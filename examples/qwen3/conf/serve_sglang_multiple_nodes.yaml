@@ -1,0 +1,58 @@
+# atmb: Auto Tuning for Multi-Backend
+defaults:
+  - _self_
+  - serve: sglang_qwen3_8b
+
+experiment:
+  exp_name: qwen3_8b
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+  runner:
+    hostfile: examples/qwen3/conf/hostfile.txt
+    docker: ds
+    nnodes: 2
+    master_addr: x.x.x.x  # ip and address for sglang distribute control
+    master_port: xxxx     # port for sglang distribute control
+    #ssh_port: xxxx        # if docker not set perhaps it is necessary to use ssh-port to connect to a remote Docker container
+    deploy:
+      port: 6706     # port for sglang serve
+      use_fs_serve: false
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-inference
+  envs:
+    #CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    nodes_envs:
+      x.x.x.x:  # Maintain consistency with the node ip information in the hostfile_nodes_envs.txt file
+        CUDA_VISIBLE_DEVICES: 1
+      x.x.x.x:  # Maintain consistency with the node ip information in the hostfile_nodes_envs.txt file
+        CUDA_VISIBLE_DEVICES: 2
+  node_args:     # Support setting different parameters on different nodes
+    x.x.x.x:     # ip and address for sglang distribute control
+      engine_args:
+        # model: /mnt/Qwen3-8B/
+    x.x.x.x:     # ip and address for sglang distribute control
+      engine_args:
+        # model: /models/Qwen3-8B/ 
+  auto_tuner:
+    engines: [sglang]
+    space:
+      sglang:
+        tensor_model_parallel_size: [4]
+        # Error occured when PP with SGLang==main (v0.4.6 not support): should be after https://github.com/sgl-project/sglang/pull/5724
+        # AttributeError: 'PPMissingLayer' object has no attribute 'quant_method'
+        pipeline_model_parallel_size: [1]
+        chunked_prefill_size: [128, 256, 512]
+        page_size: [16, 32]
+        max_running_requests: [32, 64, 128]
+    cards: 4
+    control:
+      interval: 10
+      run_best: False
+
+action: auto_tune
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

@@ -87,7 +87,7 @@ def _reset_serve_port(config):
         config.experiment.runner.deploy.port = cli_args_port
 
     for item in config.serve:
-        if item.get("serve_id", None) == "vllm_model":
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
             if deploy_port:
                 model_port = deploy_port
                 item.engine_args["port"] = deploy_port
@@ -118,7 +118,7 @@ def _get_engine_args(config, model="vllm_model"):
     engine_args = {}
 
     for item in serve_config:
-        if item.get("serve_id", None) == model:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
             engine_args = item.get("engine_args", {})
             break
     if not engine_args:
@@ -134,7 +134,7 @@ def _get_profile_args(config, model="vllm_model"):
 
     profile_args = {}
     for item in serve_config:
-        if item.get("serve_id", None) == model:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
             profile_args = item.get("profile", {})
             break
     return profile_args
@@ -146,7 +146,7 @@ def _update_auto_engine_args(config, model="vllm_model", new_engine_args={}):
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
     engine_args = {}
     for item in serve_config:
-        if item.get("serve_id", None) == model:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
             engine_args = item.get("engine_args", {})
 
             if new_engine_args.get("tensor_parallel_size", None):
@@ -200,7 +200,7 @@ def _update_config_serve(config: DictConfig):
 
     if cli_model_path or cli_engine_args:
         for item in config.serve:
-            if item.get("serve_id", None) == "vllm_model":
+            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
                 if cli_model_path:
                     item.engine_args["model"] = cli_model_path
                 if cli_engine_args:
@@ -290,6 +290,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
     else:
         before_start_cmd = ""
     cmd += f" --log-dir={logging_config.log_dir}"
+    logger.info(f"in _generate_run_script_serve, cmd: {cmd}")
     try:
         import vllm
 
@@ -494,6 +495,8 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                         )
 
             else:
+                engine = _get_inference_engine(config)
+
                 f.write(f"ray_path=$(realpath $(which ray))\n")
                 master_ip = nodes[0][0]
                 target_port = nodes[0][1].get("port")
@@ -534,6 +537,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
 
                 address = f"{master_ip}:{master_port}"
                 nodes_envs = config.experiment.get("envs", {}).get("nodes_envs", {})
+                node_args = config.experiment.get("node_args", {})
                 for index, (ip, node) in enumerate(nodes):
                     per_node_cmd = None
                     if nodes_envs and nodes_envs.get(ip, None) is not None:
@@ -548,6 +552,94 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                         raise ValueError(
                             f"Number of slots must be specified for node {node}. This can be done by setting the 'slots' attribute."
                         )
+
+                    if engine == "sglang":
+                        from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
+
+                        if index == 0:
+                            if per_node_cmd:
+                                f.write(f"{per_node_cmd}\n")
+                        if index != 0:
+                            logger.info(f"generate run script args, config: {config}")
+                            args = None
+                            for item in config.get("serve", []):
+                                if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+                                    args = item
+                                    break
+                            if args is None:
+                                raise ValueError(
+                                    f"No 'sglang_model' configuration found in task config: {serve.task_config}"
+                                )
+                            common_args = copy.deepcopy(args.get("engine_args", {}))
+                            sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
+                            if sglang_args.get("dist-init-addr", None):
+                                logger.warning(
+                                    f"sglang dist-init-addr:{ sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
+                                )
+                                was_struct = OmegaConf.is_struct(sglang_args)
+                                OmegaConf.set_struct(sglang_args, False)
+                                sglang_args.pop("dist-init-addr")
+                                if was_struct:
+                                    OmegaConf.set_struct(sglang_args, True)
+
+                            command = ["nohup", "python", "-m", "sglang.launch_server"]
+                            if common_args.get("model", None):
+                                # if node specific args
+                                if (
+                                    node_args.get(ip, None) is not None
+                                    and node_args[ip].get("engine_args", None) is not None
+                                ):
+                                    for key, value in node_args[ip]["engine_args"].items():
+                                        common_args[key] = value
+                                        logger.info(
+                                            f"node_args[{ip}] overwrite engine_args {key} = {value}"
+                                        )
+
+                                converted_args = ARGS_CONVERTER.convert("sglang", common_args)
+                                common_args_flatten = flatten_dict_to_args(
+                                    converted_args, ["model"]
+                                )
+                                command.extend(common_args_flatten)
+                                sglang_args_flatten = flatten_dict_to_args(sglang_args, ["model"])
+                                command.extend(sglang_args_flatten)
+                            else:
+                                raise ValueError(
+                                    "Either model should be specified in sglang_model."
+                                )
+
+                            command.extend(["--node-rank", str(index)])
+                            nnodes = config.experiment.runner.get("nnodes", None)
+                            addr = config.experiment.runner.get("master_addr", None)
+                            port = config.experiment.runner.get("master_port", None)
+                            if nnodes is None or addr is None or port is None:
+                                raise ValueError(
+                                    f"nnodes, master_addr, master_port must be specified in runner when engine is sglang with multi-nodes mode."
+                                )
+                            command.extend(["--nnodes", str(nnodes)])
+                            command.extend(["--dist-init-addr", str(addr) + ":" + str(port)])
+                            command.append("> /dev/null 2>&1 &")
+
+                            if docker_name:
+                                node_cmd = ' '.join(command)
+                            else:
+                                # Directly connecting to a remote Docker environment requires processing the command
+                                command.insert(0, "(")
+                                command.append(") && disown")
+                                node_cmd = ' '.join(command)
+                            if per_node_cmd:
+                                node_cmd = f"{per_node_cmd} && " + node_cmd
+                            if before_start_cmd:
+                                node_cmd = f"{before_start_cmd} && " + node_cmd
+                            if envs_str:
+                                node_cmd = f"{envs_str} && " + node_cmd
+                            ssh_cmd = f'ssh -n -p {ssh_port} {ip} "{node_cmd}"'
+                            if docker_name:
+                                ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
+                            logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
+                            f.write(f"{ssh_cmd}\n")
+                        continue
+
+                    # if engine == vllm
                     if index == 0:
                         # master node
                         f.write(f"# start cluster\n")
@@ -624,6 +716,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
             if node_cmd:
                 f.write(f"{node_cmd}\n")
 
+        logger.info(f"in _generate_run_script_serve, write cmd: {cmd}")
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
         f.write(f"\n")
