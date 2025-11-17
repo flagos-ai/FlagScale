@@ -98,7 +98,7 @@ class Emu3p5Processor:
         image_area: int = 720 * 720,
         ratio: str = "default",
         vq_type: str = "ibq",
-        device: str = "cuda:1",
+        device: str = "cuda:0",
     ):
         self.task_type = task_type
         self.tokenizer_path = tokenizer_path
@@ -200,16 +200,8 @@ class Emu3p5Processor:
 
         if self.ratio is not None:
             resolution_token_ids = self.text_tokenizer.encode(self.ratio, add_special_tokens=False)
-            input_ids += (
-                [self.special_token_ids["BOI"]]
-                + resolution_token_ids
-                + [self.special_token_ids["IMG"]]
-            )
-            uncond_input_ids += (
-                [self.special_token_ids["BOI"]]
-                + resolution_token_ids
-                + [self.special_token_ids["IMG"]]
-            )
+            input_ids += [self.special_token_ids["BOI"]] + resolution_token_ids
+            uncond_input_ids += [self.special_token_ids["BOI"]] + resolution_token_ids
 
         if input_ids[0] != self.special_token_ids["BOS"]:
             input_ids = [self.special_token_ids["BOS"]] + input_ids

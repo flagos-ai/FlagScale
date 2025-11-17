@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - inference: visual_guidance
+  - inference: visual_guidance # visual_narrative or visual_guidance
 
 experiment:
   exp_name: emu3p5_interleaved_generation
@@ -8,7 +8,6 @@ experiment:
   vq_model: BAAI/Emu3.5-VisionTokenizer
   model: BAAI/Emu3.5
   tokenizer: src/tokenizer_emu3_ibq/
-  hf_config_path: src/emu3p5/
   task:
     type: inference
     backend: vllm
@@ -22,9 +21,6 @@ experiment:
     VLLM_LOGGING_LEVEL: "DEBUG"
     CUDA_DEVICE_MAX_CONNECTIONS: 1
     VLLM_WORKER_MULTIPROC_METHOD: "spawn"
-    NCCL_NVLS_ENABLE: 0
-    NCCL_MAX_NCHANNELS: 16
-    NCCL_MIN_NCHANNELS: 16
 
 action: run
 

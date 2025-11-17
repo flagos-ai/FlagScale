@@ -9,7 +9,7 @@ llm:
   disable_log_stats: false
   enable_chunked_prefill: false
   enable_prefix_caching: false
-  seed: 42
+  seed: 6666
 
 # prompt case is here: flagscale/inference/emu_utils/prompt_case.py
 generate:
