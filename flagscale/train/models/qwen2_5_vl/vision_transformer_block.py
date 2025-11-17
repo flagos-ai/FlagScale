@@ -15,7 +15,7 @@ from megatron.core.fp8_utils import get_fp8_context
 from megatron.core.fusions.fused_layer_norm import FusedLayerNorm
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.packed_seq_params import PackedSeqParams
-from megatron.core.process_groups_config import ModelCommProcessGroups
+from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_block import TransformerBlock, TransformerBlockSubmodules
@@ -54,11 +54,11 @@ class VisionTransformerBlock(TransformerBlock):
         post_layer_norm: bool = True,
         pre_process: bool = True,
         post_process: bool = True,
-        model_comm_pgs: ModelCommProcessGroups = None,
+        pg_collection: ProcessGroupCollection = None,
     ):
         super().__init__(config=config, spec=spec, post_layer_norm=post_layer_norm,
                          pre_process=pre_process, post_process=post_process,
-                         model_comm_pgs=model_comm_pgs)
+                         pg_collection=pg_collection)
 
     def _checkpointed_forward(
         self,
