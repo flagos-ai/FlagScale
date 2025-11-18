@@ -1,12 +1,12 @@
 diff --git a/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py b/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py
-index 0d1c0b0c..1ad48023 100644
+index 0d1c0b0c..57575a1c 100644
 --- a/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py
 +++ b/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py
 @@ -59,6 +59,7 @@ from transformer_engine.pytorch.attention.dot_product_attention.backends import
      UnfusedDotProductAttention,
      FusedAttention,
      FlashAttention,
-+    GemsFlashAttention,
++    GemsAttention,
  )
  
  
@@ -30,7 +30,7 @@ index 0d1c0b0c..1ad48023 100644
              return_max_logit=self.return_max_logit,
          )
  
-+        self.gems_flash_attention = GemsFlashAttention(
++        self.gems_attention = GemsAttention(
 +            softmax_scale,
 +            attention_type=attention_type,
 +            layer_number=layer_number,
@@ -47,7 +47,7 @@ index 0d1c0b0c..1ad48023 100644
                  self.flash_attention.attention_type = self.attention_type
                  self.fused_attention.attention_type = self.attention_type
                  self.unfused_attention.attention_type = self.attention_type
-+                self.gems_flash_attention.attention_type = self.attention_type
++                self.gems_attention.attention_type = self.attention_type
  
                  query_layer, key_layer, value_layer = [
                      x.contiguous() if not x.is_contiguous() else x
@@ -61,7 +61,7 @@ index 0d1c0b0c..1ad48023 100644
 +                use_flash_attention = False
 +                use_fused_attention = False
 +                use_unfused_attention = False
-+                use_gems_flash_attention = True
++                use_gems_attention = True
 +
              if use_flash_attention:
                  if core_attention_bias_type == "alibi":
@@ -71,7 +71,7 @@ index 0d1c0b0c..1ad48023 100644
                      fp8_output=fp8_output,
                  )
 +            
-+            if use_gems_flash_attention:
++            if use_gems_attention:
 +                fu_core_attention_bias_type = core_attention_bias_type
 +                fu_core_attention_bias = core_attention_bias
 +                if core_attention_bias_type == "alibi" and (
@@ -89,7 +89,7 @@ index 0d1c0b0c..1ad48023 100644
 +                    )
 +                if checkpoint_core_attention:
 +                    return self._checkpointed_attention_forward(
-+                        self.gems_flash_attention,
++                        self.gems_attention,
 +                        query_layer,
 +                        key_layer,
 +                        value_layer,
@@ -119,7 +119,7 @@ index 0d1c0b0c..1ad48023 100644
 +                        softmax_offset=softmax_offset,
 +                        fp8_output=fp8_output,
 +                    )
-+                return self.gems_flash_attention(
++                return self.gems_attention(
 +                    query_layer,
 +                    key_layer,
 +                    value_layer,

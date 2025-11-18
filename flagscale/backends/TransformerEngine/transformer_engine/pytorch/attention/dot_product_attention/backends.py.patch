@@ -1,22 +1,46 @@
 diff --git a/transformer_engine/pytorch/attention/dot_product_attention/backends.py b/transformer_engine/pytorch/attention/dot_product_attention/backends.py
-index d4903be9..3232f539 100644
+index d4903be9..2a21620b 100644
 --- a/transformer_engine/pytorch/attention/dot_product_attention/backends.py
 +++ b/transformer_engine/pytorch/attention/dot_product_attention/backends.py
-@@ -140,6 +140,8 @@ else:
+@@ -140,6 +140,31 @@ else:
  # Float8CurrentScaling: fused_attn_bwd takes O in FP8 by default, this flag allows it in F16
  _dpa_fp8_cs_o_in_f16 = os.getenv("NVTE_DPA_FP8CS_O_in_F16", "1") == "1"
  
 +import flag_gems
 +
++
++
++
++def repeat_kv(kv: torch.Tensor, n_rep: int) -> torch.Tensor:
++    if n_rep == 1:
++        return kv
++    
++    batch, seq_len, n_kv_heads, head_dim = kv.shape
++    return kv.unsqueeze(-2).expand(batch, seq_len, n_kv_heads, n_rep, head_dim).reshape(
++        batch, seq_len, n_kv_heads * n_rep, head_dim
++    )
++
++
++def undo_repeat_kv(kv_rep, n_rep):
++    if n_rep == 1:
++        return kv_rep
++    
++    batch, seq_len, n_heads_times_rep, head_dim = kv_rep.shape
++    n_kv_heads = n_heads_times_rep // n_rep
++    
++    kv = kv_rep.view(batch, seq_len, n_kv_heads, n_rep, head_dim)
++    
++    return kv.sum(dim=3)
  
  class FP8EmulationFunc(torch.autograd.Function):
      """
-@@ -1938,3 +1940,693 @@ class FusedAttention(torch.nn.Module):
+@@ -1938,3 +1963,1010 @@ class FusedAttention(torch.nn.Module):
              return output[0].view(*output[0].shape[:-2], -1), output[1]
          # ...hd -> ...(hd)
          return output.view(*output.shape[:-2], -1)
 +
 +
++## GemsFlashAttnFunc, missing gems.flash_attention_forward
 +class GemsFlashAttnFunc(torch.autograd.Function):
 +    """FusedAttention forward and backward implementation"""
 +
@@ -413,7 +437,321 @@ index d4903be9..3232f539 100644
 +        )
 +
 +
-+class GemsFlashAttention(torch.nn.Module):
++
++## GemsSdpaAttnFunc
++class GemsSdpaAttnFunc(torch.autograd.Function):
++    """FusedAttention forward and backward implementation"""
++
++    @staticmethod
++    def forward(
++        ctx,
++        is_training,
++        max_seqlen_q,
++        max_seqlen_kv,
++        cu_seqlens_q,
++        cu_seqlens_kv,
++        cu_seqlens_q_padded,
++        cu_seqlens_kv_padded,
++        page_table_k,
++        page_table_v,
++        q,
++        k,
++        v,
++        attn_bias,
++        attn_scale,
++        dropout_p,
++        fast_zero_fill,
++        qkv_layout,
++        attn_bias_type,
++        attn_mask_type,
++        softmax_type,
++        window_size,
++        rng_gen,
++        fused_attention_backend,
++        use_FAv2_bwd,
++        fp8,
++        fp8_meta,
++        quantizers,
++        deterministic,
++        softmax_offset,
++        fp8_output,
++        layer_number,
++        return_max_logit,
++    ):
++        # pylint: disable=missing-function-docstring
++        assert not fp8, "Gems Sdpa Attention do not support fp8 now"
++        # add NVTX range
++        nvtx_label = "transformer_engine.GemsSdpaAttnFunc.forward"
++        nvtx_range_push(f"{nvtx_label}")
++
++        # recipe passed in through autocast or set by NVTE_DPA_FP8_RECIPE;
++        # may be different from fp8_meta["recipe"]
++        fp8_recipe = FP8GlobalStateManager.get_fp8_recipe()
++        if fp8_meta is not None and fp8_meta.get("local_recipes", None) is not None:
++            fp8_recipe = fp8_meta["local_recipes"][0]
++
++        # input types are inferred from the real data while output types are controlled by fp8_output
++        # fp8_output should be set upstream as (DPA.fp8 and DPA.fp8_meta["recipe"].fp8_mha)
++        assert isinstance(k, q.__class__) and isinstance(
++            v, q.__class__
++        ), "q, k, v must be of the same class, e.g. torch.Tensor or Float8Tensor."
++        is_input_fp8 = isinstance(q, Float8Tensor)
++        is_output_fp8 = fp8_output
++
++        # whether fwd kernel in FP8: fp8 = (DPA.fp8 and DPA.fp8_meta["recipe"].fp8_dpa)
++        # whether bwd kernel in FP8:
++        is_bwd_fp8 = fp8 and int(os.getenv("NVTE_FP8_DPA_BWD", "1"))
++
++        # get quantizers from DPA; all Nones if not fp8
++        QKV_quantizer, O_quantizer, S_quantizer, dQKV_quantizer, dO_quantizer, dP_quantizer = (
++            dpa_utils.get_attention_quantizers(fp8, quantizers)
++        )
++
++        # get nominal data type for out
++        # FP16/BF16 attention: torch.float16 or torch.bfloat16
++        # FP8 attention:       torch.float16 or torch.bfloat16
++        out_nominal_dtype = q.dtype
++
++        max_logit = None
++
++        from .gems_sdpa import scaled_dot_product_attention_forward
++        is_causal = attn_mask_type == 'causal'
++        gems_q = q.permute(1, 2, 0, 3) #[s, b, n_h, h] -> [b, n_h, s, h]
++        gems_k = k.permute(1, 2, 0, 3)
++        gems_v = v.permute(1, 2, 0, 3)
++        (gems_out, gems_m) = scaled_dot_product_attention_forward(
++            gems_q,
++            gems_k,
++            gems_v,
++            attn_mask=None,
++            dropout_p=dropout_p,
++            is_causal=is_causal,
++            scale=attn_scale,
++            enable_gqa=True,
++        )
++        out = gems_out.permute(2, 0, 1, 3) # [b, n_h, s, h] -> [s, b, n_h, h]
++        aux_ctx_tensors = [gems_out, gems_m]
++        max_logit = None
++
++        out_ret = out
++        fp8_tensors = (None, None, None, None)
++        qkvo_tensors = (gems_q, gems_k, gems_v, gems_out)
++
++        nvtx_range_pop(f"{nvtx_label}")
++
++        ctx.fp8_recipe = fp8_recipe
++        ctx.fp8 = is_bwd_fp8
++        # assume fwd and bwd always use the same high precision, i.e. torch.float16 or torch.bfloat16
++        # used when some tensors are base tensors and loose the "dtype" attribute
++        ctx.nominal_dtype = out_nominal_dtype
++
++        from transformer_engine.pytorch.cpu_offload import (
++            CPUOffloadEnabled,
++            mark_activation_offload,
++        )
++
++        if CPUOffloadEnabled:
++            if ctx.fp8:
++                tensor_list = fp8_tensors
++            else:
++                tensor_list = [q, k, v, out]
++
++            mark_activation_offload(*tensor_list)
++            mark_activation_offload(*aux_ctx_tensors)
++
++        ctx.is_input_fp8 = is_input_fp8
++        ctx.is_output_fp8 = is_output_fp8
++        tensors_to_save, tensor_objects = prepare_for_saving(
++            *fp8_tensors,
++            *qkvo_tensors,
++            cu_seqlens_q,
++            cu_seqlens_kv,
++            cu_seqlens_q_padded,
++            cu_seqlens_kv_padded,
++            *aux_ctx_tensors,
++        )
++        ctx.save_for_backward(*tensors_to_save)
++        ctx.tensor_objects = tensor_objects
++        ctx.fp8_meta = fp8_meta
++
++        ctx.layer_number = layer_number
++        ctx.QKV_quantizer = QKV_quantizer
++        ctx.O_quantizer = O_quantizer
++        ctx.dQKV_quantizer = dQKV_quantizer
++        ctx.dO_quantizer = dO_quantizer
++        ctx.dP_quantizer = dP_quantizer
++        ctx.S_quantizer = S_quantizer
++        if ctx.fp8 and isinstance(ctx.S_quantizer, Float8Quantizer):
++            ctx.S_quantizer = S_quantizer.copy()
++            ctx.S_quantizer.scale = S_quantizer.scale.clone()
++
++        ctx.max_seqlen_q = max_seqlen_q
++        ctx.max_seqlen_kv = max_seqlen_kv
++        ctx.attn_scale = attn_scale
++        ctx.dropout_p = dropout_p
++        ctx.fast_zero_fill = fast_zero_fill
++        ctx.is_causal = is_causal
++
++        from transformer_engine.pytorch.cpu_offload import (
++            CPUOffloadedLayer,
++        )
++
++        # If interleaved tensor is offloaded, reloaded tensor will be
++        # non-interleaved, so we need to modify the QKV layout
++        # for backward
++        if CPUOffloadedLayer and CPUOffloadEnabled:
++            reload_layout = ""
++            split_list = qkv_layout.split("_")
++            for split in split_list:
++                temp_layout = ""
++                rep_count = 1
++                for s in split:
++                    if s.isalpha():
++                        temp_layout = temp_layout + s
++                    else:
++                        rep_count = int(s)
++                for _ in range(rep_count):
++                    reload_layout = reload_layout + temp_layout + "_"
++            ctx.qkv_layout = reload_layout[:-1]
++        else:
++            ctx.qkv_layout = qkv_layout
++
++        ctx.attn_bias_type = attn_bias_type
++        ctx.attn_mask_type = attn_mask_type
++        ctx.softmax_type = softmax_type
++        ctx.window_size = window_size
++        ctx.fused_attention_backend = (
++            fused_attention_backend if ctx.fp8 else FusedAttnBackend["F16_arbitrary_seqlen"]
++        )
++        ctx.use_FAv2_bwd = use_FAv2_bwd
++        ctx.deterministic = deterministic
++
++        if return_max_logit:
++            return out_ret, *max_logit
++        return out_ret
++
++    @staticmethod
++    def backward(ctx, d_out, *_args):
++        # pylint: disable=missing-function-docstring
++
++        # d_out is expected to be in FP8 if is_output_fp8=True,
++        # but in the case it's not, convert it to FP8 before any operation
++        assert not ctx.fp8, "Gems Flash Attention do not support fp8 now"
++        assert not ctx.use_FAv2_bwd, "do not support use other flash attention kernels now"
++        if ctx.fp8 and ctx.is_output_fp8 and not isinstance(d_out, QuantizedTensorStorage):
++            d_out = ctx.dO_quantizer(d_out)
++            if not ctx.use_FAv2_bwd:
++                d_out._data = d_out._data.contiguous()
++        elif not ctx.use_FAv2_bwd:
++            d_out = d_out.contiguous()
++        (
++            q_fp8,
++            k_fp8,
++            v_fp8,
++            out_fp8,
++            gems_q,
++            gems_k,
++            gems_v,
++            gems_out,
++            cu_seqlens_q,
++            cu_seqlens_kv,
++            cu_seqlens_q_padded,
++            cu_seqlens_kv_padded,
++            *other_tensors,
++        ) = restore_from_saved(ctx.tensor_objects, ctx.saved_tensors)
++
++        aux_ctx_tensors = other_tensors
++
++        if not aux_ctx_tensors[0].is_contiguous():
++            aux_ctx_tensors[0] = aux_ctx_tensors[0].contiguous()
++        if not aux_ctx_tensors[1].is_contiguous():
++            aux_ctx_tensors[1] = aux_ctx_tensors[1].contiguous()
++        gems_out, gems_m = aux_ctx_tensors
++        rest = [None]
++
++        with torch.cuda.nvtx.range("GemsSdpaAttnFunc.backward"):
++            # get nominal data type of dq, dk, dv
++            # FP16/BF16 attention: torch.float16 or torch.bfloat16
++            # FP8 attention:       torch.float16 or torch.bfloat16
++            dqkv_nominal_dtype = ctx.nominal_dtype
++
++            if isinstance(d_out, QuantizedTensorStorage):
++                d_out = d_out.dequantize(dtype=ctx.nominal_dtype)
++            dqkv_te_dtype = TE_DType[d_out.dtype]
++            
++            from .gems_sdpa import scaled_dot_product_attention_backward
++            if not gems_q.is_contiguous():
++                gems_q = gems_q.contiguous()
++            if not gems_k.is_contiguous():
++                gems_k = gems_k.contiguous()
++            if not gems_v.is_contiguous():
++                gems_v = gems_v.contiguous()
++            if not gems_m.is_contiguous():
++                gems_m = gems_m.contiguous()
++            gems_d_out = d_out.permute(1, 2, 0, 3).contiguous() # [s, b, n_h, h] -> [b, n_h, s, h]
++            gems_dq, gems_dk, gems_dv = scaled_dot_product_attention_backward(
++                gems_d_out,
++                gems_q,
++                gems_k,
++                gems_v,
++                gems_out,
++                gems_m,
++                attn_mask=None,
++                dropout_p=ctx.dropout_p,
++                is_causal=ctx.is_causal,
++                scale=ctx.attn_scale,
++                enable_gqa=True,
++            )
++            dq = gems_dq.permute(2, 0, 1, 3)
++            dk = gems_dk.permute(2, 0, 1, 3)
++            dv = gems_dv.permute(2, 0, 1, 3)
++            rest = None
++
++        d_bias = None
++        if ctx.attn_bias_type not in ["no_bias", "alibi"]:
++            d_bias = rest[0]
++        d_softmax_offset = None
++        if ctx.softmax_type != "vanilla":
++            d_softmax_offset = rest[1]
++        
++        return (
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            dq,
++            dk,
++            dv,
++            d_bias,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            d_softmax_offset,
++            None,
++            None,
++            None,
++        )
++
++
++
++class GemsAttention(torch.nn.Module):
 +    """Dot product attention, with gems.flash_attn backends:
 +    """
 +
@@ -664,7 +1002,9 @@ index d4903be9..3232f539 100644
 +                )
 +        else:
 +            with self.attention_dropout_ctx():
-+                output = GemsFlashAttnFunc.apply(
++                # _gems_attn_impl = GemsFlashAttnFunc
++                _gems_attn_impl = GemsSdpaAttnFunc
++                output = _gems_attn_impl.apply(
 +                    self.training,
 +                    max_seqlen_q,
 +                    max_seqlen_kv,
