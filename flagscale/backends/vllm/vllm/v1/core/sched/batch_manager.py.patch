@@ -1,9 +1,9 @@
 diff --git a/vllm/v1/core/sched/batch_manager.py b/vllm/v1/core/sched/batch_manager.py
 new file mode 100644
-index 000000000..0616163f5
+index 000000000..1d0582f1c
 --- /dev/null
 +++ b/vllm/v1/core/sched/batch_manager.py
-@@ -0,0 +1,225 @@
+@@ -0,0 +1,260 @@
 +
 +
 +import enum
@@ -13,8 +13,10 @@ index 000000000..0616163f5
 +from collections import defaultdict
 +
 +from vllm.config import VllmConfig
-+# from vllm.v1.hybrid_request import HybridRequest
 +from vllm.v1.request import Request
++from vllm.logger import init_logger
++
++logger = init_logger(__name__)
 +
 +
 +class CFGStatus(enum.IntEnum):
@@ -48,7 +50,9 @@ index 000000000..0616163f5
 +        self.soi = self.additional_config.get("soi_token_id", -1)
 +        self.eoi = self.additional_config.get("eoi_token_id", -1)
 +        self.eol = self.additional_config.get("eol_token_id", -1)
-+        self.resolution_map = self.additional_config.get("resolution_map", {})
++        self.resolution_map = self.additional_config.get("resolution_map", None)
++        assert self.resolution_map is not None, "resolution_map must be provided in additional_config"
++        self.resolution_map_rev = {v: k for k, v in self.resolution_map.items()}
 +
 +        # request_id -> ...
 +        self.request_metadata: dict[str, HybridSchedulerMetadata] = {}
@@ -84,6 +88,9 @@ index 000000000..0616163f5
 +        req_metadata.format_token_ids = []
 +        self.soi_token_idx[req_id] = -1
 +        self.boi_token_idx[req_id] = -1
++
++        extra_args = request.sampling_params.extra_args
++        self.parse_customized_hw(request, extra_args)
 +
 +        if last_token_id == self.boi: # 151852
 +            req_metadata.in_image = True
@@ -122,7 +129,6 @@ index 000000000..0616163f5
 +                else:
 +                    req_metadata.format_token_ids = [self.soi] # 151851
 +
-+        extra_args = request.sampling_params.extra_args
 +        if req_metadata.in_image:
 +            request.sampling_params.top_k = extra_args.get("visual_top_k", request.sampling_params.top_k)
 +            request.sampling_params.top_p = extra_args.get("visual_top_p", request.sampling_params.top_p)
@@ -214,7 +220,10 @@ index 000000000..0616163f5
 +        req_id = request.request_id
 +
 +        if len(self.resolution_token_ids[req_id]) == 0:
-+            last_tokens = np.array(request.all_token_ids)
++            if len(request.all_token_ids) < 16:
++                last_tokens = np.array(request.all_token_ids)
++            else:
++                last_tokens = np.array(request.all_token_ids[-16:])
 +            boi_idx = np.where(last_tokens == self.boi)[0][-1] # 151852
 +            img_idx = np.where(last_tokens == self.soi)[0][-1] # 151851
 +            self.resolution_token_ids[req_id] = last_tokens[boi_idx+1:img_idx].tolist()
@@ -229,3 +238,29 @@ index 000000000..0616163f5
 +        height = int(height_str.strip())
 +        width = int(width_str.strip())
 +        return height, width
++
++    def parse_customized_hw(self, request, extra_args):
++        width = extra_args.get("width", None)
++        height = extra_args.get("height", None)
++        area = extra_args.get("area", None)
++
++        if len({width is None, height is None, area is None}) != 1:
++            logger.warning("width, height, area should be set simultaneously. Customized resolution is ignored.")
++            return
++
++        if width is None:
++            return
++
++        logger.debug(f"Set customized hw: {height} x {width} for request {request.request_id}")
++        current_area = height * width
++        target_ratio = int((area / current_area) ** 0.5)
++
++        th = int(height * target_ratio / 16)
++        tw = int(width * target_ratio / 16)
++        resolution_text = str(th) + "*" + str(tw)
++        resolution_tokens = []
++        for c in resolution_text:
++            assert c in self.resolution_map_rev, f"Unknown resolution char {c} in customized hw {resolution_text}"
++            resolution_tokens.append(self.resolution_map_rev[c])
++
++        self.resolution_token_ids[request.request_id] = resolution_tokens

@@ -107,11 +107,17 @@ class Emu3p5Processor:
         self.image_area = image_area
         self.device = device
         self.special_token_ids = {}
+
         self.resolution_map = {}
         self.ratio = None
+        self.image_width = None
+        self.image_height = None
         if self.task_type == "t2i":
             self.ratio = aspect_ratios[ratio]
             logger.info(f"[INFO] Set image ratio to {self.ratio} for task type {self.task_type}")
+            if self.ratio is not None:
+                height_str, width_str = self.ratio.split("*")
+                self.image_width, self.image_height = int(width_str), int(height_str)
 
         self.build_text_tokenizer()
         self.build_image_tokenizer()
@@ -198,11 +204,6 @@ class Emu3p5Processor:
         uncond_input_ids = self.text_tokenizer.encode(uncond_prompt, add_special_tokens=False)
         torch.cuda.empty_cache()
 
-        if self.ratio is not None:
-            resolution_token_ids = self.text_tokenizer.encode(self.ratio, add_special_tokens=False)
-            input_ids += [self.special_token_ids["BOI"]] + resolution_token_ids
-            uncond_input_ids += [self.special_token_ids["BOI"]] + resolution_token_ids
-
         if input_ids[0] != self.special_token_ids["BOS"]:
             input_ids = [self.special_token_ids["BOS"]] + input_ids
 
@@ -211,10 +212,8 @@ class Emu3p5Processor:
     def process_results(self, results: list[RequestOutput]):
         cond_res, _ = results
 
-        all_token_ids = torch.tensor(
-            cond_res.prompt_token_ids + cond_res.outputs[0].token_ids, device=self.device
-        )
-        outputs = self.text_tokenizer.decode(all_token_ids, skip_special_tokens=False)
+        token_ids = torch.tensor(cond_res.outputs[0].token_ids, device=self.device)
+        outputs = self.text_tokenizer.decode(token_ids, skip_special_tokens=False)
 
         mm_outputs = multimodal_decode(outputs, self.text_tokenizer, self.img_tokenizer)
         return mm_outputs

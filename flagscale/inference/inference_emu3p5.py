@@ -35,6 +35,9 @@ def generate(model: LLM, processor: Emu3p5Processor, prompts: list, sampling_cfg
             "visual_top_k": sampling_cfg.image_top_k,
             "visual_top_p": sampling_cfg.image_top_p,
             "visual_temperature": sampling_cfg.image_temperature,
+            "width": processor.image_width,
+            "height": processor.image_height,
+            "area": processor.image_area if processor.image_width else None,
         }
         sampling_params = SamplingParams(
             top_k=sampling_cfg.top_k,
@@ -43,7 +46,6 @@ def generate(model: LLM, processor: Emu3p5Processor, prompts: list, sampling_cfg
             max_tokens=sampling_cfg.max_tokens,
             detokenize=False,
             stop_token_ids=[processor.stop_token_id],
-            seed=42,
             extra_args=extra_args,
         )
         logger.info(f"{sampling_params=}")
@@ -111,5 +113,7 @@ if __name__ == "__main__":
         },
     )
     llm.set_tokenizer(processor.text_tokenizer)
+    vllm_config = llm.llm_engine.vllm_config
+    print(f"{vllm_config=}")
 
     generate(llm, processor, prompts, cfg.generate.get("sampling", {}))
