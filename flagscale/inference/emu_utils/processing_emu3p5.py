@@ -6,19 +6,15 @@ import torch
 from omegaconf import OmegaConf
 from PIL import Image
 from transformers import AutoTokenizer
-from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 
 from vllm.outputs import RequestOutput
 
 from flagscale.logger import logger
 
 try:
-    from src.emu3p5.configuration_emu3 import Emu3Config
     from src.utils.generation_utils import multimodal_decode
     from src.utils.input_utils import format_image_string, smart_resize
     from src.vision_tokenizer.ibq import IBQ
-
-    CONFIG_MAPPING.register("Emu3", Emu3Config)
 except ImportError as e:
     print(f"ImportError: {e}")
     raise ImportError(
