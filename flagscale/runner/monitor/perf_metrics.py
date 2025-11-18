@@ -521,12 +521,22 @@ class FLOPSMeasurementCallback:
         self.monitor.end_iteration()
         self.monitor.update_memory_stats()
 
-        # Log metrics at specified intervals
-        if iteration % self.log_interval == 0:
+        # Log metrics at specified intervals (always log first iteration if > 0)
+        if iteration > 0 and (iteration == 1 or iteration % self.log_interval == 0):
             self.monitor.log_metrics(iteration, writer, wandb_writer)
 
     def on_train_end(self, writer=None, wandb_writer=None):
         """Called at the end of training."""
+        # If we have step data but no logs yet, log the final state
+        if (
+            len(self.monitor.step_times) > 0
+            and self.monitor.file_logger.enabled
+            and len(self.monitor.file_logger.json_data) == 0
+        ):
+            # Calculate the last iteration number from step_times length
+            final_iteration = len(self.monitor.step_times)
+            self.monitor.log_metrics(final_iteration, writer, wandb_writer)
+
         # Final metrics calculation and logging
         metrics = self.monitor.metrics
         final_stats = {

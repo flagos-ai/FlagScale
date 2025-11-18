@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 Example script demonstrating performance monitoring integration for GPT model training.
 This script shows how to integrate the performance monitoring module with

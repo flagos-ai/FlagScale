@@ -1028,7 +1028,7 @@ def pretrain(
                 mpu.set_virtual_pipeline_model_parallel_rank(i)
                 extra_iterators = build_extra_valid_data_iterators(extra_valid_dataset_provider)
                 extra_valid_data_iterator.append(extra_iterators)
-        elif args.use_dualpipev:
+        elif getattr(args, "use_dualpipev", False):
             extra_valid_data_iterator = []
             for _ in range(2):
                 extra_iterators = build_extra_valid_data_iterators(
@@ -1126,7 +1126,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
                 this_model.model_type = model_type
                 this_model.vp_stage = i
                 model.append(this_model)
-        elif args.use_dualpipev:
+        elif getattr(args, "use_dualpipev", False):
             model = []
 
             pre_process, post_process = False, False
@@ -2465,6 +2465,8 @@ def train(
 
     num_microbatches = get_num_microbatches()
 
+    # Get TensorBoard and WandB writers for performance monitoring
+    writer = get_tensorboard_writer()
     wandb_writer = get_wandb_writer()
     if wandb_writer and args.wandb_log_model:
         # wandb.watch's log_freg needs to take the accumulated number of microbatches into account
@@ -2666,7 +2668,7 @@ def train(
         ft_integration.on_training_step_end()
 
         # Performance monitor: end iteration
-        perf_monitor_end_iteration(iteration)
+        perf_monitor_end_iteration(iteration, writer, wandb_writer)
 
         if should_checkpoint:
             save_checkpoint_and_time(
@@ -2801,7 +2803,7 @@ def train(
                     mpu.set_virtual_pipeline_model_parallel_rank(i)
                     extra_iterators = build_extra_valid_data_iterators(extra_valid_dataset_provider)
                     extra_valid_data_iterator.append(extra_iterators)
-            elif args.use_dualpipev:
+            elif getattr(args, "use_dualpipev", False):
                 extra_valid_data_iterator = []
                 for _ in range(2):
                     extra_iterators = build_extra_valid_data_iterators(
@@ -2911,7 +2913,7 @@ def train(
         sys.exit(exit_code)
 
     # Performance monitor: training end
-    perf_monitor_end_training()
+    perf_monitor_end_training(writer, wandb_writer)
 
     return iteration, num_floating_point_operations_so_far
 

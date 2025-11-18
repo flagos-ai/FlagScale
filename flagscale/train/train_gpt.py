@@ -278,7 +278,6 @@ if __name__ == "__main__":
         ModelType.encoder_or_decoder,
         forward_step,
         args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
-        #extra_args_provider=add_modelopt_args if has_nvidia_modelopt else None,
         extra_args_provider=combine_extra_args_providers,
         store=store,
         extra_valid_dataset_provider=extra_valid_datasets_provider
