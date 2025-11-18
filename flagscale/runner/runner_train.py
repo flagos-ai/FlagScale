@@ -433,7 +433,9 @@ class SSHTrainRunner(RunnerBase):
             host, master_addr, master_port, nnodes, node_rank, nproc_per_node, self.config
         )
 
-        nsys_cmd = "/share/project/lixianduo/envs/nsys/nsight-system/2025.5.1/bin/nsys profile -s none -t nvtx,cuda,osrt -o /share/project/lixianduo/scale_gems_cx/nsys_reps/$HOSTNAME.nsys-rep --force-overwrite true --capture-range=cudaProfilerApi --capture-range-end=stop".split(" ")
+        nsys_cmd = "/share/project/lixianduo/envs/nsys/nsight-system/2025.5.1/bin/nsys profile -s none -t nvtx,cuda,osrt -o /share/project/lixianduo/scale_gems_cx/nsys_reps/$HOSTNAME.nsys-rep --force-overwrite true --capture-range=cudaProfilerApi --capture-range-end=stop".split(
+            " "
+        )
         if "USE_NSYS_PROFILE" in self.user_envs.keys():
             runner_cmd = nsys_cmd + runner_cmd
             print(f"use nsys profile")
