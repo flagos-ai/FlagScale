@@ -28,7 +28,14 @@ VLLM_UNPATCH_DEVICES = ["ascend", "cambricon", "bi", "metax", "kunlunxin"]
 
 
 def _check_backend(backend):
-    if backend not in ["llama.cpp", "Megatron-LM", "sglang", "vllm", "Megatron-Energon", "TransformerEngine"]:
+    if backend not in [
+        "llama.cpp",
+        "Megatron-LM",
+        "sglang",
+        "vllm",
+        "Megatron-Energon",
+        "TransformerEngine",
+    ]:
         raise ValueError(f"Invalid backend {backend}.")
 
 
@@ -170,24 +177,23 @@ def _build_megatron_energon(device):
 
 def _build_transformer_engine(device):
     assert device != "cpu"
-    transformer_engine_path = os.path.join(os.path.dirname(__file__), "third_party", "TransformerEngine")
+    transformer_engine_path = os.path.join(
+        os.path.dirname(__file__), "third_party", "TransformerEngine"
+    )
     if device != "gpu":
         transformer_engine_path = os.path.join(
-            os.path.dirname(__file__), "build", device, "FlagScale", "third_party", "TransformerEngine"
+            os.path.dirname(__file__),
+            "build",
+            device,
+            "FlagScale",
+            "third_party",
+            "TransformerEngine",
         )
     subprocess.check_call(
-        [
-            sys.executable,
-            '-m',
-            'pip',
-            'install',
-            '--no-build-isolation',
-            '-e',
-            '.',
-            '--verbose'
-        ],
+        [sys.executable, '-m', 'pip', 'install', '--no-build-isolation', '-e', '.', '--verbose'],
         cwd=transformer_engine_path,
     )
+
 
 class FlagScaleBuild(_build):
     """
@@ -541,4 +547,3 @@ setup(
         "build_ext": FlagScaleBuildExt,
     },
 )
-
