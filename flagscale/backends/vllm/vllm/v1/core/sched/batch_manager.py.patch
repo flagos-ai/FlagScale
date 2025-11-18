@@ -1,9 +1,9 @@
 diff --git a/vllm/v1/core/sched/batch_manager.py b/vllm/v1/core/sched/batch_manager.py
 new file mode 100644
-index 000000000..1d0582f1c
+index 000000000..c3fbdaacf
 --- /dev/null
 +++ b/vllm/v1/core/sched/batch_manager.py
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,259 @@
 +
 +
 +import enum
@@ -212,7 +212,6 @@ index 000000000..1d0582f1c
 +                else:
 +                    req_metadata.format_token_ids = [self.soi] # 151851
 +
-+        # print(f"_update_metadata_with_output: {req_id=}, {req_metadata=}")
 +        return req_metadata
 +
 +    def parse_token_hw(self, request: Request):

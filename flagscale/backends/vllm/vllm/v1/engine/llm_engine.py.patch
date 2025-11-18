@@ -1,8 +1,8 @@
 diff --git a/vllm/v1/engine/llm_engine.py b/vllm/v1/engine/llm_engine.py
-index 2738776e3..c79d42ccf 100644
+index 2738776e3..a4e728cb8 100644
 --- a/vllm/v1/engine/llm_engine.py
 +++ b/vllm/v1/engine/llm_engine.py
-@@ -227,12 +227,38 @@ class LLMEngine:
+@@ -227,12 +227,36 @@ class LLMEngine:
                  f"request_id must be a string, got {type(request_id)}")
  
          # Process raw inputs into the request.
@@ -22,7 +22,6 @@ index 2738776e3..c79d42ccf 100644
          n = params.n if isinstance(params, SamplingParams) else 1
  
 +        if in_hybrid_mode:
-+            # print(f"{in_hybrid_mode=}")
 +            assert n == 1, "Unconditional generation does not support n > 1."
 +            assert len(request) > 1
 +
@@ -34,10 +33,9 @@ index 2738776e3..c79d42ccf 100644
 +                child_request.sampling_params = params
 +
 +                # Make a new RequestState and queue.
-+                self.output_processor.add_request(child_request, prompt_str, parent_req, idx)
++                self.output_processor.add_request(child_request, prompt_str,
++                                                  parent_req, idx)
 +                # Add the request to EngineCore.
-+                # print(f"{self.engine_core=}")
-+                # print(f"{request=}")
 +                self.engine_core.add_request(child_request)
 +            return
 +

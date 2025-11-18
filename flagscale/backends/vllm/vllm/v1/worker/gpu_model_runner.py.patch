@@ -1,8 +1,8 @@
 diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
-index a438c7777..cc1d4b9aa 100644
+index a438c7777..fd3566d73 100644
 --- a/vllm/v1/worker/gpu_model_runner.py
 +++ b/vllm/v1/worker/gpu_model_runner.py
-@@ -125,6 +125,31 @@ AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
+@@ -125,6 +125,23 @@ AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
  PerLayerAttnMetadata: TypeAlias = Union[list[AttnMetadataDict],
                                          AttnMetadataDict]
  
@@ -23,18 +23,10 @@ index a438c7777..cc1d4b9aa 100644
 +        raise RuntimeError(f"Failed to enable 'flag_gems': {e}. Please check your flag_gems installation or set USE_FLAGGEMS=false to disable it.") from e
 +# --- FLAGSCALE MODIFICATION END ---
 +
-+
-+def print_rank_0(*args, **kwargs):
-+    if torch.distributed.is_initialized():
-+        if torch.distributed.get_rank() == 0:
-+            print(*args, **kwargs)
-+    else:
-+        print(*args, **kwargs)
-+
  
  # Wrapper for ModelRunnerOutput to support overlapped execution.
  class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
-@@ -570,6 +595,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -570,6 +587,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
              req_id = new_req_data.req_id
              sampling_params = new_req_data.sampling_params
              pooling_params = new_req_data.pooling_params
@@ -42,7 +34,7 @@ index a438c7777..cc1d4b9aa 100644
  
              if sampling_params and \
                  sampling_params.sampling_type == SamplingType.RANDOM_SEED:
-@@ -599,6 +625,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -599,6 +617,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                  num_computed_tokens=new_req_data.num_computed_tokens,
                  output_token_ids=[],
                  lora_request=new_req_data.lora_request,
@@ -50,7 +42,7 @@ index a438c7777..cc1d4b9aa 100644
              )
              self.requests[req_id] = req_state
  
-@@ -616,25 +643,28 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -616,25 +635,28 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
              num_computed_tokens = req_data.num_computed_tokens[i]
              new_block_ids = req_data.new_block_ids[i]
              resumed_from_preemption = req_data.resumed_from_preemption[i]
@@ -94,7 +86,7 @@ index a438c7777..cc1d4b9aa 100644
  
              # Update the block IDs.
              if not resumed_from_preemption:
-@@ -664,18 +694,30 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -664,18 +686,30 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                  self.input_batch.block_table.append_row(
                      new_block_ids, req_index)
  

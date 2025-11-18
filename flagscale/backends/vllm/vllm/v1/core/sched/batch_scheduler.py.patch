@@ -1,9 +1,9 @@
 diff --git a/vllm/v1/core/sched/batch_scheduler.py b/vllm/v1/core/sched/batch_scheduler.py
 new file mode 100644
-index 000000000..7808bd523
+index 000000000..f1e7db350
 --- /dev/null
 +++ b/vllm/v1/core/sched/batch_scheduler.py
-@@ -0,0 +1,1448 @@
+@@ -0,0 +1,1421 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +
@@ -667,21 +667,6 @@ index 000000000..7808bd523
 +            self.get_grammar_bitmask(scheduled_requests,
 +                                     scheduled_spec_decode_tokens))
 +
-+        # print(f">>> {req_to_new_blocks=}")
-+        # print(f">>>  {new_reqs_data=}")
-+        # print(f">>>  {cached_reqs_data=}")
-+        # print(f">>>  {num_scheduled_tokens=}")
-+        # print(f">>>  {final_num_scheduled_tokens=}")
-+        # print(f">>>  {total_num_scheduled_tokens=}")
-+        # print(f">>>  {final_total_num_scheduled_tokens=}")
-+        # print(f">>>  {scheduled_spec_decode_tokens=}")
-+        # print(f">>>  {scheduled_encoder_inputs=}")
-+        # print(f">>>  {num_common_prefix_blocks=}")
-+        # print(f">>>  {self.finished_req_ids=}")
-+        # print(f">>>  {self.encoder_cache_manager.get_freed_mm_hashes()=}")
-+        # print(f">>>  {structured_output_request_ids=}")
-+        # print(f">>>  {grammar_bitmask=}")
-+
 +        scheduler_output = SchedulerOutput(
 +            scheduled_new_reqs=new_reqs_data,
 +            scheduled_cached_reqs=cached_reqs_data,
@@ -996,10 +981,6 @@ index 000000000..7808bd523
 +        num_nans_in_logits = model_runner_output.num_nans_in_logits
 +        kv_connector_output = model_runner_output.kv_connector_output
 +
-+        # print("-"*30)
-+        # print(f"update_from_output: {num_scheduled_tokens=}")
-+        # print(f"update_from_output: {sampled_token_ids=}")
-+
 +        outputs: dict[int, list[EngineCoreOutput]] = defaultdict(list)
 +        spec_decoding_stats: Optional[SpecDecodingStats] = None
 +        kv_connector_stats = (kv_connector_output.kv_connector_stats
@@ -1023,7 +1004,6 @@ index 000000000..7808bd523
 +            req_index = model_runner_output.req_id_to_index[req_id]
 +            generated_token_ids = sampled_token_ids[
 +                req_index] if sampled_token_ids else []
-+            # print(f"{sampled_token_ids=}, {generated_token_ids=}")
 +
 +            scheduled_spec_token_ids = (
 +                scheduler_output.scheduled_spec_decode_tokens.get(req_id))
@@ -1048,12 +1028,10 @@ index 000000000..7808bd523
 +            kv_transfer_params, uncond_kv_transfer_params = None, None
 +            status_before_stop = request.status
 +
-+            # print(f"111{new_token_ids=}")
 +            # Check for stop and update request status.
 +            if new_token_ids:
 +                new_token_ids, uncond_new_token_ids, stopped = self._update_request_with_output(
 +                    request, uncond_request, new_token_ids, uncond_new_token_ids)
-+            # print(f"222{new_token_ids=}")
 +
 +            # Stop checking for pooler models.
 +            pooler_output = None
@@ -1122,10 +1100,6 @@ index 000000000..7808bd523
 +                else:
 +                    # Invariant: EngineCore returns no partial prefill outputs.
 +                    assert not prompt_logprobs_tensors
-+                # print(f"after: {outputs[request.client_index]=}")
-+                # print(f"after: {request.output_token_ids=}")
-+                # print(f"after: {uncond_request.output_token_ids=}")
-+                # print(f"-"*30)
 +
 +        # Remove the stopped requests from the running and waiting queues.
 +        if stopped_running_reqs:
@@ -1168,7 +1142,6 @@ index 000000000..7808bd523
 +                engine_core_outputs[0] = eco = EngineCoreOutputs()
 +            eco.scheduler_stats = stats
 +
-+        # print(f">>>> end of update_from_output")
 +        return engine_core_outputs
 +
 +    def _update_request_with_output(
