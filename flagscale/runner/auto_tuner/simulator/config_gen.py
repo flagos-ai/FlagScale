@@ -12,13 +12,10 @@ import flagscale.train.theoretical_memory_usage as mem_usg
 
 BYTES_OF_GB = 10**9
 
-# device_type_list = ["A800", "A800", "BI150", "BI150"]
-# device_num_list = [8, 8, 8, 8]
-# memory_capacity_of_devices = [80, 80, 32, 32] # GB
 
-device_type_list = ["A800", "BI150"]
+device_type_list = ["A800", "A800"]
 device_num_list = [4, 4]
-memory_capacity_of_devices = [80, 32]  # GB
+memory_capacity_of_devices = [80, 80]  # GB
 
 global_batch_size = 512
 num_micro_batches = 8
@@ -86,15 +83,15 @@ def generate_hetero_meshes(
         for dp in comb[3::5]:
             if max_dp % dp != 0:
                 return False
+        for i in range(len(comb) // 5):
+            tp, _, _, dp, pp = comb[i * 5 : i * 5 + 5]
+            device_num = devices_info.device_num_list[i]
+            if tp * dp * pp != device_num:
+                return False
         return True
 
     def is_extreme_strategy(comb: list):
         for mesh_index in range(len(comb) // 5):
-            # num_devices_in_mesh = sum(
-            #     comb[
-            #         mesh_index * 5 : mesh_index * 5 + 4
-            #         ]
-            #     )
             num_devices_in_mesh = reduce(
                 lambda x, y: x * y, comb[mesh_index * 5 : mesh_index * 5 + 5]
             )
@@ -142,8 +139,16 @@ def generate_hetero_meshes(
     print(f"Results written to {output_file}")
 
 
-def split_layers(num_layers, pp_stages):
+def extract_mesh_stage_structure(mesh):
+    stage_counts = []
+    for i in range(0, len(mesh), 5):
+        stage_counts.append(mesh[i + 4])
+    return stage_counts
+
+
+def split_layers(num_layers, pp_stages, mesh):
     results = []
+    mesh_stage_counts = extract_mesh_stage_structure(mesh)
     # print(pp_stages)
     for split_points in combinations(range(1, num_layers), pp_stages - 1):
         # print(split_points)
@@ -155,10 +160,31 @@ def split_layers(num_layers, pp_stages):
             + [num_layers - split_points[-1]]
         )
         # to prune some extreme splits
-        if max(splits) / min(splits) > 2:
+        stage_index = 0
+        mesh_total_layers = []
+        violate = False
+
+        for m in mesh_stage_counts:
+            sub_splits = splits[stage_index : stage_index + m]
+            stage_index += m
+
+            if not sub_splits:
+                continue
+
+            if max(sub_splits) - min(sub_splits) > 4:
+                violate = True
+                break
+
+            mesh_total_layers.append(sum(sub_splits))
+
+        if violate:
             continue
-        # print(splits)
+
+        if max(mesh_total_layers) - min(mesh_total_layers) > 4:
+            continue
+
         results.append(splits)
+
     return results
 
 
@@ -280,39 +306,35 @@ def gen_hetero_configs(
     num_layers,
     # num_micro_batches,
     # hetero_configs: list,
-    output_config_file: str = "hetero_configs.json",  # 新增参数用于保存 hetero_config
+    output_config_file: str = "hetero_configs.json",
 ):
     devices_info = DevicesInfo(device_type_list=device_type_list, device_num_list=device_num_list)
 
-    # 调用 generate_hetero_meshes，生成并写入结果文件
     generate_hetero_meshes(
         devices_info=devices_info,
         global_batch_size=global_batch_size,
         num_layers=num_layers,
-        output_file="results.json",  # 保存 hetero_meshes 的中间文件
+        output_file="results.json",
     )
 
-    # 从 results.json 读取 hetero_meshes
     hetero_meshes = []
     with open("results.json", "r") as f:
         for line in f:
             hetero_meshes.append(list(map(int, line.strip().split(","))))
     # print(hetero_meshes)
     # assert False
-    # 遍历 hetero_meshes 并生成 hetero_config
+    seen = set()
     with open(output_config_file, "w") as config_file:  # 打开输出文件
         for mesh in hetero_meshes:
             pp_stages = sum(mesh[4::5])
             # in order to prune the num of layers in each stage to even number
-            pp_layer_splits = split_layers(num_layers=num_layers // 2, pp_stages=pp_stages)
+            pp_layer_splits = split_layers(num_layers=num_layers, pp_stages=pp_stages, mesh=mesh)
             for split in pp_layer_splits:
-                split = [x * 2 for x in split]
+                split = [x for x in split]
                 hetero_config = HeteroConfig(
                     mesh=mesh, pp_layer_split=split, device_types=device_type_list
                 )
                 # hetero_configs.append(hetero_config)
-
-                # 保存 HeteroConfig 的每个成员变量到文件
                 theory_peak_memory_per_stage = calculate_peak_memory_per_stage(hetero_config)
                 oom_error = report_oom_error(
                     memory_capacity_of_devices=memory_capacity_of_devices,
@@ -321,6 +343,12 @@ def gen_hetero_configs(
                 )
                 # if oom_error:
                 #     continue
+
+                key = (tuple(mesh), tuple(split), tuple(device_type_list))
+                if key in seen:
+                    continue  # 跳过重复项
+                seen.add(key)
+
                 config_data = {
                     "mesh": hetero_config.mesh,
                     "device_types": hetero_config.device_types,
@@ -357,6 +385,11 @@ def get_min_simulated_time_config(hetero_configs):
     return min(hetero_configs, key=lambda x: x.get("simulated_time", float("inf")))
 
 
+def append_config_to_file(file_path: str, config: dict):
+    with open(file_path, "a") as f:
+        f.write(str(config) + "\n")
+
+
 # for test and usage
 if __name__ == "__main__":
     # hetero_configs = []
@@ -375,16 +408,20 @@ if __name__ == "__main__":
     # assert False
     # simulation
     file_path = "hetero_configs.json"
+    result_path = "simulate_time.json"
     hetero_configs = read_configs_from_json(file_path)
     for hetero_config in hetero_configs:
         print(hetero_config)
         pp_cost = hetero_config['simulated_time'] = analylize_pipeline_time.analyze_pp_time(
             # pp_cost = hetero_config.simulated_time = analylize_pipeline_time.analyze_pp_time(
-            scheme="1F1B",
+            scheme="vpp",
+            # scheme="1F1B",
             num_micro_batches=num_micro_batches,
             process_mesh=hetero_config['mesh'],
             pp_layers_split=hetero_config['pp_layer_split'],
         )
         print(f"pipeline cost: {pp_cost}")
+        append_config_to_file(result_path, hetero_config)
+
     best_config = get_min_simulated_time_config(hetero_configs)
     print(best_config)

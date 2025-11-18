@@ -79,8 +79,8 @@ class FSTrainArguments:
                 args.distributed_timeout_minutes = 1
                 threads = []
                 # Start a thread for each virtual rank
-                for rank in range(1, 2):  # 2 for skipping launching thousands of threads
-                    # for rank in range(1, args.world_size):
+                # for rank in range(1, 2):  # 2 for skipping launching thousands of threads
+                for rank in range(1, args.world_size):
                     thread = threading.Thread(
                         target=run_virtual_rank,
                         args=(rank, args.world_size, args.distributed_timeout_minutes),
