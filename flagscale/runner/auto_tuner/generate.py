@@ -125,14 +125,20 @@ class ServeGenerator(Generator):
         serve_config = config.serve
         model_config = None
         for item in serve_config:
-            if item.get("serve_id", None) == "vllm_model":
+            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
                 model_config = item
                 break
+            else:
+                raise ValueError(
+                    f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve_config}"
+                )
 
         if not model_config.get("resources", None):
             model_config["resources"] = {}
         if model_config is None:
-            raise ValueError(f"No 'vllm_model' configuration found in task config: {serve_config}")
+            raise ValueError(
+                f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve_config}"
+            )
 
         engine = model_config.engine
         if "engine" in strategy:

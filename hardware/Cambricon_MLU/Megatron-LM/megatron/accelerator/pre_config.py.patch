@@ -1,0 +1,13 @@
+diff --git a/megatron/accelerator/pre_config.py b/megatron/accelerator/pre_config.py
+new file mode 100644
+index 000000000..9433c4d7d
+--- /dev/null
++++ b/megatron/accelerator/pre_config.py
+@@ -0,0 +1,6 @@
++import os
++
++def set_env(enable_torch_fsdp2=False):
++    if not enable_torch_fsdp2:
++        os.environ['CUDA_DEVICE_MAX_CONNECTIONS'] = '1'
++
+

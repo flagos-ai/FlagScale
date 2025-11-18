@@ -1,0 +1,84 @@
+diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
+index fe5f7a725..27b1b87b8 100644
+--- a/megatron/core/transformer/transformer_config.py
++++ b/megatron/core/transformer/transformer_config.py
+@@ -283,6 +283,15 @@ class TransformerConfig(ModelParallelConfig):
+     the number of transformer layers to recompute within each pipeline stage.  Must be None for
+     'selective' activation checkpointing."""
+ 
++    recompute_granularity_per_stage_micro_batch: list = None
++    """Same as recompute_granularity but for each stage and each micro-batch."""
++
++    recompute_method_per_stage_micro_batch: list = None
++    """Same as recompute_method but for each stage and each micro-batch."""
++
++    recompute_num_layers_per_stage_micro_batch: list = None
++    """Same as recompute_num_layers but for each stage and each micro-batch."""
++
+     distribute_saved_activations: Optional[bool] = None
+     """If True, distribute recomputed activations across the model parallel group."""
+ 
+@@ -366,6 +375,12 @@ class TransformerConfig(ModelParallelConfig):
+     use_kitchen: bool = False
+     """Use the kitchen extension for transformer quantization."""
+ 
++    ####################
++    # DualPipeV related
++    ####################
++    use_dualpipev: bool = False
++    moe_fb_overlap: bool = False
++
+     ####################
+     # MoE related
+     ####################
+@@ -577,6 +592,12 @@ class TransformerConfig(ModelParallelConfig):
+     config_logger_dir: str = ""
+     """When non-empty, dumps entry-point configs to config_logger_dir"""
+ 
++    qk_layernorm_hidden_dim: bool = False
++    """Whether to apply LayerNorm to the query and key embeddings on the hidden dimension rather than head dimension."""
++
++    use_partial_reduce_for_shared_embedding: bool = False
++    """Whether to use partional reduce for shared embedding."""
++
+     flash_decode: bool = False
+     """ Use the optimized flash decoding kernel during inference. """
+ 
+@@ -628,6 +649,26 @@ class TransformerConfig(ModelParallelConfig):
+     quant_recipe: Optional[RecipeConfig] = None
+     """Configuration of any quantization to be applied to the model"""
+ 
++    ####################
++    # PEFT
++    ####################
++    peft_type: str = None
++    """Type for finetuning"""
++    lora_target_modules: Optional[List[str]] = None
++    """Lora target modules"""
++    lora_dim: Optional[int] = None
++    """Lora rank."""
++    lora_alpha: Optional[int] = None
++    """Lora scale alpha."""
++    lora_dropout: Optional[float] = None
++    """Lora dropout prob"""
++    lora_dropout_position: Optional[str] = None
++    """Lora dropout pos"""
++    lora_in_init_method: Optional[str] = None
++    """Lora a init method"""
++    lora_out_init_method: Optional[str] = None
++    """Lora b init method"""
++
+     def __post_init__(self):
+         """Python dataclass method that is used to modify attributes after initialization.
+         See https://docs.python.org/3/library/dataclasses.html#post-init-processing for more
+@@ -1250,6 +1291,9 @@ class TransformerConfig(ModelParallelConfig):
+                     f"the number of layers ({self.num_layers})"
+                 )
+ 
++        if self.moe_fb_overlap:
++            self.delay_wgrad_compute = True
++
+ 
+ @dataclass
+ class MLATransformerConfig(TransformerConfig):
+

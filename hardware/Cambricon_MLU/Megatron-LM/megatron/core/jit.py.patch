@@ -1,0 +1,39 @@
+diff --git a/megatron/core/jit.py b/megatron/core/jit.py
+index b1aa3e0b6..7c0271c13 100644
+--- a/megatron/core/jit.py
++++ b/megatron/core/jit.py
+@@ -1,18 +1,26 @@
+ # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ 
+ import torch
++from megatron.accelerator import device_type
+ 
+ from megatron.core.utils import is_torch_min_version
+ 
++def fake_torch_compile(func):
++    def wrapper(*args, **kwargs):
++        return func(*args, **kwargs)
++    return wrapper
++
+ jit_fuser = torch.jit.script
+ # nvFuser is deprecated in PyTorch JIT starting from 2.2
++if is_torch_min_version("2.2.0a0"):
++    jit_fuser = torch.compile
+ 
+-try:
++#NOTE(mlu): replace jit_fuser with fake_torch_compile
++jit_fuser = None
++if device_type == 'mlu':
++    jit_fuser = fake_torch_compile
++elif device_type == 'cuda':
++    jit_fuser = torch.jit.script
++    # nvFuser is deprecated in PyTorch JIT starting from 2.2
+     if is_torch_min_version("2.2.0a0"):
+         jit_fuser = torch.compile
+-except ImportError:
+-
+-    def noop_decorator(func):
+-        return func
+-
+-    jit_fuser = noop_decorator
+

@@ -1,0 +1,65 @@
+diff --git a/megatron/core/dist_checkpointing/strategies/torch.py b/megatron/core/dist_checkpointing/strategies/torch.py
+index 56225ddd9..f6530b192 100644
+--- a/megatron/core/dist_checkpointing/strategies/torch.py
++++ b/megatron/core/dist_checkpointing/strategies/torch.py
+@@ -878,6 +878,13 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
+ 
+         Returns: loaded state dict
+         """
++        # Get the value from the environment variable if it exists, otherwise default to True
++        single_file_per_tensor_ckpt = os.getenv('FS_SFPT_CKPT_LOAD', 'False').lower() in (
++            'true',
++            '1',
++            't',
++        )
++
+         # Apply N-D tensors resharding
+         reformulation_metadata = get_reformulation_metadata(sharded_state_dict, checkpoint_dir)
+         sharded_state_dict, formulation_restore_data = apply_nd_flattened_tensors_reformulation(
+@@ -912,14 +919,24 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
+         )
+         # Load PyT Distributed format
+         fsr = _get_filesystem_reader(checkpoint_dir, cache_metadata=True)
+-        checkpoint.load_state_dict(
+-            pyt_state_dict,
+-            fsr,
+-            planner=MCoreLoadPlanner(
+-                shapes_validation_sharded_tensors=flexible_shape_sharded_tensors,
++        if not single_file_per_tensor_ckpt: 
++            checkpoint.load_state_dict(
++                pyt_state_dict,
++                fsr,
++                planner=MCoreLoadPlanner(
++                    shapes_validation_sharded_tensors=flexible_shape_sharded_tensors,
+                 allow_shape_mismatch_sharded_tensors=allow_shape_mismatch_sharded_tensors,
+-            ),
+-        )
++                ),
++            )
++        else:
++            checkpoint.load_state_dict(
++                pyt_state_dict,
++                fsr,
++                planner=MCoreLoadPlanner(
++                    shapes_validation_sharded_tensors=flexible_shape_sharded_tensors,
++                    allow_partial_load=True,
++                ),
++            )
+ 
+         self.cached_global_metadata = (
+             fsr.read_metadata()
+@@ -933,6 +950,13 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
+             k: v if not isinstance(v, TorchShardedTensor) else _unwrap_pyt_sharded_tensor(v)
+             for k, v in pyt_state_dict.items()
+         }
++
++        if single_file_per_tensor_ckpt: 
++            mcore_state_dict = {
++                k: [None] if (not isinstance(v, list) and "_extra_state" in k) else v
++                for k, v in mcore_state_dict.items()
++            }
++
+         mcore_state_dict = _replace_sharded_keys_with_state_dict_keys(
+             mcore_state_dict, flat_mapping, rename_mapping  # type: ignore[arg-type]
+         )
+

@@ -1,0 +1,179 @@
+diff --git a/megatron/training/utils.py b/megatron/training/utils.py
+index 698c5a07d..8d1ee3020 100644
+--- a/megatron/training/utils.py
++++ b/megatron/training/utils.py
+@@ -52,6 +52,7 @@ try:
+ except ImportError:
+     ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, custom_FSDP, Float16Module)
+ 
++from flagscale.train.hetero.p2p_communication import get_device_type_for_comm
+ 
+ def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
+     return_list = True
+@@ -181,13 +182,45 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
+     else:
+         moe_norm_2 = torch.zeros_like(norm_2)
+ 
+-    # Reduce norm across model parallel groups (dense and expert).
+-    # Dense params should sum across all model-parallel GPUs (tensor + pipeline).
+-    dense_reduce_group = mpu.get_model_parallel_group()
+-    ranks_in_dense_reduce_group = torch.distributed.get_process_group_ranks(dense_reduce_group)
+-    # Expert params should sum across all model-parallel GPUs (expert + tensor + pipeline).
+-    expert_reduce_group = mpu.get_expert_tensor_model_pipeline_parallel_group()
+-    ranks_in_expert_reduce_group = torch.distributed.get_process_group_ranks(expert_reduce_group)
++    ########## FlagScale Begin ##########
++    # Sum across all model-parallel GPUs(tensor + pipeline).
++    mp_groups = mpu.get_model_parallel_group()
++    comm_device = get_device_type_for_comm(mp_groups)
++    if comm_device == "cpu":
++        norm_2 = norm_2.cpu()
++    if isinstance(mp_groups, list):  # hetero
++        original_norm_2 = norm_2.clone().detach()
++        for mp_group in mp_groups:
++            norm_2.copy_(original_norm_2)
++            torch.distributed.all_reduce(
++                norm_2, op=torch.distributed.ReduceOp.SUM, group=mp_group
++            )
++        if len(moe_params_data) > 0:
++            emp_groups = mpu.get_expert_tensor_model_pipeline_parallel_group()
++            comm_device = get_device_type_for_comm(emp_groups)
++            if comm_device == "cpu":
++                moe_norm_2 = moe_norm_2.cpu()
++
++            assert isinstance(
++                emp_groups, list
++            ), "emp_groups should be a list if mp_groups is a list"
++            original_norm_2 = moe_norm_2.clone().detach()
++            for emp_group in emp_groups:
++                moe_norm_2.copy_(original_norm_2)
++                torch.distributed.all_reduce(
++                    moe_norm_2, op=torch.distributed.ReduceOp.SUM, group=emp_group
++                )
++            norm_2 += moe_norm_2
++    ########## FlagScale End ##########
++    else:  # original code
++
++        # Reduce norm across model parallel groups (dense and expert).
++        # Dense params should sum across all model-parallel GPUs (tensor + pipeline).
++        dense_reduce_group = mpu.get_model_parallel_group()
++        ranks_in_dense_reduce_group = torch.distributed.get_process_group_ranks(dense_reduce_group)
++        # Expert params should sum across all model-parallel GPUs (expert + tensor + pipeline).
++        expert_reduce_group = mpu.get_expert_tensor_model_pipeline_parallel_group()
++        ranks_in_expert_reduce_group = torch.distributed.get_process_group_ranks(expert_reduce_group)
+ 
+     # If dense and expert reduce groups are the same, sum then reduce.
+     if ranks_in_dense_reduce_group == ranks_in_expert_reduce_group:
+@@ -205,6 +238,10 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
+         )
+         norm_2 += moe_norm_2
+ 
++    if comm_device == "cpu":
++        norm_2 = norm_2.cuda()
++        moe_norm_2 = moe_norm_2.cuda()
++
+     return norm_2.item() ** 0.5
+ 
+ 
+@@ -227,10 +264,18 @@ def reduce_max_stat_across_model_parallel_group(stat: float) -> float:
+     """
+     if stat is None:
+         stat = -1.0
+-    stat = torch.tensor([stat], dtype=torch.float32, device=torch.cuda.current_device())
+-    torch.distributed.all_reduce(
+-        stat, op=torch.distributed.ReduceOp.MAX, group=mpu.get_model_parallel_group()
+-    )
++    model_parallel_groups = mpu.get_model_parallel_group()
++    if not isinstance(model_parallel_groups, list):
++        stat = torch.tensor([stat], dtype=torch.float32, device=get_device_type_for_comm(model_parallel_groups))
++        torch.distributed.all_reduce(
++            stat, op=torch.distributed.ReduceOp.MAX, group=mpu.get_model_parallel_group()
++        )
++    else:
++        stat = torch.tensor([stat], dtype=torch.float32, device=get_device_type_for_comm(model_parallel_groups[0]))
++        for model_parallel_group in model_parallel_groups:
++            torch.distributed.all_reduce(
++                stat, op=torch.distributed.ReduceOp.MAX, group=model_parallel_group
++            )
+     if stat.item() == -1.0:
+         return None
+     else:
+@@ -245,10 +290,18 @@ def logical_and_across_model_parallel_group(input: bool) -> bool:
+         input = 1
+     else:
+         input = 0
+-    input = torch.tensor([input], dtype=torch.int, device=torch.cuda.current_device())
+-    torch.distributed.all_reduce(
+-        input, op=torch.distributed.ReduceOp.MIN, group=mpu.get_model_parallel_group()
+-    )
++    model_parallel_groups = mpu.get_model_parallel_group()
++    if not isinstance(model_parallel_groups, list):
++        input = torch.tensor([input], dtype=torch.int, device=get_device_type_for_comm(model_parallel_groups))
++        torch.distributed.all_reduce(
++            input, op=torch.distributed.ReduceOp.MIN, group=mpu.get_model_parallel_group()
++        )
++    else:
++        input = torch.tensor([input], dtype=torch.int, device=get_device_type_for_comm(model_parallel_groups[0]))
++        for model_parallel_group in model_parallel_groups:
++            torch.distributed.all_reduce(
++                input, op=torch.distributed.ReduceOp.MIN, group=model_parallel_group
++            )
+     return bool(input.item())
+ 
+ 
+@@ -373,8 +426,15 @@ def is_rank0():
+ 
+ 
+ def is_last_rank():
+-    return torch.distributed.get_rank() == (torch.distributed.get_world_size() - 1)
+-
++    if mpu.get_pipeline_model_parallel_world_size() > 1:
++        ######### FlagScale Modify ########
++        if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
++            return mpu.is_pipeline_first_stage(ignore_virtual=True)
++        else:
++            return torch.distributed.get_rank() == mpu.get_last_rank_when_using_pipeline() 
++    else:
++        return torch.distributed.get_rank() == (
++            torch.distributed.get_world_size() - 1)
+ 
+ def print_rank_last(message):
+     """If distributed is initialized, print only on last rank."""
+@@ -495,9 +555,14 @@ def get_batch_on_this_tp_rank(data_iterator):
+             _broadcast(batch['position_ids'])
+ 
+         elif mpu.is_pipeline_first_stage():
+-            _broadcast(batch['tokens'])
+-            _broadcast(batch['attention_mask'])
+-            _broadcast(batch['position_ids'])
++           _broadcast(batch['tokens'])
++           _broadcast(batch['attention_mask'])
++           _broadcast(batch['position_ids'])
++            ######### FlagScale Begin ########
++           if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
++                _broadcast(batch['loss_mask'])
++                _broadcast(batch['labels'])
++            ######### FlagScale End ########
+ 
+         elif mpu.is_pipeline_last_stage():
+             # Multi-Token Prediction (MTP) layers need tokens and position_ids to calculate embedding.
+@@ -549,12 +614,16 @@ def get_batch_on_this_tp_rank(data_iterator):
+             _broadcast(position_ids)
+ 
+         elif mpu.is_pipeline_first_stage():
+-            labels = None
+-            loss_mask = None
+-
+             _broadcast(tokens)
+             _broadcast(attention_mask)
+             _broadcast(position_ids)
++            ######### FlagScale Modify ########
++            if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
++                _broadcast(loss_mask)
++                _broadcast(labels)
++            else:
++                labels = None
++                loss_mask = None 
+ 
+         elif mpu.is_pipeline_last_stage():
+             # Multi-Token Prediction (MTP) layers need tokens and position_ids to calculate embedding.
+

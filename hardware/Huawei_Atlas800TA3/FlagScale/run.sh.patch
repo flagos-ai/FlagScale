@@ -1,0 +1,45 @@
+diff --git a/run.sh b/run.sh
+new file mode 100644
+index 000000000..072a78c94
+--- /dev/null
++++ b/run.sh
+@@ -0,0 +1,38 @@
++#!/bin/bash
++
++if [ $# -eq 0 ]; then
++   echo "$0 {start|stop}"
++   exit 1
++fi	
++
++if [ "$2" == "rm" ]; then
++	rm -rf outputs/*
++fi
++# unset NCCL_DEBUG_FILE
++# export NCCL_DEBUG=INFO
++# export NCCL_DEBUG_SUBSYS=ALL
++case $1 in
++	start)
++	echo "Start a traing"
++	# python run.py --config-path examples/qwen2_5_vl/conf --config-name config_train
++	# tp2dp1pp1_tp2dp2pp1_tp1dp2pp1
++	# tp2pp1_tp4pp1_tp2pp1
++	# dp2dp4_shared_embedding
++	# tp4_pp2
++	# ./examples/qwen2_5_vl/conf 
++	# python run.py --config-path tests/functional_tests/test_cases/train/aquila/conf --config-name tp4_pp2
++	python run.py --config-path ./examples/qwen2_5_vl/conf  --config-name train
++	;;
++	profile)
++	echo "Start a profiling"
++	nsys profile --wait=all -s none -t nvtx,cuda -o ./build/profile_aquila --force-overwrite true --capture-range=cudaProfilerApi --capture-range-end=stop \
++	python run.py --config-path ./examples/qwen2_5_vl/conf  --config-name config_train
++	;;
++	stop)
++	echo "Stop a traing"
++	# python run.py --config-path examples/qwen2_5_vl/conf --config-name config_train action=stop
++	# python run.py --config-path tests/functional_tests/test_cases/train/aquila/conf --config-name tp4_pp2 action=stop
++	python run.py --config-path ./examples/qwen2_5_vl/conf  --config-name train action=stop
++	;;
++esac
++
+

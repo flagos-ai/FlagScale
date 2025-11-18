@@ -1,0 +1,20 @@
+diff --git a/tools/datasets/qwenvl/run.sh b/tools/datasets/qwenvl/run.sh
+new file mode 100644
+index 000000000..a33746c0c
+--- /dev/null
++++ b/tools/datasets/qwenvl/run.sh
+@@ -0,0 +1,13 @@
++export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
++
++python convert_custom_dataset_to_wds_chatml_str.py \
++    --dataset-root=/share/project/lizhiyu/data/llava-datasets/LLaVA-Pretrain \
++    --output-root=/share/project/lizhiyu/data/llava-datasets/LLaVA-Pretrain/blip_laion_cc_sbu_558k/ \
++    --json=blip_laion_cc_sbu_558k.json \
++    --train-split 1 \
++    --val-split 0 \
++    --images-key=image \
++    --videos-key=video \
++    --vision-root=/share/project/lizhiyu/data/llava-datasets/LLaVA-Pretrain \
++    --dp-size 2 \
++    --num-workers 20
+\ No newline at end of file

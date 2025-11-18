@@ -1,0 +1,18 @@
+diff --git a/megatron/core/transformer/moe/experts.py b/megatron/core/transformer/moe/experts.py
+index c215c43e2..200be4f9a 100644
+--- a/megatron/core/transformer/moe/experts.py
++++ b/megatron/core/transformer/moe/experts.py
+@@ -226,6 +226,12 @@ class GroupedMLP(MegatronModule):
+         setattr(self.weight1, 'allreduce', not self.expert_parallel)
+         setattr(self.weight2, 'allreduce', not self.expert_parallel)
+ 
++        # NOTE(lizhiyu): The following code is for hetro-expert training when one of the expert parallel degree is 1.
++        #                 But there are other codes need to be modified to make it work.
++        # if config.enable_hetero:
++        #     setattr(self.weight1, 'allreduce', False)
++        #     setattr(self.weight2, 'allreduce', False)
++
+         def remove_extra_states_check(self, incompatible_keys):
+             """
+             Remove _extra_state from unexpected keys.
+

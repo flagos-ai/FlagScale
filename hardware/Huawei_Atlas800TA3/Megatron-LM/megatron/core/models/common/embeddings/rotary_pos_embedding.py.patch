@@ -1,0 +1,14 @@
+diff --git a/megatron/core/models/common/embeddings/rotary_pos_embedding.py b/megatron/core/models/common/embeddings/rotary_pos_embedding.py
+index b777de3ad..9412be030 100644
+--- a/megatron/core/models/common/embeddings/rotary_pos_embedding.py
++++ b/megatron/core/models/common/embeddings/rotary_pos_embedding.py
+@@ -223,7 +223,7 @@ class RotaryEmbedding(nn.Module):
+                 rotary_seq_len = transformer_input.size(0)
+ 
+             if transformer_config.sequence_parallel:
+-                rotary_seq_len *= transformer_config.tensor_model_parallel_size
++                rotary_seq_len *= parallel_state.get_tensor_model_parallel_world_size()
+ 
+         rotary_seq_len *= transformer_config.context_parallel_size
+ 
+

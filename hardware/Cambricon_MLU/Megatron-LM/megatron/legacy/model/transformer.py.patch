@@ -1,0 +1,24 @@
+diff --git a/megatron/legacy/model/transformer.py b/megatron/legacy/model/transformer.py
+index c7f685ad7..bf0106f84 100644
+--- a/megatron/legacy/model/transformer.py
++++ b/megatron/legacy/model/transformer.py
+@@ -1510,6 +1510,9 @@ class ParallelTransformer(MegatronModule):
+                     (bool(int(os.getenv("NVTE_APPLY_QK_LAYER_SCALING", "0"))) and args.fp16) == config.apply_query_key_layer_scaling
+                 ), ("Unsupported config for apply_query_key_layer_scaling in TransformerEngine. If --apply-query-key-layer-scaling is "
+                     "provided, set env-var NVTE_APPLY_QK_LAYER_SCALING=1 and you must be using fp16.")
++                #NOTE(mlu): pass args num_gqa_groups to te
++                if args.num_query_groups > 1:
++                    extra_transformer_engine_kwargs["num_gqa_groups"] = args.num_query_groups
+                 return transformer_engine.pytorch.TransformerLayer(
+                     config.hidden_size,
+                     config.ffn_hidden_size,
+@@ -1538,6 +1541,8 @@ class ParallelTransformer(MegatronModule):
+                     drop_path_rate=self.drop_path_rates[layer_number - 1],
+                     set_parallel_mode=True,
+                     fuse_qkv_params=True,
++                    #NOTE(mlu): pass args tp_comm_overlap to te
++                    ub_tp_comm_overlap=args.tp_comm_overlap,
+                     **extra_transformer_engine_kwargs)
+ 
+         if config.virtual_pipeline_model_parallel_size is not None:
+

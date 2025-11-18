@@ -164,11 +164,14 @@ class InferenceEngine:
         """
 
         loader = self.vconfig.model.loader
+        _kwargs = {
+            k: v
+            for k, v in asdict(self.vconfig.model).items()
+            if v is not None and k not in ("model", "loader")
+        }
 
         if loader == "diffusers":
-            return self.load_diffusers_pipeline(
-                self.vconfig.model.model, **asdict(self.vconfig.model)
-            )
+            return self.load_diffusers_pipeline(self.vconfig.model.model, **_kwargs)
         elif loader == "transformers":
             raise NotImplementedError("Transformers loader is not implemented")
         elif loader == "custom":

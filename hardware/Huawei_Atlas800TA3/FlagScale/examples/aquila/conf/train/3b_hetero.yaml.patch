@@ -1,0 +1,120 @@
+diff --git a/examples/aquila/conf/train/3b_hetero.yaml b/examples/aquila/conf/train/3b_hetero.yaml
+new file mode 100644
+index 000000000..f385b61b0
+--- /dev/null
++++ b/examples/aquila/conf/train/3b_hetero.yaml
+@@ -0,0 +1,113 @@
++system:
++  # skip_iters_range: [113390,113400]
++  reset_position_ids: True
++  reset_attention_mask: True
++  add_qkv_bias: True
++  tensor_model_parallel_size: 1
++  pipeline_model_parallel_size: 2
++  disable_bias_linear: True
++  use_flash_attn: True
++  use_distributed_optimizer: True
++  precision:
++    bf16: True
++    initial_loss_scale: 522893
++    min_loss_scale: 1.0
++    attention_softmax_in_fp32: True
++    accumulate_allreduce_grads_in_fp32: True
++  logging:
++    log_interval: 1
++    log_throughput: True
++    tensorboard_log_interval: 1
++    wandb_project: ${experiment.exp_name}
++    wandb_exp_name: ${experiment.exp_name}
++  checkpoint:
++    #load: outputs_llama3/checkpoint_mc
++    ckpt_format: torch
++    save_interval: 1193 #2385
++  
++  hetero:
++    enable_hetero: True
++    hetero_use_cpu_communication: False
++    use_partial_reduce_for_shared_embedding: True
++    # mesh format [tp1,cp1,ep1,dp1,pp1,(tp2,cp2...)]
++
++    hetero_pipeline_layer_split: [12,12]
++    #hetero_pipeline_layer_split: [18,18]
++    #hetero_process_meshes: [1, 1, 1, 32, 1, 1,1,1,32,1]
++    hetero_process_meshes: [1, 1, 1, 1, 1, 1,1,1,1,1]
++    #hetero_device_types: ["B150","B150"]
++    hetero_device_types: ["A800"]
++
++    standalone_embedding_stage: False
++    hetero_current_device_type: "A800"
++
++  # recompute:
++  #   recompute_granularity: "full"
++  #   recompute_method: "uniform"
++  #   recompute_num_layers: 1
++
++  #   ## pp 2 stages
++  #   recompute_granularity_per_stage_micro_batch:
++  #     - [1, 4, 1, 4, 0]
++  #     - [1, 8, 1, 0, 0]
++  #   recompute_method_per_stage_micro_batch:
++  #     - [1, 8, 1, 0, 0]
++  #     - [1, 8, 1, 0, 0]
++  #   recompute_num_layers_per_stage_micro_batch:
++  #     - [1, 8, 16, 0, 0]
++  #     - [1, 0, 16, 8, 0]
++
++model:
++  # use_mcore_models: True # deprecated
++  transformer_impl: transformer_engine
++  num_layers: 12 
++  hidden_size: 2048 
++  num_attention_heads: 16
++  group_query_attention: True
++  num_query_groups: 2
++  seq_length: 4096 
++  max_position_embeddings: 4096 # only for adding position embeddings
++  norm_epsilon: 1e-6
++  use_rotary_position_embeddings: true
++  no_position_embedding: true
++  rotary_base: 1000000
++  swiglu: true
++  multiple_of: 256
++  hidden_dim_multiplier: 2 # ffn_hidden_size 11008
++  normalization: RMSNorm
++  position_embedding_type: rope
++  untie_embeddings_and_output_weights: False
++  init_method_std: 0.02
++  attention_dropout: 0.0
++  hidden_dropout: 0.0
++  weight_decay: 0.1
++  clip_grad: 1.0
++  train_samples: 244141 #29297664 #120B tokens
++  eval_iters: 0
++  micro_batch_size: 2
++  global_batch_size: 124
++  seed: 42
++
++  optimizer:
++    weight_decay: 0.1
++    adam_beta1: 0.9
++    adam_beta2: 0.95
++    lr_scheduler:
++      lr: 3.0e-3
++      min_lr: 3.0e-4
++      lr_warmup_samples: 2048
++      lr_decay_style: WSD
++      lr_wsd_decay_style: cosine
++      lr_wsd_decay_samples: 2048
++
++data:
++  #data_path: [40,/mnt/share/hetero_data/datasets/fineweb-edu-CC-3_5_text_document,28,/mnt/share/hetero_data/datasets/dclm-baseline-1.0-top_pct5_text_document,3,/mnt/share/hetero_data/datasets/k73_edu_qwen_text_document,5,/mnt/share/hetero_data/datasets/wxb_edu_qwen_text_document,20,/mnt/share/hetero_data/datasets/cosmopedia-v2-full_text_document,4,/mnt/share/hetero_data/datasets/infinst-kg-0712_text_document]
++  # exp02
++  # data_path: [4.08,/mnt/share/hetero_data/datasets/k73_edu_qwen_text_document,6.52,/mnt/share/hetero_data/datasets/wxb_edu_qwen_text_document,14.4,/mnt/share/hetero_data/datasets/opencsg-chinese-fineweb-edu-v2_20241104_text_document,4.81,/mnt/share/hetero_data/datasets/fineweb-code-corpus_20241112_text_document,0.32,/mnt/share/hetero_data/datasets/smollm-corpus-python-edu_text_document,0.4,/mnt/share/hetero_data/datasets/opc-annealing-corpus-algorithmic_corpus_text_document,0.11,/mnt/share/hetero_data/datasets/opc-annealing-corpus-synthetic_code_snippet_text_document,0.09,/mnt/share/hetero_data/datasets/opc-annealing-corpus-synthetic_qa_text_document,1.7,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/c_text_document,1.37,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/cpp_text_document,0.7,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/go_text_document,1.89,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/java_text_document,1.61,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/javascript_text_document,0.16,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/json_text_document,0.2,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/jupyter-scripts-dedup-filtered_text_document,0.16,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/jupyter-structured-clean-dedup_text_document,1.93,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/markdown_text_document,1.45,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/python_text_document,0.09,/mnt/share/hetero_data/datasets/K76/code_filter_qwen05_loss3/shell_text_document,26.11,/mnt/share/hetero_data/datasets/Nemotron-CC-HQ/Nemotron-CC-high-synthetic-diverse_qa_pairs_text_document,28.89,/mnt/share/hetero_data/datasets/Nemotron-CC-HQ/Nemotron-CC-high-actual-actual_text_document,0.18,/mnt/share/hetero_data/datasets/EleutherAI-proof-pile-2/EleutherAI-proof-pile-2-open-web-math_text_document,0.3,/mnt/share/hetero_data/datasets/finemath/infiwebmath-3plus_text_document,0.52,/mnt/share/hetero_data/datasets/finemath/finemath-3plus_text_document,1.0,/mnt/share/hetero_data/datasets/dolma_arxiv_text_document,1.0,/mnt/share/hetero_data/datasets/dolma_pes2o_v2_text_document]
++  data_path: /share/project/lizhiyu/data/pile_wikipedia_demo
++  tokenizer:
++    tokenizer_type: AquilaTokenizerFS
++    vocab_file: ./examples/aquila/tokenizer/vocab.json
++    merge_file: ./examples/aquila/tokenizer/merges.txt
++    special_tokens_file: ./examples/aquila/tokenizer/special_tokens.txt
++    vocab_size: 100008
+

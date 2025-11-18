@@ -400,7 +400,7 @@ class ServeAutoTunner(AutoTuner):
 
         if not deploy_config.get("use_fs_serve", True) and deploy_config.get("port", None):
             for item in config.serve:
-                if item.get("serve_id") == "vllm_model":
+                if item.get("serve_id") in ("vllm_model", "sglang_model"):
                     item.engine_args["port"] = (
                         config.experiment.get("runner", {}).get("deploy", {}).get("port", None)
                     )

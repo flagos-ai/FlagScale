@@ -1,0 +1,15 @@
+diff --git a/tools/checkpoint/qwen2_5_vl/run.sh b/tools/checkpoint/qwen2_5_vl/run.sh
+new file mode 100644
+index 000000000..2de4a88bf
+--- /dev/null
++++ b/tools/checkpoint/qwen2_5_vl/run.sh
+@@ -0,0 +1,7 @@
++# cd ./tools/checkpoint/qwen2_5_vl/
++export CUDA_VISIBLE_DEVICES=0,1,2,3
++bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
++/share/project/lizhiyu/data/Qwen2.5-VL-7B-Instruct \
++/share/project/lizhiyu/data/Qwen2.5-VL-7B-Instruct-tp2 \
++2 1 false bf16  \
++/share/project/lizhiyu/data/Qwen2.5-VL-7B-Instruct
+\ No newline at end of file
+

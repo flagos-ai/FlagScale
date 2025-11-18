@@ -1,0 +1,89 @@
+diff --git a/megatron/core/transformer/attention.py b/megatron/core/transformer/attention.py
+index 3d740f19b..6ebaacedd 100644
+--- a/megatron/core/transformer/attention.py
++++ b/megatron/core/transformer/attention.py
+@@ -825,22 +825,44 @@ class SelfAttention(Attention):
+         )
+ 
+         if submodules.q_layernorm is not None:
+-            self.q_layernorm = build_module(
+-                submodules.q_layernorm,
+-                hidden_size=self.hidden_size_per_attention_head,
+-                config=self.config,
+-                eps=self.config.layernorm_epsilon,
+-            )
++            if not self.config.qk_layernorm_hidden_dim:
++                self.q_layernorm = build_module(
++                    submodules.q_layernorm,
++                    hidden_size=self.hidden_size_per_attention_head,
++                    config=self.config,
++                    eps=self.config.layernorm_epsilon,
++                )
++            else:
++                tp_world_size = get_tensor_model_parallel_world_size()
++                assert tp_world_size <= 1, "TP world size must be less than 1 for qk_layernorm_hidden_dim"
++                # nums_head_cur_rank = divide(self.config.num_attention_heads, tp_world_size)
++                self.q_layernorm = build_module(
++                    submodules.q_layernorm,
++                    hidden_size=self.query_projection_size,
++                    config=self.config,
++                    eps=self.config.layernorm_epsilon,
++                )
+         else:
+             self.q_layernorm = None
+ 
+         if submodules.k_layernorm is not None:
+-            self.k_layernorm = build_module(
+-                submodules.k_layernorm,
+-                hidden_size=self.hidden_size_per_attention_head,
+-                config=self.config,
+-                eps=self.config.layernorm_epsilon,
+-            )
++            if not self.config.qk_layernorm_hidden_dim:
++                self.k_layernorm = build_module(
++                    submodules.k_layernorm,
++                    hidden_size=self.hidden_size_per_attention_head,
++                    config=self.config,
++                    eps=self.config.layernorm_epsilon,
++                )
++            else:
++                tp_world_size = get_tensor_model_parallel_world_size()
++                assert tp_world_size <= 1, "TP world size must be less than 1 for qk_layernorm_hidden_dim"
++                # nums_head_cur_rank = divide(self.config.num_attention_heads, tp_world_size)
++                self.k_layernorm = build_module(
++                    submodules.k_layernorm,
++                    hidden_size=self.kv_projection_size,
++                    config=self.config,
++                    eps=self.config.layernorm_epsilon,
++                )
+         else:
+             self.k_layernorm = None
+ 
+@@ -957,10 +979,24 @@ class SelfAttention(Attention):
+         query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
+ 
+         if self.q_layernorm is not None:
+-            query = self.q_layernorm(query)
++            if not self.config.qk_layernorm_hidden_dim:
++                query = self.q_layernorm(query)
++            else:
++                # [sq, b, np, hn] -> [sq, b, 1, np * hn]
++                query_shape = list(query.shape)
++                query = query.reshape(query.size(0), query.size(1), 1, -1)
++                query = self.q_layernorm(query)
++                query = query.reshape(*query_shape)
+ 
+         if self.k_layernorm is not None:
+-            key = self.k_layernorm(key)
++            if not self.config.qk_layernorm_hidden_dim:
++                key = self.k_layernorm(key)
++            else:
++                # [sq, b, ng, hn] -> [sq, b, 1, ng * hn]
++                key_shape = list(key.shape)
++                key = key.reshape(key.size(0), key.size(1), 1, -1)
++                key = self.k_layernorm(key)
++                key = key.reshape(*key_shape)
+ 
+         if self.config.test_mode:
+             self.run_realtime_tests()
+
