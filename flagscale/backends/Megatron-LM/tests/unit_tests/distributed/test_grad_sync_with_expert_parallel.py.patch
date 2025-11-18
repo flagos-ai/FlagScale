@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/distributed/test_grad_sync_with_expert_parallel.py b/tests/unit_tests/distributed/test_grad_sync_with_expert_parallel.py
-index 71e45f9d..fb581fc2 100644
+index 71e45f9d9..fb581fc26 100644
 --- a/tests/unit_tests/distributed/test_grad_sync_with_expert_parallel.py
 +++ b/tests/unit_tests/distributed/test_grad_sync_with_expert_parallel.py
 @@ -101,12 +101,17 @@ def get_moe_model_and_buffers(

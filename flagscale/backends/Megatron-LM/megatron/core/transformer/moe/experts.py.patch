@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/moe/experts.py b/megatron/core/transformer/moe/experts.py
-index c215c43e..200be4f9 100644
+index c215c43e2..200be4f9a 100644
 --- a/megatron/core/transformer/moe/experts.py
 +++ b/megatron/core/transformer/moe/experts.py
 @@ -226,6 +226,12 @@ class GroupedMLP(MegatronModule):

@@ -1,5 +1,5 @@
 diff --git a/megatron/core/dist_checkpointing/strategies/torch.py b/megatron/core/dist_checkpointing/strategies/torch.py
-index 56225ddd..f6530b19 100644
+index 56225ddd9..f6530b192 100644
 --- a/megatron/core/dist_checkpointing/strategies/torch.py
 +++ b/megatron/core/dist_checkpointing/strategies/torch.py
 @@ -878,6 +878,13 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):

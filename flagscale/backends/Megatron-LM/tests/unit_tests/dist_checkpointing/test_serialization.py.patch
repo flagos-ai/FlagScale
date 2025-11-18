@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/dist_checkpointing/test_serialization.py b/tests/unit_tests/dist_checkpointing/test_serialization.py
-index e0e2d948..e292b48e 100644
+index e0e2d9481..e292b48e7 100644
 --- a/tests/unit_tests/dist_checkpointing/test_serialization.py
 +++ b/tests/unit_tests/dist_checkpointing/test_serialization.py
 @@ -520,7 +520,14 @@ class TestSerialization:

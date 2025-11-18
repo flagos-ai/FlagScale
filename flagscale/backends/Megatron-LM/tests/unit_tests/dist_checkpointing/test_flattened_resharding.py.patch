@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/dist_checkpointing/test_flattened_resharding.py b/tests/unit_tests/dist_checkpointing/test_flattened_resharding.py
-index 1485eebe..a65e8cbe 100644
+index 1485eebe1..a65e8cbe4 100644
 --- a/tests/unit_tests/dist_checkpointing/test_flattened_resharding.py
 +++ b/tests/unit_tests/dist_checkpointing/test_flattened_resharding.py
 @@ -28,6 +28,9 @@ from tests.unit_tests.test_utilities import Utils

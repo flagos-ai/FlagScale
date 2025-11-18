@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/moe/moe_utils.py b/megatron/core/transformer/moe/moe_utils.py
-index b6732491..dfc06ca2 100644
+index b67324919..dfc06ca29 100644
 --- a/megatron/core/transformer/moe/moe_utils.py
 +++ b/megatron/core/transformer/moe/moe_utils.py
 @@ -700,6 +700,39 @@ def reduce_aux_losses_tracker_across_ranks(track_names: Optional[List[str]] = No

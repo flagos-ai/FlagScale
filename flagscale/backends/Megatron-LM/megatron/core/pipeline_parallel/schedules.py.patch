@@ -1,5 +1,5 @@
 diff --git a/megatron/core/pipeline_parallel/schedules.py b/megatron/core/pipeline_parallel/schedules.py
-index 317789ad..dcc4f0c3 100644
+index 317789ad6..dcc4f0c39 100644
 --- a/megatron/core/pipeline_parallel/schedules.py
 +++ b/megatron/core/pipeline_parallel/schedules.py
 @@ -113,7 +113,11 @@ def get_forward_backward_func():

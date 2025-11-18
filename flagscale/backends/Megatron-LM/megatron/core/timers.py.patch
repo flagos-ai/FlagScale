@@ -1,5 +1,5 @@
 diff --git a/megatron/core/timers.py b/megatron/core/timers.py
-index a34b6634..46876a5e 100644
+index a34b66349..46876a5e7 100644
 --- a/megatron/core/timers.py
 +++ b/megatron/core/timers.py
 @@ -283,6 +283,8 @@ class Timers:

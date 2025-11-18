@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/export/trtllm/test_single_device_fp8.py b/tests/unit_tests/export/trtllm/test_single_device_fp8.py
-index 04bbfdb1..14e0b857 100644
+index 04bbfdb12..14e0b8576 100644
 --- a/tests/unit_tests/export/trtllm/test_single_device_fp8.py
 +++ b/tests/unit_tests/export/trtllm/test_single_device_fp8.py
 @@ -101,7 +101,16 @@ def _forward_step_func(data_iterator, model):

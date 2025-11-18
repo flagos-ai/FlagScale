@@ -1,5 +1,5 @@
 diff --git a/megatron/core/distributed/finalize_model_grads.py b/megatron/core/distributed/finalize_model_grads.py
-index b175eaae..19ed0836 100644
+index b175eaae1..19ed08364 100644
 --- a/megatron/core/distributed/finalize_model_grads.py
 +++ b/megatron/core/distributed/finalize_model_grads.py
 @@ -25,6 +25,18 @@ def _get_main_grad_attr(param: torch.nn.Parameter, use_custom_fsdp: bool = False

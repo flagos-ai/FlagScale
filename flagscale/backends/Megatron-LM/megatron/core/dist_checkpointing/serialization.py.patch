@@ -1,5 +1,5 @@
 diff --git a/megatron/core/dist_checkpointing/serialization.py b/megatron/core/dist_checkpointing/serialization.py
-index 0469949c..e3feb8ce 100644
+index 0469949c6..e3feb8ce0 100644
 --- a/megatron/core/dist_checkpointing/serialization.py
 +++ b/megatron/core/dist_checkpointing/serialization.py
 @@ -8,6 +8,7 @@ Additionally, `load` expects the sharded state dict argument as a guidance for

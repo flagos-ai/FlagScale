@@ -1,5 +1,5 @@
 diff --git a/megatron/core/datasets/gpt_dataset.py b/megatron/core/datasets/gpt_dataset.py
-index b80caaf6..933b8582 100644
+index b80caaf6c..933b8582a 100644
 --- a/megatron/core/datasets/gpt_dataset.py
 +++ b/megatron/core/datasets/gpt_dataset.py
 @@ -14,7 +14,7 @@ from megatron.core.datasets.indexed_dataset import IndexedDataset

@@ -1,5 +1,5 @@
 diff --git a/megatron/training/tokenizer/tokenizer.py b/megatron/training/tokenizer/tokenizer.py
-index 5cf222cc..35ad2b85 100644
+index 5cf222ccc..35ad2b855 100644
 --- a/megatron/training/tokenizer/tokenizer.py
 +++ b/megatron/training/tokenizer/tokenizer.py
 @@ -11,9 +11,10 @@ from pathlib import Path

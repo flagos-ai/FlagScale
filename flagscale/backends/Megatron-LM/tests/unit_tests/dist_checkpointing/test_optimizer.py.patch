@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/dist_checkpointing/test_optimizer.py b/tests/unit_tests/dist_checkpointing/test_optimizer.py
-index 7c1e5f15..596cf97d 100644
+index 7c1e5f15d..596cf97d6 100644
 --- a/tests/unit_tests/dist_checkpointing/test_optimizer.py
 +++ b/tests/unit_tests/dist_checkpointing/test_optimizer.py
 @@ -196,6 +196,19 @@ def initialize_1d_flatten_tensor_model(

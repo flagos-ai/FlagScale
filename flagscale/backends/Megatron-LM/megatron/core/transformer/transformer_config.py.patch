@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
-index fe5f7a72..27b1b87b 100644
+index fe5f7a725..27b1b87b8 100644
 --- a/megatron/core/transformer/transformer_config.py
 +++ b/megatron/core/transformer/transformer_config.py
 @@ -283,6 +283,15 @@ class TransformerConfig(ModelParallelConfig):

@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/transformer_layer.py b/megatron/core/transformer/transformer_layer.py
-index 51c90f5a..56212d24 100644
+index 51c90f5ac..56212d24b 100644
 --- a/megatron/core/transformer/transformer_layer.py
 +++ b/megatron/core/transformer/transformer_layer.py
 @@ -34,7 +34,7 @@ from megatron.core.utils import (

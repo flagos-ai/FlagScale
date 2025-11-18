@@ -1,7 +1,7 @@
 diff --git a/megatron/core/transformer/transformer_block.py b/megatron/core/transformer/transformer_block.py
 old mode 100755
 new mode 100644
-index af0b3234..64fd6d60
+index af0b3234c..64fd6d606
 --- a/megatron/core/transformer/transformer_block.py
 +++ b/megatron/core/transformer/transformer_block.py
 @@ -1,5 +1,5 @@

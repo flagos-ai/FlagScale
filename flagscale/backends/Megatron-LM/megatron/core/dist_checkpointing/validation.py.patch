@@ -1,5 +1,5 @@
 diff --git a/megatron/core/dist_checkpointing/validation.py b/megatron/core/dist_checkpointing/validation.py
-index 7b423b7c..f8874bb7 100644
+index 7b423b7c8..f8874bb71 100644
 --- a/megatron/core/dist_checkpointing/validation.py
 +++ b/megatron/core/dist_checkpointing/validation.py
 @@ -503,7 +503,7 @@ def _validate_sharding_for_key_flattened(tensors_by_shard):

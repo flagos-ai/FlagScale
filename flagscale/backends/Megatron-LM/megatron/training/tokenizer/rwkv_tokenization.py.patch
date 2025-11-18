@@ -1,6 +1,6 @@
 diff --git a/megatron/training/tokenizer/rwkv_tokenization.py b/megatron/training/tokenizer/rwkv_tokenization.py
 new file mode 100644
-index 00000000..c814c554
+index 000000000..c814c5549
 --- /dev/null
 +++ b/megatron/training/tokenizer/rwkv_tokenization.py
 @@ -0,0 +1,150 @@

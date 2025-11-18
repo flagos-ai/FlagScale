@@ -1,5 +1,5 @@
 diff --git a/megatron/core/optimizer_param_scheduler.py b/megatron/core/optimizer_param_scheduler.py
-index da7e0787..e515a802 100644
+index da7e07876..e515a8026 100644
 --- a/megatron/core/optimizer_param_scheduler.py
 +++ b/megatron/core/optimizer_param_scheduler.py
 @@ -53,6 +53,7 @@ class OptimizerParamScheduler:

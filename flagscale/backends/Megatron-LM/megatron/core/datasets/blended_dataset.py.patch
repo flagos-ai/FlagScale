@@ -1,5 +1,5 @@
 diff --git a/megatron/core/datasets/blended_dataset.py b/megatron/core/datasets/blended_dataset.py
-index e5c1915b..c77b041f 100644
+index e5c1915bc..c77b041fb 100644
 --- a/megatron/core/datasets/blended_dataset.py
 +++ b/megatron/core/datasets/blended_dataset.py
 @@ -13,7 +13,7 @@ import torch

@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/test_utils.py b/tests/unit_tests/test_utils.py
-index c507c053..98dcf003 100644
+index c507c0537..98dcf0030 100644
 --- a/tests/unit_tests/test_utils.py
 +++ b/tests/unit_tests/test_utils.py
 @@ -366,14 +366,14 @@ def test_straggler_detector():

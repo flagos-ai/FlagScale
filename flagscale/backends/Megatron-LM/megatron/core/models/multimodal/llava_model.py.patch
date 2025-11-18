@@ -1,5 +1,5 @@
 diff --git a/megatron/core/models/multimodal/llava_model.py b/megatron/core/models/multimodal/llava_model.py
-index e4be5446..9e68791f 100644
+index e4be54462..9e68791f7 100644
 --- a/megatron/core/models/multimodal/llava_model.py
 +++ b/megatron/core/models/multimodal/llava_model.py
 @@ -332,9 +332,16 @@ class LLaVAModel(MegatronModule):

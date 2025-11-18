@@ -1,5 +1,5 @@
 diff --git a/megatron/core/parallel_state.py b/megatron/core/parallel_state.py
-index 33424a39..1c8a5d73 100644
+index 33424a395..1c8a5d73c 100644
 --- a/megatron/core/parallel_state.py
 +++ b/megatron/core/parallel_state.py
 @@ -13,6 +13,15 @@ import torch

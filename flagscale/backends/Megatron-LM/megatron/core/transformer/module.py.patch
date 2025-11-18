@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/module.py b/megatron/core/transformer/module.py
-index 8a8bd8c5..048a3066 100644
+index 8a8bd8c57..048a30665 100644
 --- a/megatron/core/transformer/module.py
 +++ b/megatron/core/transformer/module.py
 @@ -232,12 +232,25 @@ class Float16Module(MegatronModule):

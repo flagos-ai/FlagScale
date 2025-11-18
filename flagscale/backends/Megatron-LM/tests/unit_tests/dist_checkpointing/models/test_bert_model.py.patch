@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/dist_checkpointing/models/test_bert_model.py b/tests/unit_tests/dist_checkpointing/models/test_bert_model.py
-index 27f01447..35d08237 100644
+index 27f014478..35d08237e 100644
 --- a/tests/unit_tests/dist_checkpointing/models/test_bert_model.py
 +++ b/tests/unit_tests/dist_checkpointing/models/test_bert_model.py
 @@ -74,6 +74,9 @@ class TestBertModel:

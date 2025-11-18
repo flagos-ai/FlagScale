@@ -1,5 +1,5 @@
 diff --git a/megatron/core/optimizer/optimizer_config.py b/megatron/core/optimizer/optimizer_config.py
-index d425202b..6a8bb144 100644
+index d425202b9..6a8bb1446 100644
 --- a/megatron/core/optimizer/optimizer_config.py
 +++ b/megatron/core/optimizer/optimizer_config.py
 @@ -173,6 +173,13 @@ class OptimizerConfig:

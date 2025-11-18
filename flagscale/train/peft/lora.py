@@ -133,8 +133,8 @@ class LoRA(PEFT, peft_type='lora'):
                     old_keys.append(prefix + f"bias{gemm_id}")
                     new_keys.append(prefix + f"to_wrap.bias{gemm_id}")
             else:
-                old_keys = [prefix + "weight", prefix + "bias"]
-                new_keys = [prefix + "to_wrap.weight", prefix + "to_wrap.bias"]
+                old_keys = [prefix + "weight", prefix + "bias", prefix + "layer_norm_weight", prefix + "layer_norm_bias", prefix + "_extra_state"]
+                new_keys = [prefix + "to_wrap.weight", prefix + "to_wrap.bias", prefix + "to_wrap.layer_norm_weight", prefix + "to_wrap.layer_norm_bias", prefix + "to_wrap._extra_state"]
 
             for old_key, new_key in zip(old_keys, new_keys):
                 if old_key in state_dict.keys():
@@ -159,6 +159,7 @@ class LoRA(PEFT, peft_type='lora'):
                         f"{param_name} being removed from incompatible_keys.missing_keys in this model"
                     )
                     incompatible_keys.missing_keys.remove(param_name)
+            assert len(incompatible_keys.missing_keys) == 0, f"{incompatible_keys} missed"
 
         lora_param_names = []
         for name in model.state_dict().keys():

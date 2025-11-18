@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/models/test_llava_model.py b/tests/unit_tests/models/test_llava_model.py
-index 086a7838..3637e79d 100644
+index 086a78387..3637e79df 100644
 --- a/tests/unit_tests/models/test_llava_model.py
 +++ b/tests/unit_tests/models/test_llava_model.py
 @@ -770,6 +770,245 @@ def count_parameters(model):

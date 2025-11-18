@@ -1,5 +1,5 @@
 diff --git a/megatron/training/utils.py b/megatron/training/utils.py
-index 698c5a07..8d1ee302 100644
+index 698c5a07d..8d1ee3020 100644
 --- a/megatron/training/utils.py
 +++ b/megatron/training/utils.py
 @@ -52,6 +52,7 @@ try:

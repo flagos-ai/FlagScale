@@ -1,5 +1,5 @@
 diff --git a/megatron/core/dist_checkpointing/strategies/filesystem_async.py b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
-index a8e75960..efdbfe8c 100644
+index a8e759608..efdbfe8c6 100644
 --- a/megatron/core/dist_checkpointing/strategies/filesystem_async.py
 +++ b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
 @@ -8,13 +8,14 @@ import logging

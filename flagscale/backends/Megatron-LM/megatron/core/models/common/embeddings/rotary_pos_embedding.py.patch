@@ -1,5 +1,5 @@
 diff --git a/megatron/core/models/common/embeddings/rotary_pos_embedding.py b/megatron/core/models/common/embeddings/rotary_pos_embedding.py
-index b777de3a..9412be03 100644
+index b777de3ad..9412be030 100644
 --- a/megatron/core/models/common/embeddings/rotary_pos_embedding.py
 +++ b/megatron/core/models/common/embeddings/rotary_pos_embedding.py
 @@ -223,7 +223,7 @@ class RotaryEmbedding(nn.Module):

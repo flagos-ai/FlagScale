@@ -149,3 +149,15 @@ class AdapterWrapper(nn.Module):
             destination=destination, prefix=f'{prefix}adapter.', keep_vars=keep_vars
         )
         return destination
+
+    def sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
+        sharded_state_dict = {}
+        # Get state dict of the main module
+        base_sharded_state_dict = self.to_wrap.sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)
+        # Store adapter state dict under the "adapter" prefix in the destination dict
+        adapter_sharded_state_dict = self.adapter.sharded_state_dict(
+            prefix=f'{prefix}adapter.', sharded_offsets=sharded_offsets, metadata=metadata
+        )
+        sharded_state_dict.update(base_sharded_state_dict)
+        sharded_state_dict.update(adapter_sharded_state_dict)
+        return sharded_state_dict

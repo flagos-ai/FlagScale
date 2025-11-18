@@ -1,5 +1,5 @@
 diff --git a/megatron/inference/text_generation/sampling.py b/megatron/inference/text_generation/sampling.py
-index 370773a3..b2fc7573 100644
+index 370773a36..b2fc7573c 100644
 --- a/megatron/inference/text_generation/sampling.py
 +++ b/megatron/inference/text_generation/sampling.py
 @@ -42,7 +42,7 @@ def modify_logits_for_top_p_filtering(logits, top_p):

@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/test_parallel_state.py b/tests/unit_tests/test_parallel_state.py
-index ddee6387..de1abb95 100644
+index ddee63877..de1abb95e 100644
 --- a/tests/unit_tests/test_parallel_state.py
 +++ b/tests/unit_tests/test_parallel_state.py
 @@ -229,7 +229,13 @@ def test_different_initialize_order_consistency(src_tp_pp, ep_size):
