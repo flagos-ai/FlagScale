@@ -14,25 +14,21 @@
 # limitations under the License.
 
 
+import logging
 import os
 import sys
-import logging
-from functools import partial
+
+from argparse import Namespace
 from copy import deepcopy
+from functools import partial
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch._dynamo
 
-from argparse import Namespace
-
-# # For pytorch 2.6
-# torch.serialization.add_safe_globals([Namespace])
-
 from megatron.core import parallel_state
 from megatron.core.datasets.blended_megatron_dataset_builder import BlendedMegatronDatasetBuilder
 from megatron.core.datasets.gpt_dataset import GPTDataset, GPTDatasetConfig, MockGPTDataset
-from megatron.training.checkpointing import get_checkpoint_name # for dataloder
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.gpt.gpt_layer_specs import (
@@ -49,12 +45,17 @@ from megatron.core.transformer.spec_utils import import_module
 from megatron.core.utils import StragglerDetector
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.checkpointing import get_checkpoint_name  # for dataloder
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
     get_batch_on_this_tp_rank,
     get_blend_and_blend_per_split,
 )
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
+
+# # For pytorch 2.6
+# torch.serialization.add_safe_globals([Namespace])
+
 
 import megatron.legacy.model  # isort: skip
 
@@ -69,15 +70,21 @@ try:
 except ImportError:
     has_nvidia_modelopt = False
 
-from flagscale.train.datasets.sft_dataset import SFTDatasetConfig, SFTDataset
+from flagscale.train.datasets.sft_dataset import SFTDataset, SFTDatasetConfig
 from flagscale.train.extra_valid import extra_valid_datasets_provider
 from flagscale.train.train import pretrain
+
 stimer = StragglerDetector()
 
 #### especially for qwen2.5-vl ####
 from megatron.core.num_microbatches_calculator import get_num_microbatches
+
 torch._dynamo.config.suppress_errors = True
-from megatron.core.parallel_state import get_tensor_model_parallel_rank, get_pipeline_model_parallel_world_size, get_pipeline_model_parallel_rank
+from megatron.core.parallel_state import (
+    get_pipeline_model_parallel_rank,
+    get_pipeline_model_parallel_world_size,
+    get_tensor_model_parallel_rank,
+)
 from megatron.energon import (
     LimitDataset,
     RepeatDataset,
@@ -87,30 +94,30 @@ from megatron.energon import (
     get_train_dataset,
     get_val_datasets,
 )
-
-from megatron.training.tokenizer.tokenizer import build_tokenizer
 from megatron.training.global_vars import get_tokenizer
+from megatron.training.tokenizer.tokenizer import build_tokenizer
+
+# from tools.datasets.qwenvl.data.dataset_helpers_action import TaskEncoder, print_error_handler
+# from tools.datasets.qwenvl.data.dataset_helpers_action_unified_plus_sub import TaskEncoder, print_error_handler
+from tools.datasets.vla.data.dataset_helpers_vlm import TaskEncoder, print_error_handler
 
 from flagscale.train.models.qwen2_5_vl.layer_specs import (
     get_gpt_layer_with_transformer_engine_spec,
+    get_mlp_module_spec,
     get_qwen2vl_vision_model_spec,
-    get_mlp_module_spec
-
 )
 from flagscale.train.models.qwen2_5_vl.qwen2_5_vl_model import Qwen2_5VLModel
 from flagscale.train.models.qwen2_5_vl.tensor_parallel import broadcast_data
 from flagscale.train.models.qwen2_5_vl.transformer_config import (
     get_vision_model_config,
-    get_vision_projection_config
+    get_vision_projection_config,
 )
-# from tools.datasets.qwenvl.data.dataset_helpers_action import TaskEncoder, print_error_handler
-# from tools.datasets.qwenvl.data.dataset_helpers_action_unified_plus_sub import TaskEncoder, print_error_handler
-from tools.datasets.vla.data.dataset_helpers_vlm import TaskEncoder, print_error_handler
 
 #### especially for qwen2.5-vl ####
-IGNORE_IDX=-100
+IGNORE_IDX = -100
 FIRST_MAX_PADDING_FLAG = True
-LAST_LARGE_IMG=False
+LAST_LARGE_IMG = False
+
 
 def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True
@@ -125,14 +132,19 @@ def model_provider(
     if not use_te:
         raise NotImplementedError("The Qwen2-VL model is only implemented with TransformerEngine!")
 
-    if args.rotary_seq_len_interpolation_factor is not None or args.rotary_seq_len_interpolation_factor != 1:
+    if (
+        args.rotary_seq_len_interpolation_factor is not None
+        or args.rotary_seq_len_interpolation_factor != 1
+    ):
         print_rank_0('Multimodal RoPE currently not support RoPE interpolation, set to None...')
         args.rotary_seq_len_interpolation_factor = None
 
     vision_config = get_vision_model_config(args, deepcopy(config))
     vision_config.pipeline_model_parallel_size = 1
     vision_config.first_pipeline_num_layers = None
-    vision_projector_config = get_vision_projection_config(deepcopy(config), vision_config.hidden_size, args.spatial_merge_size)
+    vision_projector_config = get_vision_projection_config(
+        deepcopy(config), vision_config.hidden_size, args.spatial_merge_size
+    )
 
     print_rank_0("building Qwen2-5-VL model in TE...")
     # Layer Specs of vit, llm and projector
@@ -147,25 +159,20 @@ def model_provider(
         language_transformer_layer_spec=transformer_layer_spec,
         language_vocab_size=args.padded_vocab_size,
         language_max_sequence_length=args.max_position_embeddings,
-
         vision_transformer_config=vision_config,
         vision_transformer_layer_spec=vision_model_spec,
-        drop_vision_class_token=False, # NOTE: no class token to drop?
-
+        drop_vision_class_token=False,  # NOTE: no class token to drop?
         vision_projection_config=vision_projector_config,
         vision_projection_layer_spec=vision_projector_spec,
         vision_projection_type='mlp',
-        allow_missing_vision_projection_checkpoint= args.allow_missing_vision_projection_checkpoint,
-
+        allow_missing_vision_projection_checkpoint=args.allow_missing_vision_projection_checkpoint,
         language_position_embedding_type=args.position_embedding_type,
         language_rotary_percent=args.rotary_percent,
         language_rotary_base=args.rotary_base,
-
         pre_process=pre_process,
         post_process=post_process,
         add_decoder=add_decoder,
         add_encoder=add_encoder,
-
         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
         parallel_output=True,
         language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
@@ -174,42 +181,51 @@ def model_provider(
     model.freeze(
         freeze_language_model=args.freeze_LM,
         freeze_vision_model=args.freeze_ViT,
-        freeze_vision_projection=False
+        freeze_vision_projection=False,
     )
-      # ========== 打印模型embedding层信息 ==========
+    # ========== 打印模型embedding层信息 ==========
     print_rank_0("=" * 50)
     print_rank_0("Model Embedding Information:")
     print_rank_0("=" * 50)
-    
+
     # 方法1: 直接查看模型结构中的embedding相关信息
     try:
         # 语言模型的embedding
         if hasattr(model, 'language_model') and hasattr(model.language_model, 'embedding'):
             lang_embedding = model.language_model.embedding
-            print_rank_0(f"Language model embedding shape: {lang_embedding.word_embeddings.weight.shape}")
+            print_rank_0(
+                f"Language model embedding shape: {lang_embedding.word_embeddings.weight.shape}"
+            )
             print_rank_0(f"Language vocab size: {args.padded_vocab_size}")
             print_rank_0(f"Language hidden size: {config.hidden_size}")
             print(f"Config vocab_size: {args.padded_vocab_size}")
-            print(f"Actual embedding allocated: {model.language_model.embedding.word_embeddings.weight.shape[0]}")
-        
+            print(
+                f"Actual embedding allocated: {model.language_model.embedding.word_embeddings.weight.shape[0]}"
+            )
+
         # 视觉模型的embedding
         if hasattr(model, 'vision_model') and hasattr(model.vision_model, 'embeddings'):
             vision_embedding = model.vision_model.embeddings
             print_rank_0(f"Vision model embedding type: {type(vision_embedding)}")
             if hasattr(vision_embedding, 'patch_embedding'):
-                print_rank_0(f"Vision patch embedding shape: {vision_embedding.patch_embedding.weight.shape}")
-        
+                print_rank_0(
+                    f"Vision patch embedding shape: {vision_embedding.patch_embedding.weight.shape}"
+                )
+
         # 位置编码信息
         if hasattr(model, 'language_model') and hasattr(model.language_model, 'rotary_pos_emb'):
             print_rank_0(f"Language model uses rotary position embedding")
-        elif hasattr(model, 'language_model') and hasattr(model.language_model.embedding, 'position_embeddings'):
+        elif hasattr(model, 'language_model') and hasattr(
+            model.language_model.embedding, 'position_embeddings'
+        ):
             pos_emb = model.language_model.embedding.position_embeddings
             print_rank_0(f"Language position embedding shape: {pos_emb.weight.shape}")
-            
+
     except Exception as e:
         print_rank_0(f"Error accessing embedding layers: {e}")
 
     return model
+
 
 # copy from https://github.com/huggingface/transformers/blob/40a493c7ed4f19f08eadb0639cf26d49bfa5e180/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py#L1404
 def get_rope_index(
@@ -358,9 +374,21 @@ def get_rope_index(
                 time_tensor_long = time_tensor.long()
                 t_index = time_tensor_long.flatten()
 
-                h_index = torch.arange(llm_grid_h).view(1, -1, 1).expand(llm_grid_t, -1, llm_grid_w).flatten()
-                w_index = torch.arange(llm_grid_w).view(1, 1, -1).expand(llm_grid_t, llm_grid_h, -1).flatten()
-                llm_pos_ids_list.append(torch.stack([t_index, h_index, w_index]) + text_len + st_idx)
+                h_index = (
+                    torch.arange(llm_grid_h)
+                    .view(1, -1, 1)
+                    .expand(llm_grid_t, -1, llm_grid_w)
+                    .flatten()
+                )
+                w_index = (
+                    torch.arange(llm_grid_w)
+                    .view(1, 1, -1)
+                    .expand(llm_grid_t, llm_grid_h, -1)
+                    .flatten()
+                )
+                llm_pos_ids_list.append(
+                    torch.stack([t_index, h_index, w_index]) + text_len + st_idx
+                )
                 st = ed + llm_grid_t * llm_grid_h * llm_grid_w
 
             if st < len(input_tokens):
@@ -371,7 +399,9 @@ def get_rope_index(
             llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
             position_ids[..., i, attention_mask[i] == 1] = llm_positions.to(position_ids.device)
             mrope_position_deltas.append(llm_positions.max() + 1 - len(total_input_ids[i]))
-        mrope_position_deltas = torch.tensor(mrope_position_deltas, device=input_ids.device).unsqueeze(1)
+        mrope_position_deltas = torch.tensor(
+            mrope_position_deltas, device=input_ids.device
+        ).unsqueeze(1)
         return position_ids, mrope_position_deltas
     else:
         if attention_mask is not None:
@@ -387,22 +417,21 @@ def get_rope_index(
                 .expand(3, input_ids.shape[0], -1)
             )
             mrope_position_deltas = torch.zeros(
-                [input_ids.shape[0], 1],
-                device=input_ids.device,
-                dtype=input_ids.dtype,
+                [input_ids.shape[0], 1], device=input_ids.device, dtype=input_ids.dtype
             )
 
         return position_ids, mrope_position_deltas
 
+
 def get_ltor_masks_and_position_ids(
-        input_ids,
-        image_thw_grids,
-        video_thw_grids,
-        target,
-        pad_token,
-        second_per_grid_ts,
-        ignore_index=None
-    ):
+    input_ids,
+    image_thw_grids,
+    video_thw_grids,
+    target,
+    pad_token,
+    second_per_grid_ts,
+    ignore_index=None,
+):
     """Build masks and position id for left to right model."""
     # Position ids. [3 X bs X seqlen]
     position_ids, _ = get_rope_index(
@@ -410,7 +439,7 @@ def get_ltor_masks_and_position_ids(
         image_grid_thw=image_thw_grids,
         video_grid_thw=video_thw_grids,
         second_per_grid_ts=second_per_grid_ts,
-        attention_mask=input_ids != pad_token
+        attention_mask=input_ids != pad_token,
     )
 
     # Loss mask.
@@ -423,6 +452,7 @@ def get_ltor_masks_and_position_ids(
     attention_mask = None
 
     return attention_mask, loss_mask, position_ids
+
 
 def get_batch(data_iterator):
     """Generate a batch"""
@@ -441,15 +471,16 @@ def get_batch(data_iterator):
         pad_token_id = IGNORE_IDX
         # while (data["target"] == pad_token_id).all() or (data["target"].shape[-1] < 986 or data["target"].shape[-1] > 1000): # for debug
         while (data["target"] == pad_token_id).all():
-            logging.getLogger(__name__).warning("The current data is invalid because the target is all pad_token_id! Get next data to avoid fail, but it's better to check the data!")
+            logging.getLogger(__name__).warning(
+                "The current data is invalid because the target is all pad_token_id! Get next data to avoid fail, but it's better to check the data!"
+            )
             data = next(data_iterator)
     else:
         data = None
 
+    data_text = broadcast_data(["text"], data, torch.int64)["text"]
 
-    data_text =  broadcast_data(["text"], data, torch.int64)["text"]
-
-    target =  broadcast_data(["target"], data, torch.int64)["target"]
+    target = broadcast_data(["target"], data, torch.int64)["target"]
     # shape: num_tiles x c x h x w
     imgs = broadcast_data(["imgs"], data, torch.float32)["imgs"]
 
@@ -472,8 +503,9 @@ def get_batch(data_iterator):
     # shape: n_video_samples
     video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
     # shape: n_video_samples
-    second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)['second_per_grid_ts']
-
+    second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)[
+        'second_per_grid_ts'
+    ]
 
     image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
     video_input_mask = broadcast_data(["video_input_mask"], data, torch.bool)["video_input_mask"]
@@ -506,8 +538,9 @@ def get_batch(data_iterator):
         image_thw_grids,
         video_thw_grids,
         image_input_mask,
-        video_input_mask
+        video_input_mask,
     )
+
 
 # define spiky loss as a loss that's 10x the max loss observed
 SPIKY_LOSS_FACTOR = 10
@@ -600,31 +633,33 @@ def forward_step(data_iterator, model: Qwen2_5VLModel):
             image_thw_grids,
             video_thw_grids,
             image_input_mask,
-            video_input_mask
+            video_input_mask,
         ) = get_batch(data_iterator)
     timers('batch-generator').stop()
-    #print(f"LZY imags: {imgs.shape}, content: {imgs.sum()}, {imgs}")
+    # print(f"LZY imags: {imgs.shape}, content: {imgs.sum()}, {imgs}")
     vision_data = torch.cat([imgs, videos], dim=0)
     vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
     with stimer:
         output_tensor = model(
-            input_ids = tokens,
-            position_ids = position_ids,
-            vision_data = vision_data,
-            vision_grid_thw =  vision_grid,
-            video_start_index = image_input_mask.sum().cpu().item(),
-            image_input_mask = image_input_mask,
-            video_input_mask = video_input_mask,
-            attention_mask = attention_mask,
-            labels = labels
+            input_ids=tokens,
+            position_ids=position_ids,
+            vision_data=vision_data,
+            vision_grid_thw=vision_grid,
+            video_start_index=image_input_mask.sum().cpu().item(),
+            image_input_mask=image_input_mask,
+            video_input_mask=video_input_mask,
+            attention_mask=attention_mask,
+            labels=labels,
         )
 
     return output_tensor, partial(loss_func, loss_mask, model=model)
+
 
 def run_online_eval(model):
     """Run an evaluation benchmark during training."""
     # Do nothing.
     return []
+
 
 def write_online_eval_to_tensorboard(data, iteration, writer):
     """Write online evaluation data to Tensorboard."""
@@ -634,6 +669,7 @@ def write_online_eval_to_tensorboard(data, iteration, writer):
     for item in data:
         for k, v in item.items():
             writer.add_scalar(k, v, iteration)
+
 
 def datasets_provider(worker_config=None):
     """Create multimodal train, validation and test datasets."""
@@ -645,8 +681,8 @@ def datasets_provider(worker_config=None):
         task_encoder=TaskEncoder(),
         worker_config=worker_config,
         virtual_epoch_length=0,
-        max_samples_per_sequence=args.max_samples_per_sequence, # sequential shuffle in a tar
-        shuffle_buffer_size=args.shuffle_buffer_size, # shuffle in a sequential
+        max_samples_per_sequence=args.max_samples_per_sequence,  # sequential shuffle in a tar
+        shuffle_buffer_size=args.shuffle_buffer_size,  # shuffle in a sequential
         handler=print_error_handler,
         repeat=True,
         image_decode="pil",
@@ -677,23 +713,25 @@ def datasets_provider(worker_config=None):
 
     return train_dataset, val_datasets_without_source_datasets, None
 
+
 def is_first_or_last_stage(pp_size, encoder_pipeline_model_parallel_size):
     """Check if the current pipeline parallel stage is the first or last stage."""
-    if pp_size == 1:    # No pipeline parallelism.
+    if pp_size == 1:  # No pipeline parallelism.
         return True
 
     is_valid_rank = False
     pp_rank = get_pipeline_model_parallel_rank()
     if encoder_pipeline_model_parallel_size == 0:
         # No separate pipeline stage for the vision model. Run the dataloader on the first and last pipeline stage.
-        is_valid_rank = pp_rank in (0, pp_size-1)
+        is_valid_rank = pp_rank in (0, pp_size - 1)
     elif encoder_pipeline_model_parallel_size == 1:
         # Separate pipeline stage for the vision model. Run the dataloader on the first vision and LM stage and last LM stage.
-        is_valid_rank = pp_rank in (0, 1, pp_size-1)
+        is_valid_rank = pp_rank in (0, 1, pp_size - 1)
     else:
         raise NotImplementedError("encoder-pipeline-model-parallel-size > 1 is not supported yet")
 
     return is_valid_rank
+
 
 def is_dataloader_rank(encoder_pipeline_model_parallel_size):
     """Check if we should have the dataloader on this tensor and pipeline parallel rank."""
@@ -706,11 +744,12 @@ def is_dataloader_rank(encoder_pipeline_model_parallel_size):
 
     return is_first_rank
 
+
 def train_valid_test_dataloaders_provider(train_val_test_num_samples):
     """Build multimodal train, validation and test dataloaders."""
     args = get_args()
     # Dataloader is only on specific ranks.
-    if not is_dataloader_rank(args.encoder_pipeline_model_parallel_size):
+    if not is_dataloader_rank(args.transformer_pipeline_model_parallel_size):
         return None, None, None
 
     worker_debug_path = None
@@ -737,12 +776,14 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples):
             data_save_name = get_checkpoint_name(
                 args.dataloader_save,
                 args.iteration,
-                pipeline_rank=0,    # Only the first pipeline parallel rank stores the dataloader checkpoint.
+                pipeline_rank=0,  # Only the first pipeline parallel rank stores the dataloader checkpoint.
                 basename=f"train_dataloader_dprank{dp_rank:03d}.pt",
             )
             if os.path.exists(data_save_name):
                 try:
-                    dataset_state_dict = torch.load(data_save_name, map_location="cpu", weights_only=False)
+                    dataset_state_dict = torch.load(
+                        data_save_name, map_location="cpu", weights_only=False
+                    )
                     train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
                     print_rank_0(f"restored dataset state from {data_save_name}")
                 except Exception as e:
@@ -755,12 +796,14 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples):
         ]
     else:
         valid_dataloader = EnergonDataloader(None)
-    test_dataloader = None # NOTE: no test
+    test_dataloader = None  # NOTE: no test
 
     return EnergonDataloader(train_dataloader), valid_dataloader, EnergonDataloader(test_dataloader)
 
+
 class EnergonDataloader:
     """A wrapper to use Megatron Energon dataloader with the Megatron-LM training loop."""
+
     def __init__(self, dataloader):
         self._dataloader = dataloader
         self._iter = iter(cyclic_iter(dataloader))
@@ -784,7 +827,12 @@ def cyclic_iter(iter):
 def add_multimodal_extra_args(parser):
     """Extra arguments."""
     group = parser.add_argument_group(title="multimodal arguments")
-    group.add_argument("--disable-vision-class-token", action="store_true", default=False, help="Disable vision class token")
+    group.add_argument(
+        "--disable-vision-class-token",
+        action="store_true",
+        default=False,
+        help="Disable vision class token",
+    )
     group.add_argument(
         "--dataloader-save", type=str, default=None, help="Energon dataloader state save path"
     )
@@ -795,17 +843,49 @@ def add_multimodal_extra_args(parser):
     group.add_argument("--temporal-patch-size", type=int, default=2)
     group.add_argument("--patch-size", type=int, default=14)
     group.add_argument("--max-padding-length", type=int, default=2048)
-    group.add_argument("--enable-variable-seq-lengths", action="store_true", default=False, help="Enable variable sequence lengths")
-    group.add_argument("--vision-root", type=str, default = None, help="The vision dirctory root path.")
-    group.add_argument("--max-samples-per-sequence", type=int, default=2**31-1, help="max sequencial seqence samples in a slice")
-    group.add_argument("--shuffle-buffer-size", type=int, default=0, help="the buffer size to shuffle the samples in a seqence")
+    group.add_argument(
+        "--enable-variable-seq-lengths",
+        action="store_true",
+        default=False,
+        help="Enable variable sequence lengths",
+    )
+    group.add_argument(
+        "--vision-root", type=str, default=None, help="The vision dirctory root path."
+    )
+    group.add_argument(
+        "--max-samples-per-sequence",
+        type=int,
+        default=2**31 - 1,
+        help="max sequencial seqence samples in a slice",
+    )
+    group.add_argument(
+        "--shuffle-buffer-size",
+        type=int,
+        default=0,
+        help="the buffer size to shuffle the samples in a seqence",
+    )
     # learning rate
-    group.add_argument("--vision-ration", type=float, default=0.1, help="the learning rate ration of vision(inlude merger) compared with llm")
-    group.add_argument("--image-max-pixels", type=int, default=768*768, help="the maximum pixels of a single image")
-    group.add_argument("--image-min-pixels", type=int, default=32*32, help="the minimum pixels of a single image")
-    group.add_argument("--vision-recompute-layer-steps", type=int, default=0, help="the recmoute layers for vision using uniform method. 0 is disable.")
-    
-    
+    group.add_argument(
+        "--vision-ration",
+        type=float,
+        default=0.1,
+        help="the learning rate ration of vision(inlude merger) compared with llm",
+    )
+    group.add_argument(
+        "--image-max-pixels",
+        type=int,
+        default=768 * 768,
+        help="the maximum pixels of a single image",
+    )
+    group.add_argument(
+        "--image-min-pixels", type=int, default=32 * 32, help="the minimum pixels of a single image"
+    )
+    group.add_argument(
+        "--vision-recompute-layer-steps",
+        type=int,
+        default=0,
+        help="the recmoute layers for vision using uniform method. 0 is disable.",
+    )
 
     # just for checkpoint conversion
     group.add_argument(
@@ -816,15 +896,21 @@ def add_multimodal_extra_args(parser):
             "If False, convert a Transformers checkpoint to a Megatron checkpoint."
         ),
     )
-    group.add_argument("--freeze-LM", action="store_true", default=False, help="Freeze the language model")
-    group.add_argument("--freeze-ViT", action="store_true", default=False, help="Freeze the vision model")
+    group.add_argument(
+        "--freeze-LM", action="store_true", default=False, help="Freeze the language model"
+    )
+    group.add_argument(
+        "--freeze-ViT", action="store_true", default=False, help="Freeze the vision model"
+    )
     group.add_argument(
         "--allow-missing-vision-projection-checkpoint",
         action="store_true",
         default=False,
         help="Allow missing vision projection checkpoint",
     )
-    group.add_argument("--use-te", action="store_true", default=False, help="Use transformer engine")
+    group.add_argument(
+        "--use-te", action="store_true", default=False, help="Use transformer engine"
+    )
     return parser
 
 
