@@ -1,5 +1,5 @@
 diff --git a/flagscale/train/train_qwen2_5_vl.py b/flagscale/train/train_qwen2_5_vl.py
-index 9befeec7..20a17b4a 100644
+index 9befeec7..43ba5428 100644
 --- a/flagscale/train/train_qwen2_5_vl.py
 +++ b/flagscale/train/train_qwen2_5_vl.py
 @@ -22,6 +22,9 @@ from copy import deepcopy
@@ -7,7 +7,7 @@ index 9befeec7..20a17b4a 100644
  
  import torch
 +######### For huawei NPU #########
-+import flagscale.train.mindspeed_patch.megatron_adaptor
++import flagscale.train.npu_patch.megatron_adaptor
 +
  import torch._dynamo
  

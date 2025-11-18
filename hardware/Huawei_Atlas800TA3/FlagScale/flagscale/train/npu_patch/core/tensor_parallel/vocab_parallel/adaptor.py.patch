@@ -1,0 +1,27 @@
+diff --git a/flagscale/train/npu_patch/core/tensor_parallel/vocab_parallel/adaptor.py b/flagscale/train/npu_patch/core/tensor_parallel/vocab_parallel/adaptor.py
+new file mode 100644
+index 00000000..9c655780
+--- /dev/null
++++ b/flagscale/train/npu_patch/core/tensor_parallel/vocab_parallel/adaptor.py
+@@ -0,0 +1,20 @@
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
++# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
++
++from mindspeed.core.tensor_parallel.vocab_parallel.vocab_parallel import (
++    vocab_parallel_embedding_forward_impl,
++)
++
++from megatron.core.tensor_parallel.mappings import (
++    reduce_from_tensor_model_parallel_region,
++    reduce_scatter_to_sequence_parallel_region,
++)
++
++
++def mindspeed_vocab_parallel_embedding_forward(self, input_):
++    return vocab_parallel_embedding_forward_impl(
++        self,
++        input_,
++        reduce_from_tensor_model_parallel_region=reduce_from_tensor_model_parallel_region,
++        reduce_scatter_to_sequence_parallel_region=reduce_scatter_to_sequence_parallel_region,
++    )
+

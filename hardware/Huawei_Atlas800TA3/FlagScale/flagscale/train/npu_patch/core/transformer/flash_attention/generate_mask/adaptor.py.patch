@@ -1,0 +1,51 @@
+diff --git a/flagscale/train/npu_patch/core/transformer/flash_attention/generate_mask/adaptor.py b/flagscale/train/npu_patch/core/transformer/flash_attention/generate_mask/adaptor.py
+new file mode 100644
+index 00000000..e067871e
+--- /dev/null
++++ b/flagscale/train/npu_patch/core/transformer/flash_attention/generate_mask/adaptor.py
+@@ -0,0 +1,44 @@
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
++# Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++
++from functools import wraps
++from typing import Optional
++
++from mindspeed.core.transformer.flash_attention.generate_mask.generate_mask import (
++    get_attention_mask,
++)
++from torch import Tensor
++
++from megatron.core.packed_seq_params import PackedSeqParams
++from megatron.core.transformer.enums import AttnMaskType
++
++
++def dot_product_attention_forward_wrapper(fn):
++    @wraps(fn)
++    def wrapper(
++        self,
++        query: Tensor,
++        key: Tensor,
++        value: Tensor,
++        attention_mask: Tensor,
++        attn_mask_type: AttnMaskType = None,
++        attention_bias: Tensor = None,
++        packed_seq_params: Optional[PackedSeqParams] = None,
++    ):
++        if (attention_mask is None and self.attn_mask_type == AttnMaskType.causal) and not getattr(
++            self.config, 'is_llava', False
++        ):
++            self.config.sparse_mode = 2
++            attention_mask = get_attention_mask(self.config)
++        return fn(
++            self,
++            query,
++            key,
++            value,
++            attention_mask,
++            attn_mask_type,
++            attention_bias,
++            packed_seq_params,
++        )
++
++    return wrapper
+

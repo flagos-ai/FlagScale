@@ -1,0 +1,4 @@
+diff --git a/flagscale/train/npu_patch/core/fusions/rotary_pos_embedding.py b/flagscale/train/npu_patch/core/fusions/rotary_pos_embedding.py
+new file mode 100644
+index 00000000..e69de29b
+
