@@ -1,0 +1,4 @@
+paramiko==3.5.1
+pytz==2025.2
+PyYAML==6.0.2
+Requests==2.32.3

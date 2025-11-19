@@ -1,0 +1,23 @@
+# Target email address for receiving alerts
+target_email: example_alert@domain.com  # This is the email address that will receive alerts
+
+# SMTP server setup for sending emails, can query email configuration to obtain
+smtp_server: smtp.example.com  # This is the SMTP server used for sending emails
+
+# Email address used to send alerts
+source_email: example_sender@domain.com  # This is the email address used to send alerts
+
+# Remote host IP address for accessing log files
+remote_host: 192.0.2.1  # This IP address identifies the remote host where logs are stored
+
+# Username for SSH login to the remote host
+remote_user: example_user  # This is the username used to log in to the remote host via SSH
+
+# Port number used for SSH access
+remote_port: 22  # This is the standard SSH port used to connect to the remote host
+
+# Path to the log file on the remote host
+remote_log_path: /path/example_log_file.log
+
+# Interval in seconds for checking the logs
+check_interval: 1200
