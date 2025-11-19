@@ -1,0 +1,38 @@
+# Simplified Pi0.5 Training Configuration (following Pi0 pattern)
+
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  wandb_enabled: true
+  seed: 42
+  project_name: pi05_training
+  exp_name: pi05_test
+  batch_size: 1
+  train_steps: 100
+  log_freq: 10
+  output_directory: outputs/pi05_test/ckpt
+  tokenizer_max_length: 200
+
+model:
+  # change to your model path
+  checkpoint_dir: /share/pi0_5/pi05_base
+  resume: false
+  ckpt_overwrite: true
+  # change to your stat_path (lerobot format)
+  stat_path: /share/pi05_dataset/stats.json
+  action_steps: 16
+  action_dim: 32
+  pi05: true
+  discrete_state_input: true
+  tokenizer_max_length: 200
+
+data:
+  # change to your tokenizer path
+  tokenizer_path: /share/paligemma-3b-pt-224
+  # change to your data path
+  data_path: /share/pi05_dataset/wds-2
+  state_key: observation.state
+  action_key: action
+  action_token_key: action_token
+  vision_root: ""

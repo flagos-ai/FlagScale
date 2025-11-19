@@ -1,0 +1,37 @@
+engine:
+  device: cuda
+  loader: pi0_5
+  model: /share/pi0_5/pi05_base
+  output_format: image
+  results_path: ${experiment.exp_dir}/results
+  stat_path: /share/pi05_dataset/stats.json
+  tokenizer: /share/paligemma-3b-pt-224
+  torch_dtype: float32
+  transformations:
+    LogIOTransformation:
+      log_level: info
+    StateScopeTransformation: {}
+experiment:
+  exp_dir: outputs/${experiment.exp_name}
+  exp_name: pi0_5_inference
+  seed: 42
+generate:
+  action_dim: 32
+  action_steps: 16
+  batch_size: 2
+  discrete_state_input: true
+  images_keys:
+  - observation.images.camera0
+  - observation.images.camera1
+  - observation.images.camera2
+  images_shape:
+  - 3
+  - 480
+  - 640
+  instruction:
+    task:
+    - retro serie of different cars with different colors and shapes, mdjrny-v4 style
+    - retro serie of different cars with different colors and shapes
+  tokenizer_max_length: 200
+  pi05_mode: true
+  state_key: observation.state
