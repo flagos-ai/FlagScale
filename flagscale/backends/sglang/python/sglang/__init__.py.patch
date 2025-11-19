@@ -1,5 +1,5 @@
 diff --git a/python/sglang/__init__.py b/python/sglang/__init__.py
-index 509b145a..8fb6dd2b 100644
+index 509b145a9..8fb6dd2b1 100644
 --- a/python/sglang/__init__.py
 +++ b/python/sglang/__init__.py
 @@ -1,8 +1,10 @@

@@ -1,5 +1,5 @@
 diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
-index 64bb885a..2c3e7169 100644
+index 64bb885a6..2c3e7169e 100644
 --- a/python/sglang/srt/model_executor/model_runner.py
 +++ b/python/sglang/srt/model_executor/model_runner.py
 @@ -142,6 +142,23 @@ UNBALANCED_MODEL_LOADING_TIMEOUT_S = 300
