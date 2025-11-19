@@ -1,6 +1,0 @@
-- serve_id: A
-  module: examples/emu3_5/emu.py
-  name: InferencePipeline
-  resources:
-    num_replicas: 1
-    num_gpus: 2
