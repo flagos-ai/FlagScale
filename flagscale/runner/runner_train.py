@@ -197,8 +197,6 @@ def _get_runner_cmd_train(
         del runner_args["master_port"]
     if "enable_monitoring" in runner_args:
         del runner_args["enable_monitoring"]
-    if "overwrite_output" in runner_args:
-        del runner_args["overwrite_output"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port
@@ -293,14 +291,6 @@ def _generate_run_script_train(
             f.write(f'  --enable-diagnostic \\\n')
             f.write(f'  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n')
             f.write(f'echo "Monitor service started in background for {host} (node {node_rank})"\n')
-        else:
-            f.write(f'# Monitoring is disabled\n')
-            f.write(f'echo "Monitoring service is disabled"\n')
-            f.write(f'# Clean up old monitor files if they exist\n')
-            f.write(f'if [ -d "{logging_config.log_dir}/monitor" ]; then\n')
-            f.write(f'  echo "Cleaning up old monitor files for {host} (node {node_rank})..."\n')
-            f.write(f'  rm -f "{logging_config.log_dir}/monitor/host_{node_rank}_{host}_"*\n')
-            f.write(f'fi\n')
         f.write(f'\n')
 
         if with_test:
