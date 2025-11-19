@@ -6,13 +6,13 @@ on:
     paths:
       - '.github/workflows/*metax*.yml'
       - 'hardware/Metax_C550/**'
-      - 'tests/**'
+      - 'tests/Metax_C550/**'
   pull_request:
     branches: ["main"]
     paths:
       - '.github/workflows/*metax*.yml'
       - 'hardware/Metax_C550/**'
-      - 'tests/**'
+      - 'tests/Metax_C550/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
@@ -36,15 +36,15 @@ jobs:
     strategy:
       matrix:
         task:
-          - deepseek_r1_distill_qwen-metax
+          - deepseek_r1_distill_qwen
           # TODO: Need update for flaggems@v3.0
-          - deepseek_r1_distill_qwen-flaggems-metax
-          - opi_llama3_1_instruct-metax
-          - opi_llama3_1_instruct-flaggems-metax
-          - qwen3-metax
-          - qwen3-flaggems-metax
-          - robobrain2-metax  # TP1
-          - robobrain2-flaggems-metax  # TP1
+          - deepseek_r1_distill_qwen-flaggems
+          - opi_llama3_1_instruct
+          - opi_llama3_1_instruct-flaggems
+          - qwen3
+          - qwen3-flaggems
+          - robobrain2  # TP1
+          - robobrain2-flaggems  # TP1
     name: "inference-${{ matrix.task }}"
     with:
       task: ${{ matrix.task }}

@@ -1,0 +1,27 @@
+llm:
+  model: /home/gitlab-runner/data/BAAI/RoboBrain2.0-7B
+  tokenizer: /home/gitlab-runner/data/BAAI/RoboBrain2.0-7B
+  trust_remote_code: true
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.9
+  seed: 1234
+  enforce_eager: true
+  max_model_len: 32768
+  max_num_seqs: 1
+  enable_chunked_prefill: true
+  disable_cascade_attn: true
+
+generate:
+  modality: "image"
+  prompts:
+    - Analyze the content of the image
+    - What is shown in this image?
+  mm_data:
+    - /home/gitlab-runner/data/BAAI/imgs/img1.jpg
+    - /home/gitlab-runner/data/BAAI/imgs/img2.jpg
+  sampling:
+    top_p: 0.1
+    top_k: 1
+    temperature: 0.0
+    seed: 1234

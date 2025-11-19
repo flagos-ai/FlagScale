@@ -1,0 +1,8 @@
+**************************************************
+output.prompt='The president of the United States'
+output.outputs[0].text=' is responsible for the repression of the spread of nuclear arms and the maintenance of the'
+output.outputs[0].token_ids=[374, 8647, 369, 279, 72498, 315, 279, 9041, 315, 11499, 11977, 323, 279, 13709, 315, 279]
+**************************************************
+output.prompt='The capital of France'
+output.outputs[0].text=', which is also a major component of the globalized culture, is a hub'
+output.outputs[0].token_ids=[11, 902, 374, 1101, 264, 3682, 3777, 315, 279, 3728, 1534, 7829, 11, 374, 264, 19240]

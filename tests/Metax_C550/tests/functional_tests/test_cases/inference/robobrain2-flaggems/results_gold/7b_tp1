@@ -1,0 +1,8 @@
+**************************************************
+output.prompt='Analyze the content of the image'
+output.outputs[0].text='The image features a watermelon cut in half,'
+output.outputs[0].token_ids=[13708, 766, 1472, 26865, 1784, 9217, 16357, 2168, 4419, 264, 3015, 71118, 3931, 304, 4279, 11]
+**************************************************
+output.prompt='What is shown in this image?'
+output.outputs[0].text='A tiger is shown laying down on the ground in'
+output.outputs[0].token_ids=[13708, 766, 1472, 26865, 1784, 9217, 23465, 51735, 374, 6839, 34644, 1495, 389, 279, 4910, 304]
