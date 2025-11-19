@@ -1,0 +1,22 @@
+defaults:
+- _self_
+- serve: 685b
+
+experiment:
+  exp_name: deepseek_32_685b
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+  runner:
+    hostfile: null
+    deploy:
+      use_fs_serve: false
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    USE_FLAGGEMS: false
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
