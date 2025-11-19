@@ -5,14 +5,14 @@ vLLM implementation of https://github.com/baaivision/Emu3.5
 ## Environment Setup
 
 ### Install FlagScale
-- base on vLLM tag/0.11.0
+- Build from source code base on vLLM tag/0.11.0
 ```bash
 git clone https://github.com/flagos-ai/FlagScale.git
 cd FlgScale
 python tools/patch/unpatch.py --backend vllm
 cd FlagScale/third_party/vllm
-pip install -r requirements/cuda.txt --no-cache-dir -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
-MAX_JOBS=32 pip install --no-build-isolation -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -v .
+pip install -r requirements/cuda.txt --no-cache-dir
+MAX_JOBS=32 pip install --no-build-isolation -v .
 ```
 
 ### Prepare Emu3.5
@@ -23,7 +23,7 @@ git clone --no-checkout https://github.com/baaivision/Emu3.5.git tmp_repo
 cd tmp_repo
 git sparse-checkout init --cone
 git sparse-checkout set src assets
-git checkout main
+git checkout 5d6f548ea63d7540460c3524b7a46cfd3cc67942
 mv src assets ../
 cd ..
 rm -rf tmp_repo

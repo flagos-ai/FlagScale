@@ -1,10 +1,6 @@
 import os
-import sys
 
-import torch
-
-from omegaconf import DictConfig, ListConfig
-from PIL import Image
+from omegaconf import DictConfig
 from tqdm import tqdm
 
 import vllm
@@ -18,10 +14,16 @@ from flagscale.inference.emu_utils.prompt_case import EMU_TASKS
 from flagscale.logger import logger
 
 
-def generate(model: LLM, processor: Emu3p5Processor, prompts: list, sampling_cfg: DictConfig):
+def generate(
+    model: LLM, processor: Emu3p5Processor, prompts: list, sampling_cfg: DictConfig, save_dir: str
+):
 
+    os.makedirs(save_dir, exist_ok=True)
     for name, question in tqdm(prompts, total=len(prompts)):
         logger.info(f">>> Processing: {name=}, {question=}")
+
+        save_path = os.path.join(save_dir, name)
+        os.makedirs(save_path, exist_ok=True)
 
         input_ids, uncond_input_ids = processor.process_inputs(question)
 
@@ -55,11 +57,17 @@ def generate(model: LLM, processor: Emu3p5Processor, prompts: list, sampling_cfg
         mm_outputs = processor.process_results(results)
         for i, (out_type, output) in enumerate(mm_outputs):
             if out_type in ["text", "global_cot", "image_cot"]:
-                logger.info(f">>> 📄[OUTPUT-{i}][{out_type}]: {output}")
+                with open(f"{save_path}/output_{name}_{i}.txt", 'w') as f:
+                    f.write(output)
+                logger.info(
+                    f">>> 📄[OUTPUT-{i}][{out_type}]: saved to {save_path}/output_{name}_{i}.txt"
+                )
             elif out_type == "image":
                 output_image = output.convert("RGB")
-                output_image.save(f"output_{name}_{i}.png")
-                logger.info(f">>> 📷[OUTPUT-{i}][{out_type}]: saved to output_{name}_{i}.png")
+                output_image.save(f"{save_path}/output_{name}_{i}.png")
+                logger.info(
+                    f">>> 📷[OUTPUT-{i}][{out_type}]: saved to {save_path}/output_{name}_{i}.png"
+                )
             else:
                 raise ValueError(f"Unknown output type: {out_type}")
 
@@ -85,6 +93,7 @@ if __name__ == "__main__":
         raise ValueError("prompts should be a list or dict.")
 
     llm_cfg = cfg.get("llm", {})
+    save_dir = llm_cfg.pop("save", '.')
     tokenizer_path = llm_cfg.get("tokenizer", None)
     vq_model_path = llm_cfg.pop("vq_model", None)
     assert tokenizer_path and vq_model_path, "Please set the tokenzier and vq_model in llm config."
@@ -116,4 +125,4 @@ if __name__ == "__main__":
     vllm_config = llm.llm_engine.vllm_config
     print(f"{vllm_config=}")
 
-    generate(llm, processor, prompts, cfg.generate.get("sampling", {}))
+    generate(llm, processor, prompts, cfg.generate.get("sampling", {}), save_dir)

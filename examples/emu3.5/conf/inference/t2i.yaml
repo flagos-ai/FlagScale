@@ -1,4 +1,5 @@
 llm:
+  save: ${experiment.exp_dir}
   vq_model: ${experiment.vq_model}
   model: ${experiment.model}
   tokenizer: ${experiment.tokenizer}
