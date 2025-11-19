@@ -74,6 +74,6 @@ jobs:
             echo "Unknown backend type: ${{ inputs.backend }}"
             exit 1
           fi
-
+          cd tests/Nvidia_GPU/
           tests/scripts/unit_tests/test_subset.sh --backend ${{ inputs.backend }} --subset ${{ inputs.subset }} --id ${{ github.sha }}
         shell: bash

@@ -344,14 +344,14 @@ class ServeEngine:
 
         # Optionally visualize the DAG
         if visibilization:
-            dag_img_path = os.path.join(self.exp_config.exp_dir, "dag.png")
+            dag_img_path = os.path.join(self.exp_config.dag_dir, "dag.png")
             _visualize_dag_with_force_directed_layout(dag, dag_img_path)
 
     def init_task(self, pythonpath=""):
         logger.info(f" =========== pythonpath {pythonpath} -----------------------")
         runtime_env = {}
         working_dir = (
-            self.exp_config.runner.deploy.get("working_dir", "") or self.exp_config.exp_dir
+            self.exp_config.runner.deploy.get("working_dir", "") or self.exp_config.dag_dir
         )
         if pythonpath:
             runtime_env["env_vars"] = {"PYTHONPATH": pythonpath}

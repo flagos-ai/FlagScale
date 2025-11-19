@@ -1,4 +1,8 @@
+import multiprocessing
 import os
+
+multiprocessing.set_start_method("spawn", force=True)
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 from PIL import Image
 from transformers import AutoProcessor, AutoTokenizer

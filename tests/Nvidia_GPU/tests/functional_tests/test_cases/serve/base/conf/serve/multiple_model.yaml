@@ -1,0 +1,26 @@
+- serve_id: A
+  module: tests/Nvidia_GPU/tests/functional_tests/test_cases/serve/utils/models/base_model.py
+  name: ModelA
+  resources:
+    num_replicas: 2
+    num_gpus: 1
+- serve_id: B
+  module: tests/Nvidia_GPU/tests/functional_tests/test_cases/serve/utils/models/base_model.py
+  depends:
+    - A
+  name: ModelB
+  resources:
+    num_gpus: 1
+    min_replicas: 1
+    max_replicas: 2
+- serve_id: C
+  module: tests/Nvidia_GPU/tests/functional_tests/test_cases/serve/utils/models/util_models/util_model.py
+  depends:
+    - A
+  name: ModelC
+- serve_id: D
+  module: tests/Nvidia_GPU/tests/functional_tests/test_cases/serve/utils/models/util_models/util_model.py
+  depends:
+    - B
+    - C
+  name: ModelD

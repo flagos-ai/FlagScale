@@ -4,25 +4,35 @@ on:
   push:
     branches: ["main"]
     paths-ignore:
-      - 'hardware/BI_V150/**'
-      - 'hardware/Cambricon_MLU/**'
-      - 'hardware/Huawei_Atlas800TA3/**'
-      - 'hardware/Hygon_BW1000/**'
-      - 'hardware/Kunlunxin_R310p/**'
-      - 'hardware/MUSA_S5000/**'
-      - 'hardware/Metax_C550/**'
-      - 'hardware/Tsing_micro/**'
+      - 'docker/**'
+      - 'examples/**'
+      - 'install/**'
+      - 'requirements/**'
+      - 'hardware/**'
+      - 'tests/BI_V150/**'
+      - 'tests/Cambricon_MLU/**'
+      - 'tests/Huawei_Atlas800TA3/**'
+      - 'tests/Hygon_BW1000/**'
+      - 'tests/Kunlunxin_R310p/**'
+      - 'tests/MUSA_S5000/**'
+      - 'tests/Metax_C550/**'
+      - 'tests/Tsing_micro/**'
   pull_request:
     branches: ["main"]
     paths-ignore:
-      - 'hardware/BI_V150/**'
-      - 'hardware/Cambricon_MLU/**'
-      - 'hardware/Huawei_Atlas800TA3/**'
-      - 'hardware/Hygon_BW1000/**'
-      - 'hardware/Kunlunxin_R310p/**'
-      - 'hardware/MUSA_S5000/**'
-      - 'hardware/Metax_C550/**'
-      - 'hardware/Tsing_micro/**'
+      - 'docker/**'
+      - 'examples/**'
+      - 'install/**'
+      - 'requirements/**'
+      - 'hardware/**'
+      - 'tests/BI_V150/**'
+      - 'tests/Cambricon_MLU/**'
+      - 'tests/Huawei_Atlas800TA3/**'
+      - 'tests/Hygon_BW1000/**'
+      - 'tests/Kunlunxin_R310p/**'
+      - 'tests/MUSA_S5000/**'
+      - 'tests/Metax_C550/**'
+      - 'tests/Tsing_micro/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}

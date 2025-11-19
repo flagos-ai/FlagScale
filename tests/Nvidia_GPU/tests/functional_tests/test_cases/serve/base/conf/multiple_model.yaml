@@ -1,0 +1,34 @@
+defaults:
+  - _self_
+  - serve: multiple_model
+
+experiment:
+  exp_name: multiple_model
+  exp_dir: tests/functional_tests/test_cases/serve/utils/models
+  dag_dir: tests/Nvidia_GPU/tests/functional_tests/test_cases/serve/utils/models
+  task:
+    type: serve
+    entrypoint: null
+  runner:
+    hostfile: null
+    deploy:
+      port: 6701
+      use_fs_serve: true
+      enable_composition: true
+      name: /generate
+      request:
+        args:
+          - prompt
+        types:
+          - str
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    no_proxy: "127.0.0.1,localhost"
+  cmds:
+    before_start: ulimit -n 65535 && source /root/miniconda3/bin/activate flagscale-inference
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
