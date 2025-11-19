@@ -25,6 +25,7 @@ commands=(
     "tests/scripts/functional_tests/test_task.sh --type inference --task robobrain2"
     "tests/scripts/functional_tests/test_task.sh --type inference --task robobrain2-flaggems"
     # For serve
+    "tests/scripts/functional_tests/test_task.sh --type serve --task deepseek_r1_distill_qwen-huawei"
     "tests/scripts/functional_tests/test_task.sh --type serve --task qwen2_5"
     "tests/scripts/functional_tests/test_task.sh --type serve --task base"
 )

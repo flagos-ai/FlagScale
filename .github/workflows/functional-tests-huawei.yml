@@ -1,0 +1,73 @@
+name: Functional Tests Huawei
+
+on:
+  workflow_call:
+    inputs:
+      type:
+        required: true
+        type: string
+      task:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+
+jobs:
+  functional-test:
+    runs-on: [self-hosted, Linux, ARM64, huawei-0, npus-16]
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes:
+        - /usr/local/Ascend/driver:/usr/local/Ascend/driver
+        - /usr/local/Ascend/firmware:/usr/local/Ascend/firmware
+        - /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi
+        - /usr/local/sbin:/usr/local/sbin
+        - /etc/hccn.conf:/etc/hccn.conf
+        - /data:/data
+      options: --ipc=host --privileged=true --group-add video --shm-size 100gb --hostname flagscale_cicd --user root --ulimit nofile=65535:65535 --ulimit memlock=-1 --device=/dev/dri --device=/dev/ascend*
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: true
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
+
+      - name: Run Functional Test
+        run: |
+          echo "USER: $USER"
+          echo "UID: $(id -u)"
+          echo "GID: $(id -g)"
+          echo "Home: $HOME"
+          echo "PWD: ${PWD}"
+          whoami
+          git config --global --add safe.directory /__w/FlagScale/FlagScale
+          if [ "${{ inputs.type }}" = "serve" ]; then
+            echo "Original commit ID: ${{ github.event.pull_request.head.sha }}"
+            python tools/patch/unpatch.py --backend vllm FlagScale --device-type Huawei_Atlas800TA3 --task inference --key-path /data/cicd/flagscale_vllm_073_code --commit ${{ github.event.pull_request.head.sha }}
+            cd build/Huawei_Atlas800TA3/FlagScale/
+            cd third_party/vllm && VLLM_VERSION=empty pip install -v .[ascend]
+            pip install pytest -i https://pypi.tuna.tsinghua.edu.cn/simple
+          else
+            echo "Unknown backend type: ${{ inputs.type }}"
+            exit 1
+          fi
+          cd /__w/FlagScale/FlagScale
+          tests/scripts/functional_tests/test_task.sh --type ${{ inputs.type }} --task ${{ inputs.task }}
+          exit_code=$?
+          echo "Exit code: $exit_code"
+        shell: bash

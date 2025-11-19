@@ -1,0 +1,54 @@
+name: All Tests Huawei
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/*huawei*.yml'
+      - 'hardware/Huawei_Atlas800TA3/**'
+      - 'tests/functional_tests/test_cases/**/*-huawei'
+  pull_request:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/*huawei*.yml'
+      - 'hardware/Huawei_Atlas800TA3/**'
+      - 'tests/functional_tests/test_cases/**/*-huawei'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
+  cancel-in-progress: true
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    outputs:
+      ci_image: ${{ steps.set-env.outputs.ci_image }} # Declare output variable
+    steps:
+      - name: Set Environment Variable
+        id: set-env # Assign an ID to this step
+        run: |
+          echo "ci_image=localhost:5000/flagscale:flagscale_huawei_vllm_073_cicd-time2509211805" >> $GITHUB_OUTPUT  # Set output variable
+
+  functional-tests-serve:
+    needs:
+      - set-env
+    uses: ./.github/workflows/functional-tests-huawei.yml
+    strategy:
+      matrix:
+        task:
+          - deepseek_r1_distill_qwen-huawei
+    name: "serve-${{ matrix.task }}"
+    with:
+      task: ${{ matrix.task }}
+      type: serve
+      image: ${{ needs.set-env.outputs.ci_image }}
+
+  # Check All Tests
+  all-tests:
+    needs:
+      - functional-tests-serve
+    runs-on: ubuntu-latest
+    steps:
+      - name: All Tests Completed
+        run: echo "All tests completed successfully on Huawei ARM64 runner!"
+
