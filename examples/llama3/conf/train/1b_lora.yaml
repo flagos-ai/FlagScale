@@ -4,7 +4,7 @@ system:
   context_parallel_size: 2
   disable_bias_linear: True
   use_flash_attn: True
-  sequence_parallel: True
+  sequence_parallel: False
   use_distributed_optimizer: True
   precision:
     bf16: True
