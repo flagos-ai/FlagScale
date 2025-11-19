@@ -1,0 +1,26 @@
+diff --git a/flagscale/train/npu_patch/features_manager/fusions/fused_bias_swiglu.py b/flagscale/train/npu_patch/features_manager/fusions/fused_bias_swiglu.py
+new file mode 100644
+index 00000000..c21b0135
+--- /dev/null
++++ b/flagscale/train/npu_patch/features_manager/fusions/fused_bias_swiglu.py
+@@ -0,0 +1,19 @@
++from flagscale.train.npu_patch.features_manager.feature import MindSpeedFeature
++
++
++class FusedSwigluFeature(MindSpeedFeature):
++    def __init__(self):
++        super().__init__('use-swiglu', optimization_level=0)
++
++    def register_patches(self, patch_manager, args):
++        from flagscale.train.npu_patch.core.fusions.fused_bias_swiglu import (
++            BiasSwiGLUFunction,
++            SwiGLUFunction,
++        )
++
++        patch_manager.register_patch(
++            'megatron.core.fusions.fused_bias_swiglu.SwiGLUFunction', SwiGLUFunction
++        )
++        patch_manager.register_patch(
++            'megatron.core.fusions.fused_bias_swiglu.BiasSwiGLUFunction', BiasSwiGLUFunction
++        )
+
