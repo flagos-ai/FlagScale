@@ -66,6 +66,8 @@ class LogIOTransformation(Transformation):
         self._log_level = log_level
 
     def apply(self, model: nn.Module) -> bool:
+        logger.debug(f"Applying LogIOTransformation to {model.__class__.__name__}")
+
         reg = ModuleHookRegistry.get_or_create_registry(model)
         hook = LogIOHook(log_level=self._log_level)
         reg.register_hook(hook, "log_io")

@@ -200,11 +200,16 @@ class InferenceEngine:
         `Transformation` will be applied in the EXACT order as specified in the config.
         """
 
-        # TODO(yupu): run preflight/supports check for each transformation
         transforms_cfg = self.vconfig.engine.transformations or {}
         transformations = create_transformations_from_config(transforms_cfg)
         for t in transformations:
+            if not t.preflight():
+                raise ValueError(
+                    f"Transformation {t} is not supported: not met the hardware or python package requirements"
+                )
+
             for name, mod in t.targets(self.backbone):
+                logger.debug(f"Applying transformation: {t} on {name}")
                 success = t.apply(mod)
                 if not success:
                     raise ValueError(f"Failed to apply transformation: {t} on {name}")
