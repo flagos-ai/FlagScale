@@ -39,8 +39,8 @@ class InferenceEngineArgs:
     torch_dtype: Any = None
     pipeline: Any = None
     components: Any = None
-    tokenizer: str = None
-    stat_path: str = None
+    # tokenizer: str = None
+    # stat_path: str = None
 
     results_path: str = None
     output_format: str = None
@@ -77,8 +77,8 @@ class InferenceEngineArgs:
             torch_dtype=self.torch_dtype,
             pipeline=self.pipeline,
             components=self.components,
-            tokenizer=self.tokenizer,
-            stat_path=self.stat_path,
+            # tokenizer=self.tokenizer,
+            # stat_path=self.stat_path,
         )
         engine_obj = EngineConfig(
             results_path=self.results_path,
@@ -97,8 +97,8 @@ class ModelLoadConfig:
     torch_dtype: Any = None
     pipeline: Any = None
     components: Any = None
-    tokenizer: str = None
-    stat_path: str = None
+    # tokenizer: str = None
+    # stat_path: str = None
 
     def __post_init__(self):
         if not self.model:
@@ -169,7 +169,7 @@ class InferenceEngine:
             for k, v in asdict(self.vconfig.model).items()
             if v is not None and k not in ("model", "loader")
         }
-
+        print(f"Config:{self.vconfig}")
         if loader == "diffusers":
             return self.load_diffusers_pipeline(self.vconfig.model.model, **_kwargs)
         elif loader == "transformers":
@@ -230,7 +230,10 @@ class InferenceEngine:
             kwargs["generator"] = _build_generator(kwargs["generator"], default_device)
 
         with RuntimeContext(self.vconfig.engine.state_scopes).session():
+            start_time = time.time()
             outputs = self.model_or_pipeline(**kwargs)
+            gen_time = time.time() - start_time
+            print(f"gen_time: {gen_time:.2f}s")
             return outputs
 
     def save(self, outputs, name_prefix: Union[str, None] = None) -> bool:
@@ -333,10 +336,15 @@ class InferenceEngine:
         if "pretrained_model_name_or_path" in pipeline_kwargs:
             pipeline_kwargs.pop("pretrained_model_name_or_path")
         pipeline = pipeline_cls.from_pretrained(pretrained_model_name_or_path, **pipeline_kwargs)
-
-        device = kwargs.get("device", None)
-        if device:
-            pipeline.to(device)
+        if (
+            "cup_offload" in kwargs["pipeline"]["from_pretrained"]
+            and kwargs["pipeline"]["from_pretrained"]["cup_offload"]
+        ):
+            pipeline.enable_model_cpu_offload()
+        else:
+            device = kwargs.get("device", None)
+            if device:
+                pipeline.to(device)
 
         # TODO(yupu): Messy, refactor this
         known_methods_wo_args = [
