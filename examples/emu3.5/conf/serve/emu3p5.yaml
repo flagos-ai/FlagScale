@@ -1,5 +1,5 @@
 - serve_id: A
-  module: examples/emu3.5/conf/serve/emu_vllm.py
+  module: examples/emu3.5/conf/serve/emu3p5.py
   name: EmuVLLMInferencePipeline
   resources:
     max_ongoing_requests: 1

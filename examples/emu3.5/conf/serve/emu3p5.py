@@ -19,6 +19,7 @@ from vllm.sampling_params import SamplingParams
 from flagscale.inference.emu_utils import Emu3p5Processor
 from flagscale.logger import logger
 
+# Configuration parameters can refer to https://github.com/baaivision/Emu3.5/tree/main/configs
 DEFAULT_CONFIG = {
     "task_type": "x2i",
     # "task_type": "t2i",
@@ -27,10 +28,10 @@ DEFAULT_CONFIG = {
     "image_area": 1048576,
     "ratio": "auto",
     "llm": {
-        "model": "/path/to/models/Emu3.5",
-        # "model": "/path/to/models/Emu3.5-Image",
-        "tokenizer": "/path/to/src/tokenizer_emu3_ibq",
-        "vq_model": "/path/to/models/Emu3.5-VisionTokenizer",
+        "model": "/path/to/models/Emu3.5",  # https://www.modelscope.cn/models/BAAI/Emu3.5/files
+        # "model": "/path/to/models/Emu3.5-Image",   # https://modelscope.cn/models/BAAI/Emu3.5-Image/files
+        "tokenizer": "/path/to/src/tokenizer_emu3_ibq",  # https://github.com/baaivision/Emu3.5/src/tokenizer_emu3_ibp
+        "vq_model": "/path/to/models/Emu3.5-VisionTokenizer",  # https://www.modelscope.cn/models/BAAI/Emu3.5-VisionTokenizer/files
         "trust_remote_code": True,
         "tensor_parallel_size": 2,
         "gpu_memory_utilization": 0.7,
@@ -191,7 +192,7 @@ class EmuVLLMInferencePipeline:
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 outputs_dir = os.path.join(current_dir, "outputs")
                 os.makedirs(outputs_dir, exist_ok=True)
-                output_name = os.path.join(outputs_dir, f"test_task_{i}_{uuid.uuid4()}.png")
+                output_name = os.path.join(outputs_dir, f"task_{i}_{uuid.uuid4()}.png")
                 output_image = output.convert("RGB")
                 output_image.save(output_name)
                 item["content"] = os.path.abspath(output_name)
@@ -204,13 +205,14 @@ class EmuVLLMInferencePipeline:
         return formatted_outputs
 
 
-def main():
+def main(task_type: str = "x2i"):
 
-    pipeline = EmuVLLMInferencePipeline()
+    DEFAULT_CONFIG["task_type"] = task_type
+
+    pipeline = EmuVLLMInferencePipeline(DEFAULT_CONFIG)
 
     test_case_x2i = {
         "prompt": "As shown in the second figure: The ripe strawberry rests on a green leaf in the garden. Replace the chocolate truffle in first image with ripe strawberry from 2nd image",
-        # "reference_image": ["./assets/ref_0.png", "./assets/ref_1.png"],
         "reference_image": ["/path/to/assets/ref_img.png"],
     }
 
@@ -219,17 +221,9 @@ def main():
         prompt=test_case_x2i["prompt"], reference_image=test_case_x2i["reference_image"]
     )
 
-    # test_case_t2i = {
-    #    "prompt": "A lively comic-style illustration depicting two humorous cartoon dogs interacting near a freshly dug backyard hole.",
-    #    "reference_image": None,
-    # }
-
-    # logger.info(f"--- Starting Fixed Task ({pipeline.task_type}) with No Images Test Case ---")
-    # pipeline.forward(
-    #    prompt=test_case_t2i["prompt"],
-    #    reference_image=test_case_t2i["reference_image"],
-    # )
-
 
 if __name__ == "__main__":
-    main()
+
+    task_type = "t2i"  # task_type should be in (x2i, t2i, howto, story)
+
+    main(task_type)

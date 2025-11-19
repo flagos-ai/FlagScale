@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - serve: emu3_5_test
+  - serve: emu3p5
 
 experiment:
-  exp_name: emu3_5_test
+  exp_name: emu3p5
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
@@ -14,7 +14,7 @@ experiment:
       port: 9710
       use_fs_serve: true
       enable_composition: true
-      name: /emu3_5
+      name: /emu3p5
       working_dir: /path/to/FlagScale
       request:
         - arg: prompt            # the text prompt for generation
@@ -22,7 +22,7 @@ experiment:
         - arg: reference_image   # a list containing reference image paths
           type: Optional[list]
           required: false
-          default: ["/path/to/assets/ref_img.png", "/path/to/assets/ref_1.png"]
+          default: []
   cmds:
     before_start: export RAY_DEDUP_LOGS=0 && export VLLM_USE_V1=1
 

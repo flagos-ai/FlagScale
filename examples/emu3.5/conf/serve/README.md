@@ -1,18 +1,23 @@
 # After completing the environment setup based on the README.md file in the upper directory
 
+# Function HighLight:
+# 1)Support multiple instances,
+# 2)Support cross node operation,
+# 3)Support automatic expansion and contraction of capacity
+
 # Program Run Command
-python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3_5 action=run
+python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=run
 
 # Program Stop Command
-python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3_5 action=stop
+python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=stop
 
 # output result
-Position of output image: examples/emu3.5/conf/serve/outputs
+Path of output image: examples/emu3.5/conf/serve/outputs
 
 # parameter adjustment
-You should adjust the parameters of DEFAULT_CONFIG in the emu_vllm.py file to suit your need, including model paths, task types, etc
+You should adjust the parameters of DEFAULT_CONFIG in the emu3p5.py file to suit your need, including model paths, task types, etc
 
-You should specify the working_dir path in the upper level configuration file serve_emu3_5.yaml, which contains the src folder in the local Emu3.5 project: https://github.com/baaivision/Emu3.5
+You should specify the working_dir path in the upper level configuration file serve_emu3p5.yaml, which contains the src folder in the local Emu3.5 project: https://github.com/baaivision/Emu3.5
 
 note:  if you want to run command `python emu_vllm.py`, you should set the env : export PATHONPATH=/path/to/FlagScale:${PYTHONPATH}
 
@@ -22,7 +27,7 @@ import requests
 import uuid
 
 # Service address
-url = "http://127.0.0.1:9710/emu3_5"
+url = "http://127.0.0.1:9710/emu3p5"
 
 # Prepare request data
 data = {
