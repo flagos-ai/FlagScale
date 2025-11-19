@@ -39,6 +39,7 @@ jobs:
         run: |
           echo "ci_image=localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515" >> $GITHUB_OUTPUT  # Set output variable
 
+
   # Train Megatron Unit Tests with Matrix
   unit_tests_train_megatron:
     needs:

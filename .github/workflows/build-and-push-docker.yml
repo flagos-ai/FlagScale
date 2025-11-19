@@ -1,0 +1,186 @@
+name: Run Tests and Push Meatx Docker Image 
+
+on:
+  workflow_call:
+    inputs:
+      type:
+        required: true
+        type: string
+      task:
+        required: true
+        type: string
+      image:
+        required: true
+        type: string
+
+jobs:
+  functional-test:
+    # runs-on: [self-hosted, Linux, X64, metax-0, gpus-2]
+    # services:
+    #   ci-env:
+    #     image: ${{ inputs.image }}
+    #     options: >-
+    #       --ipc=host
+    #       --privileged=true
+    #       --group-add video
+    #       --shm-size 100gb
+    #       --hostname flagscale_cicd
+    #       --user root
+    #       --ulimit nofile=65535:65535
+    #       --ulimit memlock=-1
+    #       --device=/dev/dri
+    #       --device=/dev/mxcd
+    #     ports:
+    #       - 80
+    #     volumes:
+    #       - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+    #       - /home/flagscale_cicd/sccache:/root/.cache/sccache
+
+    runs-on: [self-hosted, Linux, X64, metax-0, gpus-2]
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes:
+        - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+        - /home/flagscale_cicd/sccache:/root/.cache/sccache
+      options: --ipc=host --privileged=true --group-add video --shm-size 100gb --hostname flagscale_cicd --user root --ulimit nofile=65535:65535 --ulimit memlock=-1 --device=/dev/dri --device=/dev/mxcd
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: true
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
+
+      - name: Setup Environment Info
+        run: |
+          exit
+          echo "Using_image: ${{ inputs.image }}"
+          container_id="$(/usr/bin/docker ps --format "{{.ID}} {{.Names}}" | grep "localhost5000" | cut -d ' ' -f 1)"
+          if [ -z "$container_id" ]; then
+            echo "Error: No running container found for service 'ci-env'"
+            exit 1
+          fi
+          echo "Running_CONTAINER: ${container_id}"
+          echo "CONTAINER_ID=${container_id}" >> ${GITHUB_ENV}
+          cat ${GITHUB_ENV}
+
+      - name: Run Functional Test
+        run: |
+          if ! docker inspect --format='{{.State.Running}}' "${{ env.CONTAINER_ID }}" | grep -q "true"; then
+            echo "Aborting job due to unhealthy container state"
+            exit 1
+          fi
+          echo "CONTAINER_ID: ${{ env.CONTAINER_ID}}"
+
+          /usr/bin/docker exec -it ${{ env.CONTAINER_ID }} bash
+          echo "USER: $USER"
+          echo "UID: $(id -u)"
+          echo "GID: $(id -g)"
+          echo "Home: $HOME"
+          echo "PWD: ${PWD}"
+          whoami
+          git config --global --add safe.directory /__w/FlagScale/FlagScale
+
+          if [ "${{ inputs.type }}" = "inference" ]; then
+            source /opt/conda/bin/activate flagscale-inference
+            echo "Original commit ID: ${{ github.event.pull_request.head.sha }}"
+            python tools/patch/unpatch.py --backend vllm FlagScale --task inference --device-type Metax_C550 --commit ${{ github.event.pull_request.head.sha }}
+            cd build/Metax_C550/FlagScale/third_party/vllm
+            source env.sh
+            pip install scikit-build scikit-build-core
+            pip install git+https://github.com/FlagOpen/FlagGems.git@v3.0
+            python setup.py bdist_wheel
+            pip uninstall vllm -y
+            pip install dist/vllm-*-linux_x86_64.whl
+            source /opt/conda/bin/activate base
+          else
+            echo "Unknown backend type: ${{ inputs.type }}"
+            exit 1
+          fi
+
+          cd /__w/FlagScale/FlagScale
+          tests/scripts/functional_tests/test_task.sh --type ${{ inputs.type }} --task ${{ inputs.task }}
+          exit_code=$?
+          echo "Exit code: $exit_code"
+          sccache --show-stats
+        shell: bash
+
+      # - name: Run Functional Tests
+      #   run: |
+      #     IFS=',' read -ra TASKS <<< "${{ needs.set-env.outputs.test_tasks }}"
+      #     for task in "${TASKS[@]}"; do
+      #       echo "Running test task: $task"
+      #       tests/scripts/functional_tests/test_task.sh --type ${{ needs.set-env.outputs.test_type }} --task "$task"
+      #       exit_code=$?
+      #       echo "Exit code for $task: $exit_code"
+      #       if [ $exit_code -ne 0 ]; then
+      #         echo "Test $task failed with exit code $exit_code"
+      #         exit $exit_code
+      #       fi
+      #     done
+      
+      # - name: Save running container as image
+      #   run: |
+      #     CONTAINER_ID=$(docker ps --filter "ancestor=${{ needs.set-env.outputs.ci_image }}" --format="{{.ID}}")
+      #     NEW_IMAGE_NAME="localhost:5000/saved_containers/flagscale:$(date +%Y%m%d_%H%M%S)_${GITHUB_SHA::7}"
+      #     docker commit --author="GitHub Actions <actions@github.com>" \
+      #                   --message="Auto-saved after functional tests passed (PR #${{ github.event.pull_request.number || 'push' }})" \
+      #                   $CONTAINER_ID $NEW_IMAGE_NAME
+          
+      #     # 打上额外标签便于识别来源
+      #     docker tag $NEW_IMAGE_NAME "localhost:5000/saved_containers/flagscale:pr-${{ github.event.pull_request.number || 'latest' }}"
+          
+      #     # 显示已保存的镜像信息
+      #     docker images "$NEW_IMAGE_NAME"
+
+      # 推送到远程仓库（取消注释以启用）
+      # - name: Push saved image to registry
+      #   env:
+      #     DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      #     DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      #   run: |
+      #     docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+      #     docker push "$NEW_IMAGE_NAME"
+
+  #     - name: Send Feishu Notification
+  #       if: always()
+  #       env: 
+  #         FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+  #       run: |
+  #         status=$?
+  #         if [ $status -eq 0 ]; then
+  #           MSG="Successfully saved the running container as an image! "
+  #         else
+  #           MSG="Construction failed! Please check the logs"
+  #         fi
+
+  #         # Sending structured message cards
+  #         curl -X POST ${{ env.FEISHU_WEBHOOK_URL }} \
+  #           -H "Content-Type: application/json" \
+  #           -d '{
+  #             "msg_type": "text",
+  #             "content": {
+  #               "text": "$MSG"
+  #             }            
+  #           }'
+
+  # all-tests-completed:
+  #   needs: functional-tests-inference
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: All Tests Completed Successfully
+  #       run: echo "✅ All functional tests completed successfully!"
+
