@@ -1,7 +1,7 @@
 diff --git a/megatron/core/models/gpt/gpt_layer_specs.py b/megatron/core/models/gpt/gpt_layer_specs.py
 old mode 100755
 new mode 100644
-index 68c1eb8c9..6a12b7a50
+index 68c1eb8c9..ef504df27
 --- a/megatron/core/models/gpt/gpt_layer_specs.py
 +++ b/megatron/core/models/gpt/gpt_layer_specs.py
 @@ -38,6 +38,8 @@ try:
@@ -195,7 +195,7 @@ index 68c1eb8c9..6a12b7a50
  def get_gpt_decoder_block_spec(
      config: TransformerConfig,
      use_transformer_engine: bool,
-+    use_flag_engine: bool,
++    use_flag_engine: Optional[bool] = False,
      normalization: Optional[str] = None,
      qk_l2_norm: Optional[bool] = False,
      vp_stage: Optional[int] = None,
@@ -257,7 +257,7 @@ index 68c1eb8c9..6a12b7a50
      config: TransformerConfig,
      spec: Union[TransformerBlockSubmodules, ModuleSpec],
      use_transformer_engine: bool,
-+    use_flag_engine: bool,
++    use_flag_engine: Optional[bool] = False,
      vp_stage: Optional[int] = None,
      pp_rank: Optional[int] = None,
  ) -> MultiTokenPredictionBlockSubmodules:
