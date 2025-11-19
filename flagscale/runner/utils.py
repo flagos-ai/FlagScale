@@ -358,6 +358,24 @@ def update_nodes_envs(env_config, ip_addr, resource_info):
     return cur_node_config
 
 
+def add_decive_extra_config(config, device_type):
+    if device_type is None:
+        return OmegaConf.to_container(config, resolve=True)
+    cur_node_config = {}
+    temp_dict = {}
+    if isinstance(config, DictConfig):
+        temp_dict = OmegaConf.to_container(config, resolve=True)
+    else:
+        temp_dict = config
+    for key, value in temp_dict.items():
+        if isinstance(value, dict):
+            if key == device_type:
+                cur_node_config.update(value)
+            else:
+                cur_node_config[key] = value
+    return cur_node_config
+
+
 def update_cmd_with_node_specific_config(cmd, node_specific_config=None):
     """
     Update the command string with additional configuration options for speicial device.
