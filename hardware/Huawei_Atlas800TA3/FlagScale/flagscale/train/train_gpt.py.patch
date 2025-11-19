@@ -1,0 +1,15 @@
+diff --git a/flagscale/train/train_gpt.py b/flagscale/train/train_gpt.py
+index 775ddfd0..b870aafa 100644
+--- a/flagscale/train/train_gpt.py
++++ b/flagscale/train/train_gpt.py
+@@ -11,6 +11,9 @@ from typing import List, Optional, Tuple, Union
+ 
+ import torch
+ 
++######### For huawei NPU #########
++import flagscale.train.npu_patch.megatron_adaptor
++
+ from megatron.core import parallel_state
+ from megatron.training import get_args
+ from megatron.training import inprocess_restart
+

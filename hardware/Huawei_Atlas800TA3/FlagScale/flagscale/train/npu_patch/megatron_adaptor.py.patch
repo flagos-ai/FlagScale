@@ -1,0 +1,79 @@
+diff --git a/flagscale/train/npu_patch/megatron_adaptor.py b/flagscale/train/npu_patch/megatron_adaptor.py
+new file mode 100644
+index 00000000..a774e92e
+--- /dev/null
++++ b/flagscale/train/npu_patch/megatron_adaptor.py
+@@ -0,0 +1,72 @@
++"""Adaptor for all megatron functions by feature granularity."""
++
++import os
++import shutil
++import sys
++
++from logging import getLogger
++from multiprocessing import Lock
++from pathlib import Path
++
++from flagscale.train.npu_patch.args_utils import get_full_args, get_mindspeed_args
++
++# from flagscale.train.npu_patch.deprecate import AutoExecuteFunction
++from flagscale.train.npu_patch.features_manager.features_manager import MindSpeedFeaturesManager
++from flagscale.train.npu_patch.log_config import set_log_config
++from torch.utils.cpp_extension import _get_build_directory
++from torch_npu.contrib import transfer_to_npu
++
++LOG = getLogger(__name__)
++_IS_FEATURES_PATCHED = False
++
++
++# @AutoExecuteFunction
++def patch_features():
++    """Patch all mindspeed related features."""
++    global _IS_FEATURES_PATCHED
++    if _IS_FEATURES_PATCHED:
++        return
++    _IS_FEATURES_PATCHED = True
++
++    set_log_config()
++    log = getLogger(__name__)
++    log.info("start to patch features in megatron adaptor.")
++
++    mindspeed_args = get_mindspeed_args()
++    delete_lock_file()
++
++    # apply patches before import megatron
++    MindSpeedFeaturesManager.apply_features_pre_patches(mindspeed_args)
++
++    # apply megatron patches
++    MindSpeedFeaturesManager.apply_features_patches(mindspeed_args)
++
++    # accelerate package will check TE on sys.modules, so we need remove this patch
++    if 'transformer_engine' in sys.modules:
++        del sys.modules["transformer_engine"]
++
++
++def delete_lock_file():
++    """Delete lock file in multiprocess for JIT build.."""
++    directory = Path(_get_build_directory("", True))
++    if not directory.exists():
++        return
++    with Lock():
++        files = [
++            item for item in directory.iterdir() if item.is_file() and item.name.endswith("lock")
++        ]
++        if files:
++            LOG.info("Process (PID:%s is deleting Lock directory", os.getpid())
++            shutil.rmtree(directory)
++
++
++def repatch(args):
++    MindSpeedFeaturesManager.remove_patches()
++    full_args = get_full_args()
++    for k, v in args.items():
++        setattr(full_args, k, v)
++    MindSpeedFeaturesManager.apply_features_pre_patches(full_args)
++    MindSpeedFeaturesManager.apply_features_patches(full_args)
++
++
++patch_features()
+
