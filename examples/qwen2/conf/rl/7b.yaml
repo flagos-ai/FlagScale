@@ -22,6 +22,7 @@ actor_rollout_ref:
     path: /workspace/models/Qwen/Qwen2-7B-Instruct
     use_remove_padding: true
     enable_gradient_checkpointing: true
+    trust_remote_code: True
   actor:
     optim:
       lr: 1e-6
@@ -56,8 +57,3 @@ trainer:
   test_freq: 5
   total_epochs: 15
   default_local_dir: ${experiment.exp_dir}/checkpoints
-
-append_kargs:
-  actor_rollout_ref:
-    rollout:
-      trust_remote_code: True
