@@ -1,0 +1,21 @@
+diff --git a/flagscale/train/npu_patch/core/pipeline_parallel/optimize_p2p_comm/adaptor.py b/flagscale/train/npu_patch/core/pipeline_parallel/optimize_p2p_comm/adaptor.py
+new file mode 100644
+index 00000000..14fa95c6
+--- /dev/null
++++ b/flagscale/train/npu_patch/core/pipeline_parallel/optimize_p2p_comm/adaptor.py
+@@ -0,0 +1,14 @@
++# Copyright (c) 2025, Huawei Technologies Co., Ltd.  All rights reserved.
++
++
++from functools import wraps
++
++
++def core_transformer_config_from_args_wrapper(fn):
++    @wraps(fn)
++    def wrapper(args):
++        config = fn(args)
++        config.batch_p2p_comm = False
++        return config
++
++    return wrapper
+

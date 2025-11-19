@@ -1,8 +1,8 @@
 diff --git a/vllm/model_executor/models/llava_onevision.py b/vllm/model_executor/models/llava_onevision.py
-index ecd24af03..c27ad589a 100644
+index cee9ddaf9..4453fd6b9 100644
 --- a/vllm/model_executor/models/llava_onevision.py
 +++ b/vllm/model_executor/models/llava_onevision.py
-@@ -436,6 +436,16 @@ class LlavaOnevisionMultiModalProjector(nn.Module):
+@@ -450,6 +450,16 @@ class LlavaOnevisionMultiModalProjector(nn.Module):
  class LlavaOnevisionForConditionalGeneration(nn.Module, SupportsMultiModal,
                                               SupportsPP):
  

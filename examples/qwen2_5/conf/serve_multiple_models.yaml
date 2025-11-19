@@ -16,10 +16,8 @@ experiment:
       enable_composition: true
       name: /generate
       request:
-        args:
-          - prompt
-        types:
-          - str
+        - arg: prompt
+          type: str
   cmds:
     before_start: export RAY_DEDUP_LOGS=0
 

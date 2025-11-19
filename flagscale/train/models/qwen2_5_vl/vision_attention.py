@@ -22,7 +22,7 @@ from megatron.core.parallel_state import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
 )
-from megatron.core.process_groups_config import ModelCommProcessGroups
+from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.spec_utils import build_module
 from megatron.core.utils import deprecate_inference_params, is_fa_min_version
 
@@ -189,9 +189,9 @@ class VisionAttention(Attention):
         attn_mask_type: AttnMaskType,
         attention_type: str,
         cp_comm_type: str = None,
-        model_comm_pgs: ModelCommProcessGroups = None,
+        pg_collection: ProcessGroupCollection = None,
     ):
-        super().__init__(config=config, submodules=submodules, layer_number=layer_number, attn_mask_type=attn_mask_type, attention_type=attention_type, cp_comm_type=cp_comm_type, model_comm_pgs=model_comm_pgs)
+        super().__init__(config=config, submodules=submodules, layer_number=layer_number, attn_mask_type=attn_mask_type, attention_type=attention_type, cp_comm_type=cp_comm_type, pg_collection=pg_collection)
 
 
     def _adjust_key_value_for_inference(
@@ -323,7 +323,7 @@ class VisionAttention(Attention):
             if rotary_pos_emb is not None:
                 q_pos_emb, k_pos_emb = rotary_pos_emb
                 key = inference_context.apply_rotary_emb_key(
-                    key, k_pos_emb, self.config, self.model_comm_pgs.cp
+                    key, k_pos_emb, self.config, self.pg_collection.cp
                 )
                 rotary_pos_emb = (q_pos_emb, None)  # key rotary emb has been applied
 
@@ -527,11 +527,11 @@ class VisionAttention(Attention):
                         q_pos_emb,
                         config=self.config,
                         cu_seqlens=cu_seqlens_q,
-                        cp_group=self.model_comm_pgs.cp,
+                        cp_group=self.pg_collection.cp,
                     )
                 else:
                     query = inference_context.apply_rotary_emb_query(
-                        query, q_pos_emb, self.config, cu_seqlens_q, self.model_comm_pgs.cp
+                        query, q_pos_emb, self.config, cu_seqlens_q, self.pg_collection.cp
                     )
             if k_pos_emb is not None:
                 key = apply_rotary_pos_emb_vision(
@@ -539,7 +539,7 @@ class VisionAttention(Attention):
                     k_pos_emb,
                     config=self.config,
                     cu_seqlens=cu_seqlens_kv,
-                    cp_group=self.model_comm_pgs.cp,
+                    cp_group=self.pg_collection.cp,
                 )
 
             # TODO, can apply positional embedding to value_layer so it has
@@ -622,7 +622,7 @@ class SelfAttentionVision(VisionAttention):
         layer_number: int,
         attn_mask_type=AttnMaskType.padding,
         cp_comm_type: str = None,
-        model_comm_pgs: ModelCommProcessGroups = None,
+        pg_collection: ProcessGroupCollection = None,
     ):
         super().__init__(
             config=config,
@@ -631,7 +631,7 @@ class SelfAttentionVision(VisionAttention):
             attn_mask_type=attn_mask_type,
             attention_type="self",
             cp_comm_type=cp_comm_type,
-            model_comm_pgs=model_comm_pgs,
+            pg_collection=pg_collection,
         )
 
         self.linear_qkv = build_module(
