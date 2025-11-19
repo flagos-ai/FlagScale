@@ -53,7 +53,7 @@ jobs:
           whoami
           git config --global --add safe.directory /__w/FlagScale/FlagScale
           
-          TMP_DIR=$(mktemp -d)
+          TMP_DIR=/tmp/flagscale_tmp
           echo "Copying source to temporary directory: $TMP_DIR"
           rm -rf $TMP_DIR
           mkdir -p $TMP_DIR
@@ -66,9 +66,84 @@ jobs:
             # PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="Megatron-LM" --verbose --no-build-isolation
           elif [ "${{ inputs.backend }}" = "vllm" ] || [ "${{ inputs.backend }}" = "inference_flagscale" ]; then
             source /root/miniconda3/bin/activate flagscale-inference
-            pip install scikit-build scikit-build-core
-            pip install --no-build-isolation git+https://github.com/FlagOpen/FlagGems.git@release_v1.0.0
-            PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="vllm" --verbose --no-build-isolation
+            export SCCACHE_DIR=/root/.cache/sccache
+            sccache --start-server
+            sccache --show-stats
+
+            echo "[INFO] Install VLLM and its dependencies ..."
+            MAX_RETRIES=5
+            DELAYS=(1 1.5 2 2.5 3)
+            COMMANDS=(
+              "pip install git+https://github.com/FlagOpen/FlagGems.git@v3.0"
+              "PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="vllm" --verbose --no-build-isolation"
+            )
+
+            # Initialize state array
+            declare -A command_status
+            declare -A retry_count
+            declare -A delay_index
+
+            # Traverse all commands and initialize variables
+            for i in "${!COMMANDS[@]}"; do
+              command_status[$i]=false
+              retry_count[$i]=0
+              delay_index[$i]=0
+            done
+
+            # Continuously check if there are any unsuccessful commands that need to be retried
+            while true; do
+              all_successful=true
+
+              for i in "${!COMMANDS[@]}"; do
+                cmd="${COMMANDS[$i]}"
+
+                if ! ${command_status[$i]} && [ ${retry_count[$i]} -lt $MAX_RETRIES ]; then
+                  echo "Attempt to execute command (${retry_count[$i]}/$MAX_RETRIES times): ${cmd}"
+
+                  START_TIME=$(date +%s.%N)
+
+                  if ! eval "$cmd"; then
+                    echo "Command execution failed! We will retry in ${DELAYS[delay_index[$i]} minutes ..."
+                    sleep $((${DELAYS[delay_index[$i]]} * 60))
+                    ((retry_count[$i]++))
+                    ((delay_index[$i]++))
+                  else
+                    command_status[$i]=true
+                  fi
+                  END_TIME=$(date +%s.%N)
+                  all_successful=false
+                else
+                  echo "Skip commands that have been successfully/have reached the maximum retry count: ${cmd}"
+                fi
+              done
+              if [ "$all_successful" = true ]; then
+                echo "All commands have been executed"
+                break
+              fi
+            done
+
+            if [ "$all_successful" = false ]; then
+              exit 1
+            fi
+
+            # computation time
+            ELAPSED_SECONDS=$(awk "BEGIN {print $END_TIME - $START_TIME}")
+            ELAPSED_MINUTES=$(awk "BEGIN {print int($ELAPSED_SECONDS / 60)}")
+            REMAINING_SECONDS=$(awk "BEGIN {print $ELAPSED_SECONDS - $ELAPSED_MINUTES * 60}")
+
+            # Format time display
+            FORMATTED_START=$(date -d "@$START_TIME" "+%Y-%m-%d %H:%M:%S")
+            FORMATTED_END=$(date -d "@$END_TIME" "+%Y-%m-%d %H:%M:%S")
+
+            sccache --show-stats
+
+            echo "================================"
+            echo "Build time statistics"
+            echo "================================"
+            echo "Start time: ${FORMATTED_START}"
+            echo "End time: ${FORMATTED_END}"
+            echo "Total time taken: ${ELAPSED_MINUTES} minutes ${REMAINING_SECONDS} seconds"
+            echo "================================"
             conda deactivate
           else
             echo "Unknown backend type: ${{ inputs.backend }}"
