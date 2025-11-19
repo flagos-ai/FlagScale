@@ -1571,18 +1571,40 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                 if isinstance(optim_instance, DistributedOptimizer):
                     optim_instance._copy_main_params_to_param_buffer()
 
-        # Forward pass.
-        losses_reduced = forward_backward_func(
-            forward_step_func=forward_step_func,
-            data_iterator=data_iterator,
-            model=model,
-            num_microbatches=get_num_microbatches(),
-            seq_length=args.seq_length,
-            micro_batch_size=args.micro_batch_size,
-            decoder_seq_length=args.decoder_seq_length,
-            forward_only=False,
-            adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
-        )
+
+        # Know more about FlagGems: https://github.com/FlagOpen/FlagGems
+        if os.getenv("USE_FLAGGEMS", "false").lower() in ("1", "true", "yes"):
+            try:
+                import flag_gems
+                with flag_gems.use_gems():
+                    print_datetime('Successfully enabled flag_gems as default ops implementation.')
+                    # Forward pass.
+                    losses_reduced = forward_backward_func(
+                        forward_step_func=forward_step_func,
+                        data_iterator=data_iterator,
+                        model=model,
+                        num_microbatches=get_num_microbatches(),
+                        seq_length=args.seq_length,
+                        micro_batch_size=args.micro_batch_size,
+                        decoder_seq_length=args.decoder_seq_length,
+                        forward_only=False,
+                        adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
+                    )
+            except Exception as e:
+                print_datetime(f"Failed to enable 'flag_gems': {e}. Falling back to default implementation.")
+        else:
+            # Forward pass.
+            losses_reduced = forward_backward_func(
+                forward_step_func=forward_step_func,
+                data_iterator=data_iterator,
+                model=model,
+                num_microbatches=get_num_microbatches(),
+                seq_length=args.seq_length,
+                micro_batch_size=args.micro_batch_size,
+                decoder_seq_length=args.decoder_seq_length,
+                forward_only=False,
+                adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
+            )
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
         return {}, True, should_checkpoint, should_exit, exit_code, None, None
