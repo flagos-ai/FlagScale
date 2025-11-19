@@ -80,6 +80,7 @@ data:
   split: 1
   no_mmap_bin_files: true
   tokenizer:
+    legacy_tokenizer: true
     tokenizer_type: Qwen2TokenizerFS
     tokenizer_path: /tokenizer_path
     vocab_size: 151851

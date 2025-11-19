@@ -100,6 +100,7 @@ data:
   dataloader_type: external
   split: 100,0,0
   tokenizer:
+    legacy_tokenizer: true
     tokenizer_type: Qwen2VLTokenizer
     tokenizer_path: xxxx
     vocab_size: 152064 # 7b

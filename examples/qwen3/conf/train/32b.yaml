@@ -82,6 +82,7 @@ data:
   split: 1
   no_mmap_bin_files: true
   tokenizer:
+    legacy_tokenizer: true
     tokenizer_type: QwenTokenizerFS
     tokenizer_path: examples/aquila/qwentokenizer
     vocab_size: 151851
