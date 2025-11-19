@@ -17,7 +17,7 @@ class MonitorService:
     An independent monitoring service for background monitoring of training task status, log collection, and diagnostic report generation.
     """
 
-    def __init__(self, config, runner_instance, interval=10):
+    def __init__(self, config, runner_instance, interval=10, host=None, node_rank=None):
         """
         Initializing service
 
@@ -25,6 +25,8 @@ class MonitorService:
             config: Configuration object
             runner_instance: runner instance
             interval: interval time
+            host: Hostname or IP of this node (for single-node mode)
+            node_rank: Node rank of this node (for single-node mode)
         """
         self.config = config
         self.runner = runner_instance
@@ -39,6 +41,10 @@ class MonitorService:
         self.last_log_check_times = {}  # Track last modification time for each log file
         self.last_job_status = None  # Track previous job status for kill detection
         self.process_start_time = time.time()  # Track when monitoring started
+        # Single-node monitoring mode (each node monitors itself)
+        self.single_node_mode = host is not None and node_rank is not None
+        self.monitored_host = host
+        self.monitored_node_rank = node_rank
         self.monitor_log_dir = os.path.join(config.train.system.logging.log_dir, "monitor")
         os.makedirs(self.monitor_log_dir, exist_ok=True)
 
@@ -230,11 +236,16 @@ class MonitorService:
             # Write monitor-detected kill entry (won't be re-detected by diagnostic.py)
             kill_entry = f"[{current_time}] MonitorDetected: MANUAL KILL DETECTED - Process terminated unexpectedly, likely killed manually"
 
-            if not hasattr(self.runner, 'resources') or self.runner.resources is None:
-                # Local mode
+            if self.single_node_mode:
+                # Single-node monitoring mode
+                self._write_diagnostic_entry(
+                    self.monitored_host, self.monitored_node_rank, kill_entry
+                )
+            elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+                # Local mode (backward compatibility)
                 self._write_diagnostic_entry("localhost", 0, kill_entry)
             else:
-                # Multi-node mode
+                # Multi-node mode (centralized monitoring)
                 for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                     self._write_diagnostic_entry(host, node_rank, kill_entry)
 
@@ -283,9 +294,14 @@ class MonitorService:
             logger.error(f"Failed to write status log: {e}")
 
     def _collect_logs(self):
-        if not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        if self.single_node_mode:
+            # Single-node monitoring mode - each node monitors only itself
+            self._collect_logs_for_host(self.monitored_host, self.monitored_node_rank)
+        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+            # Local mode (backward compatibility)
             self._collect_logs_for_host("localhost", 0)
         else:
+            # Multi-node mode (centralized monitoring)
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 self._collect_logs_for_host(host, node_rank)
 
@@ -301,9 +317,14 @@ class MonitorService:
             logger.error(f"Failed to collect logs for {host} (node {node_rank}): {e}")
 
     def _generate_diagnostics(self):
-        if not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        """Generate diagnostc report"""
+        if self.single_node_mode:
+            # Single-node monitoring mode - each node monitors only itself
+            self._generate_diagnostic_for_host(self.monitored_host, self.monitored_node_rank)
+        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
             self._generate_diagnostic_for_host("localhost", 0)
         else:
+            # Multi-nodes (centralized monitoring)
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 self._generate_diagnostic_for_host(host, node_rank)
 
@@ -450,12 +471,16 @@ class MonitorService:
 
     def _check_and_report_hang(self):
         """Check for hanging processes and report them"""
-        if not hasattr(self.runner, 'resources') or self.runner.resources is None:
-            # Local mode
+        if self.single_node_mode:
+            # Single-node monitoring mode
+            if self._check_log_hang(self.monitored_host, self.monitored_node_rank):
+                self._generate_hang_diagnostic(self.monitored_host, self.monitored_node_rank)
+        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+            # Local mode (backward compatibility)
             if self._check_log_hang("localhost", 0):
                 self._generate_hang_diagnostic("localhost", 0)
         else:
-            # Multi-node mode
+            # Multi-node mode (centralized monitoring)
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 if self._check_log_hang(host, node_rank):
                     self._generate_hang_diagnostic(host, node_rank)

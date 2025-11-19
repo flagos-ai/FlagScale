@@ -95,9 +95,12 @@ def generate_diagnostic_report(config, host, node_rank, log_file, return_content
     """
     global _diagnostic_offsets
 
-    # Generate the path of the diagnostic file
-    log_dir = os.path.dirname(log_file)
-    diagnostic_file = os.path.join(log_dir, f"host_{node_rank}_{host}_diagnostic.txt")
+    # Always use the monitor subdirectory for diagnostic files (unified for single/multi-node)
+    base_log_dir = config.train.system.logging.log_dir
+    monitor_dir = os.path.join(base_log_dir, "monitor")
+    os.makedirs(monitor_dir, exist_ok=True)
+
+    diagnostic_file = os.path.join(monitor_dir, f"host_{node_rank}_{host}_diagnostic.txt")
     host_key = f"{host}_{node_rank}"
 
     try:
