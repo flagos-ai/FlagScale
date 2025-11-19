@@ -144,6 +144,13 @@ from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 from flagscale.train.peft.peft import PEFT
 from flagscale.train.peft.lora import LoRA
 
+try:
+    import flag_gems
+    HAVE_GEMS = True
+except ImportError:
+    HAVE_GEMS = False
+
+
 def destroy_global_state():
     destroy_global_vars()
     destroy_num_microbatches_calculator()
@@ -2545,6 +2552,13 @@ def train(
             optimizers=[optimizer],
         )
         cuda_graph_helper.create_cudagraphs()
+
+
+    if args.use_flag_gems:
+        if not HAVE_GEMS:
+            raise ValueError(f"Can not import flag gems")
+        else:
+            flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
 
     # Run training iterations till done.
     buffered_rollouts = None

@@ -28,7 +28,14 @@ VLLM_UNPATCH_DEVICES = ["ascend", "cambricon", "bi", "metax", "kunlunxin"]
 
 
 def _check_backend(backend):
-    if backend not in ["llama.cpp", "Megatron-LM", "sglang", "vllm", "Megatron-Energon"]:
+    if backend not in [
+        "llama.cpp",
+        "Megatron-LM",
+        "sglang",
+        "vllm",
+        "Megatron-Energon",
+        "TransformerEngine",
+    ]:
         raise ValueError(f"Invalid backend {backend}.")
 
 
@@ -168,6 +175,26 @@ def _build_megatron_energon(device):
     )
 
 
+def _build_transformer_engine(device):
+    assert device != "cpu"
+    transformer_engine_path = os.path.join(
+        os.path.dirname(__file__), "third_party", "TransformerEngine"
+    )
+    if device != "gpu":
+        transformer_engine_path = os.path.join(
+            os.path.dirname(__file__),
+            "build",
+            device,
+            "FlagScale",
+            "third_party",
+            "TransformerEngine",
+        )
+    subprocess.check_call(
+        [sys.executable, '-m', 'pip', 'install', '--no-build-isolation', '-e', '.', '--verbose'],
+        cwd=transformer_engine_path,
+    )
+
+
 class FlagScaleBuild(_build):
     """
     Build the FlagScale backends.
@@ -254,6 +281,8 @@ class FlagScaleBuildPy(_build_py):
                 backend_commit = os.getenv(f"FLAGSCALE_VLLM_COMMIT", None)
             elif backend == "llama.cpp":
                 backend_commit = os.getenv(f"FLAGSCALE_LLAMA_CPP_COMMIT", None)
+            elif backend == "TransformerEngine":
+                backend_commit = os.getenv(f"FLAGSCALE_TRANSFORMER_ENGINE_COMMIT", None)
             dst = os.path.join(main_path, "third_party", backend)
             src = os.path.join(main_path, "flagscale", "backends", backend)
             print(f"[build_py] Device {self.device} initializing the {backend} backend.")
@@ -459,6 +488,8 @@ class FlagScaleBuildExt(_build_ext):
                     print(
                         f"[build_ext] Megatron-Energon will be copied to megatron after installed."
                     )
+                elif backend == "TransformerEngine":
+                    _build_transformer_engine(self.device)
                 else:
                     raise ValueError(f"Unknown backend: {backend}")
         super().run()

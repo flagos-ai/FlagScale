@@ -1,8 +1,8 @@
 diff --git a/megatron/core/optimizer/optimizer_config.py b/megatron/core/optimizer/optimizer_config.py
-index e9989cc14..f2e1ffa8b 100644
+index e9989cc14..598e2c833 100644
 --- a/megatron/core/optimizer/optimizer_config.py
 +++ b/megatron/core/optimizer/optimizer_config.py
-@@ -180,6 +180,13 @@ class OptimizerConfig:
+@@ -180,6 +180,16 @@ class OptimizerConfig:
  
      config_logger_dir: str = ""
      """When non-empty, dumps entry-point configs to config_logger_dir"""
@@ -13,6 +13,14 @@ index e9989cc14..f2e1ffa8b 100644
 +    ################
 +    vision_ration: float = 1.0
 +    ########## FlagScale End ##########
++
++    use_flag_engine_optimizer: bool = False
++    """ Use FlagEngine.FusedAdam for training"""
  
      def __post_init__(self):
          """Check the validity of the config."""
+@@ -261,3 +271,4 @@ class OptimizerConfig:
+             assert (
+                 self.exp_avg_sq_dtype == torch.float32
+             ), "exp_avg_sq_dtype can only be fp32 when not using precision-aware optimizer"
++

@@ -1,6 +1,6 @@
 [submodule "third_party/Megatron-LM"]
 	path = third_party/Megatron-LM
-	url = https://github.com/NVIDIA/Megatron-LM.git
+	url = https://gitee.com/lxdcumt/Megatron-LM.git
 	branch = main
 [submodule "third_party/vllm"]
 	path = third_party/vllm
@@ -22,3 +22,7 @@
 [submodule "third_party/verl"]
 	path = third_party/verl
 	url = https://github.com/volcengine/verl.git
+[submodule "third_party/TransformerEngine"]
+	path = third_party/TransformerEngine
+	url = https://gitee.com/lxdcumt/TransformerEngine.git
+	branch = main

@@ -1,0 +1,37 @@
+defaults:
+  - _self_
+  # - train: 30b_a3b
+  - train: 32b_te_cx_gems_nsys
+
+experiment:
+  # exp_name: Qwen3-30b-a3b-Train
+  exp_name: Qwen3-32b-Train
+  seed: 42
+  save_steps: 10000
+  load: None
+  exp_dir: /share/project/lixianduo/scale_gems_cx/experiments_te_cx_gems_nsys/${experiment.exp_name}
+  ckpt_format: torch
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/train_gpt.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    # hostfile: null
+    hostfile: /share/project/lixianduo/scale_gems_cx/2node_hostfile_5
+    ssh_port: 7878
+  cmds:
+    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate /share/project/lixianduo/envs/flagscale-train-gems-cx
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    USE_NSYS_PROFILE: True
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

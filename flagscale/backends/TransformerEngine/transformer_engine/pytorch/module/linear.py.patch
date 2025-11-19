@@ -1,0 +1,179 @@
+diff --git a/transformer_engine/pytorch/module/linear.py b/transformer_engine/pytorch/module/linear.py
+index ccb84e66..b07cd758 100644
+--- a/transformer_engine/pytorch/module/linear.py
++++ b/transformer_engine/pytorch/module/linear.py
+@@ -53,6 +53,7 @@ from ..distributed import (
+ )
+ from ..cpp_extensions import (
+     general_gemm,
++    gems_general_gemm,
+ )
+ from ..constants import GemmParallelModes, dist_group_type
+ from ..jit import no_torch_dynamo
+@@ -118,6 +119,7 @@ class _Linear(torch.autograd.Function):
+         symmetric_ar_type: str,
+         save_original_input: bool = False,
+         debug: Optional[bool] = False,
++        use_flag_engine: Optional[bool] = False,
+     ) -> torch.Tensor:
+         # pylint: disable=missing-function-docstring
+ 
+@@ -306,18 +308,33 @@ class _Linear(torch.autograd.Function):
+         # Note: y = x * w^T
+         # ------------------------------------------------------
+         nvtx_range_push(f"{nvtx_label}.gemm")
+-        gemm_out, *_, reduce_scatter_out = general_gemm(
+-            weightmat,
+-            inputmat_total,
+-            get_workspace(),
+-            quantization_params=output_quantizer,
+-            out_dtype=activation_dtype,
+-            bias=bias,
+-            use_split_accumulator=use_split_accumulator,
+-            ub=ub_obj,
+-            ub_type=ub_type,
+-            extra_output=reduce_scatter_out,
+-        )
++        # TODO(lixianduo): Polish
++        if not use_flag_engine:
++            gemm_out, *_, reduce_scatter_out = general_gemm(
++                weightmat,
++                inputmat_total,
++                get_workspace(),
++                quantization_params=output_quantizer,
++                out_dtype=activation_dtype,
++                bias=bias,
++                use_split_accumulator=use_split_accumulator,
++                ub=ub_obj,
++                ub_type=ub_type,
++                extra_output=reduce_scatter_out,
++            )
++        else:
++            gemm_out, *_, reduce_scatter_out = gems_general_gemm(
++                weightmat,
++                inputmat_total,
++                get_workspace(),
++                quantization_params=output_quantizer,
++                out_dtype=activation_dtype,
++                bias=bias,
++                use_split_accumulator=use_split_accumulator,
++                ub=ub_obj,
++                ub_type=ub_type,
++                extra_output=reduce_scatter_out,
++            )
+         nvtx_range_pop(f"{nvtx_label}.gemm")
+         # ------------------------------------------------------
+         # Finished forward GEMM...
+@@ -466,6 +483,7 @@ class _Linear(torch.autograd.Function):
+             ctx.requires_dgrad = inp.requires_grad
+             ctx.requires_wgrad = weight.requires_grad
+             ctx.reduce_and_update_bwd_fp8_tensors = False
++            ctx.use_flag_engine = use_flag_engine
+ 
+             ctx.owns_input = saved_inputmat is not inp
+             if ctx.fp8 and requires_grad(inp, weight, bias):
+@@ -709,21 +727,39 @@ class _Linear(torch.autograd.Function):
+                 # Note: dx = dy * w
+ 
+                 nvtx_range_push(f"{nvtx_label}.dgrad_gemm")
+-                gemm_out, *_, reduce_scatter_out = general_gemm(
+-                    weight_fp8,
+-                    grad_output,
+-                    get_workspace(),
+-                    layout="NN",
+-                    grad=True,
+-                    quantization_params=ctx.grad_input_quantizer,
+-                    out=gemm_out,
+-                    out_dtype=ctx.activation_dtype,
+-                    use_split_accumulator=use_split_accumulator,
+-                    ub=ub_obj_dgrad,
+-                    ub_type=ub_type_dgrad,
+-                    extra_output=reduce_scatter_out,
+-                    bulk_overlap=ctx.ub_bulk_dgrad,
+-                )
++                # TODO(lixianduo): polish
++                if not ctx.use_flag_engine:
++                    gemm_out, *_, reduce_scatter_out = general_gemm(
++                        weight_fp8,
++                        grad_output,
++                        get_workspace(),
++                        layout="NN",
++                        grad=True,
++                        quantization_params=ctx.grad_input_quantizer,
++                        out=gemm_out,
++                        out_dtype=ctx.activation_dtype,
++                        use_split_accumulator=use_split_accumulator,
++                        ub=ub_obj_dgrad,
++                        ub_type=ub_type_dgrad,
++                        extra_output=reduce_scatter_out,
++                        bulk_overlap=ctx.ub_bulk_dgrad,
++                    )
++                else:
++                    gemm_out, *_, reduce_scatter_out = gems_general_gemm(
++                        weight_fp8,
++                        grad_output,
++                        get_workspace(),
++                        layout="NN",
++                        grad=True,
++                        quantization_params=ctx.grad_input_quantizer,
++                        out=gemm_out,
++                        out_dtype=ctx.activation_dtype,
++                        use_split_accumulator=use_split_accumulator,
++                        ub=ub_obj_dgrad,
++                        ub_type=ub_type_dgrad,
++                        extra_output=reduce_scatter_out,
++                        bulk_overlap=ctx.ub_bulk_dgrad,
++                    )
+                 nvtx_range_pop(f"{nvtx_label}.dgrad_gemm")
+ 
+                 # Prepare grad input tensor
+@@ -872,7 +908,11 @@ class _Linear(torch.autograd.Function):
+ 
+                     """
+                     nvtx_range_push(f"{nvtx_label}.wgrad_gemm")
+-                    dw, db, *_ = general_gemm(x, dy, **wgrad_gemm_kwargs)
++                    # TODO(lixianduo): polish
++                    if not ctx.use_flag_engine:
++                        dw, db, *_ = general_gemm(x, dy, **wgrad_gemm_kwargs)
++                    else:
++                        dw, db, *_ = gems_general_gemm(x, dy, **wgrad_gemm_kwargs)
+                     nvtx_range_pop(f"{nvtx_label}.wgrad_gemm")
+                     return dw, db
+ 
+@@ -1003,6 +1043,7 @@ class _Linear(torch.autograd.Function):
+             None,  # symmetric_ar_type
+             None,  # save_original_input
+             None,  # debug
++            None,  # use_flag_engine
+         )
+ 
+ 
+@@ -1120,6 +1161,7 @@ class Linear(TransformerEngineBaseModule):
+         symmetric_ar_type: Optional[str] = None,
+         save_original_input: bool = False,
+         name: Optional[str] = None,
++        use_flag_engine: Optional[bool] = False,
+     ) -> None:
+         super().__init__()
+ 
+@@ -1135,6 +1177,7 @@ class Linear(TransformerEngineBaseModule):
+         self.symmetric_ar_type = symmetric_ar_type
+         self.save_original_input = save_original_input
+         self.name = name
++        self.use_flag_engine = use_flag_engine
+ 
+         self.wgrad_store = WeightGradStore(delay_wgrad_compute, ub_bulk_wgrad)
+ 
+@@ -1490,6 +1533,7 @@ class Linear(TransformerEngineBaseModule):
+                 self.symmetric_ar_type,
+                 self.save_original_input,
+                 debug,
++                self.use_flag_engine,
+             )
+             out = linear_fn(*args)
+         if self.gemm_bias_unfused_add:
+@@ -1720,3 +1764,4 @@ class Linear(TransformerEngineBaseModule):
+                 self.quantizers["scaling_bwd"][
+                     tex.FP8BwdTensors.GRAD_OUTPUT1
+                 ].all_gather_usage = True
++

@@ -1,7 +1,7 @@
 diff --git a/megatron/core/transformer/transformer_block.py b/megatron/core/transformer/transformer_block.py
 old mode 100755
 new mode 100644
-index c14f8ea1f..c30fd3a5b
+index c14f8ea1f..dc68a5816
 --- a/megatron/core/transformer/transformer_block.py
 +++ b/megatron/core/transformer/transformer_block.py
 @@ -1,5 +1,6 @@
@@ -11,7 +11,17 @@ index c14f8ea1f..c30fd3a5b
  from contextlib import nullcontext
  from dataclasses import dataclass
  from typing import List, Optional, Union
-@@ -74,13 +75,14 @@ logger = logging.getLogger(__name__)
+@@ -57,6 +58,9 @@ if HAVE_TE:
+         get_cpu_offload_context,
+         te_checkpoint,
+     )
++    from megatron.core.extensions.flag_engine import (
++        FENorm,
++    )
+ 
+     LayerNormImpl = TENorm
+ 
+@@ -74,13 +78,14 @@ logger = logging.getLogger(__name__)
  
  def get_num_layers_to_build(
      config: TransformerConfig, vp_stage: Optional[int] = None, pp_rank: Optional[int] = None
@@ -27,7 +37,7 @@ index c14f8ea1f..c30fd3a5b
  
      Returns:
          int: The number of layers to be built for the current pipeline stage.
-@@ -143,7 +145,7 @@ def get_num_layers_to_build(
+@@ -143,7 +148,7 @@ def get_num_layers_to_build(
  
          if is_last_pp_stage and config.num_layers_in_last_pipeline_stage is not None:
              num_layers_per_pipeline_rank = config.num_layers_in_last_pipeline_stage
@@ -36,7 +46,7 @@ index c14f8ea1f..c30fd3a5b
          # Include the embedding layer and loss layer into pipeline parallelism partition
          num_layers = config.num_layers
          if config.account_for_embedding_in_pipeline_split:
-@@ -158,7 +160,7 @@ def get_num_layers_to_build(
+@@ -158,7 +163,7 @@ def get_num_layers_to_build(
          num_layers_per_pipeline_rank = num_layers // config.pipeline_model_parallel_size
  
      vp_size = config.virtual_pipeline_model_parallel_size
@@ -45,7 +55,7 @@ index c14f8ea1f..c30fd3a5b
          # Interleaved pipeline parallelism:
          # Number of layers in each model chunk is the number of layers in the stage,
          # divided by the number of model chunks in a stage.
-@@ -178,11 +180,26 @@ def get_num_layers_to_build(
+@@ -178,11 +183,26 @@ def get_num_layers_to_build(
          num_layers_per_virtual_stage = num_layers_per_pipeline_rank // vp_size
  
          num_layers_to_build = num_layers_per_virtual_stage
@@ -74,7 +84,20 @@ index c14f8ea1f..c30fd3a5b
  
      # The embedding (or loss) layer cannot function as a standalone transformer layer
      # Reduce the number of layers to construct by 1 on the first (or last) stage if the
-@@ -556,6 +573,14 @@ class TransformerBlock(MegatronModule):
+@@ -254,8 +274,11 @@ def _get_block_submodules(
+             return spec.submodules
+         elif issubclass(spec.module, BaseTransformerLayer):
+             num_layers = get_num_layers_to_build(config, vp_stage, pp_rank)
++            local_layernorm_impl = LayerNormImpl
++            if config.transformer_impl == 'flag_engine':
++                local_layernorm_impl = FENorm
+             return TransformerBlockSubmodules(
+-                layer_specs=[spec] * num_layers, layer_norm=LayerNormImpl
++                layer_specs=[spec] * num_layers, layer_norm=local_layernorm_impl
+             )
+         else:
+             raise Exception(f"specialize for {spec.module.__name__}.")
+@@ -556,6 +579,14 @@ class TransformerBlock(MegatronModule):
              [s, b, h], and optionally the updated context tensor if cross-attention is used.
          """
  
@@ -89,7 +112,7 @@ index c14f8ea1f..c30fd3a5b
          inference_context = deprecate_inference_params(inference_context, inference_params)
  
          # Delete the obsolete reference to the initial input tensor if necessary
-@@ -609,6 +634,71 @@ class TransformerBlock(MegatronModule):
+@@ -609,6 +640,71 @@ class TransformerBlock(MegatronModule):
              use_outer_quantization_context = False
              use_inner_quantization_context = False
              outer_quantization_context = nullcontext()
@@ -161,7 +184,7 @@ index c14f8ea1f..c30fd3a5b
  
          with rng_context, outer_quantization_context:
              # Forward pass.
-@@ -710,6 +800,16 @@ class TransformerBlock(MegatronModule):
+@@ -710,6 +806,16 @@ class TransformerBlock(MegatronModule):
          elif isinstance(self.config.moe_layer_freq, list):
              non_homogeneous_layers = True
  
@@ -178,3 +201,8 @@ index c14f8ea1f..c30fd3a5b
          if self.config.heterogeneous_block_specs:
              non_homogeneous_layers = True
  
+@@ -759,3 +865,4 @@ class TransformerBlock(MegatronModule):
+                 )
+ 
+         return sharded_state_dict
++

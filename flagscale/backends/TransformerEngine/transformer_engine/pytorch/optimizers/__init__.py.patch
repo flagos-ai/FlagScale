@@ -1,0 +1,22 @@
+diff --git a/transformer_engine/pytorch/optimizers/__init__.py b/transformer_engine/pytorch/optimizers/__init__.py
+index c76f7574..b188415a 100644
+--- a/transformer_engine/pytorch/optimizers/__init__.py
++++ b/transformer_engine/pytorch/optimizers/__init__.py
+@@ -4,8 +4,8 @@
+ 
+ """Fused optimizers and multi-tensor kernels."""
+ from transformer_engine_torch import (
+-    multi_tensor_scale,
+-    multi_tensor_l2norm,
++    # multi_tensor_scale,
++    # multi_tensor_l2norm,
+     multi_tensor_unscale_l2norm,
+     multi_tensor_adam,
+     multi_tensor_adam_fp8,
+@@ -16,3 +16,6 @@ from transformer_engine_torch import (
+ from .fused_adam import FusedAdam
+ from .fused_sgd import FusedSGD
+ from .multi_tensor_apply import MultiTensorApply, multi_tensor_applier
++# # # copy from Megatron-LM Local Branch for kernel replacements
++from .multi_tensor_apply import native_multi_tensor_l2_norm as multi_tensor_l2norm
++from .multi_tensor_apply import native_multi_tensor_scale as multi_tensor_scale

@@ -1,0 +1,102 @@
+diff --git a/transformer_engine/pytorch/ops/basic/rmsnorm.py b/transformer_engine/pytorch/ops/basic/rmsnorm.py
+index 8c3f0297..87be3f36 100644
+--- a/transformer_engine/pytorch/ops/basic/rmsnorm.py
++++ b/transformer_engine/pytorch/ops/basic/rmsnorm.py
+@@ -26,6 +26,7 @@ from ...utils import (
+ from ..op import BasicOperation, OperationContext
+ from .._common import maybe_autocast_dtype, maybe_dequantize
+ 
++from ...module.gems_rms_norm import rms_norm_forward, rms_norm_backward
+ 
+ class RMSNorm(BasicOperation):
+     r"""Root Mean Square Layer Normalization
+@@ -75,10 +76,12 @@ class RMSNorm(BasicOperation):
+         dtype: Optional[torch.dtype] = None,
+         zero_centered_gamma: bool = False,
+         sm_margin: int = 0,
++        use_flag_engine: Optional[bool] = False,
+     ) -> None:
+         super().__init__()
+         self.eps: float = eps
+         self.zero_centered_gamma: bool = zero_centered_gamma
++        self.use_flag_engine = use_flag_engine
+ 
+         # Parameter shape
+         if not isinstance(normalized_shape, Iterable):
+@@ -184,16 +187,26 @@ class RMSNorm(BasicOperation):
+ 
+         # Compute RMSNorm
+         sm_margin = self._sm_margins["forward" if ctx.requires_grad else "inference"]
+-        y, _, rstdevs = rmsnorm_fwd(
+-            x,
+-            w,
+-            self.eps,
+-            None,
+-            next_op_input_quantizer,
+-            TE_DType[dtype],
+-            sm_margin,
+-            self.zero_centered_gamma,
+-        )
++
++        # TODO(lixianduo): polish
++        if not self.use_flag_engine:
++            y, _, rstdevs = rmsnorm_fwd(
++                x,
++                w,
++                self.eps,
++                None,
++                next_op_input_quantizer,
++                TE_DType[dtype],
++                sm_margin,
++                self.zero_centered_gamma,
++            )
++        else:
++            y, rstdevs = rms_norm_forward(
++                x,
++                [x.shape[-1]],
++                w,
++                self.eps,
++            )
+ 
+         # Save state for backward pass
+         if ctx.requires_grad:
+@@ -224,15 +237,26 @@ class RMSNorm(BasicOperation):
+         dy = maybe_dequantize(grad_output.contiguous(), dtype).view(x.size())
+         w = maybe_dequantize(self.weight, dtype).view((inner_dim,))
+ 
++        # TODO(lixianduo): polish
+         # Compute RMSNorm backward pass
+-        dx, dw = rmsnorm_bwd(
+-            dy,
+-            x,
+-            rstdevs,
+-            w,
+-            self._sm_margins["backward"],
+-            self.zero_centered_gamma,
+-        )
++        if not self.use_flag_engine:
++            dx, dw = rmsnorm_bwd(
++                dy,
++                x,
++                rstdevs,
++                w,
++                self._sm_margins["backward"],
++                self.zero_centered_gamma,
++            )
++        else:
++            dx, dw = rms_norm_backward(
++                dy,
++                x,
++                rstdevs,
++                [x.shape[-1]],
++                w,
++                self.eps,
++            )
+ 
+         # Clear saved tensors if possible
+         clear_tensor_data(x)
+@@ -250,3 +274,4 @@ class RMSNorm(BasicOperation):
+         """Every operand in this function has a defined ONNX translation."""
+         weight = self.weight + 1 if self.zero_centered_gamma else self.weight
+         return torch.nn.functional.rms_norm(input_, input_.shape[-1:], weight, self.eps)
++

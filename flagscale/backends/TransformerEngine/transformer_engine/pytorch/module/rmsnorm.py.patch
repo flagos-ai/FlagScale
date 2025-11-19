@@ -1,0 +1,25 @@
+diff --git a/transformer_engine/pytorch/module/rmsnorm.py b/transformer_engine/pytorch/module/rmsnorm.py
+index fb267d8a..850466ea 100644
+--- a/transformer_engine/pytorch/module/rmsnorm.py
++++ b/transformer_engine/pytorch/module/rmsnorm.py
+@@ -71,6 +71,7 @@ class RMSNorm(_RMSNormOp):
+         params_dtype: Optional[torch.dtype] = None,  # deprecated
+         zero_centered_gamma: bool = False,
+         hidden_size: Optional[int] = None,  # deprecated
++        use_flag_engine: Optional[bool] = False,
+         **kwargs,
+     ) -> None:
+ 
+@@ -106,6 +107,7 @@ class RMSNorm(_RMSNormOp):
+             normalized_shape,
+             eps=eps,
+             zero_centered_gamma=zero_centered_gamma,
++            use_flag_engine=use_flag_engine,
+             **kwargs,
+         )
+ 
+@@ -175,3 +177,4 @@ class RMSNorm(_RMSNormOp):
+         """Shim for backward compatibility"""
+         warnings.warn("inf_rmsnorm_sm_margin attr is deprecated", DeprecationWarning, stacklevel=2)
+         self._sm_margins["inference"] = val
++

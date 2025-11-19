@@ -1,0 +1,155 @@
+diff --git a/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py b/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py
+index 0d1c0b0c..57575a1c 100644
+--- a/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py
++++ b/transformer_engine/pytorch/attention/dot_product_attention/dot_product_attention.py
+@@ -59,6 +59,7 @@ from transformer_engine.pytorch.attention.dot_product_attention.backends import
+     UnfusedDotProductAttention,
+     FusedAttention,
+     FlashAttention,
++    GemsAttention,
+ )
+ 
+ 
+@@ -318,6 +319,7 @@ class DotProductAttention(TransformerEngineBaseModule):
+         softmax_scale: Optional[float] = None,
+         softmax_type: str = "vanilla",
+         return_max_logit: Optional[bool] = False,
++        use_flag_engine: Optional[bool] = False,
+     ) -> None:
+         super().__init__()
+ 
+@@ -345,6 +347,7 @@ class DotProductAttention(TransformerEngineBaseModule):
+         self.cp_global_ranks = cp_global_ranks
+         self.cp_stream = cp_stream
+         self.cp_comm_type = cp_comm_type
++        self.use_flag_engine = use_flag_engine
+ 
+         self.hidden_size_per_attention_head_k = (
+             kv_channels if isinstance(kv_channels, int) else kv_channels[0]
+@@ -451,6 +454,16 @@ class DotProductAttention(TransformerEngineBaseModule):
+             return_max_logit=self.return_max_logit,
+         )
+ 
++        self.gems_attention = GemsAttention(
++            softmax_scale,
++            attention_type=attention_type,
++            layer_number=layer_number,
++            deterministic=self.deterministic,
++            **attn_kwargs,
++            softmax_type=self.softmax_type,
++            return_max_logit=self.return_max_logit,
++        )
++
+         def remove_extra_states_check(self, incompatible_keys):  # pylint: disable=unused-argument
+             """
+             Temporarily remove core_attention._extra_state as a missing key
+@@ -1124,6 +1137,7 @@ class DotProductAttention(TransformerEngineBaseModule):
+                 self.flash_attention.attention_type = self.attention_type
+                 self.fused_attention.attention_type = self.attention_type
+                 self.unfused_attention.attention_type = self.attention_type
++                self.gems_attention.attention_type = self.attention_type
+ 
+                 query_layer, key_layer, value_layer = [
+                     x.contiguous() if not x.is_contiguous() else x
+@@ -1380,6 +1394,14 @@ class DotProductAttention(TransformerEngineBaseModule):
+                 else None
+             )
+ 
++
++            # TODO(lixianduo): to be polished
++            if self.use_flag_engine:
++                use_flash_attention = False
++                use_fused_attention = False
++                use_unfused_attention = False
++                use_gems_attention = True
++
+             if use_flash_attention:
+                 if core_attention_bias_type == "alibi":
+                     alibi_slopes, _ = dpa_utils.get_alibi(
+@@ -1551,4 +1573,86 @@ class DotProductAttention(TransformerEngineBaseModule):
+                     quantizers=self.quantizers,
+                     fp8_output=fp8_output,
+                 )
++            
++            if use_gems_attention:
++                fu_core_attention_bias_type = core_attention_bias_type
++                fu_core_attention_bias = core_attention_bias
++                if core_attention_bias_type == "alibi" and (
++                    alibi_slopes is not None or max_seqlen_q != max_seqlen_kv
++                ):
++                    fu_core_attention_bias_type = "post_scale_bias"
++                    _, fu_core_attention_bias = dpa_utils.get_alibi(
++                        _alibi_cache,
++                        query_layer.shape[-2],
++                        max_seqlen_q,
++                        max_seqlen_kv,
++                        alibi_slopes=alibi_slopes,
++                        bias_dtype=query_layer.dtype,
++                        bottom_right_alignment=attn_mask_type not in ["causal", "padding_causal"],
++                    )
++                if checkpoint_core_attention:
++                    return self._checkpointed_attention_forward(
++                        self.gems_attention,
++                        query_layer,
++                        key_layer,
++                        value_layer,
++                        qkv_layout=qkv_layout,
++                        cu_seqlens_q=cu_seqlens_q,
++                        cu_seqlens_kv=cu_seqlens_kv,
++                        cu_seqlens_q_padded=cu_seqlens_q_padded,
++                        cu_seqlens_kv_padded=cu_seqlens_kv_padded,
++                        max_seqlen_q=max_seqlen_q,
++                        max_seqlen_kv=max_seqlen_kv,
++                        attn_mask_type=attn_mask_type,
++                        attention_mask=attention_mask,
++                        window_size=window_size,
++                        fused_attention_backend=fused_attention_backend,
++                        core_attention_bias_type=fu_core_attention_bias_type,
++                        core_attention_bias=fu_core_attention_bias,
++                        fast_zero_fill=fast_zero_fill,
++                        cp_group=self.cp_group,
++                        cp_global_ranks=self.cp_global_ranks,
++                        cp_stream=self.cp_stream,
++                        cp_comm_type=self.cp_comm_type,
++                        fp8=self.fp8 and self.fp8_meta["recipe"].fp8_dpa,
++                        fp8_meta=self.fp8_meta,
++                        quantizers=self.quantizers,
++                        pad_between_seqs=pad_between_seqs,
++                        inference_params=inference_params,
++                        softmax_offset=softmax_offset,
++                        fp8_output=fp8_output,
++                    )
++                return self.gems_attention(
++                    query_layer,
++                    key_layer,
++                    value_layer,
++                    qkv_layout=qkv_layout,
++                    cu_seqlens_q=cu_seqlens_q,
++                    cu_seqlens_kv=cu_seqlens_kv,
++                    cu_seqlens_q_padded=cu_seqlens_q_padded,
++                    cu_seqlens_kv_padded=cu_seqlens_kv_padded,
++                    max_seqlen_q=max_seqlen_q,
++                    max_seqlen_kv=max_seqlen_kv,
++                    attn_mask_type=attn_mask_type,
++                    attention_mask=attention_mask,
++                    window_size=window_size,
++                    fused_attention_backend=fused_attention_backend,
++                    core_attention_bias_type=fu_core_attention_bias_type,
++                    core_attention_bias=fu_core_attention_bias,
++                    fast_zero_fill=fast_zero_fill,
++                    cp_group=self.cp_group,
++                    cp_global_ranks=self.cp_global_ranks,
++                    cp_stream=self.cp_stream,
++                    cp_comm_type=self.cp_comm_type,
++                    fp8=self.fp8 and self.fp8_meta["recipe"].fp8_dpa,
++                    fp8_meta=self.fp8_meta,
++                    quantizers=self.quantizers,
++                    pad_between_seqs=pad_between_seqs,
++                    inference_params=inference_params,
++                    softmax_offset=softmax_offset,
++                    fp8_output=fp8_output,
++                )
++
++            
+             return None
++
