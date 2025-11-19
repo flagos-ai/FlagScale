@@ -1,12 +1,10 @@
-backends_commit:
-  vllm: 6d8d0a24c02bfd84d46b3016b865a44f048ae84b
+backends_commit: {}
 backends_version:
-  FlagScale: v0.8.0
-  vllm: 0.8.5
-commit: 32704acc698b2565cd371365cf4c43549a9fb652
+  FlagScale: 0.9.0
+commit: 3c5dbc409d6e222009bc07b772a141d6f5a81bca
 contact: ''
 device_type: Kunlunxin_R310p
 models:
-- qwen3 8b
+- qwen3-8b-flagscale
 task:
-- inference
+- train
