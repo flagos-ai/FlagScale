@@ -17,6 +17,9 @@ jobs:
   functional-test:
     runs-on: [self-hosted, Linux, X64, metax-0, gpus-2]
     container:
+      env:
+        HTTP_PROXY: ${{ secrets.METAX_PROXY }}
+        HTTPS_PROXY: ${{ secrets.METAX_PROXY }}
       image: ${{ inputs.image }}
       ports:
         - 80
@@ -43,7 +46,7 @@ jobs:
           submodules: false
           set-safe-directory: true
           retry-on-intr: fail=5,delay=180000
-
+      
       - name: Install sccache
         run: |
           set -eux
