@@ -1,0 +1,16 @@
+diff --git a/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl_convertor.sh b/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl_convertor.sh
+index d76caa55..397d38a4 100644
+--- a/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl_convertor.sh
++++ b/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl_convertor.sh
+@@ -136,8 +136,9 @@ elif [ $MG2HF = false ]; then
+     PRETRAIN_CHECKPOINT_PATH=${SOURCE_CKPT_PATH}
+ fi
+ 
++###### Huawei NPU only support local transformer impl ######
+ te_options=" \
+-            --transformer-impl transformer_engine \
++            --transformer-impl local \
+             "
+ 
+ if [ $PR = fp16 ]; then
+

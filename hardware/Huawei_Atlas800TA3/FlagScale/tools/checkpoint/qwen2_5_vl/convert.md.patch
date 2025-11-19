@@ -1,0 +1,14 @@
+diff --git a/tools/checkpoint/qwen2_5_vl/convert.md b/tools/checkpoint/qwen2_5_vl/convert.md
+index 79b08afc..10e0ea9e 100644
+--- a/tools/checkpoint/qwen2_5_vl/convert.md
++++ b/tools/checkpoint/qwen2_5_vl/convert.md
+@@ -15,7 +15,7 @@ git lfs pull
+ Run the `hf2mcore_qwen2.5_vl_convertor.sh` script with the following arguments:
+ ```bash
+ MODEL_SIZE=$1                 # Model size: 2B / 7B / 72B
+-SOURCE_CKPT_PATH=$2           # Path to the original Huggingface-style checkpoint
++SOURCE_CKPT_PATH=$2           # Path to the original checkpoint
+ TARGET_CKPT_PATH=$3           # Path to save the converted checkpoint
+ TP=$4                         # Tensor parallel size
+ PP=$5                         # Pipeline parallel size
+

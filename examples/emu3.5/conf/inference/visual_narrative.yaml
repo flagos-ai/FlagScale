@@ -1,0 +1,32 @@
+llm:
+  save: ${experiment.exp_dir}
+  vq_model: ${experiment.vq_model}
+  model: ${experiment.model}
+  tokenizer: ${experiment.tokenizer}
+  trust_remote_code: true
+  dtype: auto
+  tensor_parallel_size: 2
+  gpu_memory_utilization: 0.7
+  disable_log_stats: false
+  enable_chunked_prefill: false
+  enable_prefix_caching: false
+  seed: 6666
+
+# prompt case is here: flagscale/inference/emu_utils/prompt_case.py
+generate:
+  task_type: story
+  ratio: auto
+  image_area: 518400
+  sampling:
+    max_tokens: 32768
+    detokenize: false
+    top_k: 131072
+    top_p: 1.0
+    temperature: 1.0
+    text_top_k: 1024
+    text_top_p: 0.9
+    text_temperature: 1.0
+    image_top_k: 10240
+    image_top_p: 1.0
+    image_temperature: 1.0
+    guidance_scale: 3.0

@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - inference: visual_guidance # visual_narrative or visual_guidance
+
+experiment:
+  exp_name: emu3p5_interleaved_generation
+  exp_dir: outputs/${experiment.exp_name}
+  vq_model: BAAI/Emu3.5-VisionTokenizer
+  model: BAAI/Emu3.5
+  tokenizer: src/tokenizer_emu3_ibq/
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/inference_emu3p5.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-inference
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1
+    VLLM_LOGGING_LEVEL: "DEBUG"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

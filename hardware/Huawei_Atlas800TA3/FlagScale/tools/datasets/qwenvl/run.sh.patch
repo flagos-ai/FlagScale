@@ -1,10 +1,10 @@
 diff --git a/tools/datasets/qwenvl/run.sh b/tools/datasets/qwenvl/run.sh
 new file mode 100644
-index 000000000..a33746c0c
+index 00000000..96cbb5a3
 --- /dev/null
 +++ b/tools/datasets/qwenvl/run.sh
 @@ -0,0 +1,13 @@
-+export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
++export PYTHONPATH=$PYTHONPATH:../../../third_party/Megatron-LM/
 +
 +python convert_custom_dataset_to_wds_chatml_str.py \
 +    --dataset-root=/share/project/lizhiyu/data/llava-datasets/LLaVA-Pretrain \

@@ -1,0 +1,53 @@
+diff --git a/examples/qwen2_5_vl/conf/train/7b.yaml b/examples/qwen2_5_vl/conf/train/7b.yaml
+index 62b2e072..2145e40a 100644
+--- a/examples/qwen2_5_vl/conf/train/7b.yaml
++++ b/examples/qwen2_5_vl/conf/train/7b.yaml
+@@ -13,11 +13,11 @@ system:
+   overlap_grad_reduce: False # if has text-only must be false
+   overlap_param_gather: False # if has text-only must be false
+   use_mcore_models: True
+-  transformer_impl: transformer_engine
+-  recompute_method: "uniform"
+-  recompute_granularity: "full"
+-  recompute_num_layers: 1
+-  use_te: True
++  transformer_impl: local
++  # recompute_method: "uniform"
++  # recompute_granularity: "full"
++  # recompute_num_layers: 1
++  # use_te: True
+   precision:
+     bf16: True
+     attention_softmax_in_fp32: True
+@@ -38,7 +38,7 @@ system:
+     async_save: False
+ 
+ model:
+-  attention_backend: flash # don't use "auto(nvte_flash_attn)"
++  # attention_backend: flash # don't use "auto(nvte_flash_attn)"
+   disable_bias_linear: True
+   add_qkv_bias: True
+   num_layers: 28
+@@ -58,10 +58,10 @@ model:
+   attention_dropout: 0.0
+   hidden_dropout: 0.0
+   clip_grad: 1.0
+-  train_iters: 62
++  train_iters: 5000
+   eval_iters: 0 # no valid
+   micro_batch_size: 1
+-  global_batch_size: 16
++  global_batch_size: 128
+   allow_missing_vision_projection_checkpoint: False
+   apply_layernorm_1p: False
+   group_query_attention: True
+@@ -91,7 +91,7 @@ model:
+       lr: 1.0e-5
+       min_lr: 1.0e-6
+       # lr_warmup_fraction: .03
+-      lr_warmup_iters: 10
++      lr_warmup_iters: 500
+       lr_decay_style: cosine
+ 
+ data:
+

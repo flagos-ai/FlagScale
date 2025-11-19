@@ -1,96 +1,51 @@
 diff --git a/vllm/inputs/preprocess.py b/vllm/inputs/preprocess.py
-index de5dc0876..6a7139939 100644
+index 7518cd8fc..8ff83d805 100644
 --- a/vllm/inputs/preprocess.py
 +++ b/vllm/inputs/preprocess.py
-@@ -339,6 +339,7 @@ class InputPreprocessor:
+@@ -311,6 +311,8 @@ class InputPreprocessor:
      ) -> Union[TokenInputs, MultiModalInputs]:
-         prompt_token_ids = parsed_content["prompt_token_ids"]
-         token_type_ids = parsed_content.get("token_type_ids")
-+        negative_prompt_token_ids = parsed_content.get("negative_prompt_token_ids") # --- FLAGSCALE MODIFICATION ---
+         prompt_token_ids = self._truncate_inputs(
+             parsed_content["prompt_token_ids"], tokenization_kwargs)
++        uncond_prompt_token_ids = self._truncate_inputs(
++            parsed_content["uncond_prompt_token_ids"], tokenization_kwargs)
  
          inputs: Union[TokenInputs, MultiModalInputs]
          if multi_modal_data := parsed_content.get("multi_modal_data"):
-@@ -354,6 +355,7 @@ class InputPreprocessor:
-             inputs = token_inputs(
-                 prompt_token_ids=prompt_token_ids,
-                 token_type_ids=token_type_ids,
-+                negative_prompt_token_ids=negative_prompt_token_ids, # --- FLAGSCALE MODIFICATION ---
+@@ -322,7 +324,10 @@ class InputPreprocessor:
+                 mm_uuids=mm_uuids,
              )
+         else:
+-            inputs = token_inputs(prompt_token_ids=prompt_token_ids)
++            inputs = token_inputs(
++                prompt_token_ids=prompt_token_ids,
++                uncond_prompt_token_ids=uncond_prompt_token_ids
++            )
  
          if cache_salt := parsed_content.get("cache_salt"):
-@@ -370,6 +372,7 @@ class InputPreprocessor:
-     ) -> Union[TokenInputs, MultiModalInputs]:
-         prompt_token_ids = parsed_content["prompt_token_ids"]
-         token_type_ids = parsed_content.get("token_type_ids")
-+        negative_prompt_token_ids = parsed_content.get("negative_prompt_token_ids") # --- FLAGSCALE MODIFICATION ---
- 
-         inputs: Union[TokenInputs, MultiModalInputs]
-         if multi_modal_data := parsed_content.get("multi_modal_data"):
-@@ -385,6 +388,7 @@ class InputPreprocessor:
-             inputs = token_inputs(
-                 prompt_token_ids=prompt_token_ids,
-                 token_type_ids=token_type_ids,
-+                negative_prompt_token_ids=negative_prompt_token_ids, # --- FLAGSCALE MODIFICATION ---
-             )
- 
-         if cache_salt := parsed_content.get("cache_salt"):
-@@ -400,6 +404,7 @@ class InputPreprocessor:
-         return_mm_hashes: bool = False,
+             inputs["cache_salt"] = cache_salt
+@@ -337,6 +342,7 @@ class InputPreprocessor:
+         mm_uuids: Optional[MultiModalUUIDDict] = None,
      ) -> Union[TokenInputs, MultiModalInputs]:
          prompt_text = parsed_content["prompt"]
-+        negative_prompt_text = parsed_content.get("negative_prompt") # --- FLAGSCALE MODIFICATION ---
++        uncond_prompt_text = parsed_content.get("uncond_prompt")
  
          inputs: Union[TokenInputs, MultiModalInputs]
          if multi_modal_data := parsed_content.get("multi_modal_data"):
-@@ -417,9 +422,21 @@ class InputPreprocessor:
-                 lora_request=lora_request,
+@@ -352,9 +358,17 @@ class InputPreprocessor:
+                 prompt_text,
                  tokenization_kwargs=tokenization_kwargs,
              )
-+            # --- FLAGSCALE MODIFICATION BEG ---
-+            negative_prompt_token_ids = None
-+            if negative_prompt_text:
-+                negative_prompt_token_ids = self._tokenize_prompt(
-+                    negative_prompt_text,
-+                    lora_request=lora_request,
++            uncond_prompt_token_ids = None
++            if uncond_prompt_text:
++                uncond_prompt_token_ids = self._tokenize_prompt_async(
++                    uncond_prompt_text,
++                    tokenization_kwargs=tokenization_kwargs,
 +                )
-+            # --- FLAGSCALE MODIFICATION END ---
              inputs = token_inputs(
                  prompt=prompt_text,
                  prompt_token_ids=prompt_token_ids,
-+                # --- FLAGSCALE MODIFICATION BEG ---
-+                negative_prompt=negative_prompt_text,
-+                negative_prompt_token_ids=negative_prompt_token_ids,
-+                # --- FLAGSCALE MODIFICATION END ---
-             )
- 
-         if cache_salt := parsed_content.get("cache_salt"):
-@@ -435,6 +452,7 @@ class InputPreprocessor:
-         return_mm_hashes: bool = False,
-     ) -> Union[TokenInputs, MultiModalInputs]:
-         prompt_text = parsed_content["prompt"]
-+        negative_prompt_text = parsed_content.get("negative_prompt") # --- FLAGSCALE MODIFICATION ---
- 
-         inputs: Union[TokenInputs, MultiModalInputs]
-         if multi_modal_data := parsed_content.get("multi_modal_data"):
-@@ -452,9 +470,21 @@ class InputPreprocessor:
-                 lora_request=lora_request,
-                 tokenization_kwargs=tokenization_kwargs,
-             )
-+            # --- FLAGSCALE MODIFICATION BEG ---
-+            negative_prompt_token_ids = None
-+            if negative_prompt_text:
-+                negative_prompt_token_ids = await self._tokenize_prompt_async(
-+                    negative_prompt_text,
-+                    lora_request=lora_request,
-+                )
-+            # --- FLAGSCALE MODIFICATION END ---
-             inputs = token_inputs(
-                 prompt=prompt_text,
-                 prompt_token_ids=prompt_token_ids,
-+                # --- FLAGSCALE MODIFICATION BEG ---
-+                negative_prompt=negative_prompt_text,
-+                negative_prompt_token_ids=negative_prompt_token_ids,
-+                # --- FLAGSCALE MODIFICATION END ---
++                uncond_prompt=uncond_prompt_text,
++                uncond_prompt_token_ids=uncond_prompt_token_ids,
              )
  
          if cache_salt := parsed_content.get("cache_salt"):

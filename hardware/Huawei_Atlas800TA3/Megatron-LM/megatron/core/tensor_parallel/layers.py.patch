@@ -1,0 +1,14 @@
+diff --git a/megatron/core/tensor_parallel/layers.py b/megatron/core/tensor_parallel/layers.py
+index c4be2cfc2..b5ef07246 100644
+--- a/megatron/core/tensor_parallel/layers.py
++++ b/megatron/core/tensor_parallel/layers.py
+@@ -214,6 +214,8 @@ class VocabParallelEmbedding(torch.nn.Module):
+         self.embedding_dim = embedding_dim
+         self.reduce_scatter_embeddings = reduce_scatter_embeddings
+         self.tp_group = tp_group
++        
++        self.tensor_model_parallel_size = self.tp_group.size()
+ 
+         self.tp_group = get_tensor_model_parallel_group_if_none(self.tp_group)
+ 
+

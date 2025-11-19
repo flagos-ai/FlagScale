@@ -1,0 +1,23 @@
+diff --git a/flagscale/train/npu_patch/op_builder/matmul_add_builder.py b/flagscale/train/npu_patch/op_builder/matmul_add_builder.py
+new file mode 100644
+index 00000000..f20dc420
+--- /dev/null
++++ b/flagscale/train/npu_patch/op_builder/matmul_add_builder.py
+@@ -0,0 +1,16 @@
++# Copyright (c) 2024, Huawei Technologies Co., Ltd. All rights reserved.
++from flagscale.train.npu_patch.op_builder.atb_builder import AtbOpBuilder
++
++
++class MatmulAddOpBuilder(AtbOpBuilder):
++    OP_NAME = "npu_matmul_add_fp32"
++
++    def __init__(self):
++        super(MatmulAddOpBuilder, self).__init__(self.OP_NAME)
++
++    def sources(self):
++        return [
++            'ops/csrc/atb/matmul_add.cpp',
++            'ops/csrc/atb/utils/atb_adapter.cpp',
++            'ops/csrc/flop_counter/flop_counter.cpp',
++        ]
+

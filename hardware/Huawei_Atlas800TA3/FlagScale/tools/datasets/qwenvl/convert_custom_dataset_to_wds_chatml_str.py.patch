@@ -1,0 +1,14 @@
+diff --git a/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py b/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py
+index e7e1517b..e7c4639d 100644
+--- a/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py
++++ b/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py
+@@ -9,7 +9,7 @@ import pickle
+ from argparse import ArgumentParser
+ from typing import List, Union
+ 
+-import cv2
++# import cv2
+ import webdataset as wds
+ import yaml
+ 
+

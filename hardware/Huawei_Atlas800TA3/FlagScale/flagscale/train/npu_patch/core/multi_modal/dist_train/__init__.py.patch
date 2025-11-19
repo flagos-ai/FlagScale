@@ -1,0 +1,8 @@
+diff --git a/flagscale/train/npu_patch/core/multi_modal/dist_train/__init__.py b/flagscale/train/npu_patch/core/multi_modal/dist_train/__init__.py
+new file mode 100644
+index 00000000..58f7fa6c
+--- /dev/null
++++ b/flagscale/train/npu_patch/core/multi_modal/dist_train/__init__.py
+@@ -0,0 +1 @@
++from . import dist_communication, dist_parallel_state, dist_schedules, inner_data_parallel
+

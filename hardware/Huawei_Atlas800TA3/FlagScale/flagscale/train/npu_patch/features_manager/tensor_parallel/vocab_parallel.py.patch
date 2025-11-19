@@ -1,0 +1,32 @@
+diff --git a/flagscale/train/npu_patch/features_manager/tensor_parallel/vocab_parallel.py b/flagscale/train/npu_patch/features_manager/tensor_parallel/vocab_parallel.py
+new file mode 100644
+index 00000000..470cbff6
+--- /dev/null
++++ b/flagscale/train/npu_patch/features_manager/tensor_parallel/vocab_parallel.py
+@@ -0,0 +1,25 @@
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
++
++from argparse import ArgumentParser
++
++from flagscale.train.npu_patch.features_manager.feature import MindSpeedFeature
++
++
++class ReplaceIndexPutFeature(MindSpeedFeature):
++
++    def __init__(self):
++        super().__init__('vocab-parallel', optimization_level=2)
++
++    def is_need_apply(self, args):
++        """Check the feature is need to apply."""
++        return self.optimization_level <= args.optimization_level
++
++    def register_patches(self, patch_manager, args):
++        from flagscale.train.npu_patch.core.tensor_parallel.vocab_parallel.adaptor import (
++            mindspeed_vocab_parallel_embedding_forward,
++        )
++
++        patch_manager.register_patch(
++            'megatron.core.tensor_parallel.layers.VocabParallelEmbedding.forward',
++            mindspeed_vocab_parallel_embedding_forward,
++        )
+

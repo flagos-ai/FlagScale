@@ -1,0 +1,24 @@
+diff --git a/flagscale/train/npu_patch/core/fusions/fused_bias_swiglu.py b/flagscale/train/npu_patch/core/fusions/fused_bias_swiglu.py
+new file mode 100644
+index 00000000..496312c5
+--- /dev/null
++++ b/flagscale/train/npu_patch/core/fusions/fused_bias_swiglu.py
+@@ -0,0 +1,17 @@
++import torch_npu
++
++
++def fused_swiglu(x):
++    return torch_npu.npu_swiglu(x, dim=-1)
++
++
++class SwiGLUFunction:
++    @staticmethod
++    def apply(x, *args):
++        return fused_swiglu(x)
++
++
++class BiasSwiGLUFunction:
++    @staticmethod
++    def apply(x, bias, *args):
++        return fused_swiglu(x + bias)
+

@@ -1,0 +1,4 @@
+diff --git a/flagscale/train/npu_patch/core/transformer/flash_attention/__init__.py b/flagscale/train/npu_patch/core/transformer/flash_attention/__init__.py
+new file mode 100644
+index 00000000..e69de29b
+

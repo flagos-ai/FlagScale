@@ -1,0 +1,32 @@
+diff --git a/flagscale/train/npu_patch/functional/profiler/profiler_info.py b/flagscale/train/npu_patch/functional/profiler/profiler_info.py
+new file mode 100644
+index 00000000..7a60a7d7
+--- /dev/null
++++ b/flagscale/train/npu_patch/functional/profiler/profiler_info.py
+@@ -0,0 +1,25 @@
++from functools import wraps
++
++import torch_npu
++
++
++def get_nccl_options_add_group_info_wrapper(get_nccl_options):
++    @wraps(get_nccl_options)
++    def wrapper(pg_name, nccl_comm_cfgs):
++        options = get_nccl_options(pg_name, nccl_comm_cfgs)
++        if hasattr(torch_npu._C._distributed_c10d.ProcessGroupHCCL.Options, 'hccl_config'):
++            options = (
++                options
++                if options is not None
++                else torch_npu._C._distributed_c10d.ProcessGroupHCCL.Options()
++            )
++            try:
++                # torch_npu not support inplace update
++                hccl_config = options.hccl_config
++                hccl_config.update({'group_name': pg_name})
++                options.hccl_config = hccl_config
++            except TypeError as e:
++                pass  # compatible with old torch_npu version
++        return options
++
++    return wrapper
+

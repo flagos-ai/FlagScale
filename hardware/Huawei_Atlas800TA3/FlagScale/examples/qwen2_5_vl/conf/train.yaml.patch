@@ -1,0 +1,14 @@
+diff --git a/examples/qwen2_5_vl/conf/train.yaml b/examples/qwen2_5_vl/conf/train.yaml
+index 7159e1b1..8eb5efc6 100644
+--- a/examples/qwen2_5_vl/conf/train.yaml
++++ b/examples/qwen2_5_vl/conf/train.yaml
+@@ -23,6 +23,8 @@ experiment:
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+     NVTE_APPLY_QK_LAYER_SCALING: 0
+     NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
++    HCCL_DETERMINISTIC: true
++    LD_PRELOAD: "/usr/local/python3.11.5/lib/python3.11/site-packages/scikit_learn.libs/libgomp-947d5fa1.so.1.0.0"
+ 
+ action: run
+ 
+

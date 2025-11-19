@@ -1,0 +1,16 @@
+diff --git a/megatron/core/tensor_parallel/random.py b/megatron/core/tensor_parallel/random.py
+index 994560e51..4e4d757b0 100644
+--- a/megatron/core/tensor_parallel/random.py
++++ b/megatron/core/tensor_parallel/random.py
+@@ -24,8 +24,8 @@ from .utils import gather_split_1d_tensor, split_tensor_into_1d_equal_chunks
+ 
+ try:
+     import transformer_engine  # pylint: disable=unused-import
+-    from transformer_engine.pytorch.distributed import activation_recompute_forward
+-    from transformer_engine.pytorch.fp8 import FP8GlobalStateManager, fp8_autocast
++    # from transformer_engine.pytorch.distributed import activation_recompute_forward
++    # from transformer_engine.pytorch.fp8 import FP8GlobalStateManager, fp8_autocast
+ 
+     HAVE_TE = True
+ except ModuleNotFoundError:
+

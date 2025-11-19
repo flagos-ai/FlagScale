@@ -1,13 +1,8 @@
 diff --git a/vllm/model_executor/models/siglip.py b/vllm/model_executor/models/siglip.py
-index 3630f59f5..78e4835e6 100644
+index eb49d6d2c..aed832acf 100644
 --- a/vllm/model_executor/models/siglip.py
 +++ b/vllm/model_executor/models/siglip.py
-@@ -1,3 +1,4 @@
-+# copy from https://github.com/vllm-project/vllm/blob/dc1b4a6f1300003ae27f033afbdff5e2683721ce/vllm/model_executor/models/siglip.py
- # SPDX-License-Identifier: Apache-2.0
- # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
- """Implementation of SiglipVisionModel intended to be only used
-@@ -206,26 +207,28 @@ class SiglipMLP(nn.Module):
+@@ -207,26 +207,28 @@ class SiglipMLP(nn.Module):
  
          self.config = config
          self.activation_fn = get_act_fn(config.hidden_act)

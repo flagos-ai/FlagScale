@@ -1,0 +1,188 @@
+diff --git a/flagscale/train/npu_patch/features_manager/__init__.py b/flagscale/train/npu_patch/features_manager/__init__.py
+new file mode 100644
+index 00000000..75a5e8b1
+--- /dev/null
++++ b/flagscale/train/npu_patch/features_manager/__init__.py
+@@ -0,0 +1,181 @@
++from typing import List
++
++from flagscale.train.npu_patch.features_manager.dist_train.dist_train_feature import DistTrainFeature
++from flagscale.train.npu_patch.features_manager.feature import MindSpeedFeature
++from flagscale.train.npu_patch.features_manager.features_manager import MindSpeedFeaturesManager
++from flagscale.train.npu_patch.features_manager.fusions.fused_bias_swiglu import FusedSwigluFeature
++from flagscale.train.npu_patch.features_manager.fusions.fused_moe_permute import FusedMoEPermuteFeature
++from flagscale.train.npu_patch.features_manager.fusions.fused_rope import FusedRoPEFeature
++from flagscale.train.npu_patch.features_manager.fusions.fused_softmax import FusedSoftmaxFeature
++from flagscale.train.npu_patch.features_manager.fusions.grouped_matmul import GroupedMatmulFeature
++from flagscale.train.npu_patch.features_manager.megatron_basic.megatron_basic import MegatronBasicFeature
++from flagscale.train.npu_patch.features_manager.megatron_basic.requirements_basic import (
++    RequirementsBasicFeature,
++)
++from flagscale.train.npu_patch.features_manager.megatron_basic.transformer_engine_basic import (
++    TransformerEngineBasicFeature,
++)
++from flagscale.train.npu_patch.features_manager.optimizer.fused_ema_adamw_feature import FusedEmaAdamwFeature
++from flagscale.train.npu_patch.features_manager.optimizer.virtual_optimizer import VirtualOptimizerFeature
++from flagscale.train.npu_patch.features_manager.pipeline_parallel import NoopLayersFeature
++from flagscale.train.npu_patch.features_manager.pipeline_parallel.optimize_p2p_comm import (
++    OptimizeP2PCommFeature,
++)
++from flagscale.train.npu_patch.features_manager.pipeline_parallel.ripipe_schedules_feature import (
++    RiPipeSchedulesAdvanceFeature,
++    RiPipeSchedulesBubbleFeature,
++)
++from flagscale.train.npu_patch.features_manager.tensor_parallel.vocab_parallel import ReplaceIndexPutFeature
++
++# from flagscale.train.npu_patch.features_manager.transformer.flash_attention.alibi_feature import AlibiFeature
++from flagscale.train.npu_patch.features_manager.transformer.flash_attention.fusion_attention_v1_feature import (
++    FusionAttentionFeature,
++)
++from flagscale.train.npu_patch.features_manager.transformer.flash_attention.fusion_attention_v2_feature import (
++    FusionAttentionV2Feature,
++)
++from flagscale.train.npu_patch.features_manager.transformer.flash_attention.generate_mask_feature import (
++    GenerateMaskFeature,
++)
++from flagscale.train.npu_patch.features_manager.transformer.flash_attention.reset_attention_mask_feature import (
++    ResetAttentionMaskFeature,
++)
++from flagscale.train.npu_patch.features_manager.transformer.module_rearrange.mcore_rearrange import (
++    MegatronMcoreRearrangeFeature,
++)
++
++# from flagscale.train.npu_patch.deprecate import AutoExecuteFunction
++
++
++# from flagscale.train.npu_patch.features_manager.tensor_parallel.unaligned_linear_feature import UnalignedLinearFeature
++# from flagscale.train.npu_patch.features_manager.pipeline_parallel.unaligned_pineline_feature import UnalignedPipelineFeature
++
++
++# from flagscale.train.npu_patch.features_manager.tensor_parallel.unaligned_linear_feature import UnalignedLinearFeature
++
++# from flagscale.train.npu_patch.features_manager.tensor_parallel.mc2 import MC2Feature
++# from flagscale.train.npu_patch.features_manager.tensor_parallel.locl_coc import CoCFeature
++
++
++# from flagscale.train.npu_patch.features_manager.pipeline_parallel.variable_seq_length import VariableSequenceLengthFeature
++# from flagscale.train.npu_patch.features_manager.pipeline_parallel.multi_parameter import MultiParameterFeature
++# from flagscale.train.npu_patch.features_manager.pipeline_parallel.optimize_send_recv_comm import OptimizeSendRecvCommFeature
++# from flagscale.train.npu_patch.features_manager.pipeline_parallel.dualpipev_feature import DualpipeVFeature
++
++
++FEATURES_LIST = [
++    # Functional features
++    # ProfilerDefaultFeature(),
++    # Virtaul Optimizer
++    VirtualOptimizerFeature(),
++    # Tensor parallel features
++    # UnalignedLinearFeature(),
++    # # llava-multimodal
++    # UnalignedPipelineFeature()
++]
++
++
++# this list is for reconstruction of mindspeed
++def add_megatron_basic_features(features_list: List[MindSpeedFeature]):
++    features_list.extend(
++        [RequirementsBasicFeature(), MegatronBasicFeature(), TransformerEngineBasicFeature()]
++    )
++
++
++def add_fusions_features(features_list: List[MindSpeedFeature]):
++    features_list.extend(
++        [
++            GroupedMatmulFeature(),
++            FusedSwigluFeature(),
++            FusedSoftmaxFeature(),
++            FusedRoPEFeature(),
++            FusedMoEPermuteFeature(),
++        ]
++    )
++
++
++def add_tensor_parallel_features(features_list: List[MindSpeedFeature]):
++    features_list.extend(
++        [
++            # UnalignedLinearFeature(),
++            # MC2Feature(),
++            # CoCFeature(),
++            # TP2dFeature(),
++            ReplaceIndexPutFeature()
++        ]
++    )
++
++
++def add_pipeline_parallel_features(features_list: List[MindSpeedFeature]):
++    features_list.extend(
++        [
++            RiPipeSchedulesBubbleFeature(),
++            RiPipeSchedulesAdvanceFeature(),
++            NoopLayersFeature(),
++            OptimizeP2PCommFeature(),
++            # VariableSequenceLengthFeature(),
++            # MultiParameterFeature(),
++            # OptimizeSendRecvCommFeature(),
++            # UnalignedPipelineFeature(),
++            # DualpipeVFeature(),
++        ]
++    )
++
++
++def add_transformer_features(features_list: List[MindSpeedFeature]):
++    features_list.extend(
++        [
++            FusionAttentionFeature(),
++            FusionAttentionV2Feature(),
++            # AlibiFeature(),
++            GenerateMaskFeature(),
++            ResetAttentionMaskFeature(),
++            # MLAFeature(),
++            MegatronMcoreRearrangeFeature(),
++        ]
++    )
++
++
++def add_optimizer_features(features_list: List[MindSpeedFeature]):
++    features_list.extend(
++        [
++            # Optimizer features: fused-ema-adamw
++            FusedEmaAdamwFeature(),
++            VirtualOptimizerFeature(),
++        ]
++    )
++
++
++def add_dist_train_features(features_list: List[MindSpeedFeature]):
++    features_list.extend([DistTrainFeature()])
++
++
++# def add_distributed_features(features_list: List[MindSpeedFeature]):
++#     features_list.extend([
++#         BufferPadFeature(),
++#         LayerZeroFeature(),
++#         TorchFullyShardedDataParallelFeature(),
++#         ResetBucketGroupOrderFeature()
++#     ])
++
++
++def create_features_list():
++    features_list = []
++    add_megatron_basic_features(features_list)
++    add_fusions_features(features_list)
++    add_tensor_parallel_features(features_list)
++    add_pipeline_parallel_features(features_list)
++
++    add_optimizer_features(features_list)
++
++    add_dist_train_features(features_list)
++
++    add_transformer_features(features_list)
++    return features_list
++
++
++def set_default_features_list():
++    MindSpeedFeaturesManager.set_features_list(create_features_list())
++
++
++set_default_features_list()
+
