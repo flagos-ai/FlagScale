@@ -1,6 +1,6 @@
 diff --git a/vllm/transformers_utils/configs/emu3_5.py b/vllm/transformers_utils/configs/emu3_5.py
 new file mode 100644
-index 000000000..066ed4d3e
+index 000000000..6f1ef6f6a
 --- /dev/null
 +++ b/vllm/transformers_utils/configs/emu3_5.py
 @@ -0,0 +1,221 @@
@@ -193,7 +193,7 @@ index 000000000..066ed4d3e
 +                else "full_attention"
 +                for i in range(self.num_hidden_layers)
 +            ]
-+        layer_type_validation(self.layer_types, self.num_hidden_layers)
++        layer_type_validation(self.layer_types)
 +
 +        super().__init__(
 +            pad_token_id=pad_token_id,
