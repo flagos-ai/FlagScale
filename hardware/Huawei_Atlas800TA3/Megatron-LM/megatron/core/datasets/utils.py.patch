@@ -1,0 +1,48 @@
+diff --git a/megatron/core/datasets/utils.py b/megatron/core/datasets/utils.py
+index e14656df7..af125793f 100644
+--- a/megatron/core/datasets/utils.py
++++ b/megatron/core/datasets/utils.py
+@@ -1,11 +1,14 @@
+ # Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+ 
++import os
+ import logging
+ from enum import Enum
+ from typing import List, Optional, Tuple
+ 
+ import numpy
+ 
++import torch
++
+ from ..utils import log_single_rank
+ 
+ logger = logging.getLogger(__name__)
+@@ -90,3 +93,26 @@ def get_blend_from_list(
+     prefix_per_dataset = [rppd.strip() for rppd in raw_prefix_per_dataset]
+ 
+     return prefix_per_dataset, weight_per_dataset
++
++
++def is_built_on_zero_rank():
++    """
++    Determines if the current distributed rank is the one responsible for building datasets. 
++
++    Returns:
++        bool: True if the current rank is responsible for building resources, False otherwise.
++    """
++    from megatron.training import get_args
++    args = get_args()
++
++    is_built = False
++    if not args.no_shared_fs \
++        and torch.distributed.get_rank() == 0:
++        is_built = True 
++    elif args.no_shared_fs \
++        and int(os.environ["LOCAL_RANK"]) == 0:
++        is_built = True 
++    else:
++        is_built = False
++    
++    return is_built
+\ No newline at end of file
+

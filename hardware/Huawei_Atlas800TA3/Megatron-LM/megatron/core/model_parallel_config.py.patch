@@ -1,0 +1,22 @@
+diff --git a/megatron/core/model_parallel_config.py b/megatron/core/model_parallel_config.py
+index fc0041a0a..9e53424bf 100644
+--- a/megatron/core/model_parallel_config.py
++++ b/megatron/core/model_parallel_config.py
+@@ -346,6 +346,16 @@ class ModelParallelConfig:
+        the user adds a level 1 timer that is not called by all ranks.
+     """
+ 
++    ###################
++    # Heterogeneous Training 
++    ###################
++    enable_hetero: str = None
++    """Enable the heterogeneous training."""
++
++    hetero_pipeline_layer_split: list = None
++    """A list of lists, each sublist contains numbers of layers to be processed in the corresponding pipeline stages for one device type."""
++
++
+     def __post_init__(self):
+         """Python dataclass method that is used to modify attributes after initialization.
+         See https://docs.python.org/3/library/dataclasses.html#post-init-processing for more
+

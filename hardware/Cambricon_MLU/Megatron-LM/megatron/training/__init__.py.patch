@@ -1,0 +1,24 @@
+diff --git a/megatron/training/__init__.py b/megatron/training/__init__.py
+index 46cf5b5c9..40b9d0c4d 100644
+--- a/megatron/training/__init__.py
++++ b/megatron/training/__init__.py
+@@ -2,6 +2,18 @@
+ 
+ import torch
+ 
++#NOTE(mlu): import gpu_migration from here, prevente gpu_migration infecting megatron.core
++try:
++    import torch_mlu
++    import torch._dynamo
++    torch._dynamo.config.suppress_errors = True
++    from torch_mlu.utils.gpu_migration import migration
++except:
++    pass
++
++#NOTE(mlu): import accelarator module
++from megatron import accelerator
++
+ from .global_vars import get_args
+ from .global_vars import get_signal_handler
+ from .global_vars import get_tokenizer
+

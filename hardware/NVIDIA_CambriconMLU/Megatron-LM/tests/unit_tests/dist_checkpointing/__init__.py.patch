@@ -1,0 +1,16 @@
+diff --git a/tests/unit_tests/dist_checkpointing/__init__.py b/tests/unit_tests/dist_checkpointing/__init__.py
+index ae1637258..a4e01da73 100644
+--- a/tests/unit_tests/dist_checkpointing/__init__.py
++++ b/tests/unit_tests/dist_checkpointing/__init__.py
+@@ -46,6 +46,10 @@ class TempNamedDir(TemporaryDirectory):
+         )
+         self.sync = sync
+ 
++        if sync:
++            import torch
++            torch.distributed.barrier()
++
+     def cleanup(self, override_sync: Optional[bool] = None) -> None:
+         sync = self.sync if override_sync is None else override_sync
+         if sync:
+

@@ -1,0 +1,14 @@
+diff --git a/megatron/core/dist_checkpointing/mapping.py b/megatron/core/dist_checkpointing/mapping.py
+index d6d8e3d28..c44100f21 100644
+--- a/megatron/core/dist_checkpointing/mapping.py
++++ b/megatron/core/dist_checkpointing/mapping.py
+@@ -205,7 +205,7 @@ class ShardedTensor(ShardedBase):
+             )
+ 
+         # TODO: np.unravel_index?
+-        mask = np.zeros(np.product(self.local_shape), dtype=bool)
++        mask = np.zeros(np.prod(self.local_shape), dtype=bool)
+         mask[self.flattened_range] = True
+         return np.nonzero(mask.reshape(self.local_shape))
+ 
+

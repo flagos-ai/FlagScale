@@ -1,0 +1,23 @@
+diff --git a/flagscale/train/train.py b/flagscale/train/train.py
+index e1778c88..b1ee77b9 100644
+--- a/flagscale/train/train.py
++++ b/flagscale/train/train.py
+@@ -2283,7 +2283,7 @@ def post_training_step_callbacks(
+         check_adlr_autoresume_termination(iteration, model, optimizer, opt_param_scheduler)
+ 
+     # Profiling.
+-    torch.cuda.nvtx.range_pop() # for iteratrion
++    # torch.cuda.nvtx.range_pop() # for iteratrion
+     if (
+         args.profile
+         and iteration == args.profile_step_end
+@@ -2610,7 +2610,7 @@ def train(
+             elif iteration == args.profile_step_start:
+                 torch.cuda.cudart().cudaProfilerStart()
+                 torch.autograd.profiler.emit_nvtx(record_shapes=True).__enter__()
+-        torch.cuda.nvtx.range_push(f"iteration num {iteration}") # NOTE(lizhiyu): add iteration num tag for profile
++        # torch.cuda.nvtx.range_push(f"iteration num {iteration}") # NOTE(lizhiyu): add iteration num tag for profile
+         ft_integration.on_checkpointing_start()
+         maybe_finalize_async_save(blocking=False)
+         ft_integration.on_checkpointing_end(is_async_finalization=True)
+
