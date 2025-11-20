@@ -7,16 +7,16 @@
 
 **3)Support automatic expansion and contraction of capacity**
 
-# Program Run Command
+# Launch emu3.5 serve
 python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=run
 
-# Program Stop Command
+# Stop emu3.5 serve
 python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=stop
 
-# output result
-Path of output image: examples/emu3.5/conf/serve/outputs
+# Check output result
+Path of output images: examples/emu3.5/conf/serve/outputs
 
-# parameter adjustment
+# Parameter adjustment
 You should adjust the parameters of DEFAULT_CONFIG in the emu3p5.py file to suit your need, including model paths, task types, etc
 
 You should specify the working_dir path in the upper level configuration file serve_emu3p5.yaml, which contains the src folder in the local Emu3.5 project: https://github.com/baaivision/Emu3.5
