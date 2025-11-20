@@ -18,7 +18,7 @@ experiment:
     # hostfile: /share/project/jiyuheng/exp0/hostfile.32
     # ssh_port: 22
   cmds:
-    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train && export https_proxy=http://10.8.48.6:2080 && export http_proxy=http://10.8.48.6:2080
+    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
   envs:
     CUDA_VISIBLE_DEVICES: 4,5,6,7
     CUDA_DEVICE_MAX_CONNECTIONS: 1
@@ -32,9 +32,6 @@ experiment:
     GLOO_SOCKET_IFNAME: ens101
     NCCL_SOCKET_IFNAME: ens101
     NCCL_IB_GID_INDEX: 7
-    LIBRARY_PATH: /usr/local/cuda/lib64/stubs
-    LD_LIBRARY_PATH: /usr/local/cuda-12.4/lib64:/usr/local/cuda-12.4/lib64:/usr/local/cuda-12.4/lib64:/usr/local/lib:/usr/local/mpi/lib:/usr/local/mpi/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
-    PATH: /root/miniconda3/envs/flagscale-train/bin:/root/miniconda3/condabin:/client-tools:/usr/local/mpi/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 action: run
 
