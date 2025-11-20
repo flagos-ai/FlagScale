@@ -88,6 +88,8 @@ def loss_func(
 
     # Check individual rank losses are not NaN prior to DP all-reduce.
     rerun_state_machine = get_rerun_state_machine()
+    if args.enable_simulator:
+        args.check_for_nan_in_loss_and_grad = False
     if args.check_for_nan_in_loss_and_grad:
         rerun_state_machine.validate_result(
             result=loss,

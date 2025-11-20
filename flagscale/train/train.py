@@ -781,11 +781,9 @@ def pretrain(
         inprocess_call_wrapper: an optional instance of inprocess.CallWrapper,
             it is automatically injected when in-process restart is in use
     """
-
     if inprocess_call_wrapper is not None:
         iteration = inprocess_call_wrapper.iteration
         store = torch.distributed.PrefixStore(str(iteration), store)
-
     # Initalize and get arguments, timers, and Tensorboard writer.
     initialize_megatron(
         extra_args_provider=extra_args_provider,
@@ -797,7 +795,6 @@ def pretrain(
 
     args = get_args()
     timers = get_timers()
-
     if args.log_progress:
         append_to_progress_log("Starting job")
 
@@ -809,7 +806,6 @@ def pretrain(
 
     # Set pytorch JIT layer fusion options and warmup JIT functions.
     set_jit_fusion_options()
-
     # Adjust the startup time so it reflects the largest value.
     # This will be closer to what scheduler will see (outside of
     # image ... launches.
@@ -832,10 +828,8 @@ def pretrain(
     )
     print_datetime('after megatron is initialized')
     app_metrics['app_model_init_finish_time'] = one_logger_utils.get_timestamp_in_ms()
-
     # Track E2E metrics on pretrain start
     one_logger_utils.on_pretrain_start()
-
     # Context used for persisting some state between checkpoint saves.
     if args.non_persistent_ckpt_type == 'local':
         try:
@@ -869,22 +863,18 @@ def pretrain(
         }
     else:
         checkpointing_context = {}
-
     ########## FlagScale Begin ##########
     num_microbatches = get_num_microbatches()
     fs_report_theoretical_memory(args, num_microbatches=num_microbatches, verbose=True)
     ########## FlagScale End ##########
-
     # Model, optimizer, and learning rate.
     timers('model-and-optimizer-setup', log_level=0).start(barrier=True)
     model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
         model_provider, model_type, checkpointing_context=checkpointing_context
     )
-
     timers('model-and-optimizer-setup').stop()
     print_datetime('after model, optimizer, and learning rate ' 'scheduler are built')
     config = get_model_config(model[0])
-
     # Data stuff.
     app_metrics['app_build_dataiters_start_time'] = one_logger_utils.get_timestamp_in_ms()
     timers('train/valid/test-data-iterators-setup', log_level=0).start(barrier=True)
@@ -929,7 +919,6 @@ def pretrain(
     # Print setup timing.
     print_rank_0('done with setup ...')
     timers.log(['model-and-optimizer-setup', 'train/valid/test-data-iterators-setup'], barrier=True)
-
     one_logger = get_one_logger()
     one_logger and one_logger.log_metrics(app_metrics)
 
@@ -937,10 +926,8 @@ def pretrain(
     if wandb_writer:
         # Add job name to the wandb config to make it easier to run more singleton dependency jobs.
         wandb_writer.config.update({'slurm_job_name': os.getenv("SLURM_JOB_NAME", "N/A")})
-
     if not args.skip_train:
         print_rank_0('training ...')
-
         if args.dataloader_type == 'cyclic' and args.retro_project_dir:
             assert args.retro_cyclic_train_iters is not None
             args.train_iters = args.retro_cyclic_train_iters
@@ -1055,7 +1042,6 @@ def pretrain(
                     non_loss_data_func=non_loss_data_func
                 )
         ######### FlagScale End ##########
-
     wandb_writer = get_wandb_writer()
     if wandb_writer:
         wandb_writer.finish()
@@ -1070,7 +1056,6 @@ def pretrain(
 
     ft_integration.shutdown()
     one_logger_utils.finish()
-
 
 def update_train_iters(args):
 
@@ -1414,14 +1399,14 @@ def setup_model_and_optimizer(
         no_wd_decay_cond,
         scale_lr_cond,
         lr_mult,
-        use_gloo_process_groups=args.enable_gloo_process_groups,
+        #use_gloo_process_groups=args.enable_gloo_process_groups,
+        #use_gloo_process_groups=False,
         # If the user is asking for a non-zero embedding init std, skip weight decay for embeddings
         #  to avoid embeddings from shrinking to zero as recommended in https://arxiv.org/abs/2312.16903
-        default_skip_embedding_weight_decay=args.embedding_init_method_std is not None,
+        #default_skip_embedding_weight_decay=args.embedding_init_method_std is not None,
     )
     opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
     one_logger and one_logger.log_metrics({"app_build_optimzer_finish_time": one_logger_utils.get_timestamp_in_ms()})
-
     if args.moe_use_upcycling:
         torch.distributed.barrier()
         assert not checkpoint_exists(args.save), (
@@ -1528,7 +1513,6 @@ def setup_model_and_optimizer(
         print_rank_0("> converted checkpoint: %s -> %s." % (load_ckpt_format, args.ckpt_format))
         torch.distributed.barrier()
         exit()
-
     return model, optimizer, opt_param_scheduler
 
 
@@ -1547,14 +1531,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     """Single training step."""
     args = get_args()
     timers = get_timers()
-
     rerun_state_machine = get_rerun_state_machine()
     while rerun_state_machine.should_run_forward_backward(data_iterator):
         # Set grad to zero.
         for model_chunk in model:
             model_chunk.zero_grad_buffer()
         optimizer.zero_grad()
-
         if has_nvidia_modelopt:
             # [ModelOpt]: Pipeline-parallel Distillation stacks student and teacher tensors
             adjust_tensor_shapes_fn = get_tensor_shapes_adjust_fn_for_distillation(
@@ -1572,6 +1554,9 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                     optim_instance._copy_main_params_to_param_buffer()
 
         # Forward pass.
+        # =================== Forward + Backward timing ===================
+        torch.cuda.synchronize()
+        t_fwd_start = time.time()
         losses_reduced = forward_backward_func(
             forward_step_func=forward_step_func,
             data_iterator=data_iterator,
@@ -1580,9 +1565,15 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             seq_length=args.seq_length,
             micro_batch_size=args.micro_batch_size,
             decoder_seq_length=args.decoder_seq_length,
-            forward_only=False,
+            forward_only=True,
             adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
         )
+        torch.cuda.synchronize()
+        t_fwd_end = time.time()
+        fwd_time = t_fwd_end - t_fwd_start
+        bwd_time = fwd_time * 2.0
+        print(f"[simulatior output] forward: {fwd_time:.2f}, backward: {bwd_time:.2f}", flush=True)
+        # ================================================================
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
         return {}, True, should_checkpoint, should_exit, exit_code, None, None
@@ -1609,11 +1600,11 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
 
     # Update parameters.
-
+    # =================== Communication / Optimizer timing ===================
     timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
     update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
     timers('optimizer').stop()
-
+    #print(f"[simulatior output] forward: {fwd_time:.2f}, backward: {bwd_time:.2f}, communication: {comm_time:.2f}", flush=True)
     # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
     # so we must gather across mp ranks
     update_successful = logical_and_across_model_parallel_group(update_successful)
@@ -1639,6 +1630,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     # Empty unused memory.
     if args.empty_unused_memory_level >= 2:
         torch.cuda.empty_cache()
+
 
     if mpu.is_pipeline_last_stage(ignore_virtual=True):
         # Average loss across microbatches.
@@ -2640,7 +2632,7 @@ def train(
                         model, optimizer, iteration, ref_state_dict,
                     )
                 train_data_iterator = buffered_rollouts
-
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
         ft_integration.on_training_step_start()
         (
             loss_dict,
@@ -3257,7 +3249,8 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
     args.do_test = getattr(args, "do_test", False) or flags[2].item()
     if getattr(args, 'perform_rl_step', False):
         args.to_test = False
-
+    if args.enable_simulator:
+        args.do_train = 1
     return train_dataloader, valid_dataloaders, test_dataloader
 
 
