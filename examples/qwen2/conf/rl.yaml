@@ -13,8 +13,8 @@ experiment:
     before_start: source /root/miniconda3/bin/activate verl
   runner:
     nnodes: 1
-    nproc_per_node: 4
-    hostfile: ./hostfile
+    nproc_per_node: 8
+    hostfile: null
     ray_port: 6379
     ray_dashboard_port: 8265
   envs:

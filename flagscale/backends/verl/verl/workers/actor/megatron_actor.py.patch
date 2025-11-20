@@ -1,5 +1,5 @@
 diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
-index 38d317e1..e7c70861 100644
+index 38d317e1..26def4e8 100644
 --- a/verl/workers/actor/megatron_actor.py
 +++ b/verl/workers/actor/megatron_actor.py
 @@ -38,7 +38,10 @@ from torch import nn
@@ -13,7 +13,24 @@ index 38d317e1..e7c70861 100644
  from verl.utils.megatron.pipeline_parallel import make_batch_generator
  from verl.utils.megatron.tensor_parallel import vocab_parallel_entropy, vocab_parallel_log_probs_from_logits
  from verl.utils.megatron_utils import get_model_config
-@@ -419,76 +422,327 @@ class MegatronPPOActor(BasePPOActor):
+@@ -409,6 +412,16 @@ class MegatronPPOActor(BasePPOActor):
+             # We move calculation of entropy to compute_log_probs, forward_only == True
+             device = output["log_probs"].device
+             metrics = {}
++            
++            # Check if sequence packing loss is enabled from config (check early for debugging)
++            log_prob_raw = output["log_probs"]
++            seqpack_loss_enabled = self.config.policy_loss.get("seqpack_loss", False) if self.config.policy_loss else False
++            
++            # Print debug info to verify code execution and config loading
++            print_rank_0(f"[MegatronPPOActor] loss_func: forward_only={forward_only}, seqpack_loss_enabled={seqpack_loss_enabled}")
++            if hasattr(self.config, "policy_loss") and self.config.policy_loss:
++                print_rank_0(f"[MegatronPPOActor] policy_loss config exists: {self.config.policy_loss}")
++            
+             if forward_only:
+                 if post_process_fn is None:
+                     pass
+@@ -419,76 +432,323 @@ class MegatronPPOActor(BasePPOActor):
                  if not calculate_entropy:
                      return torch.tensor(1.0, device=device), metrics
  
@@ -30,10 +47,6 @@ index 38d317e1..e7c70861 100644
 -                advantages = data["advantages"]
 -
 -                entropy_coeff = self.config.entropy_coeff
-+            # Check if sequence packing loss is enabled from config
-+            log_prob_raw = output["log_probs"]
-+            seqpack_loss_enabled = self.config.policy_loss.get("seqpack_loss", False) if self.config.policy_loss else False
-+            
 +            if seqpack_loss_enabled:
 +                # Get packed_seq_params from data
 +                packed_seq_params = tu.get_non_tensor_data(data, key="packed_seq_params", default=None)
