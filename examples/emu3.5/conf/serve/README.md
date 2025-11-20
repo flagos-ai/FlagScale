@@ -1,7 +1,7 @@
 **After completing the environment setup based on the README.md file in the upper directory**
 
 # Function HighLight:
-# 1)Support multiple instances,
+### 1)Support multiple instances,
 # 2)Support cross node operation,
 ### 3)Support automatic expansion and contraction of capacity
 
