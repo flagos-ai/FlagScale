@@ -29,7 +29,8 @@ cd ..
 rm -rf tmp_repo
 ```
 
-## Configuration
+## Offline Inference
+### Configuration
 
 - Path: `./examples/emu3.5/conf`
 
@@ -71,7 +72,7 @@ generate:
     guidance_scale: 5.0
 ```
 
-## Run Inference
+### Run Inference
 
 entrypoint: `./flagscale/inference/inference_emu3p5.py`
 
@@ -83,11 +84,23 @@ python run.py --config-path examples/emu3.5/conf/ --config-name image_generation
 python run.py --config-path examples/emu3.5/conf/ --config-name interleaved_generation.yaml
 ```
 
-## Run Serve
+## Online Serve
 1)Support multiple instances
+
 2)Support multiple nodes
+
 3)Support instance autoscaling
 
+### Configuration
+**model-related configuration:** `examples/emu3.5/conf/serve/emu3p5.py`
+You should adjust the parameters of DEFAULT_CONFIG in the file to fit your need, including model paths, task types, etc
+
+**deploy-related configuration:** `examples/emu3.5/conf/serve_emu3p5.yaml`
+You should specify the working_dir path in the configuration file serve_emu3p5.yaml, which contains the src folder in the local Emu3.5 project: https://github.com/baaivision/Emu3.5
+
+Note:  You can also directly run command `python emu3p5.py`, with setting the env : `export PATHONPATH=/path/to/FlagScale:${PYTHONPATH}`
+
+### Run Serve
 
 ```bash
 # Start emu3.5 serve
@@ -133,13 +146,4 @@ except Exception as e:
     print("Fail", e)
 ```
 
-**Check output result**
-
-Path of output images: examples/emu3.5/conf/serve/outputs
-
-### Parameter adjustment
-You should adjust the parameters of DEFAULT_CONFIG in the `examples/emu3.5/conf/serve/emu3p5.py` file to suit your need, including model paths, task types, etc
-
-You should specify the working_dir path in the configuration file serve_emu3p5.yaml, which contains the src folder in the local Emu3.5 project: https://github.com/baaivision/Emu3.5
-
-Note:  You can also directly run command `python emu3p5.py`, with setting the env : `export PATHONPATH=/path/to/FlagScale:${PYTHONPATH}`
+**Path of output images:** examples/emu3.5/conf/serve/outputs

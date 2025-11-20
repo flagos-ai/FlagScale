@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
 }
 
 
-class EmuVLLMInferencePipeline:
+class Emu3_5InferencePipeline:
 
     def __init__(self, config: Dict[str, Any] = DEFAULT_CONFIG):
 
@@ -209,16 +209,16 @@ def main(task_type: str = "x2i"):
 
     DEFAULT_CONFIG["task_type"] = task_type
 
-    pipeline = EmuVLLMInferencePipeline(DEFAULT_CONFIG)
+    pipeline = Emu3_5InferencePipeline(DEFAULT_CONFIG)
 
-    test_case_x2i = {
+    sampler = {
         "prompt": "As shown in the second figure: The ripe strawberry rests on a green leaf in the garden. Replace the chocolate truffle in first image with ripe strawberry from 2nd image",
         "reference_image": ["/path/to/assets/ref_img.png"],
     }
 
     logger.info(f"--- Starting Fixed Task ({pipeline.task_type}) Test Case ---")
     pipeline.forward(
-        prompt=test_case_x2i["prompt"], reference_image=test_case_x2i["reference_image"]
+        prompt=sampler["prompt"], reference_image=sampler["reference_image"]
     )
 
 
