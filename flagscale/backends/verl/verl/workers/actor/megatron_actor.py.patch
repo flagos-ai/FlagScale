@@ -1,5 +1,5 @@
 diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
-index 38d317e1..26def4e8 100644
+index 38d317e1..240c889d 100644
 --- a/verl/workers/actor/megatron_actor.py
 +++ b/verl/workers/actor/megatron_actor.py
 @@ -38,7 +38,10 @@ from torch import nn
@@ -13,24 +13,28 @@ index 38d317e1..26def4e8 100644
  from verl.utils.megatron.pipeline_parallel import make_batch_generator
  from verl.utils.megatron.tensor_parallel import vocab_parallel_entropy, vocab_parallel_log_probs_from_logits
  from verl.utils.megatron_utils import get_model_config
-@@ -409,6 +412,16 @@ class MegatronPPOActor(BasePPOActor):
+@@ -409,6 +412,20 @@ class MegatronPPOActor(BasePPOActor):
              # We move calculation of entropy to compute_log_probs, forward_only == True
              device = output["log_probs"].device
              metrics = {}
 +            
 +            # Check if sequence packing loss is enabled from config (check early for debugging)
 +            log_prob_raw = output["log_probs"]
-+            seqpack_loss_enabled = self.config.policy_loss.get("seqpack_loss", False) if self.config.policy_loss else False
++            # Safely access policy_loss config (may not exist for ref worker)
++            if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None:
++                seqpack_loss_enabled = getattr(self.config.policy_loss, "seqpack_loss", False)
++            else:
++                seqpack_loss_enabled = False
 +            
 +            # Print debug info to verify code execution and config loading
 +            print_rank_0(f"[MegatronPPOActor] loss_func: forward_only={forward_only}, seqpack_loss_enabled={seqpack_loss_enabled}")
-+            if hasattr(self.config, "policy_loss") and self.config.policy_loss:
++            if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None:
 +                print_rank_0(f"[MegatronPPOActor] policy_loss config exists: {self.config.policy_loss}")
 +            
              if forward_only:
                  if post_process_fn is None:
                      pass
-@@ -419,76 +432,323 @@ class MegatronPPOActor(BasePPOActor):
+@@ -419,76 +436,323 @@ class MegatronPPOActor(BasePPOActor):
                  if not calculate_entropy:
                      return torch.tensor(1.0, device=device), metrics
  
@@ -170,7 +174,7 @@ index 38d317e1..26def4e8 100644
 +                            old_log_prob = seq_data_dict["old_log_probs"]
 +                            advantages = seq_data_dict["advantages"]
 +                            
-+                            loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
++                            loss_mode = getattr(self.config.policy_loss, "loss_mode", "vanilla") if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None else "vanilla"
 +                            policy_loss_fn = get_policy_loss_fn(loss_mode)
 +                            rollout_is_weights = seq_data_dict.get("rollout_is_weights", None)
 +                            
@@ -239,7 +243,7 @@ index 38d317e1..26def4e8 100644
 +                    entropy_coeff = self.config.entropy_coeff
 +                    loss_agg_mode = self.config.loss_agg_mode
 +
-+                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
++                    loss_mode = getattr(self.config.policy_loss, "loss_mode", "vanilla") if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None else "vanilla"
 +
 +                    policy_loss_fn = get_policy_loss_fn(loss_mode)
 +
@@ -356,7 +360,7 @@ index 38d317e1..26def4e8 100644
 +                    entropy_coeff = self.config.entropy_coeff
 +                    loss_agg_mode = self.config.loss_agg_mode
 +
-+                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
++                    loss_mode = getattr(self.config.policy_loss, "loss_mode", "vanilla") if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None else "vanilla"
 +
 +                    policy_loss_fn = get_policy_loss_fn(loss_mode)
 +
