@@ -4,12 +4,16 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 
 from __future__ import annotations
-from abc import  abstractmethod
-from typing import Optional, Tuple, Union
+
 import logging
+
+from abc import abstractmethod
+from typing import Optional, Tuple, Union
+
 logger = logging.getLogger(__name__)
 
 import torch
+
 from torch import Tensor
 
 from megatron.core.inference.contexts import BaseInferenceContext
@@ -23,13 +27,16 @@ from megatron.core.parallel_state import (
     get_tensor_model_parallel_world_size,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.transformer.attention import (
+    Attention,
+    CrossAttentionSubmodules,
+    SelfAttentionSubmodules,
+)
+from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.spec_utils import build_module
+from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import deprecate_inference_params, is_fa_min_version
 
-from megatron.core.transformer.enums import AttnMaskType
-from megatron.core.transformer.transformer_config import TransformerConfig
-
-from megatron.core.transformer.attention import Attention, SelfAttentionSubmodules, CrossAttentionSubmodules
 try:
     from einops import rearrange
 except ImportError:
@@ -52,16 +59,12 @@ except ImportError:
     SplitAlongDim = None
 
 try:
-    from megatron.core.extensions.transformer_engine import (
-        fused_apply_rotary_pos_emb,
-    )
+    from megatron.core.extensions.transformer_engine import fused_apply_rotary_pos_emb
 
     HAVE_APPLY_ROPE_FUSION = True
 except ImportError:
     try:
-        from apex.transformer.functional import (
-            fused_apply_rotary_pos_emb,
-        )
+        from apex.transformer.functional import fused_apply_rotary_pos_emb
 
         HAVE_APPLY_ROPE_FUSION = True
     except ImportError:
@@ -111,6 +114,7 @@ def _apply_rotary_pos_emb_bshd_vision(
     sin_ = torch.sin(freqs).float()
     t = (t * cos_) + (_rotate_half(t, rotary_interleaved) * sin_)
     return torch.cat((t, t_pass), dim=-1).to(input_dtype)
+
 
 def apply_rotary_pos_emb_vision(
     t: Tensor,
@@ -174,6 +178,7 @@ def apply_rotary_pos_emb_with_cos_sin_vision(
 
     return y
 
+
 class VisionAttention(Attention):
     """Attention layer abstract class.
 
@@ -191,8 +196,15 @@ class VisionAttention(Attention):
         cp_comm_type: str = None,
         pg_collection: ProcessGroupCollection = None,
     ):
-        super().__init__(config=config, submodules=submodules, layer_number=layer_number, attn_mask_type=attn_mask_type, attention_type=attention_type, cp_comm_type=cp_comm_type, pg_collection=pg_collection)
-
+        super().__init__(
+            config=config,
+            submodules=submodules,
+            layer_number=layer_number,
+            attn_mask_type=attn_mask_type,
+            attention_type=attention_type,
+            cp_comm_type=cp_comm_type,
+            pg_collection=pg_collection,
+        )
 
     def _adjust_key_value_for_inference(
         self,
@@ -295,8 +307,12 @@ class VisionAttention(Attention):
             # Flash Decoding assumes that the keys stored in the KV Cache already have RoPE applied.
             # Apply RoPE before we store the keys to make it compatible with flash decoding kernel
             if rotary_pos_sin_q is not None and rotary_pos_sin_k is not None:
-                key = apply_rotary_pos_emb_with_cos_sin_vision(key, rotary_pos_cos_k, rotary_pos_sin_k)
-                query = apply_rotary_pos_emb_with_cos_sin_vision(query, rotary_pos_cos_q, rotary_pos_sin_q)
+                key = apply_rotary_pos_emb_with_cos_sin_vision(
+                    key, rotary_pos_cos_k, rotary_pos_sin_k
+                )
+                query = apply_rotary_pos_emb_with_cos_sin_vision(
+                    query, rotary_pos_cos_q, rotary_pos_sin_q
+                )
         else:
             rotary_pos_cos_q = None
             rotary_pos_sin_q = None
@@ -607,6 +623,7 @@ class VisionAttention(Attention):
         output, bias = self.linear_proj(core_attn_out)
 
         return output, bias
+
 
 class SelfAttentionVision(VisionAttention):
     """Self-attention layer class

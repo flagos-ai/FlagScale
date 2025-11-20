@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from typing import List, Optional, Union
 
 import torch
+
 from torch import Tensor
 
 from megatron.core import parallel_state, tensor_parallel
@@ -17,15 +18,12 @@ from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.spec_utils import ModuleSpec
-from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_block import TransformerBlock, TransformerBlockSubmodules
+from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import WrappedTensor, deprecate_inference_params, make_viewless_tensor
 
 try:
-    from megatron.core.extensions.transformer_engine import (
-        TENorm,
-        te_checkpoint,
-    )
+    from megatron.core.extensions.transformer_engine import TENorm, te_checkpoint
 
     HAVE_TE = True
     LayerNormImpl = TENorm
@@ -56,9 +54,14 @@ class VisionTransformerBlock(TransformerBlock):
         post_process: bool = True,
         pg_collection: ProcessGroupCollection = None,
     ):
-        super().__init__(config=config, spec=spec, post_layer_norm=post_layer_norm,
-                         pre_process=pre_process, post_process=post_process,
-                         pg_collection=pg_collection)
+        super().__init__(
+            config=config,
+            spec=spec,
+            post_layer_norm=post_layer_norm,
+            pre_process=pre_process,
+            post_process=post_process,
+            pg_collection=pg_collection,
+        )
 
     def _checkpointed_forward(
         self,
@@ -160,7 +163,6 @@ class VisionTransformerBlock(TransformerBlock):
 
         return hidden_states
 
-
     def forward(
         self,
         hidden_states: Union[Tensor, WrappedTensor],
@@ -177,7 +179,7 @@ class VisionTransformerBlock(TransformerBlock):
         *,
         inference_params: Optional[BaseInferenceContext] = None,
         packed_seq_params_full: Optional[PackedSeqParams] = None,
-        fullatt_block_indexes = None,
+        fullatt_block_indexes=None,
     ):
         """
         Perform the forward pass through the transformer block.
@@ -265,7 +267,7 @@ class VisionTransformerBlock(TransformerBlock):
                     attention_bias=attention_bias,
                     packed_seq_params=packed_seq_params,
                     packed_seq_params_full=packed_seq_params_full,
-                    fullatt_block_indexes=fullatt_block_indexes
+                    fullatt_block_indexes=fullatt_block_indexes,
                 )
             else:
                 for l_no, layer in enumerate(self.layers):
