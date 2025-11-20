@@ -11,7 +11,7 @@ python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 act
 ## Program Stop Command
 python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=stop
 
-# output result
+## output result
 Path of output image: examples/emu3.5/conf/serve/outputs
 
 # parameter adjustment
