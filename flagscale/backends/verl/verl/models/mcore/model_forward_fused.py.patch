@@ -1,0 +1,24 @@
+diff --git a/verl/models/mcore/model_forward_fused.py b/verl/models/mcore/model_forward_fused.py
+index 03e234d5..4e811121 100644
+--- a/verl/models/mcore/model_forward_fused.py
++++ b/verl/models/mcore/model_forward_fused.py
+@@ -72,6 +72,7 @@ def fused_forward_model_gen(vision_model: bool = False):
+         labels_mask: Tensor,
+         temperature: float,
+         multi_modal_inputs: dict,
++        data=None,
+     ):
+         pre_process: bool = (
+             unwrap_model(model).pre_process if not vision_model else True
+@@ -87,6 +88,11 @@ def fused_forward_model_gen(vision_model: bool = False):
+         batch_size, seq_len = attention_mask.shape[:2]
+         input_ids_rmpad, packed_seq_params = preprocess_packed_seqs(input_ids, attention_mask, pre_process=pre_process)
+         input_ids_rmpad = input_ids_rmpad.contiguous()
++        
++        # Store packed_seq_params in data if provided
++        if data is not None:
++            from verl.utils import tensordict_utils as tu
++            tu.assign_non_tensor(data, packed_seq_params=packed_seq_params)
+         labels_rmpad, _ = preprocess_packed_seqs(labels, attention_mask, pre_process=True)
+         labels_mask_rmpad, _ = preprocess_packed_seqs(labels_mask, attention_mask, pre_process=True)
+         labels_rmpad = labels_rmpad.contiguous()
