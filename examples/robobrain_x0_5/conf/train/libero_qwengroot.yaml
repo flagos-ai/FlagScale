@@ -1,0 +1,102 @@
+config_path: examples/robobrain_x0_5/conf/train/libero_qwengroot.yaml
+seed: 42
+trackers: [jsonl, wandb]
+wandb_entity: jinhuiye
+wandb_project: StarVLA_Libero
+is_debug: false
+
+batch_size: 2
+resume: false
+checkpoint_dir: results/ckpt_in
+exp_name: starvla
+project_name: starvla
+wandb_enabled: false
+output_directory: results/ckpt_out
+log_freq: 10
+train_steps: 100
+
+framework:
+  name: QwenGR00T
+  qwenvl:
+    base_vlm: /repos/flagscale_new_robotics/FlagScale/results/ckpt_in/backbone
+    # attn_implementation: flash_attention_2
+    attn_implementation: eager
+    vl_hidden_dim: 2048
+  dino:
+    dino_backbone: dinov2_vits14
+  action_model:
+    action_model_type: DiT-L
+    action_hidden_dim: 1024
+    hidden_size: 1024
+    add_pos_embed: true
+    max_seq_len: 1024
+    action_dim: 14
+    state_dim: 7
+    future_action_window_size: 29
+    action_horizon: 30
+    past_action_window_size: 0
+    repeated_diffusion_steps: 8
+    noise_beta_alpha: 1.5
+    noise_beta_beta: 1.0
+    noise_s: 0.999
+    num_timestep_buckets: 1000
+    num_inference_timesteps: 4
+    num_target_vision_tokens: 32
+    diffusion_model_cfg:
+      cross_attention_dim: 2048
+      dropout: 0.2
+      final_dropout: true
+      interleave_self_attention: true
+      norm_type: ada_norm
+      num_layers: 16
+      output_dim: 1024
+      positional_embeddings: null
+  reduce_in_full_precision: true
+
+datasets:
+  task_encoder:
+    vision_root: ""
+    state_key: eepose
+    action_horizon: 7
+    action_key: eepose
+  data_path: /repos/flagscale_new_robotics/FlagScale/demo_0913_n2/wds-1
+  vlm_data: {}
+  vla_data: {}
+
+trainer:
+  epochs: 10
+  max_train_steps: 36000
+  num_warmup_steps: 3600
+  save_interval: 3600
+  eval_interval: 500
+  learning_rate:
+    base: 3.0e-05
+    qwen_vl_interface: 1.0e-05
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: true
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  max_grad_norm: 1.0
+  warmup_ratio: 0.1
+  weight_decay: 0.0
+  logging_frequency: 10
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08
+  is_resume: false
+  resume_epoch: null
+  resume_step: null
+  enable_gradient_checkpointing: true
+  enable_mixed_precision_training: true
+
+system: {}
+model: {}
+data: {}

@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - train: 3_3b
+  - train: libero_qwengroot
 
 experiment:
-  exp_name: Robotics-3.3B
+  exp_name: libero_qwengroot
   seed: 42
   save_steps: 10000
   load: null
@@ -12,7 +12,7 @@ experiment:
   task:
     type: train
     backend: robotics
-    entrypoint: flagscale/train/train_robotics.py
+    entrypoint: flagscale/train/train_robotics_qwengroot.py
   runner:
     per_node_task: false
     no_shared_fs: false
@@ -22,14 +22,9 @@ experiment:
     before_start: echo "Starting Robotics Training"
   envs:
     LOGLEVEL: "INFO"
-    CUDA_VISIBLE_DEVICES: "1"
+    CUDA_VISIBLE_DEVICES: "0,1"
     CUDA_DEVICE_MAX_CONNECTIONS: 1
-    # Set python paths for: robotics, lerobot, openpi-client, FlagScale, Megatron-LM
-    PYTHONPATH: python/paths
-    # Set lerobot data path
-    HF_LEROBOT_HOME: lerobot/data/path
     WANDB_MODE: offline
-
 
 action: run
 

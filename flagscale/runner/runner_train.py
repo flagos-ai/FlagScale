@@ -57,12 +57,8 @@ def _get_args_robotics(config: DictConfig):
     config_dict = OmegaConf.to_container(config, resolve=True)
     config_dict = config_dict["train"]
 
-    new_config_dict = {}
-    new_config_dict.update(config_dict["model"])
-    ignore_keys = ["log_dir", "details_dir", "scripts_dir", "pids_dir"]
-    # Flatten the dictionary to a list of arguments
-    args = flatten_dict_to_args(new_config_dict, ignore_keys)
-    args = [config_dict["data"]["config_name"]] + args
+    new_config_dict = {"config_path": config_dict["config_path"]}
+    args = flatten_dict_to_args(new_config_dict)
     return args
 
 
@@ -269,7 +265,7 @@ def _generate_run_script_train(
         f.write(f"\n")
         f.write(f"cd {root_dir}\n")
         f.write(f"\n")
-        f.write(f"export PYTHONPATH={megatron_dir}:{root_dir}:${{PYTHONPATH}}\n")
+        f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
         f.write(f"\n")
         f.write(f'cmd="{cmd}"\n')
         f.write(f"\n")

@@ -16,6 +16,12 @@ cd FlagScale/
 
 Install train and inference env according to [README](https://github.com/FlagOpen/FlagScale/blob/main/README.md) 
 
+Install transformers. Higher version cause problem on image pre-processing.
+
+```sh
+pip install transformers==4.53.0
+```
+
 # Download Model
 
 ```sh
@@ -70,9 +76,9 @@ Download test images:
 
 ```sh
 cd FlagScale/
-wget https://gitee.com/hchnr/flag-scale/blob/robotics_dataset/orbbec_0_latest.jpg
-wget https://gitee.com/hchnr/flag-scale/blob/robotics_dataset/orbbec_1_latest.jpg
-wget https://gitee.com/hchnr/flag-scale/blob/robotics_dataset/orbbec_2_latest.jpg
+wget https://gitee.com/hchnr/flag-scale/raw/robotics_dataset/orbbec_0_latest.jpg
+wget https://gitee.com/hchnr/flag-scale/raw/robotics_dataset/orbbec_1_latest.jpg
+wget https://gitee.com/hchnr/flag-scale/raw/robotics_dataset/orbbec_2_latest.jpg
 ```
 
 Run client:
