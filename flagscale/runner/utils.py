@@ -256,10 +256,8 @@ def flatten_dict_to_args_verl(config_dict, pre_str=""):
                 target_str = f"{key}."
             args.extend(flatten_dict_to_args_verl(value, pre_str + target_str))
         elif isinstance(value, list):
-            v_str = ""
-            for v in value:
-                v_str += f"{v}"
-            args.append(f"{pre_str+key}=" + v_str)
+            json_str = json.dumps(value)
+            args.append(f"{pre_str+key}={json_str}")
         elif isinstance(value, bool):
             args.append(f"{pre_str+key}={value}")
         else:

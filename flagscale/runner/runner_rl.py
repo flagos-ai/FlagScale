@@ -33,35 +33,7 @@ def _get_args_verl(config: DictConfig):
     # Flatten config to arguments
     args = flatten_dict_to_args_verl(config_dict, pre_str="")
 
-    # Helper: extract key from argument
-    def _get_key(arg: str) -> str:
-        if "=" in arg:
-            return arg.split("=")[0].lstrip("+")
-        return arg if arg.startswith("~") else arg
-
-    config_path_args = [arg for arg in args if arg.startswith("--config-")]
-    override_args = [arg for arg in args if not arg.startswith("--config-")]
-
-    initial_args_keys = {_get_key(arg) for arg in override_args}
-    
-    # Convert configs that need + prefix (override_* and megatron.* for Megatron strategy)
-    def _needs_plus(arg: str) -> bool:
-        key = _get_key(arg)
-        if arg.startswith("+"):
-            return False
-        if ".override_" in key:
-            return True
-        if strategy == "megatron":
-            # Both actor.megatron.* and ref.megatron.* need + prefix
-            if "actor_rollout_ref.actor.megatron." in key:
-                return True
-            if "actor_rollout_ref.ref.megatron." in key:
-                return True
-        return False
-
-    override_args = [f"+{arg}" if _needs_plus(arg) else arg for arg in args]
-
-    return config_path_args + override_args
+    return args
 
 
 def _update_config_rl(config: DictConfig):

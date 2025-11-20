@@ -2,7 +2,7 @@
 config-path: config
 
 #default verl config name
-config-name: ppo_trainer.yaml
+config-name: ppo_megatron_trainer.yaml
 
 algorithm:
   adv_estimator: grpo
@@ -21,15 +21,12 @@ actor_rollout_ref:
   model:
     path: /nfs/lyrawen/models/Qwen2.5-0.5B-Instruct
     use_remove_padding: true
-    enable_gradient_checkpointing: true
     trust_remote_code: true
   actor:
-    _target_: verl.workers.config.actor.McoreActorConfig
-    strategy: megatron
     optim:
       lr: 1e-6
-    ppo_mini_batch_size: 256
-    ppo_micro_batch_size_per_gpu: 4      
+    ppo_mini_batch_size: 128
+    ppo_micro_batch_size_per_gpu: 2     
     use_kl_loss: true
     kl_loss_coef: 0.001
     kl_loss_type: low_var_kl
@@ -45,10 +42,10 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: 4
     tensor_model_parallel_size: 2
     name: vllm
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.5
     n: 5
   ref:
-    log_prob_micro_batch_size_per_gpu: 4
+    log_prob_micro_batch_size_per_gpu: 2
     megatron:
       pipeline_model_parallel_size: 2
       tensor_model_parallel_size: 2

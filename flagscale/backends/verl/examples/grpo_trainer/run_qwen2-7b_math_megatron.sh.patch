@@ -1,5 +1,5 @@
 diff --git a/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh b/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh
-index 2a29ccd0..1377a601 100644
+index 2a29ccd0..ffad8500 100644
 --- a/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh
 +++ b/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh
 @@ -8,10 +8,10 @@ if [ "$rollout_mode" = "async" ]; then
@@ -17,7 +17,13 @@ index 2a29ccd0..1377a601 100644
  
  train_files="['$gsm8k_train_path', '$math_train_path']"
  test_files="['$gsm8k_test_path', '$math_test_path']"
-@@ -29,7 +29,7 @@ python3 -m verl.trainer.main_ppo --config-path=config \
+@@ -24,12 +24,12 @@ python3 -m verl.trainer.main_ppo --config-path=config \
+     data.train_files="$train_files" \
+     data.val_files="$test_files" \
+     data.return_raw_chat=$return_raw_chat \
+-    data.train_batch_size=1024 \
++    data.train_batch_size=512 \
+     data.max_prompt_length=1024 \
      data.max_response_length=1024 \
      data.filter_overlong_prompts=True \
      data.truncation='error' \
