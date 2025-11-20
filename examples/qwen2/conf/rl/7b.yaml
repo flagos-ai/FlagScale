@@ -9,8 +9,8 @@ algorithm:
   use_kl_in_reward: false
 
 data:
-  train_files: /nfs/lyrawen/geometry3k/data/train.parquet
-  val_files: /nfs/lyrawen/geometry3k/data/test.parquet
+  train_files: /workspace/data/gsm8k/train.parquet
+  val_files: /workspace/data/gsm8k/test.parquet
   train_batch_size: 256
   max_prompt_length: 512
   max_response_length: 1024
@@ -19,44 +19,31 @@ data:
 
 actor_rollout_ref:
   model:
-    path: /nfs/lyrawen/model/Qwen2.5-VL-7B-Instruct
+    path: /workspace/models/Qwen/Qwen2-7B-Instruct
     use_remove_padding: true
     enable_gradient_checkpointing: true
-    trust_remote_code: true
   actor:
-    # Use Megatron backend for actor
-    _target_: verl.workers.config.actor.McoreActorConfig
-    strategy: megatron
     optim:
       lr: 1e-6
     ppo_mini_batch_size: 64
     ppo_micro_batch_size_per_gpu: 10
-    use_sequence_packing_balance: true
-    sequence_packing_algorithm: modified_first_fit_decreasing
-    # Use fused kernels when available (FlashAttention, fused MLP, etc.)
-    use_fused_kernels: true
-    megatron:
-      tensor_model_parallel_size: 4
-      override_transformer_config:
-        attn_implementation: flash_attention_2
-      override_mcore_model_config:
-        params_dtype: bfloat16   # or float16 depending on GPU support
-        input_dtype: bfloat16    # optional, keep inputs in same dtype
     use_kl_loss: true
     kl_loss_coef: 0.001
     kl_loss_type: low_var_kl
     entropy_coeff: 0
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
   rollout:
     log_prob_micro_batch_size_per_gpu: 10
     tensor_model_parallel_size: 2
     name: vllm
     gpu_memory_utilization: 0.6
     n: 5
-    dtype: bfloat16
   ref:
     log_prob_micro_batch_size_per_gpu: 10
-    megatron:
-      tensor_model_parallel_size: 4
+    fsdp_config:
+      param_offload: true
 
 trainer:
   critic_warmup: 0
@@ -69,3 +56,8 @@ trainer:
   test_freq: 5
   total_epochs: 15
   default_local_dir: ${experiment.exp_dir}/checkpoints
+
+append_kargs:
+  actor_rollout_ref:
+    rollout:
+      trust_remote_code: True

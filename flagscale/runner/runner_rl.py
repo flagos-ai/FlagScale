@@ -26,12 +26,15 @@ _MAX_CPU_COUNT = multiprocessing.cpu_count()
 def _get_args_verl(config: DictConfig):
     assert config.experiment.task.backend == "verl", "This function only supports verl backend."
 
-    # Convert to dict and extract actor config
-    config_dict = OmegaConf.to_container(config, resolve=True)["rl"]
-    actor_config = config_dict.get("actor_rollout_ref", {}).get("actor", {})
+    # Convert the DictConfig to a regular dictionary
+    config_dict = OmegaConf.to_container(config, resolve=True)
+    config_dict = config_dict["rl"]
 
-    # Flatten config to arguments
-    args = flatten_dict_to_args_verl(config_dict, pre_str="")
+    new_config_dict = {}
+    new_config_dict.update(config_dict)
+
+    # Flatten the dictionary to a list of arguments
+    args = flatten_dict_to_args_verl(new_config_dict, pre_str="")
 
     return args
 
