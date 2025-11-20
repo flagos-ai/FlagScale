@@ -812,35 +812,35 @@ def add_multimodal_extra_args(parser):
         "--max-samples-per-sequence",
         type=int,
         default=2**31 - 1,
-        help="max sequencial seqence samples in a slice",
+        help="Max sequencial seqence samples in a slice",
     )
     group.add_argument(
         "--shuffle-buffer-size",
         type=int,
         default=0,
-        help="the buffer size to shuffle the samples in a seqence",
+        help="The buffer size to shuffle the samples in a seqence",
     )
     # learning rate
     group.add_argument(
         "--vision-ration",
         type=float,
         default=0.1,
-        help="the learning rate ration of vision(inlude merger) compared with llm",
+        help="The learning rate ration of vision(inlude merger) compared with llm",
     )
     group.add_argument(
         "--image-max-pixels",
         type=int,
         default=768 * 768,
-        help="the maximum pixels of a single image",
+        help="The maximum pixels of a single image",
     )
     group.add_argument(
-        "--image-min-pixels", type=int, default=32 * 32, help="the minimum pixels of a single image"
+        "--image-min-pixels", type=int, default=32 * 32, help="The minimum pixels of a single image"
     )
     group.add_argument(
         "--vision-recompute-layer-steps",
         type=int,
         default=0,
-        help="the recmoute layers for vision using uniform method. 0 is disable.",
+        help="The recmoute layers for vision using uniform method. 0 is disable.",
     )
 
     # just for checkpoint conversion
