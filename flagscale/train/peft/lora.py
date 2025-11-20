@@ -159,7 +159,7 @@ class LoRA(PEFT, peft_type='lora'):
                         f"{param_name} being removed from incompatible_keys.missing_keys in this model"
                     )
                     incompatible_keys.missing_keys.remove(param_name)
-            assert len(incompatible_keys.missing_keys) == 0, f"{incompatible_keys} missed"
+            assert len(incompatible_keys.missing_keys) == 0, f"{incompatible_keys.missing_keys} missed"
 
         lora_param_names = []
         for name in model.state_dict().keys():

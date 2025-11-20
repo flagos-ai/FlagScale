@@ -27,6 +27,15 @@ system:
     finetune: True
 
 model:
+  peft_type: lora
+  lora_target_modules: ["linear_proj", "linear_qkv"]
+  lora_dim: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_dropout_position: pre
+  lora_in_init_method: kaiming
+  lora_out_init_method: zero
+
   no_gradient_accumulation_fusion: True
   use_mcore_models: True
   transformer_impl: transformer_engine
