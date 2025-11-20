@@ -217,9 +217,7 @@ def main(task_type: str = "x2i"):
     }
 
     logger.info(f"--- Starting Fixed Task ({pipeline.task_type}) Test Case ---")
-    pipeline.forward(
-        prompt=sampler["prompt"], reference_image=sampler["reference_image"]
-    )
+    pipeline.forward(prompt=sampler["prompt"], reference_image=sampler["reference_image"])
 
 
 if __name__ == "__main__":
