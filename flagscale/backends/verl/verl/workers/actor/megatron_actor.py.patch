@@ -1,5 +1,5 @@
 diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
-index 38d317e1..240c889d 100644
+index 38d317e1..444ca50a 100644
 --- a/verl/workers/actor/megatron_actor.py
 +++ b/verl/workers/actor/megatron_actor.py
 @@ -38,7 +38,10 @@ from torch import nn
@@ -13,7 +13,7 @@ index 38d317e1..240c889d 100644
  from verl.utils.megatron.pipeline_parallel import make_batch_generator
  from verl.utils.megatron.tensor_parallel import vocab_parallel_entropy, vocab_parallel_log_probs_from_logits
  from verl.utils.megatron_utils import get_model_config
-@@ -409,6 +412,20 @@ class MegatronPPOActor(BasePPOActor):
+@@ -409,6 +412,24 @@ class MegatronPPOActor(BasePPOActor):
              # We move calculation of entropy to compute_log_probs, forward_only == True
              device = output["log_probs"].device
              metrics = {}
@@ -27,14 +27,18 @@ index 38d317e1..240c889d 100644
 +                seqpack_loss_enabled = False
 +            
 +            # Print debug info to verify code execution and config loading
-+            print_rank_0(f"[MegatronPPOActor] loss_func: forward_only={forward_only}, seqpack_loss_enabled={seqpack_loss_enabled}")
-+            if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None:
-+                print_rank_0(f"[MegatronPPOActor] policy_loss config exists: {self.config.policy_loss}")
++            # Use pipeline last stage rank 0 for printing (loss_func only executes on last stage)
++            if mpu.is_pipeline_last_stage(ignore_virtual=True):
++                if mpu.get_tensor_model_parallel_rank() == 0:
++                    global_rank = torch.distributed.get_rank()
++                    print(f"[MegatronPPOActor] loss_func (rank={global_rank}): forward_only={forward_only}, seqpack_loss_enabled={seqpack_loss_enabled}", flush=True)
++                    if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None:
++                        print(f"[MegatronPPOActor] policy_loss config exists: {self.config.policy_loss}", flush=True)
 +            
              if forward_only:
                  if post_process_fn is None:
                      pass
-@@ -419,76 +436,323 @@ class MegatronPPOActor(BasePPOActor):
+@@ -419,76 +440,332 @@ class MegatronPPOActor(BasePPOActor):
                  if not calculate_entropy:
                      return torch.tensor(1.0, device=device), metrics
  
@@ -60,16 +64,21 @@ index 38d317e1..240c889d 100644
 +                has_is_nested_attr = hasattr(log_prob_raw, "is_nested")
 +                is_nested_tensor = has_is_nested_attr and log_prob_raw.is_nested if has_is_nested_attr else False
 +                
-+                print_rank_0(f"[MegatronPPOActor] seqpack_loss=True condition checks:")
-+                print_rank_0(f"  - packed_seq_params is not None: {has_packed_seq_params}")
-+                print_rank_0(f"  - log_prob_raw has 'is_nested' attribute: {has_is_nested_attr}")
-+                if has_is_nested_attr:
-+                    print_rank_0(f"  - log_prob_raw.is_nested: {is_nested_tensor}")
-+                print_rank_0(f"  - All conditions met: {has_packed_seq_params and is_nested_tensor}")
++                # Use pipeline last stage rank 0 for printing
++                if mpu.is_pipeline_last_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0:
++                    global_rank = torch.distributed.get_rank()
++                    print(f"[MegatronPPOActor] seqpack_loss=True condition checks (rank={global_rank}):", flush=True)
++                    print(f"  - packed_seq_params is not None: {has_packed_seq_params}", flush=True)
++                    print(f"  - log_prob_raw has 'is_nested' attribute: {has_is_nested_attr}", flush=True)
++                    if has_is_nested_attr:
++                        print(f"  - log_prob_raw.is_nested: {is_nested_tensor}", flush=True)
++                    print(f"  - All conditions met: {has_packed_seq_params and is_nested_tensor}", flush=True)
 +                
 +                # Verify that data is in packed format
 +                if has_packed_seq_params and is_nested_tensor:
-+                    print_rank_0("[MegatronPPOActor] Using sequence packing mode for loss computation (seqpack_loss=True)")
++                    if mpu.is_pipeline_last_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0:
++                        global_rank = torch.distributed.get_rank()
++                        print(f"[MegatronPPOActor] Using sequence packing mode for loss computation (seqpack_loss=True) (rank={global_rank})", flush=True)
 +                    # Get sequence boundaries from PackedSeqParams (similar to NeMo-RL)
 +                    cu_seqlens_q = packed_seq_params.cu_seqlens_q
 +                    cu_seqlens_q_padded = packed_seq_params.cu_seqlens_q_padded
@@ -225,8 +234,10 @@ index 38d317e1..240c889d 100644
 +                        policy_loss = torch.tensor(1.0, device=device)
 +                else:
 +                    # seqpack_loss is enabled but data is not in packed format, fall back to standard mode
-+                    print_rank_0("[Warning] seqpack_loss=True is set in config, but data is not in packed format. Falling back to standard loss computation.")
-+                    print_rank_0("[MegatronPPOActor] Using standard mode for loss computation (seqpack_loss=False or data not packed)")
++                    if mpu.is_pipeline_last_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0:
++                        global_rank = torch.distributed.get_rank()
++                        print(f"[Warning] seqpack_loss=True is set in config, but data is not in packed format. Falling back to standard loss computation. (rank={global_rank})", flush=True)
++                        print(f"[MegatronPPOActor] Using standard mode for loss computation (seqpack_loss=False or data not packed) (rank={global_rank})", flush=True)
 +                    # Standard loss computation (original logic)
 +                    responses = data["responses"]
 +                response_length = responses.size(1)
@@ -343,7 +354,9 @@ index 38d317e1..240c889d 100644
 -                    kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
 -                    kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=self.config.loss_agg_mode)
 +                # seqpack_loss is False or not set, use standard mode
-+                print_rank_0("[MegatronPPOActor] Using standard mode for loss computation (seqpack_loss=False or not set)")
++                if mpu.is_pipeline_last_stage(ignore_virtual=True) and mpu.get_tensor_model_parallel_rank() == 0:
++                    global_rank = torch.distributed.get_rank()
++                    print(f"[MegatronPPOActor] Using standard mode for loss computation (seqpack_loss=False or not set) (rank={global_rank})", flush=True)
 +                # Standard loss computation (original logic)
 +                responses = data["responses"]
 +                response_length = responses.size(1)
