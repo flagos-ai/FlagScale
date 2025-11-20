@@ -1,8 +1,16 @@
 diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
-index 38d317e1..444ca50a 100644
+index 38d317e1..25a73994 100644
 --- a/verl/workers/actor/megatron_actor.py
 +++ b/verl/workers/actor/megatron_actor.py
-@@ -38,7 +38,10 @@ from torch import nn
+@@ -22,6 +22,7 @@ Note that our model doesn't have to be `MegatronModule` because we don't share e
+ import itertools
+ import logging
+ import os
++import sys
+ from functools import partial
+ from typing import Iterable
+ 
+@@ -38,7 +39,10 @@ from torch import nn
  
  from verl import DataProto
  from verl.trainer.ppo.core_algos import agg_loss, get_policy_loss_fn, kl_penalty
@@ -13,10 +21,25 @@ index 38d317e1..444ca50a 100644
  from verl.utils.megatron.pipeline_parallel import make_batch_generator
  from verl.utils.megatron.tensor_parallel import vocab_parallel_entropy, vocab_parallel_log_probs_from_logits
  from verl.utils.megatron_utils import get_model_config
-@@ -409,6 +412,24 @@ class MegatronPPOActor(BasePPOActor):
+@@ -409,6 +413,43 @@ class MegatronPPOActor(BasePPOActor):
              # We move calculation of entropy to compute_log_probs, forward_only == True
              device = output["log_probs"].device
              metrics = {}
++            
++            # Add unconditional logging to verify loss_func is called
++            # Use both logger.warning (visible with default WARN level) and print to ensure visibility
++            try:
++                global_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else -1
++                pp_rank = mpu.get_pipeline_model_parallel_rank() if torch.distributed.is_initialized() else -1
++                tp_rank = mpu.get_tensor_model_parallel_rank() if torch.distributed.is_initialized() else -1
++                is_last_stage = mpu.is_pipeline_last_stage(ignore_virtual=True) if torch.distributed.is_initialized() else False
++                msg = f"[MegatronPPOActor] loss_func CALLED: global_rank={global_rank}, pp_rank={pp_rank}, tp_rank={tp_rank}, is_last_stage={is_last_stage}, forward_only={forward_only}"
++                logger.warning(msg)  # Use WARNING level to ensure visibility with default log level
++                print(msg, flush=True, file=sys.stderr)  # Also print to stderr as backup
++            except Exception as e:
++                error_msg = f"[MegatronPPOActor] loss_func CALLED but error getting rank info: {e}"
++                logger.error(error_msg)
++                print(error_msg, flush=True, file=sys.stderr)
 +            
 +            # Check if sequence packing loss is enabled from config (check early for debugging)
 +            log_prob_raw = output["log_probs"]
@@ -26,19 +49,23 @@ index 38d317e1..444ca50a 100644
 +            else:
 +                seqpack_loss_enabled = False
 +            
-+            # Print debug info to verify code execution and config loading
-+            # Use pipeline last stage rank 0 for printing (loss_func only executes on last stage)
++            # Log debug info to verify code execution and config loading
++            # Use pipeline last stage rank 0 for logging (loss_func only executes on last stage)
 +            if mpu.is_pipeline_last_stage(ignore_virtual=True):
 +                if mpu.get_tensor_model_parallel_rank() == 0:
 +                    global_rank = torch.distributed.get_rank()
-+                    print(f"[MegatronPPOActor] loss_func (rank={global_rank}): forward_only={forward_only}, seqpack_loss_enabled={seqpack_loss_enabled}", flush=True)
++                    msg = f"[MegatronPPOActor] loss_func (rank={global_rank}): forward_only={forward_only}, seqpack_loss_enabled={seqpack_loss_enabled}"
++                    logger.warning(msg)  # Use WARNING level to ensure visibility
++                    print(msg, flush=True)  # Also print to stdout
 +                    if hasattr(self.config, "policy_loss") and self.config.policy_loss is not None:
-+                        print(f"[MegatronPPOActor] policy_loss config exists: {self.config.policy_loss}", flush=True)
++                        config_msg = f"[MegatronPPOActor] policy_loss config exists: {self.config.policy_loss}"
++                        logger.warning(config_msg)
++                        print(config_msg, flush=True)
 +            
              if forward_only:
                  if post_process_fn is None:
                      pass
-@@ -419,76 +440,332 @@ class MegatronPPOActor(BasePPOActor):
+@@ -419,76 +460,332 @@ class MegatronPPOActor(BasePPOActor):
                  if not calculate_entropy:
                      return torch.tensor(1.0, device=device), metrics
  
