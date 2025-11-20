@@ -1,5 +1,5 @@
 diff --git a/verl/models/mcore/model_forward.py b/verl/models/mcore/model_forward.py
-index b6192386..7abe8a14 100644
+index b6192386..d9786c98 100644
 --- a/verl/models/mcore/model_forward.py
 +++ b/verl/models/mcore/model_forward.py
 @@ -87,6 +87,7 @@ def gptmodel_forward_no_padding(
@@ -10,7 +10,7 @@ index b6192386..7abe8a14 100644
  ):
      """Default forward pass for GPT models with optional sequence packing."""
      pre_process = unwrap_model(model).pre_process
-@@ -101,6 +102,14 @@ def gptmodel_forward_no_padding(
+@@ -101,6 +102,11 @@ def gptmodel_forward_no_padding(
      batch_size = input_ids.shape[0]
      input_ids_rmpad, packed_seq_params = preprocess_packed_seqs_no_padding(input_ids, pre_process=pre_process)
      input_ids_rmpad = input_ids_rmpad.contiguous()
@@ -18,10 +18,7 @@ index b6192386..7abe8a14 100644
 +    if data is not None:
 +        from verl.utils import tensordict_utils as tu
 +        tu.assign_non_tensor(data, packed_seq_params=packed_seq_params)
-+        use_sequence_packing = tu.get_non_tensor_data(data, key="use_sequence_packing", default=False)
-+        tu.assign_non_tensor(data, use_sequence_packing=use_sequence_packing)
 +
-+    # if use_sequence_packing, the shape of model output is [1, total_tokens, vocab_size]
      output_orig = model(
          input_ids=input_ids_rmpad,
          attention_mask=None,

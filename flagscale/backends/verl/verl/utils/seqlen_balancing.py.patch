@@ -1,5 +1,5 @@
 diff --git a/verl/utils/seqlen_balancing.py b/verl/utils/seqlen_balancing.py
-index bc5588f7..1040ec11 100644
+index bc5588f7..0ac3a75a 100644
 --- a/verl/utils/seqlen_balancing.py
 +++ b/verl/utils/seqlen_balancing.py
 @@ -15,7 +15,9 @@
@@ -509,22 +509,18 @@ index bc5588f7..1040ec11 100644
 +
 +class FirstFitDecreasingPacker(FirstFitPacker):
 +    """First-Fit Decreasing (FFD) algorithm for sequence packing.
-+
-+    This algorithm sorts sequences by length in descending order and then
-+    places each sequence into the first bin where it fits.
  
 -def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, equal_size: bool):
++    This algorithm sorts sequences by length in descending order and then
++    places each sequence into the first bin where it fits.
++
 +    Time complexity: O(n log n) for sorting + O(n * m) for packing,
 +    where n is the number of sequences and m is the number of bins.
-     """
--    Calculates partitions of indices from seqlen_list such that the sum of sequence lengths
--    in each partition is balanced. Uses the Karmarkar-Karp differencing method.
++    """
 +    def _prepare_sequences(self, seqlen_list: list[int]) -> list[tuple[int, int]]:
 +        # Create a list of (length, index) pairs
 +        indexed_lengths = [(length, i) for i, length in enumerate(seqlen_list)]
- 
--    This is useful for balancing workload across devices or batches, especially when
--    dealing with variable sequence lengths.
++
 +        # Sort by length in descending order
 +        indexed_lengths.sort(reverse=True)
 +
@@ -538,8 +534,12 @@ index bc5588f7..1040ec11 100644
 +
 +    Time complexity: O(n * m) for packing, where n is the number of sequences
 +    and m is the number of bins.
-+    """
-+
+     """
+-    Calculates partitions of indices from seqlen_list such that the sum of sequence lengths
+-    in each partition is balanced. Uses the Karmarkar-Karp differencing method.
+ 
+-    This is useful for balancing workload across devices or batches, especially when
+-    dealing with variable sequence lengths.
 +    def _prepare_sequences(self, seqlen_list: list[int]) -> list[tuple[int, int]]:
 +        # Create a list of (length, index) pairs
 +        indexed_lengths = [(length, i) for i, length in enumerate(seqlen_list)]
@@ -776,7 +776,7 @@ index bc5588f7..1040ec11 100644
  
  
  def log_seqlen_unbalance(seqlen_list: list[int], partitions: list[list[int]], prefix):
-@@ -266,23 +719,127 @@ def rearrange_micro_batches(
+@@ -266,18 +719,34 @@ def rearrange_micro_batches(
      same_micro_num_in_dp=True,
      min_num_micro_batch=None,
      use_dynamic_bsz_balance=True,
@@ -813,100 +813,7 @@ index bc5588f7..1040ec11 100644
  
      Returns:
          List[TensorDict]: the micro-batches.
-         List[List[int]]: index lists mapping each micro-batch back to original positions.
-     """
-+    if use_sequence_packing_balance:
-+        # NeMo-aligned sequence packing: compute packable groups only; no truncation/concat here
-+        bin_capacity = max_token_len  # max_token_len is bin_capacity for sequence packing
-+
-+        # Build sequence lengths
-+        if input_lengths_key in batch.keys():
-+            seqlens_tensor = batch[input_lengths_key]
-+            if isinstance(seqlens_tensor, torch.Tensor):
-+                seqlens = seqlens_tensor.tolist()
-+            else:
-+                seqlens = list(map(int, seqlens_tensor))
-+        else:
-+            attn = batch["attention_mask"]  # [B, S]
-+            seqlens = attn.sum(dim=1).tolist()
-+
-+        # Compute pad multiple ~ 2 * TP * SP
-+        if pad_multiple is None:
-+            pad_multiple = 2 * int(tp_size) * int(sp_size)
-+
-+        def _pad_to_multiple(x: int, m: int) -> int:
-+            return ((int(x) + int(m) - 1) // int(m)) * int(m)
-+
-+        padded_seqlens = [_pad_to_multiple(l, pad_multiple) for l in seqlens]
-+
-+        # Determine target bin count considering VPP and DP alignment
-+        # First, do an initial packing to get the base bin count
-+        initial_bins = get_seqlen_balanced_partitions(
-+            seqlen_list=padded_seqlens,
-+            algorithm=algorithm,
-+            bin_capacity=bin_capacity,
-+            min_bin_count=None,
-+            bin_count_multiple=None,
-+            equal_size=False,
-+        )
-+        initial_bin_count = len(initial_bins)
-+
-+        # Align with VPP if requested (num_batches_divided_by)
-+        target_bin_count = initial_bin_count
-+        if num_batches_divided_by is not None and num_batches_divided_by > 1:
-+            target_bin_count = roundup_divisible(initial_bin_count, int(num_batches_divided_by))
-+
-+        # Align micro-batch count across DP ranks if needed
-+        if dist.is_initialized() and dp_group is not None and same_micro_num_in_dp:
-+            device = batch[input_key].device if isinstance(batch.get(input_key, None), torch.Tensor) else "cpu"
-+            local_bins = torch.tensor([target_bin_count], device=device)
-+            dist.all_reduce(local_bins, op=dist.ReduceOp.MAX, group=dp_group)
-+            target_bin_count = int(local_bins.item())
-+            # Ensure DP-aligned count also satisfies VPP requirement
-+            if num_batches_divided_by is not None and num_batches_divided_by > 1:
-+                target_bin_count = roundup_divisible(target_bin_count, int(num_batches_divided_by))
-+
-+        # Use get_seqlen_balanced_partitions to do final packing with all constraints
-+        # If target_bin_count differs from initial, we need to repack with min_bin_count constraint
-+        if target_bin_count != initial_bin_count:
-+            bins = get_seqlen_balanced_partitions(
-+                seqlen_list=padded_seqlens,
-+                algorithm=algorithm,
-+                bin_capacity=bin_capacity,
-+                min_bin_count=target_bin_count,
-+                bin_count_multiple=None,
-+                equal_size=False,
-+            )
-+        else:
-+            # target_bin_count == initial_bin_count, so initial packing already satisfies all constraints
-+            bins = initial_bins
-+
-+        # Materialize micro-batches (grouping only)
-+        micro_batches = []
-+        bin_packed_lengths = [sum(padded_seqlens[i] for i in part) for part in bins]
-+        max_packed_len = max(bin_packed_lengths) if bin_packed_lengths else 0
-+        # optional: if VPP provided, ensure max_packed_len is visible to all mbs for PP
-+        for partition in bins:
-+            curr_mb = tu.index_select_tensor_dict(batch, partition)
-+            tu.assign_non_tensor(curr_mb, pack_sequences=True)
-+            # seq_length_key: key name holding per-sample true lengths (e.g., "input_lengths")
-+            tu.assign_non_tensor(curr_mb, seq_length_key=input_lengths_key)
-+            tu.assign_non_tensor(curr_mb, pad_individual_seqs_to_multiple_of=int(pad_multiple))
-+            curr_packed_len = sum(padded_seqlens[i] for i in partition) 
-+            # packed_seq_len: total packed tokens of this micro-batch (sum of per-seq aligned lengths)
-+            tu.assign_non_tensor(curr_mb, packed_seq_len=int(curr_packed_len))
-+            # for PP>1 cases, downstream may choose to pad all packed seqs to the same max within a global-batch
-+            # pad_full_seq_to: global max packed length ensuring fixed [batch x seqlen] buffers for pipeline parallel
-+            tu.assign_non_tensor(curr_mb, pad_full_seq_to=int(max_packed_len))
-+            micro_batches.append(curr_mb)
-+        batch_idx_list = bins
-+        return micro_batches, batch_idx_list
-+
-+    # Dynamic batching path (original implementation)
-     # this is per local micro_bsz
-     input_ids = batch["input_ids"]
-     if input_ids.is_nested:
-@@ -311,7 +868,15 @@ def rearrange_micro_batches(
+@@ -311,7 +780,15 @@ def rearrange_micro_batches(
      assert num_micro_batches <= len(seq_len_effective)
  
      workloads = calculate_workload(seq_len_effective)

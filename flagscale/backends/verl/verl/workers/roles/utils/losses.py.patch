@@ -1,22 +1,45 @@
 diff --git a/verl/workers/roles/utils/losses.py b/verl/workers/roles/utils/losses.py
-index 3693e5eb..eed6348a 100644
+index 3693e5eb..beac1909 100644
 --- a/verl/workers/roles/utils/losses.py
 +++ b/verl/workers/roles/utils/losses.py
-@@ -53,6 +53,51 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
+@@ -19,9 +19,11 @@ from tensordict import TensorDict
+ from verl.trainer.ppo.core_algos import agg_loss, compute_value_loss, get_policy_loss_fn, kl_penalty
+ from verl.utils import tensordict_utils as tu
+ from verl.utils.dataset.dataset_utils import DatasetPadMode
++from verl.utils.logger import print_rank_0
+ from verl.utils.torch_functional import masked_mean
+ from verl.workers.config import ActorConfig, CriticConfig
+ from verl.workers.roles.utils.padding import no_padding_2_padding
++from megatron.core.packed_seq_params import PackedSeqParams
+ 
+ 
+ def sft_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None):
+@@ -53,6 +55,62 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
      log_prob = model_output["log_probs"]
      entropy = model_output.get("entropy", None)
  
-+    use_sequence_packing = tu.get_non_tensor_data(data, key="use_sequence_packing", default=False)
-+    packed_seq_params = tu.get_non_tensor_data(data, key="packed_seq_params", default=None)
 +
++    seqpack_loss_enabled = config.policy_loss.get("seqpack_loss", False) if hasattr(config, "policy_loss") and config.policy_loss else False
++    
++    if seqpack_loss_enabled:
++        packed_seq_params = tu.get_non_tensor_data(data, key="packed_seq_params", default=None)
++        
 +
-+    if use_sequence_packing and packed_seq_params is not None:
-+        return _ppo_loss_with_sequence_packing(
-+            config, log_prob, entropy, data, dp_group, packed_seq_params
-+        )
++        if packed_seq_params is not None and hasattr(log_prob, "is_nested") and log_prob.is_nested and PackedSeqParams is not None:
++            print_rank_0("[PPO Loss] Using _ppo_loss_with_sequence_packing (seqpack_loss=True)")
++            return _ppo_loss_with_sequence_packing(
++                config, model_output, data, dp_group, packed_seq_params
++            )
++        else:
++            print_rank_0("[Warning] seqpack_loss=True is set in config, but data is not in packed format. Falling back to standard loss computation.")
++            return _ppo_loss_standard(
++                config, model_output, data, dp_group
++            )
 +    else:
++        # Use standard loss computation
++        print_rank_0("[PPO Loss] Using _ppo_loss_standard (seqpack_loss=False or not set)")
 +        return _ppo_loss_standard(
-+            config, log_prob, entropy, data, dp_group
++            config, model_output, data, dp_group
 +        )
 +
 +
@@ -54,21 +77,59 @@ index 3693e5eb..eed6348a 100644
      log_prob = no_padding_2_padding(log_prob, data)  # (bsz, response_length)
      if entropy is not None:
          entropy = no_padding_2_padding(entropy, data)  # (bsz, response_length)
-@@ -108,31 +153,78 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
+@@ -108,31 +166,109 @@ def ppo_loss(config: ActorConfig, model_output, data: TensorDict, dp_group=None)
      return policy_loss, metrics
  
  
 -def value_loss(config: CriticConfig, model_output, data: TensorDict, dp_group=None):
 -    vpreds = model_output["values"]
 -    vpreds = no_padding_2_padding(vpreds, data)  # (bsz, response_length)
-+def _ppo_loss_with_sequence_packing(config: ActorConfig, model_output, data: TensorDict, dp_group=None, packed_seq_params: PackedSeqParams = None):
-+    from megatron.core import parallel_state as mpu
++def _ppo_loss_with_sequence_packing(config: ActorConfig, model_output, data: TensorDict, dp_group=None, packed_seq_params=None):
++    """
++    Compute PPO loss with sequence packing support.
++    This function processes each sequence individually to avoid padding effects.
++    
++    Args:
++        config: ActorConfig
++        model_output: Dict containing "log_probs" and optionally "entropy" (nested tensors)
++        data: TensorDict containing old_log_probs, advantages, response_mask, etc.
++        dp_group: Data parallel group (optional)
++        packed_seq_params: PackedSeqParams object containing sequence boundary information
++    
++    Returns:
++        policy_loss: Accumulated policy loss across all sequences
++        metrics: Accumulated metrics dictionary
++    """
++    log_prob = model_output["log_probs"]
++    entropy = model_output.get("entropy", None)
++    
++    # Check if log_prob is a nested tensor
++    if not (hasattr(log_prob, "is_nested") and log_prob.is_nested):
++        # If not nested tensor, fall back to standard loss
++        print_rank_0("[Warning] log_prob is not a nested tensor, falling back to standard loss")
++        return _ppo_loss_standard(config, model_output, data, dp_group)
++    
++    # Get sequence boundaries from nested tensor
++    log_prob_offsets = log_prob.offsets()  # cu_seqlens
++    log_prob_values = log_prob.values()    # [total_tokens]
++    num_sequences = len(log_prob_offsets) - 1
++    
++    loss_accum = 0.0
++    metrics_accum = {}
  
 -    values = data["values"]
 -    returns = data["returns"]
 -    response_mask = data["response_mask"].to(bool)
-+    cu_seqlens = packed_seq_params.cu_seqlens_q
-+    cu_seqlens_padded = packed_seq_params.cu_seqlens_q_padded
++    # Process each sequence individually
++    for seq_idx in range(num_sequences):
++        # Get log_prob for current sequence
++        seq_log_prob_start = log_prob_offsets[seq_idx].item()
++        seq_log_prob_end = log_prob_offsets[seq_idx + 1].item()
++        seq_log_prob = log_prob_values[seq_log_prob_start:seq_log_prob_end]
++        seq_log_prob = seq_log_prob.unsqueeze(0)  # [1, seq_len]
++        
++        # Get sequence length (unpadded)
++        unpadded_seq_len = seq_log_prob_end - seq_log_prob_start
  
 -    vf_loss, vf_clipfrac = compute_value_loss(
 -        vpreds=vpreds,
@@ -78,18 +139,43 @@ index 3693e5eb..eed6348a 100644
 -        cliprange_value=config.cliprange_value,
 -        loss_agg_mode=config.loss_agg_mode,
 -    )
-+    if cu_seqlens_q_padded is not None:
-+        padded_cu_seqlens = self.cu_seqlens_q_padded
-+        padded_seq_lengths = (
-+            self.cu_seqlens_q_padded[1:] - self.cu_seqlens_q_padded[:-1]
-+        )
-+    else:
-+        padded_cu_seqlens = unpadded_cu_seqlens
-+        padded_seq_lengths = unpadded_seq_lengths
++        # Extract data for current sequence
++        seq_data = {}
++        for key in ["old_log_probs", "advantages", "response_mask", "ref_log_prob"]:
++            if key in data:
++                tensor = data[key]
++                if isinstance(tensor, torch.Tensor):
++                    # Handle nested tensor
++                    if hasattr(tensor, "is_nested") and tensor.is_nested:
++                        tensor_offsets = tensor.offsets()
++                        tensor_values = tensor.values()
++                        tensor_start = tensor_offsets[seq_idx].item()
++                        tensor_end = tensor_offsets[seq_idx + 1].item()
++                        seq_tensor = tensor_values[tensor_start:tensor_end].unsqueeze(0)
++                        seq_data[key] = seq_tensor
++                    # Handle regular tensor
++                    elif tensor.ndim > 1 and tensor.shape[1] > 1:
++                        # Slice to sequence length
++                        seq_data[key] = tensor[seq_idx:seq_idx+1, :unpadded_seq_len]
++                    else:
++                        seq_data[key] = tensor[seq_idx:seq_idx+1]
++                else:
++                    seq_data[key] = tensor
  
 -    metrics = {}
-+    seq_starts = padded_cu_seqlens[:-1]
-+    seq_ends = padded_cu_seqlens[1:]
++        # Create model_output for current sequence
++        seq_model_output = {"log_probs": seq_log_prob}
++        if entropy is not None:
++            if hasattr(entropy, "is_nested") and entropy.is_nested:
++                entropy_offsets = entropy.offsets()
++                entropy_values = entropy.values()
++                entropy_start = entropy_offsets[seq_idx].item()
++                entropy_end = entropy_offsets[seq_idx + 1].item()
++                seq_entropy = entropy_values[entropy_start:entropy_end].unsqueeze(0)
++            else:
++                # Fallback: slice regular tensor
++                seq_entropy = entropy[seq_idx:seq_idx+1, :unpadded_seq_len]
++            seq_model_output["entropy"] = seq_entropy
  
 -    metrics.update(
 -        {
@@ -98,62 +184,30 @@ index 3693e5eb..eed6348a 100644
 -            "critic/vpred_mean": masked_mean(vpreds, response_mask).detach().item(),
 -        }
 -    )
-+    loss_accum = 0
- 
--    return vf_loss, metrics
-+    log_prob = model_output["log_probs"]
-+    log_prob_values = log_prob.values()     # [total_tokens]
-+    log_prob_offsets = log_prob.offsets()   # cu_seqlens
-+
-+    for seq_idx in range(len(seq_starts)):
-+        seq_start = seq_starts[seq_idx].item()
-+        seq_end = seq_ends[seq_idx].item()
-+        unpadded_seq_len = unpadded_seq_lengths[seq_idx].item()
-+
-+        # get log_prob of the current sequence
-+        seq_log_prob_start = log_prob_offsets[seq_idx].item()
-+        seq_log_prob_end = log_prob_offsets[seq_idx + 1].item()
-+        seq_log_prob = log_prob_values[seq_log_prob_start:seq_log_prob_end]
-+        seq_log_prob = seq_log_prob.unsqueeze(0)    # [1, seq_len] 
-+
-+        # get other data
-+        seq_data = {}
-+        for key in ["old_log_probs", "advantages", "response_mask", "ref_log_prob"]:
-+            if key in data:
-+                tensor = data[key]
-+                if isinstance(tensor, torch.Tensor):
-+                    if tensor.ndim > 1 and tensor.shape[1] > 1:
-+                        # 只保留有效长度
-+                        seq_data[key] = tensor[seq_idx:seq_idx+1, :unpadded_seq_len]
-+                    else:
-+                        seq_data[key] = tensor[seq_idx:seq_idx+1]
-+                else:
-+                    seq_data[key] = tensor
-+
-+        # create model_output for the current sequence
-+        seq_model_output = {"log_probs": seq_log_prob}
-+        if entropy is not None:
-+            entropy_values = entropy.values()
-+            entropy_offsets = entropy.offsets()
-+            seq_entropy_start = entropy_offsets[seq_idx].item()
-+            seq_entropy_end = entropy_offsets[seq_idx + 1].item()
-+            seq_entropy = entropy_values[seq_entropy_start:seq_entropy_end].unsqueeze(0)
-+            seq_model_output["entropy"] = seq_entropy
-+
-+        # add data
++        # Create TensorDict for current sequence
 +        seq_data_dict = TensorDict(seq_data, batch_size=[1])
++        # Copy non-tensor metadata
 +        for key in data.keys():
 +            if key not in seq_data and not isinstance(data[key], torch.Tensor):
 +                tu.assign_non_tensor(seq_data_dict, key, tu.get_non_tensor_data(data, key))
-+
+ 
+-    return vf_loss, metrics
++        # Compute loss for current sequence using standard function
 +        seq_loss, seq_metrics = _ppo_loss_standard(
 +            config, seq_model_output, seq_data_dict, dp_group
 +        )
 +
-+        # accumulate loss and metrics
++        # Accumulate loss and metrics
 +        loss_accum += seq_loss
 +        for k, v in seq_metrics.items():
 +            if k not in metrics_accum:
 +                metrics_accum[k] = 0.0
-+            metrics_accum[k] += v
++            if isinstance(v, (int, float)):
++                metrics_accum[k] += v
++            elif isinstance(v, torch.Tensor):
++                metrics_accum[k] += v.detach().item() if v.numel() == 1 else v.detach()
++            else:
++                metrics_accum[k] += v
++    
++    return loss_accum, metrics_accum
 \ No newline at end of file

@@ -1,0 +1,393 @@
+diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
+index 38d317e1..14b51322 100644
+--- a/verl/workers/actor/megatron_actor.py
++++ b/verl/workers/actor/megatron_actor.py
+@@ -38,7 +38,10 @@ from torch import nn
+ 
+ from verl import DataProto
+ from verl.trainer.ppo.core_algos import agg_loss, get_policy_loss_fn, kl_penalty
++from verl.utils import tensordict_utils as tu
+ from verl.utils.device import get_device_id, get_torch_device
++from verl.utils.logger import print_rank_0
++from tensordict import TensorDict
+ from verl.utils.megatron.pipeline_parallel import make_batch_generator
+ from verl.utils.megatron.tensor_parallel import vocab_parallel_entropy, vocab_parallel_log_probs_from_logits
+ from verl.utils.megatron_utils import get_model_config
+@@ -419,76 +422,315 @@ class MegatronPPOActor(BasePPOActor):
+                 if not calculate_entropy:
+                     return torch.tensor(1.0, device=device), metrics
+ 
+-            responses = data["responses"]
+-            response_length = responses.size(1)
+-            response_mask = data["response_mask"].to(bool)
+-            loss_agg_mode = self.config.loss_agg_mode
+-            # compute policy loss
+-            log_prob = output["log_probs"][:, -response_length - 1 : -1].contiguous()
+-            ret_entropy = None
+-            stats = {}
+-            if not forward_only:
+-                old_log_prob = data["old_log_probs"]
+-                advantages = data["advantages"]
+-
+-                entropy_coeff = self.config.entropy_coeff
++            # Check if sequence packing loss is enabled from config
++            log_prob_raw = output["log_probs"]
++            seqpack_loss_enabled = self.config.policy_loss.get("seqpack_loss", False) if self.config.policy_loss else False
++            
++            if seqpack_loss_enabled:
++                # Get packed_seq_params from data
++                packed_seq_params = tu.get_non_tensor_data(data, key="packed_seq_params", default=None)
++                
++                # Verify that data is in packed format
++                if packed_seq_params is not None and hasattr(log_prob_raw, "is_nested") and log_prob_raw.is_nested:
++                    print_rank_0("[MegatronPPOActor] Using sequence packing mode for loss computation (seqpack_loss=True)")
++                    # Get sequence boundaries from PackedSeqParams (similar to NeMo-RL)
++                    cu_seqlens_q = packed_seq_params.cu_seqlens_q
++                    cu_seqlens_q_padded = packed_seq_params.cu_seqlens_q_padded
++                
++                # Calculate unpadded and padded sequence lengths
++                unpadded_seq_lengths = cu_seqlens_q[1:] - cu_seqlens_q[:-1]
++                if cu_seqlens_q_padded is not None:
++                    padded_cu_seqlens = cu_seqlens_q_padded
++                    padded_seq_lengths = cu_seqlens_q_padded[1:] - cu_seqlens_q_padded[:-1]
++                else:
++                    padded_cu_seqlens = cu_seqlens_q
++                    padded_seq_lengths = unpadded_seq_lengths
++                
++                # Get sequence start and end positions
++                seq_starts = padded_cu_seqlens[:-1]
++                seq_ends = padded_cu_seqlens[1:]
++                num_sequences = len(seq_starts)
++                
++                loss_accum = 0.0
++                metrics_accum = {}
++                
++                log_prob = log_prob_raw
++                entropy = output.get("entropy", None)
++                log_prob_values = log_prob.values()    # [total_tokens]
++                log_prob_offsets = log_prob.offsets()  # cu_seqlens (should match cu_seqlens_q)
++                
++                # Process each sequence individually (similar to NeMo-RL's wrapper)
++                for seq_idx in range(num_sequences):
++                    seq_start = seq_starts[seq_idx].item()
++                    seq_end = seq_ends[seq_idx].item()
++                    unpadded_seq_len = unpadded_seq_lengths[seq_idx].item()
++                    
++                    # Extract log_prob for current sequence from nested tensor
++                    # (Similar to NeMo-RL extracting logits slice from packed logits)
++                    seq_log_prob_start = log_prob_offsets[seq_idx].item()
++                    seq_log_prob_end = log_prob_offsets[seq_idx + 1].item()
++                    seq_log_prob = log_prob_values[seq_log_prob_start:seq_log_prob_end]
++                    seq_log_prob = seq_log_prob.unsqueeze(0)  # [1, seq_len]
++                    
++                    # Extract data for current sequence and remove padding
++                    # (Similar to NeMo-RL's data.slice() and unpadded_seq_data)
++                    seq_data = {}
++                    for key in ["old_log_probs", "advantages", "response_mask", "ref_log_prob", "responses"]:
++                        if key in data:
++                            tensor = data[key]
++                            if isinstance(tensor, torch.Tensor):
++                                # Handle nested tensor
++                                if hasattr(tensor, "is_nested") and tensor.is_nested:
++                                    tensor_offsets = tensor.offsets()
++                                    tensor_values = tensor.values()
++                                    tensor_start = tensor_offsets[seq_idx].item()
++                                    tensor_end = tensor_offsets[seq_idx + 1].item()
++                                    seq_tensor = tensor_values[tensor_start:tensor_end].unsqueeze(0)
++                                    seq_data[key] = seq_tensor
++                                # Handle regular tensor - only keep unpadded length
++                                elif tensor.ndim > 1 and tensor.shape[1] > 1:
++                                    seq_data[key] = tensor[seq_idx:seq_idx+1, :unpadded_seq_len]
++                                else:
++                                    seq_data[key] = tensor[seq_idx:seq_idx+1]
++                            else:
++                                seq_data[key] = tensor
++                    
++                    # Create model_output for current sequence
++                    seq_model_output = {"log_probs": seq_log_prob}
++                    if entropy is not None:
++                        if hasattr(entropy, "is_nested") and entropy.is_nested:
++                            entropy_offsets = entropy.offsets()
++                            entropy_values = entropy.values()
++                            entropy_start = entropy_offsets[seq_idx].item()
++                            entropy_end = entropy_offsets[seq_idx + 1].item()
++                            seq_entropy = entropy_values[entropy_start:entropy_end].unsqueeze(0)
++                        else:
++                            seq_entropy = entropy[seq_idx:seq_idx+1, :unpadded_seq_len]
++                        seq_model_output["entropy"] = seq_entropy
++                    
++                    # Create TensorDict for current sequence
++                    seq_data_dict = TensorDict(seq_data, batch_size=[1])
++                    # Copy non-tensor metadata
++                    for key in data.keys():
++                        if key not in seq_data and not isinstance(data[key], torch.Tensor):
++                            tu.assign_non_tensor(seq_data_dict, key, tu.get_non_tensor_data(data, key))
++                    
++                    # Get response_mask for current sequence
++                    if "response_mask" not in seq_data_dict:
++                        if "response_mask" in data:
++                            response_mask_tensor = data["response_mask"]
++                            if hasattr(response_mask_tensor, "is_nested") and response_mask_tensor.is_nested:
++                                mask_offsets = response_mask_tensor.offsets()
++                                mask_values = response_mask_tensor.values()
++                                mask_start = mask_offsets[seq_idx].item()
++                                mask_end = mask_offsets[seq_idx + 1].item()
++                                seq_response_mask = mask_values[mask_start:mask_end].unsqueeze(0)
++                            else:
++                                seq_response_mask = response_mask_tensor[seq_idx:seq_idx+1, :unpadded_seq_len]
++                            seq_data_dict["response_mask"] = seq_response_mask
++                    
++                    response_mask = seq_data_dict["response_mask"].to(bool)
++                    
++                    # Compute loss for current sequence using standard logic
++                    # (Similar to NeMo-RL calling self.loss_fn on single sequence)
++                    if not forward_only:
++                        old_log_prob = seq_data_dict["old_log_probs"]
++                        advantages = seq_data_dict["advantages"]
++                        
++                        loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
++                        policy_loss_fn = get_policy_loss_fn(loss_mode)
++                        rollout_is_weights = seq_data_dict.get("rollout_is_weights", None)
++                        
++                        # Compute policy loss for this sequence
++                        pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(
++                            old_log_prob=old_log_prob,
++                            log_prob=seq_log_prob,
++                            advantages=advantages,
++                            response_mask=response_mask,
++                            loss_agg_mode=self.config.loss_agg_mode,
++                            config=self.config,
++                            rollout_is_weights=rollout_is_weights,
++                        )
++                        
++                        seq_policy_loss = pg_loss
++                        
++                        # Add entropy loss
++                        if entropy is not None and "entropy" in seq_model_output:
++                            seq_entropy = seq_model_output["entropy"]
++                            entropy_loss = agg_loss(loss_mat=seq_entropy, loss_mask=response_mask, loss_agg_mode=self.config.loss_agg_mode)
++                            entropy_coeff = meta_info["entropy_coeff"]
++                            seq_policy_loss = pg_loss - entropy_coeff * entropy_loss
++                        
++                        # Add KL loss
++                        if self.config.use_kl_loss:
++                            ref_log_prob = seq_data_dict["ref_log_prob"]
++                            kld = kl_penalty(logprob=seq_log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
++                            kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=self.config.loss_agg_mode)
++                            seq_policy_loss = seq_policy_loss + kl_loss * self.config.kl_loss_coef
++                        
++                        # Accumulate loss and metrics (similar to NeMo-RL)
++                        loss_accum += seq_policy_loss
++                        metrics_accum["actor/pg_loss"] = metrics_accum.get("actor/pg_loss", 0.0) + pg_loss.detach().item()
++                        metrics_accum["actor/pg_clipfrac"] = metrics_accum.get("actor/pg_clipfrac", 0.0) + pg_clipfrac.detach().item()
++                        metrics_accum["actor/ppo_kl"] = metrics_accum.get("actor/ppo_kl", 0.0) + ppo_kl.detach().item()
++                        metrics_accum["actor/pg_clipfrac_lower"] = metrics_accum.get("actor/pg_clipfrac_lower", 0.0) + pg_clipfrac_lower.detach().item()
++                        if self.config.use_kl_loss:
++                            metrics_accum["actor/kl_loss"] = metrics_accum.get("actor/kl_loss", 0.0) + kl_loss.detach().item()
++                            metrics_accum["actor/kl_coef"] = self.config.kl_loss_coef
++                
++                policy_loss = loss_accum
++                stats = metrics_accum
++                ret_entropy = None
++                if calculate_entropy and entropy is not None:
++                    ret_entropy = entropy
++                
++                    if forward_only:
++                        policy_loss = torch.tensor(1.0, device=device)
++                else:
++                    # seqpack_loss is enabled but data is not in packed format, fall back to standard mode
++                    print_rank_0("[Warning] seqpack_loss=True is set in config, but data is not in packed format. Falling back to standard loss computation.")
++                    print_rank_0("[MegatronPPOActor] Using standard mode for loss computation (seqpack_loss=False or data not packed)")
++                    # Standard loss computation (original logic)
++                    responses = data["responses"]
++                response_length = responses.size(1)
++                response_mask = data["response_mask"].to(bool)
+                 loss_agg_mode = self.config.loss_agg_mode
++                # compute policy loss
++                log_prob = output["log_probs"][:, -response_length - 1 : -1].contiguous()
++                ret_entropy = None
++                stats = {}
++                if not forward_only:
++                    old_log_prob = data["old_log_probs"]
++                    advantages = data["advantages"]
++
++                    entropy_coeff = self.config.entropy_coeff
++                    loss_agg_mode = self.config.loss_agg_mode
++
++                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
++
++                    policy_loss_fn = get_policy_loss_fn(loss_mode)
++
++                    # Extract pre-computed rollout importance sampling weights if present
++                    # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
++                    rollout_is_weights = data.get("rollout_is_weights", None)
++
++                    # NOTE: Both mismatch diagnostic metrics (PPL, KL, etc.) and IS weight metrics
++                    # are computed centrally in ray_trainer.py for consistency and efficiency.
++                    # This ensures metrics are computed uniformly across all batches at the trainer level
++                    # and avoids redundant computation across workers and micro-batches.
++                    pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(
++                        old_log_prob=old_log_prob,
++                        log_prob=log_prob,
++                        advantages=advantages,
++                        response_mask=response_mask,
++                        loss_agg_mode=loss_agg_mode,
++                        config=self.config,
++                        rollout_is_weights=rollout_is_weights,
++                    )
+ 
+-                loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
+-
+-                policy_loss_fn = get_policy_loss_fn(loss_mode)
+-
+-                # Extract pre-computed rollout importance sampling weights if present
+-                # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
+-                rollout_is_weights = data.get("rollout_is_weights", None)
+-
+-                # NOTE: Both mismatch diagnostic metrics (PPL, KL, etc.) and IS weight metrics
+-                # are computed centrally in ray_trainer.py for consistency and efficiency.
+-                # This ensures metrics are computed uniformly across all batches at the trainer level
+-                # and avoids redundant computation across workers and micro-batches.
+-                pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(
+-                    old_log_prob=old_log_prob,
+-                    log_prob=log_prob,
+-                    advantages=advantages,
+-                    response_mask=response_mask,
+-                    loss_agg_mode=loss_agg_mode,
+-                    config=self.config,
+-                    rollout_is_weights=rollout_is_weights,
+-                )
++                    stats.update(
++                        {
++                            "actor/pg_loss": pg_loss.detach().item(),
++                            "actor/pg_clipfrac": pg_clipfrac.detach().item(),
++                            "actor/ppo_kl": ppo_kl.detach().item(),
++                            "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
++                        }
++                    )
++                    policy_loss = pg_loss
+ 
+-                stats.update(
+-                    {
+-                        "actor/pg_loss": pg_loss.detach().item(),
+-                        "actor/pg_clipfrac": pg_clipfrac.detach().item(),
+-                        "actor/ppo_kl": ppo_kl.detach().item(),
+-                        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+-                    }
+-                )
+-                policy_loss = pg_loss
++                if calculate_entropy:
++                    entropy = output["entropy"][:, -response_length - 1 : -1].contiguous()
++                    if not forward_only:
++                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
++                        entropy_coeff = meta_info["entropy_coeff"]
++                        policy_loss = pg_loss - entropy_coeff * entropy_loss
++                    else:
++                        ret_entropy = entropy
+ 
+-            if calculate_entropy:
+-                entropy = output["entropy"][:, -response_length - 1 : -1].contiguous()
+-                if not forward_only:
+-                    entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+-                    entropy_coeff = meta_info["entropy_coeff"]
+-                    policy_loss = pg_loss - entropy_coeff * entropy_loss
++                if forward_only:
++                    policy_loss = torch.tensor(1.0, device=device)
+                 else:
+-                    ret_entropy = entropy
+-
+-            if forward_only:
+-                policy_loss = torch.tensor(1.0, device=device)
++                    if self.config.use_kl_loss:
++                        ref_log_prob = data["ref_log_prob"]
++                        # compute kl loss
++                        kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
++                        kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=self.config.loss_agg_mode)
++
++                        policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
++                        metrics["actor/kl_loss"] = kl_loss.detach().item()
++                        metrics["actor/kl_coef"] = self.config.kl_loss_coef
+             else:
+-                if self.config.use_kl_loss:
+-                    ref_log_prob = data["ref_log_prob"]
+-                    # compute kl loss
+-                    kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
+-                    kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=self.config.loss_agg_mode)
++                # seqpack_loss is False or not set, use standard mode
++                print_rank_0("[MegatronPPOActor] Using standard mode for loss computation (seqpack_loss=False or not set)")
++                # Standard loss computation (original logic)
++                responses = data["responses"]
++                response_length = responses.size(1)
++                response_mask = data["response_mask"].to(bool)
++                loss_agg_mode = self.config.loss_agg_mode
++                # compute policy loss
++                log_prob = output["log_probs"][:, -response_length - 1 : -1].contiguous()
++                ret_entropy = None
++                stats = {}
++                if not forward_only:
++                    old_log_prob = data["old_log_probs"]
++                    advantages = data["advantages"]
++
++                    entropy_coeff = self.config.entropy_coeff
++                    loss_agg_mode = self.config.loss_agg_mode
++
++                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
++
++                    policy_loss_fn = get_policy_loss_fn(loss_mode)
++
++                    # Extract pre-computed rollout importance sampling weights if present
++                    # Weights are computed centrally in trainer and added when algorithm.rollout_is=True
++                    rollout_is_weights = data.get("rollout_is_weights", None)
++
++                    # NOTE: Both mismatch diagnostic metrics (PPL, KL, etc.) and IS weight metrics
++                    # are computed centrally in ray_trainer.py for consistency and efficiency.
++                    # This ensures metrics are computed uniformly across all batches at the trainer level
++                    # and avoids redundant computation across workers and micro-batches.
++                    pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(
++                        old_log_prob=old_log_prob,
++                        log_prob=log_prob,
++                        advantages=advantages,
++                        response_mask=response_mask,
++                        loss_agg_mode=loss_agg_mode,
++                        config=self.config,
++                        rollout_is_weights=rollout_is_weights,
++                    )
++
++                    stats.update(
++                        {
++                            "actor/pg_loss": pg_loss.detach().item(),
++                            "actor/pg_clipfrac": pg_clipfrac.detach().item(),
++                            "actor/ppo_kl": ppo_kl.detach().item(),
++                            "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
++                        }
++                    )
++                    policy_loss = pg_loss
+ 
+-                    policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
+-                    metrics["actor/kl_loss"] = kl_loss.detach().item()
+-                    metrics["actor/kl_coef"] = self.config.kl_loss_coef
++                if calculate_entropy:
++                    entropy = output["entropy"][:, -response_length - 1 : -1].contiguous()
++                    if not forward_only:
++                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
++                        entropy_coeff = meta_info["entropy_coeff"]
++                        policy_loss = pg_loss - entropy_coeff * entropy_loss
++                    else:
++                        ret_entropy = entropy
+ 
+-                # return loss and stats
++                if forward_only:
++                    policy_loss = torch.tensor(1.0, device=device)
++                else:
++                    if self.config.use_kl_loss:
++                        ref_log_prob = data["ref_log_prob"]
++                        # compute kl loss
++                        kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
++                        kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=self.config.loss_agg_mode)
++
++                        policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
++                        metrics["actor/kl_loss"] = kl_loss.detach().item()
++                        metrics["actor/kl_coef"] = self.config.kl_loss_coef
+ 
+             append_to_dict(metrics, stats)
+             return policy_loss, [metrics, ret_entropy]

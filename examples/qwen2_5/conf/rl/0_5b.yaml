@@ -34,8 +34,10 @@ actor_rollout_ref:
     kl_loss_coef: 0.001
     kl_loss_type: low_var_kl
     entropy_coeff: 0
-    use_sequence_packing_balance: true
-    sequence_packing_algorithm: "modified_first_fit_decreasing"
+    balance_algorithm: "modified_first_fit_decreasing"
+    policy_loss:
+      loss_mode: "vanilla"
+      seqpack_loss: True
     megatron:
       pipeline_model_parallel_size: 2
       tensor_model_parallel_size: 2
