@@ -1,0 +1,184 @@
+diff --git a/megatron/core/pipeline_parallel/p2p_communication.py b/megatron/core/pipeline_parallel/p2p_communication.py
+index 17f1a44c6..5f44618c2 100644
+--- a/megatron/core/pipeline_parallel/p2p_communication.py
++++ b/megatron/core/pipeline_parallel/p2p_communication.py
+@@ -242,6 +242,7 @@ def _communicate(
+     tensor_shape: Shape,
+     config: ModelParallelConfig,
+     wait_on_reqs: bool = True,
++    group: torch.distributed.ProcessGroup = None
+ ) -> Tuple[torch.Tensor, torch.Tensor]:
+     """Communicate tensors between stages. Used as helper method in other
+     communication methods that are used in megatron/schedules.py.
+@@ -291,7 +292,7 @@ def _communicate(
+         return torch.empty(
+             recv_prev_shape,
+             requires_grad=True,
+-            device=torch.cuda.current_device(),
++            device=torch.cuda.current_device() if "cpu:gloo" != group.name() else torch.device("cpu"),
+             dtype=config.pipeline_dtype,
+         )
+ 
+@@ -299,7 +300,7 @@ def _communicate(
+         return torch.empty(
+             recv_next_shape,
+             requires_grad=True,
+-            device=torch.cuda.current_device(),
++            device=torch.cuda.current_device() if "cpu:gloo" != group.name() else torch.device("cpu"),
+             dtype=config.pipeline_dtype,
+         )
+ 
+@@ -342,9 +343,14 @@ def _communicate(
+     # tensor parallelism, and hence a rank in the encoder is going to feed
+     # several different decoder ranks. We therefore have to receive or send tensors
+     # from several groups. For convenience, I wrap everything into lists.
+-    pp_group = get_pipeline_model_parallel_group()
+-    next_rank = get_pipeline_model_parallel_next_rank()
+-    prev_rank = get_pipeline_model_parallel_prev_rank()
++    if config.enable_hetero: # Using the passed 'group' in the case of 'enable_hetero'
++        pp_group = group
++        next_rank = get_pipeline_model_parallel_next_rank(group=group)
++        prev_rank = get_pipeline_model_parallel_prev_rank(group=group)
++    else:
++        pp_group = get_pipeline_model_parallel_group()
++        next_rank = get_pipeline_model_parallel_next_rank()
++        prev_rank = get_pipeline_model_parallel_prev_rank()
+     if not isinstance(pp_group, list):
+         pp_group = [pp_group]
+         assert not isinstance(next_rank, list)
+@@ -425,6 +431,68 @@ def _communicate(
+ 
+     return tensor_recv_prev, tensor_recv_next, reqs
+ 
++def warm_up_comm_group(config):
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import warm_up_comm_group_hetero
++        warm_up_comm_group_hetero(config)
++        return
++
++    # NOTE(lizhiyu): For enbale config.variable_seq_lengths and pp_size > 2
++    if not config.variable_seq_lengths or get_pipeline_model_parallel_world_size() <= 2:
++        return
++    config.variable_seq_lengths=False
++    rank = torch.distributed.get_rank()
++    pp_group = get_pipeline_model_parallel_group()
++    # This is arbitrary because the shape of the recv tensor needs
++    # to be specified when communicating.
++    # It can be changed into any other shape.
++    tensor_shape = [1]
++    to_send_tensor= torch.empty(
++            tensor_shape,
++            requires_grad=True,
++            device=torch.cuda.current_device(),
++            dtype=config.pipeline_dtype,
++        )
++    to_recv_tensor= torch.empty(
++            tensor_shape,
++            requires_grad=True,
++            device=torch.cuda.current_device(),
++            dtype=config.pipeline_dtype,
++        )
++
++    group_ranks = torch.distributed.get_process_group_ranks(pp_group)
++    pipeline_rank = get_pipeline_model_parallel_rank()
++    if pipeline_rank == 0:
++        _communicate(
++            tensor_send_next=to_send_tensor,
++            tensor_send_prev=None,
++            recv_prev=False,
++            recv_next=False,
++            tensor_shape=to_recv_tensor.shape,
++            config=config,
++            group=pp_group,
++        )
++    elif pipeline_rank == len(group_ranks) - 1:
++        _communicate(
++            tensor_send_next=None,
++            tensor_send_prev=None,
++            recv_prev=True,
++            recv_next=False,
++            tensor_shape=to_recv_tensor.shape,
++            config=config,
++            group=pp_group,
++        )
++    elif rank in group_ranks:
++        _communicate(
++            tensor_send_next=to_send_tensor,
++            tensor_send_prev=None,
++            recv_prev=True,
++            recv_next=False,
++            tensor_shape=to_recv_tensor.shape,
++            config=config,
++            group=pp_group,
++        )
++    config.variable_seq_lengths = True
+ 
+ @nvtx_decorator()
+ def recv_forward(
+@@ -434,6 +502,9 @@ def recv_forward(
+ 
+     See _communicate for argument details.
+     """
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import recv_forward_hetero
++        return recv_forward_hetero(tensor_shape, config, is_first_stage=is_first_stage)
+     if is_first_stage:
+         input_tensor = None
+     else:
+@@ -460,6 +531,10 @@ def recv_backward(
+ 
+     See _communicate for argument details.
+     """
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import recv_backward_hetero
++        return recv_backward_hetero(tensor_shape, config, is_last_stage=is_last_stage)
++
+     if is_last_stage:
+         output_tensor_grad = None
+     else:
+@@ -486,6 +561,10 @@ def send_forward(
+ 
+     See _communicate for argument details.
+     """
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import send_forward_hetero
++        send_forward_hetero(output_tensor, config, is_last_stage=is_last_stage)
++        return
+ 
+     if not is_last_stage:
+         if config.timers is not None:
+@@ -510,6 +589,11 @@ def send_backward(
+ 
+     See _communicate for argument details.
+     """
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import send_backward_hetero
++        send_backward_hetero(input_tensor_grad, config, is_first_stage=is_first_stage)
++        return
++
+     if not is_first_stage:
+         if config.timers is not None:
+             config.timers('backward-send', log_level=2).start()
+@@ -536,6 +620,10 @@ def send_forward_recv_backward(
+ 
+     See _communicate for argument details.
+     """
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import send_forward_recv_backward_hetero
++        return send_forward_recv_backward_hetero(output_tensor, tensor_shape, config, is_last_stage=is_last_stage)
++
+     if is_last_stage:
+         output_tensor_grad = None
+     else:
+@@ -565,6 +653,10 @@ def send_backward_recv_forward(
+ 
+     See _communicate for argument details.
+     """
++    if config.enable_hetero:
++        from flagscale.train.hetero.p2p_communication import send_backward_recv_forward_hetero
++        return send_backward_recv_forward_hetero(input_tensor_grad, tensor_shape, config, is_first_stage=is_first_stage)
++
+     if is_first_stage:
+         input_tensor = None
+     else:
+

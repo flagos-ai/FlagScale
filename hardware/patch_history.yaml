@@ -33,6 +33,13 @@ Cambricon_MLU:
     FlagScale:
     - 10faa30d1635fb8a102a48352d196870841100a0
     - 1d6faaad9c56e3e5ccae0526a6a977fae46650d2
+  train:
+    FlagScale+Megatron-LM:
+    - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    Megatron-LM:
+    - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    FlagScale:
+    - a4434373b7d0bf952d8d6eecb036243cd0a7a049
 Kunlunxin_R310p:
   inference:
     FlagScale+vllm:
@@ -218,3 +225,7 @@ Tsing_micro:
     FlagScale:
     - ba7c854fbfeae7676229b5457c05694aaa6b7781
     - ff41d6d017730504fac2fc62226a615b38558433
+NVIDIA_CambriconMLU:
+  train:
+    Megatron-LM:
+    - 631ebb869a58a4d495a4c2bd1698e31409448ca6

@@ -1,0 +1,157 @@
+diff --git a/megatron/training/tokenizer/rwkv_tokenization.py b/megatron/training/tokenizer/rwkv_tokenization.py
+new file mode 100644
+index 000000000..c814c5549
+--- /dev/null
++++ b/megatron/training/tokenizer/rwkv_tokenization.py
+@@ -0,0 +1,150 @@
++from __future__ import (absolute_import, division, print_function,
++                        unicode_literals)
++
++import sys
++import json
++import logging
++import os
++from io import open
++
++try:
++    from functools import lru_cache
++except ImportError:
++    def lru_cache():
++        return lambda func: func
++
++logger = logging.getLogger(__name__)
++
++
++class TRIE:
++    __slots__ = tuple("ch,to,values,front".split(","))
++
++    def __init__(self, front=None, ch=None):
++        self.ch = ch
++        self.to = [None for _ in range(256)]
++        self.values = set()
++        self.front = front
++
++    def add(self, key: bytes, idx: int = 0, val=None):
++        if idx == len(key):
++            if val is None:
++                val = key
++            self.values.add(val)
++            return self
++        ch = key[idx]
++        if self.to[ch] is None:
++            self.to[ch] = TRIE(front=self, ch=ch)
++        return self.to[ch].add(key, idx=idx + 1, val=val)
++
++    def find_longest(self, key: bytes, idx: int = 0):
++        u = self
++        ret = None
++        while idx < len(key) and u.to[key[idx]] is not None:
++            u = u.to[key[idx]]
++            idx += 1
++            if u.values:
++                ret = idx, u, u.values
++        if ret is None:
++            raise ValueError("No matching token found")
++        return ret
++
++
++class RWKVTokenizer:
++    """
++    RWKV Trie-based tokenizer.
++    Compatible interface with Megatron tokenizer.
++    """
++    @classmethod
++    def from_pretrained(cls, tokenizer_path, *inputs, **kwargs):
++        tokenizer = cls(tokenizer_path, *inputs, **kwargs)
++        return tokenizer
++
++    def __init__(self, tokenizer_path, special_tokens=None, max_len=None):
++        self.max_len = max_len if max_len is not None else int(1e12)
++        self.idx2token = {}
++        self.token2idx = {}
++
++        files = [f for f in os.listdir(tokenizer_path) if f.endswith('.txt')]
++        if not files:
++            raise ValueError(f"No .txt vocab files found in {tokenizer_path}")
++        for vocab_file in files:
++            file_path = os.path.join(tokenizer_path, vocab_file)
++            with open(file_path, "r", encoding="utf-8") as f:
++                lines = f.readlines()
++
++        sorted_tokens = []
++        for line in lines:
++            idx = int(line[:line.index(' ')])
++            token_bytes = eval(line[line.index(' '):line.rindex(' ')])
++            token_bytes = token_bytes.encode("utf-8") if isinstance(token_bytes, str) else token_bytes
++            sorted_tokens.append(token_bytes)
++            self.idx2token[idx] = token_bytes
++            self.token2idx[token_bytes] = idx
++
++        self.root = TRIE()
++        for token_bytes, idx in self.token2idx.items():
++            self.root.add(token_bytes, val=(token_bytes, idx))
++
++        self.special_tokens = {}
++        self.special_tokens_decoder = {}
++        self.set_special_tokens(special_tokens)
++        self.eod = 0
++        self.unique_identifiers = [self.eod]
++
++    def set_special_tokens(self, special_tokens):
++        if not special_tokens:
++            return
++        start_idx = len(self.idx2token)
++        for i, tok in enumerate(special_tokens):
++            self.special_tokens[tok] = start_idx + i
++            self.special_tokens_decoder[start_idx + i] = tok
++
++    def encode_bytes(self, src: bytes):
++        idx = 0
++        tokens = []
++        while idx < len(src):
++            _idx = idx
++            idx, _, values = self.root.find_longest(src, idx)
++            if idx == _idx:
++                raise ValueError(f"Cannot encode byte at position {idx}")
++            _, token_id = next(iter(values))
++            tokens.append(token_id)
++        return tokens
++
++    def decode_bytes(self, tokens):
++        return b''.join([self.idx2token[i] for i in tokens])
++
++    def encode(self, text):
++        return self.encode_bytes(text.encode("utf-8"))
++
++    def decode(self, tokens):
++        try:
++            return self.decode_bytes(tokens).decode("utf-8")
++        except Exception:
++            return '\ufffd'
++
++    def convert_tokens_to_ids(self, tokens):
++        ids = []
++        for t in tokens:
++            if t in self.special_tokens:
++                ids.append(self.special_tokens[t])
++            else:
++                ids.append(self.token2idx.get(t.encode("utf-8") if isinstance(t, str) else t, 0))
++        return ids
++
++    def convert_ids_to_tokens(self, ids):
++        tokens = []
++        for i in ids:
++            if i in self.special_tokens_decoder:
++                tokens.append(self.special_tokens_decoder[i])
++            else:
++                tokens.append(self.idx2token[i])
++        return tokens
++
++    def __len__(self):
++        return len(self.idx2token) + len(self.special_tokens)
++
++    @property
++    def vocab_size(self):
++        return len(self.idx2token) + len(getattr(self, 'special_tokens', {}))
++
+

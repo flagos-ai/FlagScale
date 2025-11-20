@@ -1,0 +1,190 @@
+diff --git a/megatron/accelerator/__init__.py b/megatron/accelerator/__init__.py
+new file mode 100644
+index 000000000..40f99ded3
+--- /dev/null
++++ b/megatron/accelerator/__init__.py
+@@ -0,0 +1,183 @@
++import os
++from functools import wraps
++import torch
++
++device_type=None
++try:
++    import torch_mlu
++    device_type='mlu'
++    print(f'[INFO]: device type is mlu')
++except:
++    device_type='cuda'
++    print(f'[INFO]: device type is cuda')
++
++
++if hasattr(torch.distributed, "all_gather_into_tensor") and \
++   hasattr(torch.distributed, "reduce_scatter_tensor"):
++    torch.distributed._all_gather_base = torch.distributed.all_gather_into_tensor
++    torch.distributed._reduce_scatter_base = torch.distributed.reduce_scatter_tensor
++
++def wrapper_type(fn):
++    @wraps(fn)
++    def decorated(*args, **kwargs):
++        output = fn(*args, **kwargs)
++        if isinstance(output, str):
++            if output == 'torch.mlu.FloatTensor':
++                output = 'torch.cuda.FloatTensor'
++            elif output == 'torch.mlu.BFloat16Tensor':
++                output = 'torch.cuda.BFloat16Tensor'
++            elif output == 'torch.mlu.HalfTensor':
++                output = 'torch.cuda.HalfTensor'
++        return output
++
++    return decorated
++
++def wrapper_cuda(fn):
++    @wraps(fn)
++    def decorated(*args, **kwargs):
++        output = fn(*args, **kwargs)
++        return output
++
++    return decorated
++
++
++def wrapper_init_process_group(fn):
++    @wraps(fn)
++    def decorated(*args, **kwargs):
++        if 'backend' in kwargs.keys():
++            if kwargs['backend'] == 'nccl':
++                kwargs['backend']='cncl'
++        output = fn(*args, **kwargs)
++        return output
++
++    return decorated
++
++
++def wrapper_torch_device(fn):
++    @wraps(fn)
++    def decorated(*args, **kwargs):
++        if 'device' in kwargs.keys():
++            if kwargs['device'] == 'cuda':
++                kwargs['device']='mlu'
++        output = fn(*args, **kwargs)
++        return output
++
++    return decorated
++
++
++def replace_cuda_with_mlu(fn):
++    def _replace_cuda_with_mlu(self, *args, **kwargs):
++        if args:
++          args = list(args)
++          for i, arg in enumerate(args):
++              # 'cuda*' -> 'mlu*'
++              if isinstance(arg, str) and "cuda" in arg:
++                  arg = arg.replace("cuda", "mlu")
++              elif isinstance(arg, str) and "CUDA" in arg:
++                  arg = arg.replace("CUDA", "MLU")
++              # torch.device('cuda*') -> torch.device('mlu*')
++              elif isinstance(arg, torch.device) and "cuda" in arg.type:
++                  device = f"mlu:{arg.index}" if arg.index is not None else "mlu"
++                  arg = torch.device(device)
++              args[i]= arg
++
++        if "device" in kwargs and kwargs["device"] == "cuda":
++            kwargs["device"] = "mlu"
++        return fn(self, *args, **kwargs)
++
++    torch.Tensor.to = _replace_cuda_with_mlu
++
++
++def replace_nccl_with_cncl(fn):
++    def _replace_nccl_with_cncl(*args, **kwargs):
++        if args:
++          args = list(args)
++          for i, arg in enumerate(args):
++              # 'cuda*' -> 'mlu*'
++              if isinstance(arg, str) and "nccl" in arg:
++                  arg = arg.replace("nccl", "cncl")
++              args[i]= arg
++
++        return fn(*args, **kwargs)
++
++    torch.distributed.is_backend_available = _replace_nccl_with_cncl
++
++def wrapper_backend(fn):
++    @wraps(fn)
++    def decorated(*args, **kwargs):
++        output = fn(*args, **kwargs)
++        if isinstance(output, str):
++            if output == 'cncl':
++                output = 'nccl'
++        return output
++
++    return decorated
++
++from torch.utils._device import _device_constructors
++old_devs_ = torch.utils._device._device_constructors()
++def org_dev_constructors():
++    global old_devs_
++    return old_devs_
++
++
++if device_type == 'mlu':
++    org_dev_constructors()
++
++    torch.cuda.BFloat16Tensor = torch.mlu.BFloat16Tensor
++    torch.cuda.CUDAGraph = torch.mlu.MLUGraph
++    torch.cuda.Event = torch.mlu.Event
++    torch.cuda.FloatTensor = torch.mlu.FloatTensor
++    torch.cuda.HalfTensor = torch.mlu.HalfTensor
++    torch.cuda.LongTensor = torch.mlu.LongTensor
++    torch.cuda.Stream = torch.mlu.Stream
++
++    torch.cuda.amp = torch.mlu.amp
++    torch.cuda.clock_rate = torch.mlu.clock_rate
++    torch.cuda.current_device = torch.mlu.current_device
++    torch.cuda.current_stream = torch.mlu.current_stream
++    torch.cuda.device = torch.mlu.device
++    torch.cuda.device_count = torch.mlu.device_count
++    torch.cuda.default_stream = torch.mlu.default_stream
++    torch.cuda.default_generators = torch.mlu.default_generators
++    torch.cuda.empty_cache = torch.mlu.empty_cache
++    torch.cuda.get_device_properties = torch.mlu.get_device_properties
++    torch.cuda.get_rng_state = torch.mlu.get_rng_state
++    torch.cuda.graph = torch.mlu.graph
++    torch.cuda.graph_pool_handle = torch.mlu.graph_pool_handle
++    torch.cuda.is_available = torch.mlu.is_available
++    torch.cuda.manual_seed = torch.mlu.manual_seed
++    torch.cuda.memory_allocated = torch.mlu.memory_allocated
++    torch.cuda.memory_reserved = torch.mlu.memory_reserved
++    torch.cuda.memory_stats = torch.mlu.memory_stats
++    torch.cuda.nvtx = torch.mlu.cnpx
++    torch.cuda.power_draw = torch.mlu.power_draw
++    torch.cuda.random = torch.mlu.random
++    torch.cuda.set_device = torch.mlu.set_device
++    torch.cuda.synchronize = torch.mlu.synchronize
++    torch.cuda.stream = torch.mlu.stream
++    torch.cuda.set_device = torch.mlu.set_device
++    torch.cuda.set_rng_state = torch.mlu.set_rng_state
++    torch.cuda.temperature = torch.mlu.temperature
++    torch.cuda.utilization = torch.mlu.utilization
++
++    torch.cuda._lazy_call = torch.mlu._lazy_call
++    torch.cuda._lazy_init = torch.mlu._lazy_init
++
++
++    torch.Tensor.cuda = wrapper_cuda(torch.Tensor.mlu)
++    torch.Tensor.type = wrapper_type(torch.Tensor.type)
++    torch.Tensor.is_cuda = torch.Tensor.is_mlu
++    torch.rand = wrapper_torch_device(torch.rand)
++    torch.arange = wrapper_torch_device(torch.arange)
++    torch.randn = wrapper_torch_device(torch.randn)
++    torch.tensor = wrapper_torch_device(torch.tensor)
++    torch.zeros = wrapper_torch_device(torch.zeros)
++    torch.ones = wrapper_torch_device(torch.ones)
++    torch.empty = wrapper_torch_device(torch.empty)
++    replace_cuda_with_mlu(torch.Tensor.to)
++    replace_nccl_with_cncl(torch.distributed.is_backend_available)
++
++    #torch.distributed.get_backend = wrapper_backend(torch.distributed.get_backend)
++    torch.distributed.init_process_group = wrapper_init_process_group(torch.distributed.init_process_group)
++    torch.distributed.new_group = wrapper_init_process_group(torch.distributed.new_group)
++    torch.mlu.nccl=torch.mlu.cncl
+

@@ -1,0 +1,103 @@
+diff --git a/megatron/core/dist_checkpointing/strategies/filesystem_async.py b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
+index a8e759608..efdbfe8c6 100644
+--- a/megatron/core/dist_checkpointing/strategies/filesystem_async.py
++++ b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
+@@ -8,13 +8,14 @@ import logging
+ import os
+ import pickle
+ import queue
++import pickle
+ from functools import partial
+ from heapq import heappop, heappush
+ from itertools import chain
+ from operator import itemgetter
+ from pathlib import Path
+ from time import time
+-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
++from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
+ 
+ import torch
+ from torch import multiprocessing as mp
+@@ -29,6 +30,7 @@ except ImportError:
+ 
+ from torch.distributed.checkpoint.planner import SavePlan, SavePlanner, WriteItem, WriteItemType
+ from torch.distributed.checkpoint.storage import WriteResult
++from torch.distributed.checkpoint.metadata import Metadata
+ from torch.futures import Future
+ 
+ from .async_utils import _disable_gc
+@@ -46,6 +48,40 @@ except ImportError:
+ 
+ _results_queue = None
+ 
++_GLOBAL_PREVIOUS_METADATA = None 
++
++_GLOBAL_PREVIOUS_COUNT = 0
++
++
++def get_previous_metadata():
++    """
++    Get the metadata from the previous save.
++    """
++    return _GLOBAL_PREVIOUS_METADATA
++
++
++def set_previous_metadata(metadata):
++    """
++    Set the metadata from the previous save.
++    """
++    global _GLOBAL_PREVIOUS_METADATA
++    _GLOBAL_PREVIOUS_METADATA = metadata
++
++
++def get_previous_count():
++    """
++    Get the count from the previous save.
++    """
++    return _GLOBAL_PREVIOUS_COUNT
++
++
++def set_previous_count(count):
++    """
++    Set the count from the previous save.
++    """
++    global _GLOBAL_PREVIOUS_COUNT
++    _GLOBAL_PREVIOUS_COUNT = count
++
+ 
+ def _get_write_results_queue():
+     global _results_queue
+@@ -100,6 +136,13 @@ class FileSystemWriterAsync(FileSystemWriter):
+         self.results_queue: Optional[mp.Queue] = None
+         self.separation_hint = separation_hint
+ 
++        # Get the value from the environment variable if it exists, otherwise default to False
++        self.single_file_per_tensor_ckpt = os.getenv('FS_SFPT_CKPT_SAVE', 'False').lower() in (
++            'true',
++            '1',
++            't',
++        )
++
+     def prepare_write_data(self, plan: SavePlan, planner: SavePlanner) -> None:
+         """
+         First stage of async saving. Copy data to CPU and plan the local saving.
+@@ -124,12 +167,17 @@ class FileSystemWriterAsync(FileSystemWriter):
+         start = time()
+         # move tensors from GPU to CPU before starting async writing
+         # We do D2H synchronously for now
+-        file_count = 0
++        if not self.single_file_per_tensor_ckpt:
++            file_count = 0
++        else:
++            file_count = get_previous_count() 
+ 
+         def gen_file(prefix=""):
+             nonlocal file_count
+             file_name = f"{prefix}{storage_plan.prefix}{file_count}{DEFAULT_SUFFIX}"
+             file_count += 1
++            if self.single_file_per_tensor_ckpt:
++                set_previous_count(file_count)
+             return file_name
+ 
+         def _clone_if_needed(ten: torch.Tensor):
+

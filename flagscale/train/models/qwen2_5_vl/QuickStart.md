@@ -16,6 +16,8 @@ python ./tools/patch/unpatch.py --backend=Megatron-Energon
 cd ./third_party/Megatron-Energon/
 pip install -e .
 cp -r src/megatron/energon/ ../Megatron-LM/megatron/
+cd ../Megatron-LM/
+mv tools tools_bk # avoid the tools confict
 ```
 
 You can also refered the readme in `https://github.com/FlagOpen/FlagScale.git`
@@ -30,6 +32,7 @@ cd Qwen2.5-VL-7B-Instruct
 git lfs pull
 
 cd ./tools/checkpoint/qwen2_5_vl/
+export PYTHONPATH=$PYTHONPATH:../../../:../../../third_party/Megatron-LM/
 bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct-tp2 \
@@ -52,7 +55,7 @@ unzip images.zip
 
 #convert to webdataset format
 cd ./tools/datasets/qwenvl/
-export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
+export PYTHONPATH=$PYTHONPATH:../../../third_party/Megatron-LM/
 
 python convert_custom_dataset_to_wds_chatml_str.py \
     --dataset-root=/mnt/LLaVA-Pretrain \

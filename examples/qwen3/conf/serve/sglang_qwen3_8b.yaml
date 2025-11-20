@@ -1,0 +1,31 @@
+- serve_id: vllm_model
+  # engine: vllm
+  # engine: llama_cpp
+  engine: sglang
+  engine_args:
+    model: /models/Qwen3-8B/
+    host: 0.0.0.0
+    max_model_len: 4096
+    max_num_seqs: 4
+    uvicorn_log_level: warning
+    port: 30000
+  engine_args_specific:
+    llama_cpp:
+      threads: 4
+      n_gpu_layers: 64
+    vllm:
+      tensor_parallel_size: 1
+      pipeline_parallel_size: 1
+      gpu_memory_utilization: 0.9
+      enforce_eager: true
+      trust_remote_code: true
+      enable_chunked_prefill: true
+    sglang:
+      tp: 2
+      page_size: 16
+  profile:
+    prefix_len: 0
+    input_len: 1024
+    output_len: 1024
+    num_prompts: 128
+    range_ratio: 1

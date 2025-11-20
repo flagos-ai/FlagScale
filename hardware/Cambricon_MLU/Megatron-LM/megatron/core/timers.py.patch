@@ -1,0 +1,14 @@
+diff --git a/megatron/core/timers.py b/megatron/core/timers.py
+index a34b66349..46876a5e7 100644
+--- a/megatron/core/timers.py
++++ b/megatron/core/timers.py
+@@ -283,6 +283,8 @@ class Timers:
+                 # groups inside their class.
+                 rank_name_to_time[rank, i] = self._timers[name].elapsed(reset=reset)
+ 
++        if "cpu:gloo" == torch.distributed.get_backend():
++            rank_name_to_time = rank_name_to_time.cpu()
+         # See the note above for why we are not using gather.
+         dist_all_gather_func(rank_name_to_time.view(-1), rank_name_to_time[rank, :].view(-1))
+ 
+
