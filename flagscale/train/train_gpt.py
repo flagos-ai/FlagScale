@@ -26,6 +26,14 @@ from megatron.training.datasets.sft_dataset import SFTDataset
 from model_provider import model_provider
 from gpt_builders import gpt_builder
 
+from flagscale.runner.monitor.arguments import add_perf_monitor_args
+from flagscale.runner.monitor.hooks import (
+    initialize_perf_monitor,
+    perf_monitor_start_iteration,
+    perf_monitor_end_iteration,
+    perf_monitor_end_training
+)
+
 try:
     from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
@@ -38,9 +46,18 @@ from flagscale.train.extra_valid import extra_valid_datasets_provider
 from flagscale.train.train import pretrain
 from flagscale.train.global_vars import get_parallel_context
 
-
 stimer = StragglerDetector()
 
+def add_extra_args(parser):
+    """Add extra arguments including performance monitoring and ModelOpt."""
+    # Add performance monitoring args
+    parser = add_performance_args(parser)
+
+    # Chain with ModelOpt args if available
+    if has_nvidia_modelopt:
+        parser = add_modelopt_args(parser)
+
+    return parser
 
 def get_batch(data_iterator, vp_stage=None):
     """Generate a batch."""
@@ -234,6 +251,17 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
     return train_ds, valid_ds, test_ds
 
 
+def combine_extra_args_providers(parser):
+    """Combine multiple extra args providers."""
+    # Add performance monitoring args
+    parser = add_perf_monitor_args(parser)
+
+    # Add modelopt args if available
+    if has_nvidia_modelopt:
+        parser = add_modelopt_args(parser)
+
+    return parser
+
 if __name__ == "__main__":
 
     # Temporary for transition to core datasets
@@ -250,7 +278,7 @@ if __name__ == "__main__":
         ModelType.encoder_or_decoder,
         forward_step,
         args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
-        extra_args_provider=add_modelopt_args if has_nvidia_modelopt else None,
+        extra_args_provider=combine_extra_args_providers,
         store=store,
         extra_valid_dataset_provider=extra_valid_datasets_provider
     )

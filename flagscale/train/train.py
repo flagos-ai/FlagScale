@@ -1028,7 +1028,7 @@ def pretrain(
                 mpu.set_virtual_pipeline_model_parallel_rank(i)
                 extra_iterators = build_extra_valid_data_iterators(extra_valid_dataset_provider)
                 extra_valid_data_iterator.append(extra_iterators)
-        elif args.use_dualpipev:
+        elif getattr(args, "use_dualpipev", False):
             extra_valid_data_iterator = []
             for _ in range(2):
                 extra_iterators = build_extra_valid_data_iterators(
@@ -1126,7 +1126,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
                 this_model.model_type = model_type
                 this_model.vp_stage = i
                 model.append(this_model)
-        elif args.use_dualpipev:
+        elif getattr(args, "use_dualpipev", False):
             model = []
 
             pre_process, post_process = False, False
@@ -2290,6 +2290,11 @@ def train(
     extra_valid_dataset_provider=None,
 ):
     """Training function: run train_step desired number of times, run validation, checkpoint."""
+    # Import performance monitor hooks
+    from flagscale.runner.monitor.hooks import (
+        initialize_perf_monitor, perf_monitor_start_iteration,
+        perf_monitor_end_iteration, perf_monitor_end_training
+    )
     args = get_args()
     timers = get_timers()
 
@@ -2428,6 +2433,8 @@ def train(
     timers('interval-time', log_level=0).start(barrier=True)
     print_datetime('before the start of training step')
     report_memory_flag = True
+    # Initialize performance monitor if enabled
+    perf_callback = initialize_perf_monitor(args)
     pre_hook_enabled = False
     should_exit = False
     exit_code = 0
@@ -2458,6 +2465,8 @@ def train(
 
     num_microbatches = get_num_microbatches()
 
+    # Get TensorBoard and WandB writers for performance monitoring
+    writer = get_tensorboard_writer()
     wandb_writer = get_wandb_writer()
     if wandb_writer and args.wandb_log_model:
         # wandb.watch's log_freg needs to take the accumulated number of microbatches into account
@@ -2598,6 +2607,9 @@ def train(
 
         args.curr_iteration = iteration
 
+        # Performance monitor: start iteration
+        perf_monitor_start_iteration(iteration)
+
         ########## FlagScale Begin ##########
         if args.skip_samples_range or args.skip_iters_range:
             current_global_batch_size = get_current_global_batch_size()
@@ -2654,6 +2666,10 @@ def train(
             forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func
         )
         ft_integration.on_training_step_end()
+
+        # Performance monitor: end iteration
+        perf_monitor_end_iteration(iteration, writer, wandb_writer)
+
         if should_checkpoint:
             save_checkpoint_and_time(
                 iteration,
@@ -2787,7 +2803,7 @@ def train(
                     mpu.set_virtual_pipeline_model_parallel_rank(i)
                     extra_iterators = build_extra_valid_data_iterators(extra_valid_dataset_provider)
                     extra_valid_data_iterator.append(extra_iterators)
-            elif args.use_dualpipev:
+            elif getattr(args, "use_dualpipev", False):
                 extra_valid_data_iterator = []
                 for _ in range(2):
                     extra_iterators = build_extra_valid_data_iterators(
@@ -2895,6 +2911,9 @@ def train(
         ft_integration.shutdown()
         one_logger_utils.finish()
         sys.exit(exit_code)
+
+    # Performance monitor: training end
+    perf_monitor_end_training(writer, wandb_writer)
 
     return iteration, num_floating_point_operations_so_far
 

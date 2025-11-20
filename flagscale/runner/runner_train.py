@@ -105,6 +105,10 @@ def _update_config_train(config: DictConfig):
     if config.experiment.runner.get("no_shared_fs", False):
         config.train.system.no_shared_fs = True
 
+    # Override perf_monitor settings from experiment.runner if specified
+    if config.experiment.runner.get("enable_perf_monitor", None) is not None:
+        config.train.system.enable_perf_monitor = config.experiment.runner.enable_perf_monitor
+
     config = config.train.system
 
     if config.get("checkpoint", None) is None:
