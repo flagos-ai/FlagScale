@@ -269,7 +269,7 @@ def _generate_run_script_train(
         f.write(f"\n")
         f.write(f"cd {root_dir}\n")
         f.write(f"\n")
-        f.write(f"export PYTHONPATH={megatron_dir}:{root_dir}:${{PYTHONPATH}}\n")
+        f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
         f.write(f"\n")
         f.write(f'cmd="{cmd}"\n')
         f.write(f"\n")
