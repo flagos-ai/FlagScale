@@ -57,8 +57,8 @@ class PerfMonitorLogger:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        # Setup timestamp for this session
-        self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Setup timestamp for this session (use local timezone)
+        self.session_timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
 
         # Setup log files
         self.metrics_file = self.log_dir / f"perf_metrics_{self.session_timestamp}.log"
@@ -95,9 +95,7 @@ class PerfMonitorLogger:
             return
 
         header = "=" * 80 + "\n"
-        header += (
-            f"Performance Monitor Session Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        )
+        header += f"Performance Monitor Session Started: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')}\n"
         header += "=" * 80 + "\n"
         header += f"{'Timestamp':<20} {'Step':<8} {'TFLOPS/GPU':<12} {'TFLOPS':<10} "
         header += f"{'Samples/s':<12} {'Tokens/s':<12} {'Time(ms)':<10} {'Memory(GB)':<10}\n"
@@ -119,7 +117,7 @@ class PerfMonitorLogger:
         if not self.enabled:
             return
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
         # Format metrics for text log
         tflops_gpu = metrics_dict.get('TFLOPS_per_GPU', 0.0)
@@ -178,7 +176,7 @@ class PerfMonitorLogger:
         summary = {
             "session_info": {
                 "start_time": self.session_timestamp,
-                "end_time": datetime.now().isoformat(),
+                "end_time": datetime.now().astimezone().isoformat(),
                 "total_iterations": len(self.json_data),
             },
             "final_statistics": final_stats or {},
@@ -191,7 +189,7 @@ class PerfMonitorLogger:
 
         # Log completion
         footer = "\n" + "=" * 80 + "\n"
-        footer += f"Performance Monitor Session Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        footer += f"Performance Monitor Session Completed: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S')}\n"
         footer += f"Summary saved to: {self.summary_file}\n"
         footer += "=" * 80
 
