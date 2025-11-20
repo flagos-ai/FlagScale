@@ -1,17 +1,17 @@
 **After completing the environment setup based on the README.md file in the upper directory**
 
 # Function HighLight:
-### 1)Support multiple instances,
-### 2)Support cross node operation,
-### 3)Support automatic expansion and contraction of capacity
+**1)Support multiple instances**
+**2)Support cross node operation**
+**3)Support automatic expansion and contraction of capacity**
 
-## Program Run Command
+# Program Run Command
 python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=run
 
-## Program Stop Command
+# Program Stop Command
 python run.py --config-path examples/emu3.5/conf/ --config-name serve_emu3p5 action=stop
 
-## output result
+# output result
 Path of output image: examples/emu3.5/conf/serve/outputs
 
 # parameter adjustment
