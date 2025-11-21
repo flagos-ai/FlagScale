@@ -1,8 +1,23 @@
 diff --git a/megatron/core/optimizer/optimizer_config.py b/megatron/core/optimizer/optimizer_config.py
-index e9989cc14..f2e1ffa8b 100644
+index e9989cc14..af997c0f8 100644
 --- a/megatron/core/optimizer/optimizer_config.py
 +++ b/megatron/core/optimizer/optimizer_config.py
-@@ -180,6 +180,13 @@ class OptimizerConfig:
+@@ -119,6 +119,14 @@ class OptimizerConfig:
+     sgd_momentum: float = 0.9
+     """Momentum factor for SGD optimizer."""
+ 
++    # Muon.
++    muon_momentum: float = 0.95
++    """Momentum factor for Muon optimizer."""
++    muon_nesterov: bool = True
++    muon_ns_steps: int = 5
++    """The adamw update rms that muon is designed to matched, typicially 0.2 ~ 0.4"""
++    muon_matched_adamw_rms: float = 0.2
++
+     #######################
+     # Distributed optimizer
+     #######################
+@@ -180,6 +188,13 @@ class OptimizerConfig:
  
      config_logger_dir: str = ""
      """When non-empty, dumps entry-point configs to config_logger_dir"""
