@@ -1,0 +1,26 @@
+diff --git a/tools/preprocess_data.py b/tools/preprocess_data.py
+index 13e5b64a4..c90feb5c1 100644
+--- a/tools/preprocess_data.py
++++ b/tools/preprocess_data.py
+@@ -12,6 +12,7 @@ import time
+ import gzip
+ import glob
+ import torch
++import shutil
+ import numpy as np
+ import multiprocessing
+ try:
+@@ -258,7 +259,12 @@ def main():
+ 
+     if args.split_sentences:
+         if nltk_available:
+-            nltk.download("punkt", quiet=True, download_dir=os.environ.get("NLTK_DATA"))
++            try:
++                punkt_path = os.environ.get("NLTK_DATA") + "/tokenizers/punkt"
++                if not os.path.exists(punkt_path):
++                    shutil.copytree('/root/nltk_data/tokenizers/punkt', punkt_path)
++            except:
++                nltk.download("punkt", quiet=True, download_dir=os.environ.get("NLTK_DATA"))
+         else:
+             raise Exception(
+                 "nltk library required for sentence splitting is not available.")

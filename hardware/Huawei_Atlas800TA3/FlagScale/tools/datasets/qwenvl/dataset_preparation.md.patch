@@ -1,0 +1,14 @@
+diff --git a/tools/datasets/qwenvl/dataset_preparation.md b/tools/datasets/qwenvl/dataset_preparation.md
+index 1bd24a84..a41d8603 100644
+--- a/tools/datasets/qwenvl/dataset_preparation.md
++++ b/tools/datasets/qwenvl/dataset_preparation.md
+@@ -16,7 +16,7 @@ unzip images.zip
+ cd ./tools/datasets/qwenvl/
+ 
+ 
+-export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
++export PYTHONPATH=$PYTHONPATH:../../../third_party/Megatron-LM/
+ 
+ python convert_custom_dataset_to_wds_chatml_str.py \
+     --dataset-root=/mnt/LLaVA-Pretrain \
+

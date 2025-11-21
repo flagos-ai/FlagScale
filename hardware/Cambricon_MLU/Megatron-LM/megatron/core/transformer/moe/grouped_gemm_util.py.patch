@@ -1,0 +1,19 @@
+diff --git a/megatron/core/transformer/moe/grouped_gemm_util.py b/megatron/core/transformer/moe/grouped_gemm_util.py
+index 5dd344816..06a716b45 100644
+--- a/megatron/core/transformer/moe/grouped_gemm_util.py
++++ b/megatron/core/transformer/moe/grouped_gemm_util.py
+@@ -1,7 +1,12 @@
+ # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+ 
++#NOTE(mlu): call grouped_gemm fuse_op from apex
++from megatron.accelerator import device_type
+ try:
+-    import grouped_gemm
++    if device_type == 'mlu':
++        from apex.contrib import grouped_gemm
++    else:
++        import grouped_gemm
+ except ImportError:
+     grouped_gemm = None
+ 
+

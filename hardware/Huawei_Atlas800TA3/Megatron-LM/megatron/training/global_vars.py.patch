@@ -1,0 +1,127 @@
+diff --git a/megatron/training/global_vars.py b/megatron/training/global_vars.py
+index 7b946dc34..d589a76e4 100644
+--- a/megatron/training/global_vars.py
++++ b/megatron/training/global_vars.py
+@@ -5,6 +5,7 @@
+ import os
+ import sys
+ import torch
++import torch.distributed
+ 
+ from megatron.core import Timers
+ from megatron.core.config import set_experimental_flag
+@@ -13,6 +14,8 @@ from megatron.core.num_microbatches_calculator import init_num_microbatches_calc
+ from megatron.training import dist_signal_handler
+ from megatron.training.tokenizer import build_tokenizer
+ 
++from flagscale.train.hetero.p2p_communication import get_device_type_for_comm
++
+ _GLOBAL_ARGS = None
+ _GLOBAL_TOKENIZER = None
+ _GLOBAL_TENSORBOARD_WRITER = None
+@@ -98,9 +101,6 @@ def set_global_variables(args, build_tokenizer=True):
+     )
+     if build_tokenizer:
+         _ = _build_tokenizer(args)
+-    _set_tensorboard_writer(args)
+-    _set_wandb_writer(args)
+-    _set_one_logger(args)
+     _set_adlr_autoresume(args)
+     _set_timers(args)
+     _set_energy_monitor(args)
+@@ -112,6 +112,42 @@ def set_global_variables(args, build_tokenizer=True):
+         _set_signal_handler()
+ 
+ 
++def set_global_writers(args):
++    """Set tensorboard-writer and wandb writer.
++
++    Note that this function should be called after calling finish_mpu_init.
++    This is because we can know which rank is the last one after the rank mapping in finish_mpu_init.
++    """
++
++    assert args is not None
++
++    _ensure_var_is_initialized(_GLOBAL_ARGS, 'args')
++
++    from .utils import is_last_rank
++    if is_last_rank(): 
++        _set_tensorboard_writer(args)
++        _set_one_logger(args)
++
++    # build wandb writers for all processes in the dp group of the last rank 
++    from megatron.core import mpu 
++    mp_groups = mpu.get_model_parallel_group()
++    if not isinstance(mp_groups, list):
++        mp_groups = [mp_groups]
++    size = torch.distributed.get_world_size(mp_groups[-1])
++    comm_device = get_device_type_for_comm(mp_groups)
++    ranks_tensor = torch.tensor([0 for _ in range(size)], dtype=torch.int, device=comm_device)
++    orig_ranks = torch.tensor([i for i in range(size)], dtype=torch.int, device=comm_device)
++    if is_last_rank():
++        ranks_list = torch.distributed.get_process_group_ranks(mp_groups[-1])
++        ranks_tensor = torch.tensor(ranks_list, dtype=torch.int, device=comm_device)
++    orig_ranks = ranks_tensor.clone().detach()
++    for group in mp_groups:
++        ranks_tensor = orig_ranks.clone()
++        torch.distributed.all_reduce(ranks_tensor, group=group)
++    if torch.distributed.get_rank() in ranks_tensor.tolist(): 
++        _set_wandb_writer(args)
++
++
+ def unset_global_variables():
+     """Unset global vars.
+ 
+@@ -169,7 +205,7 @@ def _set_tensorboard_writer(args):
+                                    'tensorboard writer')
+ 
+     if hasattr(args, 'tensorboard_dir') and \
+-       args.tensorboard_dir and args.rank == (args.world_size - 1):
++       args.tensorboard_dir:
+         try:
+             from torch.utils.tensorboard import SummaryWriter
+             print('> setting tensorboard ...')
+@@ -186,11 +222,13 @@ def _set_wandb_writer(args):
+     global _GLOBAL_WANDB_WRITER
+     _ensure_var_is_not_initialized(_GLOBAL_WANDB_WRITER,
+                                    'wandb writer')
+-    if getattr(args, 'wandb_project', '') and args.rank == (args.world_size - 1):
++    if getattr(args, 'wandb_project', ''):
+         if args.wandb_exp_name == '':
+             raise ValueError("Please specify the wandb experiment name!")
+ 
+         import wandb
++        rank = torch.distributed.get_rank()
++
+         if args.wandb_save_dir:
+             save_dir = args.wandb_save_dir
+         else:
+@@ -202,12 +240,25 @@ def _set_wandb_writer(args):
+             # settings were.
+             with open(wandb_config['kitchen_config_file'], "r") as f:
+                 wandb_config['kitchen_config_file_contents'] = f.read()
++        save_dir = os.path.join(save_dir, "rank-{}".format(rank))
++        os.makedirs(save_dir, exist_ok=True)
++
++        wandb_id = f"{args.wandb_exp_name}-rank-{rank}"
++        name = f'{args.wandb_exp_name}-rank-{rank}'
++        group = args.wandb_exp_name
+         wandb_kwargs = {
++            'id': wandb_id,
+             'dir': save_dir,
+-            'name': args.wandb_exp_name,
++            'name': name,
++            'group': group,
+             'project': args.wandb_project,
++            'mode': args.wandb_mode,
++            'resume': 'auto',
+             'config': wandb_config}
+-        os.makedirs(wandb_kwargs['dir'], exist_ok=True)
++
++        if args.wandb_mode == 'online' or args.wandb_api_key:
++            assert args.wandb_api_key, 'wandb_api_key is required for online mode'
++            wandb.login(key=args.wandb_api_key)
+         wandb.init(**wandb_kwargs)
+         _GLOBAL_WANDB_WRITER = wandb
+ 
+

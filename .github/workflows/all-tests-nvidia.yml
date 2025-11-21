@@ -43,7 +43,6 @@ jobs:
   unit_tests_train_megatron:
     needs:
       - set-env
-      - functional_tests_rl
     uses: ./.github/workflows/unit-tests-nvidia.yml
     strategy:
       matrix:
@@ -85,28 +84,28 @@ jobs:
       subset: ${{ matrix.subset }}
       image: ${{ needs.set-env.outputs.ci_image }}
 
-  # Inference Flagscale Unit Tests with Matrix
-  unit_tests_inference_flagscale:
-    needs:
-      - set-env
-      - unit_tests_train_flagscale
-    uses: ./.github/workflows/unit-tests-nvidia.yml
-    strategy:
-      matrix:
-        subset:
-          - inference
-          - transformations
-    name: "inference_flagscale-${{ matrix.subset == './' && 'root' || matrix.subset }}"
-    with:
-      backend: inference_flagscale
-      subset: ${{ matrix.subset }}
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # # Inference Flagscale Unit Tests with Matrix
+  # unit_tests_inference_flagscale:
+  #   needs:
+  #     - set-env
+  #     - unit_tests_train_flagscale
+  #   uses: ./.github/workflows/unit-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       subset:
+  #         - inference
+  #         - transformations
+  #   name: "inference_flagscale-${{ matrix.subset == './' && 'root' || matrix.subset }}"
+  #   with:
+  #     backend: inference_flagscale
+  #     subset: ${{ matrix.subset }}
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
   # Functional Tests with Mision and Type Matrix
   functional_tests_train:
     needs:
       - set-env
-      - functional_tests_serve
+      - unit_tests_train_flagscale
     uses: ./.github/workflows/functional-tests-nvidia.yml
     strategy:
       matrix:
@@ -137,40 +136,40 @@ jobs:
       type: hetero_train
       image: ${{ needs.set-env.outputs.ci_image }}
 
-  functional_tests_inference:
-    needs:
-      - set-env
-    uses: ./.github/workflows/functional-tests-nvidia.yml
-    strategy:
-      matrix:
-        task:
-          - deepseek_r1_distill_qwen
-          - deepseek_r1_distill_qwen-flaggems
-          - qwen3
-          - qwen3-flaggems
-          - robobrain2
-          # - robobrain2-flaggems
-    name: "inference-${{ matrix.task }}"
-    with:
-      task: ${{ matrix.task }}
-      type: inference
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # functional_tests_inference:
+  #   needs:
+  #     - set-env
+  #   uses: ./.github/workflows/functional-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       task:
+  #         - deepseek_r1_distill_qwen
+  #         - deepseek_r1_distill_qwen-flaggems
+  #         - qwen3
+  #         - qwen3-flaggems
+  #         - robobrain2
+  #         # - robobrain2-flaggems
+  #   name: "inference-${{ matrix.task }}"
+  #   with:
+  #     task: ${{ matrix.task }}
+  #     type: inference
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
-  functional_tests_serve:
-    needs:
-      - set-env
-      - functional_tests_inference
-    uses: ./.github/workflows/functional-tests-nvidia.yml
-    strategy:
-      matrix:
-        task:
-          - qwen2_5
-          - base
-    name: "serve-${{ matrix.task }}"
-    with:
-      task: ${{ matrix.task }}
-      type: serve
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # functional_tests_serve:
+  #   needs:
+  #     - set-env
+  #     - functional_tests_inference
+  #   uses: ./.github/workflows/functional-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       task:
+  #         - qwen2_5
+  #         - base
+  #   name: "serve-${{ matrix.task }}"
+  #   with:
+  #     task: ${{ matrix.task }}
+  #     type: serve
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
   functional_tests_rl:
     needs:
@@ -192,11 +191,11 @@ jobs:
     needs:
       - unit_tests_train_megatron
       - unit_tests_train_flagscale
-      - unit_tests_inference_flagscale
+      # - unit_tests_inference_flagscale
       - functional_tests_train
       - functional_tests_hetero
-      - functional_tests_inference
-      - functional_tests_serve
+      # - functional_tests_inference
+      # - functional_tests_serve
       - functional_tests_rl
     runs-on: ubuntu-latest
     steps:

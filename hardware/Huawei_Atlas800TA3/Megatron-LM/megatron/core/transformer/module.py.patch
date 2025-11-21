@@ -1,0 +1,37 @@
+diff --git a/megatron/core/transformer/module.py b/megatron/core/transformer/module.py
+index 8a8bd8c57..048a30665 100644
+--- a/megatron/core/transformer/module.py
++++ b/megatron/core/transformer/module.py
+@@ -232,12 +232,25 @@ class Float16Module(MegatronModule):
+         return self.module.set_input_tensor(input_tensor)
+ 
+     def forward(self, *inputs, **kwargs):  # pylint: disable=missing-function-docstring
+-        if parallel_state.is_pipeline_first_stage(ignore_virtual=False, vp_stage=self.vp_stage):
+-            inputs = fp32_to_float16(inputs, self.float16_convertor)
+-        outputs = self.module(*inputs, **kwargs)
+-        if parallel_state.is_pipeline_last_stage(ignore_virtual=False, vp_stage=self.vp_stage):
+-            outputs = float16_to_fp32(outputs)
+-        return outputs
++        ######### FlagScale Begin ########
++        from flagscale.train.dualpipev.dualpipev_schedules import get_dualpipe_chunk
++        if self.config.use_dualpipev:
++            dualpipe_first_stage = parallel_state.is_pipeline_first_stage() and get_dualpipe_chunk() == 0
++            if dualpipe_first_stage:
++                inputs = fp32_to_float16(inputs, self.float16_convertor)
++            outputs = self.module(*inputs, **kwargs)
++            dualpipe_last_stage = parallel_state.is_pipeline_first_stage() and get_dualpipe_chunk() == 1
++            if dualpipe_last_stage:
++                outputs = float16_to_fp32(outputs)
++            return outputs
++        ######### FlagScale End ########
++        else:
++            if parallel_state.is_pipeline_first_stage(ignore_virtual=False, vp_stage=self.vp_stage):
++                inputs = fp32_to_float16(inputs, self.float16_convertor)
++            outputs = self.module(*inputs, **kwargs)
++            if parallel_state.is_pipeline_last_stage(ignore_virtual=False, vp_stage=self.vp_stage):
++                outputs = float16_to_fp32(outputs)
++            return outputs
+ 
+     def state_dict(
+         self, destination=None, prefix='', keep_vars=False
+

@@ -1,0 +1,23 @@
+diff --git a/megatron/core/datasets/blended_dataset.py b/megatron/core/datasets/blended_dataset.py
+index e5c1915bc..c77b041fb 100644
+--- a/megatron/core/datasets/blended_dataset.py
++++ b/megatron/core/datasets/blended_dataset.py
+@@ -13,7 +13,7 @@ import torch
+ 
+ from megatron.core.datasets.blended_megatron_dataset_config import BlendedMegatronDatasetConfig
+ from megatron.core.datasets.megatron_dataset import MegatronDataset
+-from megatron.core.datasets.utils import normalize
++from megatron.core.datasets.utils import normalize, is_built_on_zero_rank
+ from megatron.core.utils import log_single_rank
+ 
+ logger = logging.getLogger(__name__)
+@@ -123,7 +123,7 @@ class BlendedDataset(torch.utils.data.Dataset):
+         else:
+             cache_hit = False
+ 
+-        if not path_to_cache or (not cache_hit and torch.distributed.get_rank() == 0):
++        if not path_to_cache or (not cache_hit and is_built_on_zero_rank()):
+             log_single_rank(
+                 logger, logging.INFO, f"Build and save the {type(self).__name__} indices"
+             )
+

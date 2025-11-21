@@ -14,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import wandb
 
 from megatron.energon import WorkerConfig, get_loader, get_train_dataset
-from tools.datasets.qwenvl.data.dataset_helpers_pi0 import TaskEncoder
+from tools.datasets.vla.data.dataset_helpers import TaskEncoder
 
 from flagscale.models.pi0.modeling_pi0 import PI0Policy, PI0PolicyConfig
 from flagscale.runner.utils import logger

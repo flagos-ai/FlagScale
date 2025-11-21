@@ -1,0 +1,11 @@
+backends_commit:
+  Megatron-LM: 3a2a972d9ffd5cee534b761f0803ea1b07389d2f
+backends_version:
+  Megatron-LM: 0.12.0
+commit: a9e7999232dc3c2a74793decbf2425098ba72a00
+contact: ''
+device_type: NVIDIA_CambriconMLU
+models:
+- aquila
+task:
+- train

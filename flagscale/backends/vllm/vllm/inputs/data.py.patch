@@ -1,63 +1,52 @@
 diff --git a/vllm/inputs/data.py b/vllm/inputs/data.py
-index 23cb5e502..fb619c7df 100644
+index 1718c0767..3e69e512c 100644
 --- a/vllm/inputs/data.py
 +++ b/vllm/inputs/data.py
-@@ -35,6 +35,11 @@ class TextPrompt(TypedDict):
+@@ -45,6 +45,9 @@ class TextPrompt(TypedDict):
      Optional cache salt to be used for prefix caching.
      """
  
-+    # --- FLAGSCALE MODIFICATION BEG ---
-+    negative_prompt: NotRequired[Optional[str]]
-+    """The negative input text to be tokenized before passing to the model."""
-+    # --- FLAGSCALE MODIFICATION END ---
++    uncond_prompt: NotRequired[Optional[str]]
++    """The uncond input text to be tokenized before passing to the model."""
 +
  
  class TokensPrompt(TypedDict):
      """Schema for a tokenized prompt."""
-@@ -64,6 +69,11 @@ class TokensPrompt(TypedDict):
+@@ -85,6 +88,9 @@ class TokensPrompt(TypedDict):
      Optional cache salt to be used for prefix caching.
      """
  
-+    # --- FLAGSCALE MODIFICATION BEG ---
-+    negative_prompt_token_ids: NotRequired[Optional[list[int]]]
-+    """A list of token IDs to pass to the model for the negative input."""
-+    # --- FLAGSCALE MODIFICATION END ---
++    uncond_prompt_token_ids: NotRequired[Optional[list[int]]]
++    """A list of token IDs to pass to the model for the uncond input."""
 +
  
  class EmbedsPrompt(TypedDict):
      """Schema for a prompt provided via token embeddings."""
-@@ -187,19 +197,33 @@ class TokenInputs(TypedDict):
+@@ -215,18 +221,26 @@ class TokenInputs(TypedDict):
      Optional cache salt to be used for prefix caching.
      """
  
-+    # --- FLAGSCALE MODIFICATION BEG ---
-+    negative_prompt_token_ids: NotRequired[Optional[list[int]]]
-+    negative_prompt: NotRequired[Optional[str]]
-+    # --- FLAGSCALE MODIFICATION END ---
++    uncond_prompt_token_ids: NotRequired[Optional[list[int]]]
++    uncond_prompt: NotRequired[Optional[str]]
 +
  
  def token_inputs(
      prompt_token_ids: list[int],
-     token_type_ids: Optional[list[int]] = None,
      prompt: Optional[str] = None,
      cache_salt: Optional[str] = None,
-+    # --- FLAGSCALE MODIFICATION BEG ---
-+    negative_prompt_token_ids: Optional[list[int]] = None,
-+    negative_prompt: Optional[str] = None,
-+    # --- FLAGSCALE MODIFICATION END ---
++    uncond_prompt_token_ids: Optional[list[int]] = None,
++    uncond_prompt: Optional[str] = None,
  ) -> TokenInputs:
      """Construct [`TokenInputs`][vllm.inputs.data.TokenInputs] from optional
      values."""
 -    inputs = TokenInputs(type="token", prompt_token_ids=prompt_token_ids)
 +    inputs = TokenInputs(type="token", prompt_token_ids=prompt_token_ids,
-+                         negative_prompt_token_ids=negative_prompt_token_ids) # --- FLAGSCALE MODIFICATION ---
++                         uncond_prompt_token_ids=uncond_prompt_token_ids)
  
      if prompt is not None:
          inputs["prompt"] = prompt
-+    # --- FLAGSCALE MODIFICATION BEG ---
-+    if negative_prompt is not None:
-+        inputs["negative_prompt"] = negative_prompt
-+    # --- FLAGSCALE MODIFICATION END ---
-     if token_type_ids is not None:
-         inputs["token_type_ids"] = token_type_ids
++    if uncond_prompt is not None:
++        inputs["uncond_prompt"] = uncond_prompt
      if cache_salt is not None:
+         inputs["cache_salt"] = cache_salt
+ 

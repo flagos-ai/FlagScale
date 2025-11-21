@@ -1,13 +1,12 @@
 backends_commit:
-  vllm: b6553be1bc75f046b00046a4ad7576364d03c835
+  Megatron-LM: 3a2a972d9ffd5cee534b761f0803ea1b07389d2f
 backends_version:
-  FlagScale: main
-  vllm: 0.9.1
-commit: cc386578b9c4d33ecd8e8d22f266e1b5dba579b1
-contact: 1131595527@qq.com
+  FlagScale: 0.9.0
+  Megatron-LM: 0.12.1
+commit: a9e7999232dc3c2a74793decbf2425098ba72a00
+contact: ''
 device_type: Huawei_Atlas800TA3
 models:
-- kimi_k2
-- qwen3
+- Qwen2.5-VL
 task:
-- inference
+- train

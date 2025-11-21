@@ -26,7 +26,7 @@ data:
   # change to your tokenizer path
   tokenizer_path: /models/google/paligemma-3b-pt-224
   # change to your data path
-  data_path: /repos/flagscale_dataset/flag-scale/demo_0913_n2/wds-1
+  data_path: /repos/flagscale_new_robotics/FlagScale/demo_0913_n2/wds-2
   state_key: eepose
   action_key: eepose
   action_token_key: action_eepose_token
