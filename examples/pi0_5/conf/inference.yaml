@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - inference: pi0_5
+
+experiment:
+  exp_name: PI05_Inference
+  seed: 42
+  exp_dir: outputs/${experiment.exp_name}
+  ckpt_format: torch
+  task:
+    type: inference
+    backend: pi0_5
+    entrypoint: flagscale/inference/inference_engine.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    hostfile: null
+  cmds:
+    before_start: echo "Starting PI05 Inference"
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0"
+    OTEL_SDK_DISABLED: true
+
+action: run
