@@ -1,5 +1,5 @@
 diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
-index 38d317e1..aa2bdf57 100644
+index 38d317e1..b46f7cd8 100644
 --- a/verl/workers/actor/megatron_actor.py
 +++ b/verl/workers/actor/megatron_actor.py
 @@ -22,6 +22,7 @@ Note that our model doesn't have to be `MegatronModule` because we don't share e
@@ -65,7 +65,7 @@ index 38d317e1..aa2bdf57 100644
              if forward_only:
                  if post_process_fn is None:
                      pass
-@@ -419,76 +460,318 @@ class MegatronPPOActor(BasePPOActor):
+@@ -419,76 +460,325 @@ class MegatronPPOActor(BasePPOActor):
                  if not calculate_entropy:
                      return torch.tensor(1.0, device=device), metrics
  
@@ -416,7 +416,14 @@ index 38d317e1..aa2bdf57 100644
 +                    stats = metrics_accum
 +                    ret_entropy = None
 +                    if calculate_entropy and entropy is not None:
-+                        ret_entropy = entropy
++                        # Extract response part from entropy to match response_mask shape
++                        # Similar to standard mode: entropy[:, -response_length - 1 : -1]
++                        if is_nested_tensor:
++                            # For nested tensor, entropy is already in the correct format
++                            ret_entropy = entropy
++                        else:
++                            # For padded tensor, extract response part
++                            ret_entropy = entropy[:, -response_length - 1 : -1].contiguous()
 +                    
 +                    if forward_only:
 +                        policy_loss = torch.tensor(1.0, device=device)
@@ -447,7 +454,7 @@ index 38d317e1..aa2bdf57 100644
  
              append_to_dict(metrics, stats)
              return policy_loss, [metrics, ret_entropy]
-@@ -530,6 +813,7 @@ class MegatronPPOActor(BasePPOActor):
+@@ -530,6 +820,7 @@ class MegatronPPOActor(BasePPOActor):
                      label_mask,
                      temperature,
                      multi_modal_inputs,
@@ -455,7 +462,7 @@ index 38d317e1..aa2bdf57 100644
                  )
              else:
                  forward_fn = get_mcore_forward_fn(self.hf_config)
-@@ -564,6 +848,7 @@ class MegatronPPOActor(BasePPOActor):
+@@ -564,6 +855,7 @@ class MegatronPPOActor(BasePPOActor):
                      multi_modal_inputs,
                      logits_processor=logits_processor,
                      logits_processor_args=logits_processor_args,
