@@ -1,0 +1,20 @@
+diff --git a/verl/workers/engine/megatron/transformer_impl.py b/verl/workers/engine/megatron/transformer_impl.py
+index 0e568d80..92b12e4a 100644
+--- a/verl/workers/engine/megatron/transformer_impl.py
++++ b/verl/workers/engine/megatron/transformer_impl.py
+@@ -616,6 +616,7 @@ class MegatronEngineWithLMHead(MegatronEngine):
+             multi_modal_inputs,
+             logits_processor=logits_processor,
+             logits_processor_args=logits_processor_args,
++            data=batch,
+         )
+ 
+         return output, partial(postprocess_micro_batch_func, data=batch)
+@@ -670,6 +671,7 @@ class MegatronEngineWithValueHead(MegatronEngineWithLMHead):
+             input_ids,
+             multi_modal_inputs,
+             value_model=True,
++            data=batch,
+         )
+ 
+         return output, partial(postprocess_micro_batch_func, data=batch)

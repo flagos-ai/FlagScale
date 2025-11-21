@@ -2,62 +2,62 @@
 config-path: config
 
 #default verl config name
-config-name: ppo_trainer.yaml
+config-name: ppo_megatron_trainer.yaml
 
 algorithm:
   adv_estimator: grpo
   use_kl_in_reward: false
 
 data:
-  train_files: /workspace/data/gsm8k/train.parquet
-  val_files: /workspace/data/gsm8k/test.parquet
+  train_files: /nfs/lyrawen/gsm8k/data/train.parquet
+  val_files: /nfs/lyrawen/gsm8k/data/test.parquet
   train_batch_size: 1024
-  max_prompt_length: 512
+  max_prompt_length: 1024
   max_response_length: 1024
   filter_overlong_prompts: true
   truncation: "error"
 
 actor_rollout_ref:
   model:
-    path: /workspace/models/Qwen/Qwen2.5-0.5B-Instruct
+    path: /nfs/lyrawen/models/Qwen2.5-0.5B-Instruct
     use_remove_padding: true
-    enable_gradient_checkpointing: true
+    trust_remote_code: true
   actor:
     optim:
       lr: 1e-6
-    ppo_mini_batch_size: 256
-    ppo_micro_batch_size_per_gpu: 40
+    ppo_mini_batch_size: 128
+    ppo_micro_batch_size_per_gpu: 2     
     use_kl_loss: true
     kl_loss_coef: 0.001
     kl_loss_type: low_var_kl
     entropy_coeff: 0
-    fsdp_config:
-      param_offload: false
-      optimizer_offload: false
+    balance_algorithm: "modified_first_fit_decreasing"
+    policy_loss:
+      loss_mode: "vanilla"
+      seqpack_loss: True
+    megatron:
+      pipeline_model_parallel_size: 2
+      tensor_model_parallel_size: 2
   rollout:
-    log_prob_micro_batch_size_per_gpu: 40
+    log_prob_micro_batch_size_per_gpu: 4
     tensor_model_parallel_size: 2
     name: vllm
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.5
     n: 5
   ref:
-    log_prob_micro_batch_size_per_gpu: 40
-    fsdp_config:
-      param_offload: true
+    log_prob_micro_batch_size_per_gpu: 2
+    megatron:
+      pipeline_model_parallel_size: 2
+      tensor_model_parallel_size: 2
 
 trainer:
   critic_warmup: 0
-  logger: ["console"]
-  project_name: "verl_grpo_example_gsm8k"
-  experiment_name: "qwen2_5-0_5b"
+  logger: ["console", "wandb", "tensorboard"]
+  project_name: "verl_grpo_example_gsm8k_megatron"
+  experiment_name: "qwen2_5_05b_megatron"
   n_gpus_per_node: 8
   nnodes: 1
-  save_freq: 200
-  test_freq: 100
+  save_freq: 20
+  test_freq: 5
   total_epochs: 15
   default_local_dir: ${experiment.exp_dir}/checkpoints
-
-append_kargs:
-  actor_rollout_ref:
-    rollout:
-      trust_remote_code: True

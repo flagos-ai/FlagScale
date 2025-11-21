@@ -1,0 +1,40 @@
+diff --git a/verl/trainer/ppo/ray_trainer.py b/verl/trainer/ppo/ray_trainer.py
+index 9f633730..032511bf 100644
+--- a/verl/trainer/ppo/ray_trainer.py
++++ b/verl/trainer/ppo/ray_trainer.py
+@@ -921,22 +921,32 @@ class RayPPOTrainer:
+         global_seqlen_lst = batch.batch["attention_mask"].view(batch_size, -1).sum(-1)  # (train_batch_size,)
+         global_seqlen_lst = calculate_workload(global_seqlen_lst)
+         world_size = self.actor_rollout_wg.world_size
++        balance_algorithm = self.config.trainer.get("balance_algorithm", "karmarkar_karp")
+         if keep_minibatch:
+             # Decouple the DP balancing and mini-batching.
+             minibatch_size = self.config.actor_rollout_ref.actor.get("ppo_mini_batch_size")
+             minibatch_num = len(global_seqlen_lst) // minibatch_size
+             global_partition_lst = [[] for _ in range(world_size)]
+             for i in range(minibatch_num):
++                minibatch_seqlen_lst = global_seqlen_lst[i * minibatch_size : (i + 1) * minibatch_size]
+                 rearrange_minibatch_lst = get_seqlen_balanced_partitions(
+-                    global_seqlen_lst[i * minibatch_size : (i + 1) * minibatch_size],
+-                    k_partitions=world_size,
++                    seqlen_list=minibatch_seqlen_lst,
++                    algorithm=balance_algorithm,
+                     equal_size=True,
++                    bin_capacity=sum(minibatch_seqlen_lst),
++                    min_bin_count=world_size,
++                    bin_count_multiple=world_size,
+                 )
+                 for j, part in enumerate(rearrange_minibatch_lst):
+                     global_partition_lst[j].extend([x + minibatch_size * i for x in part])
+         else:
+             global_partition_lst = get_seqlen_balanced_partitions(
+-                global_seqlen_lst, k_partitions=world_size, equal_size=True
++                seqlen_list=global_seqlen_lst,
++                algorithm=balance_algorithm,
++                bin_capacity=sum(global_seqlen_lst),
++                equal_size=True,
++                min_bin_count=world_size,
++                bin_count_multiple=world_size,
+             )
+         # Place smaller micro-batches at both ends to reduce the bubbles in pipeline parallel.
+         for idx, partition in enumerate(global_partition_lst):

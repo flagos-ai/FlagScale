@@ -1,0 +1,77 @@
+#default verl config path
+config-path: config
+
+#default verl config name
+config-name: ppo_trainer.yaml
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+data:
+  train_files: /nfs/lyrawen/geometry3k/data/train.parquet
+  val_files: /nfs/lyrawen/geometry3k/data/test.parquet
+  train_batch_size: 512
+  max_prompt_length: 1024
+  max_response_length: 2048
+  filter_overlong_prompts: true
+  truncation: "error"
+
+actor_rollout_ref:
+  model:
+    path: /nfs/lyrawen/model/Qwen2.5-VL-7B-Instruct
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+    trust_remote_code: True
+  actor:
+    # Use Megatron backend for actor
+    _target_: verl.workers.config.actor.McoreActorConfig
+    strategy: megatron
+    optim:
+      lr: 1e-6
+    ppo_mini_batch_size: 128
+    ppo_micro_batch_size_per_gpu: 4
+    use_sequence_packing_balance: true
+    sequence_packing_algorithm: modified_first_fit_decreasing
+    # Use fused kernels when available (FlashAttention, fused MLP, etc.)
+    use_fused_kernels: true
+    megatron:
+      pipeline_model_parallel_size: 1
+      tensor_model_parallel_size: 2
+      override_mcore_model_config:
+        params_dtype: bfloat16   # or float16 depending on GPU support
+        input_dtype: bfloat16    # optional, keep inputs in same dtype
+    use_kl_loss: true
+    kl_loss_coef: 0.01
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 5120
+  rollout:
+    log_prob_micro_batch_size_per_gpu: 20
+    tensor_model_parallel_size: 1
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 20480
+    name: vllm
+    gpu_memory_utilization: 0.8
+    n: 5
+    dtype: bfloat16
+  ref:
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 20480
+    log_prob_micro_batch_size_per_gpu: 20
+    megatron:
+      pipeline_model_parallel_size: 1
+      tensor_model_parallel_size: 2
+
+trainer:
+  critic_warmup: 0
+  logger: ["console", "wandb"]
+  project_name: "verl_grpo_example_geo3k"
+  experiment_name: "qwen2_7b_function_rm"
+  n_gpus_per_node: 8
+  nnodes: 1
+  save_freq: 20
+  test_freq: 5
+  total_epochs: 15
+  default_local_dir: ${experiment.exp_dir}/checkpoints

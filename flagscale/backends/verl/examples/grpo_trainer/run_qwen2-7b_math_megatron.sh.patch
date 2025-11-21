@@ -1,0 +1,28 @@
+diff --git a/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh b/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh
+index 2a29ccd0..1377a601 100644
+--- a/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh
++++ b/examples/grpo_trainer/run_qwen2-7b_math_megatron.sh
+@@ -8,10 +8,10 @@ if [ "$rollout_mode" = "async" ]; then
+     return_raw_chat="True"
+ fi
+ 
+-gsm8k_train_path=$HOME/data/gsm8k/train.parquet
+-gsm8k_test_path=$HOME/data/gsm8k/test.parquet
+-math_train_path=$HOME/data/math/train.parquet
+-math_test_path=$HOME/data/math/test.parquet
++gsm8k_train_path=/nfs/lyrawen/gsm8k/data/train.parquet
++gsm8k_test_path=/nfs/lyrawen/gsm8k/data/test.parquet
++math_train_path=/nfs/lyrawen/math12k/data/train.parquet
++math_test_path=/nfs/lyrawen/math12k/data/test.parquet
+ 
+ train_files="['$gsm8k_train_path', '$math_train_path']"
+ test_files="['$gsm8k_test_path', '$math_test_path']"
+@@ -29,7 +29,7 @@ python3 -m verl.trainer.main_ppo --config-path=config \
+     data.max_response_length=1024 \
+     data.filter_overlong_prompts=True \
+     data.truncation='error' \
+-    actor_rollout_ref.model.path=Qwen/Qwen2-7B-Instruct \
++    actor_rollout_ref.model.path=/nfs/lyrawen/models/Qwen2.5-0.5B-Instruct \
+     actor_rollout_ref.model.use_fused_kernels=$USE_FUSED_KERNELS \
+     actor_rollout_ref.actor.optim.lr=1e-6 \
+     actor_rollout_ref.actor.ppo_mini_batch_size=256 \

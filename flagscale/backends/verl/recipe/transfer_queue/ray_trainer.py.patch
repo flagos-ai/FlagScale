@@ -1,0 +1,18 @@
+diff --git a/recipe/transfer_queue/ray_trainer.py b/recipe/transfer_queue/ray_trainer.py
+index d6adbddb..cf7092ea 100644
+--- a/recipe/transfer_queue/ray_trainer.py
++++ b/recipe/transfer_queue/ray_trainer.py
+@@ -1173,7 +1173,12 @@ class RayPPOTrainer:
+         global_seqlen_lst = data["attention_mask"].view(batch_size, -1).sum(-1).tolist()  # (train_batch_size,)
+         world_size = self.actor_rollout_wg.world_size
+         global_partition_lst = get_seqlen_balanced_partitions(
+-            global_seqlen_lst, k_partitions=world_size, equal_size=True
++            seqlen_list=global_seqlen_lst,
++            algorithm="karmarkar_karp",
++            bin_capacity=sum(global_seqlen_lst),
++            min_bin_count=world_size,
++            bin_count_multiple=world_size,
++            equal_size=True,
+         )
+         # reorder based on index. The data will be automatically equally partitioned by dispatch function
+         global_idx = [j for partition in global_partition_lst for j in partition]
