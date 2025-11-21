@@ -1,5 +1,5 @@
 diff --git a/verl/workers/actor/megatron_actor.py b/verl/workers/actor/megatron_actor.py
-index 38d317e1..b46f7cd8 100644
+index 38d317e1..e744846e 100644
 --- a/verl/workers/actor/megatron_actor.py
 +++ b/verl/workers/actor/megatron_actor.py
 @@ -22,6 +22,7 @@ Note that our model doesn't have to be `MegatronModule` because we don't share e
@@ -65,7 +65,7 @@ index 38d317e1..b46f7cd8 100644
              if forward_only:
                  if post_process_fn is None:
                      pass
-@@ -419,76 +460,325 @@ class MegatronPPOActor(BasePPOActor):
+@@ -419,76 +460,336 @@ class MegatronPPOActor(BasePPOActor):
                  if not calculate_entropy:
                      return torch.tensor(1.0, device=device), metrics
  
@@ -266,6 +266,7 @@ index 38d317e1..b46f7cd8 100644
 +                        unpadded_seq_len = unpadded_seq_lengths[seq_idx].item()
 +                        
 +                        # Get actual response length for this sequence from response_mask
++                        # First, extract response_mask for this sequence to determine actual length
 +                        response_mask_seq = data.get("response_mask", None)
 +                        if response_mask_seq is not None:
 +                            if hasattr(response_mask_seq, "is_nested") and response_mask_seq.is_nested:
@@ -273,9 +274,15 @@ index 38d317e1..b46f7cd8 100644
 +                                mask_values = response_mask_seq.values()
 +                                mask_start = mask_offsets[seq_idx].item()
 +                                mask_end = mask_offsets[seq_idx + 1].item()
-+                                actual_response_len = mask_values[mask_start:mask_end].sum().item()
++                                seq_mask = mask_values[mask_start:mask_end]
++                                # Count the number of True values (actual response length)
++                                actual_response_len = seq_mask.sum().item()
 +                            else:
-+                                actual_response_len = response_mask_seq[seq_idx].sum().item()
++                                # For padded tensor, extract the mask for this sequence
++                                seq_mask = response_mask_seq[seq_idx]  # [response_length]
++                                # Count the number of True values (actual response length)
++                                # This gives us the number of valid response positions
++                                actual_response_len = seq_mask.sum().item()
 +                        else:
 +                            # Fallback: use unpadded_seq_len (but this is total seq len, not response len)
 +                            actual_response_len = response_length
@@ -290,6 +297,8 @@ index 38d317e1..b46f7cd8 100644
 +                        else:
 +                            # Extract from padded tensor - get response part for this sequence
 +                            # log_prob is [batch_size, response_length], extract actual response length
++                            # Use min to ensure we don't exceed the actual tensor size
++                            actual_response_len = min(actual_response_len, log_prob.shape[1])
 +                            seq_log_prob = log_prob[seq_idx:seq_idx+1, :actual_response_len]  # [1, actual_response_len]
 +                        
 +                        # Extract data for current sequence and remove padding
@@ -309,14 +318,14 @@ index 38d317e1..b46f7cd8 100644
 +                                        seq_data[key] = seq_tensor
 +                                    # Handle regular tensor - extract response part for response-related tensors
 +                                    elif tensor.ndim > 1 and tensor.shape[1] > 1:
-+                                        # For response-related tensors (old_log_probs, advantages, etc.), 
++                                        # For response-related tensors (old_log_probs, advantages, response_mask, ref_log_prob), 
 +                                        # they are already in response format [batch_size, response_length]
 +                                        # Extract the actual response length for this sequence
-+                                        if key in ["old_log_probs", "advantages", "ref_log_prob"]:
++                                        if key in ["old_log_probs", "advantages", "response_mask", "ref_log_prob"]:
 +                                            # These are response-length tensors, use actual_response_len
 +                                            seq_data[key] = tensor[seq_idx:seq_idx+1, :actual_response_len]
 +                                        else:
-+                                            # For other tensors, use unpadded_seq_len
++                                            # For other tensors (like responses), use unpadded_seq_len
 +                                            seq_data[key] = tensor[seq_idx:seq_idx+1, :unpadded_seq_len]
 +                                    else:
 +                                        seq_data[key] = tensor[seq_idx:seq_idx+1]
@@ -360,7 +369,9 @@ index 38d317e1..b46f7cd8 100644
 +                                    seq_response_mask = mask_values[mask_start:mask_end].unsqueeze(0)
 +                                else:
 +                                    # response_mask is in response format, use actual_response_len
-+                                    seq_response_mask = response_mask_tensor[seq_idx:seq_idx+1, :actual_response_len]
++                                    # Ensure we don't exceed the actual tensor size
++                                    actual_mask_len = min(actual_response_len, response_mask_tensor.shape[1])
++                                    seq_response_mask = response_mask_tensor[seq_idx:seq_idx+1, :actual_mask_len]
 +                                seq_data_dict["response_mask"] = seq_response_mask
 +                        
 +                        response_mask = seq_data_dict["response_mask"].to(bool)
@@ -454,7 +465,7 @@ index 38d317e1..b46f7cd8 100644
  
              append_to_dict(metrics, stats)
              return policy_loss, [metrics, ret_entropy]
-@@ -530,6 +820,7 @@ class MegatronPPOActor(BasePPOActor):
+@@ -530,6 +831,7 @@ class MegatronPPOActor(BasePPOActor):
                      label_mask,
                      temperature,
                      multi_modal_inputs,
@@ -462,7 +473,7 @@ index 38d317e1..b46f7cd8 100644
                  )
              else:
                  forward_fn = get_mcore_forward_fn(self.hf_config)
-@@ -564,6 +855,7 @@ class MegatronPPOActor(BasePPOActor):
+@@ -564,6 +866,7 @@ class MegatronPPOActor(BasePPOActor):
                      multi_modal_inputs,
                      logits_processor=logits_processor,
                      logits_processor_args=logits_processor_args,
