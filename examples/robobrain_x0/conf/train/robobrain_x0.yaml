@@ -104,7 +104,7 @@ data:
   shuffle-buffer-size: 1000
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
-    tokenizer_path: /models/BAAI/RoboBrain-X0-Preview.bak
+    tokenizer_path: /models/BAAI/RoboBrain-X0-Preview
     vocab_size: 151643 # action
     make_vocab_size_divisible_by: 64
     extra_vocab_size: 293
