@@ -1,13 +1,12 @@
 backends_commit:
-  vllm: b6553be1bc75f046b00046a4ad7576364d03c835
+  vllm: 8ce5d3198d00631a76e1aa02a57947b46bc7218c
 backends_version:
-  FlagScale: main
-  vllm: 0.9.1
-commit: cc386578b9c4d33ecd8e8d22f266e1b5dba579b1
-contact: 1131595527@qq.com
+  vllm: 0.11.0rc3
+commit: b1f5b20d8fe561b65e71f0ded602ed3ac298cb3b
+contact: ''
 device_type: Huawei_Atlas800TA3
 models:
-- kimi_k2
-- qwen3
+- qwen3_vl
+- deepseek_v3_2
 task:
 - inference
