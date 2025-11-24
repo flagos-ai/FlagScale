@@ -588,9 +588,7 @@ class TaskEncoder(
                                             current_action_tokens.extend(tokens)
                                             action_tokens_loaded = True
                                             if i < len(action_token_paths) - 1:
-                                                current_action_tokens.append(
-                                                    -1
-                                                )
+                                                current_action_tokens.append(-1)
                                         except Exception as e:
                                             dataset_logger.warning(
                                                 f"Failed to load action token file: {full_action_token_path}. Error: {e}"
