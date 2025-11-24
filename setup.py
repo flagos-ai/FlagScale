@@ -7,6 +7,8 @@ from setuptools import setup
 from setuptools.command.build import build as _build
 from setuptools.command.build_ext import build_ext as _build_ext
 from setuptools.command.build_py import build_py as _build_py
+from setuptools.command.install_lib import install_lib as _install_lib
+
 
 try:
     import git  # from GitPython
@@ -468,6 +470,16 @@ class FlagScaleBuildExt(_build_ext):
                     raise ValueError(f"Unknown backend: {backend}")
         super().run()
 
+
+class FlagScaleInstallLib(_install_lib):
+    def run(self):
+        build_py_cmd = self.get_finalized_command("build_py")
+        backend = getattr(build_py_cmd, "backend", None)
+        print(f"[install_lib] Got backends from build_py: {backend}")
+        super().run()
+
+        raise ValueError(self.install_dir)
+        
 def _read_requirements_file(requirements_path):
     """读取 requirements 文件并返回依赖列表"""
     requirements_file = os.path.join(os.path.dirname(__file__), requirements_path)
