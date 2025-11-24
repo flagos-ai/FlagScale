@@ -464,6 +464,8 @@ class ServeEngine:
             runtime_env["env_vars"] = {"PYTHONPATH": pythonpath}
 
         if working_dir:
+            if working_dir not in sys.path:
+                sys.path.append(working_dir)
             runtime_env["working_dir"] = working_dir
             runtime_env["excludes"] = [
                 "*.log",
