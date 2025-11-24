@@ -19,7 +19,6 @@ import json
 import logging
 import math
 import os
-import pprint
 import re
 import sys
 import time
@@ -27,22 +26,19 @@ import traceback
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import PIL
 import torch
 
 from PIL import Image
-from torchvision import transforms as T
 
 from megatron.energon import Batch, DefaultTaskEncoder, VQASample
 from megatron.training import get_args
 from megatron.training.global_vars import get_tokenizer
+from flagscale.logger import logger
 from tools.datasets.qwenvl.data.image_processing import get_visual_transform
-
-# from tools.datasets.qwenvl.data.energon.chatml import ChatMLSample
 from tools.datasets.vla.data.energon.chatml import ChatMLSample
 
 dataset_logger = logging.getLogger(__name__)
@@ -102,7 +98,6 @@ def convert_to_qwen2vl_content(
     Split user input into format Qwen2VL tokenizer accepts.
     """
     if not isinstance(user_input, str):
-        # 如果输入不是字符串，说明它可能已经被处理过了，立即报错
         raise TypeError(
             f"convert_to_qwen2vl_content was called with a non-string input of type {type(user_input)}. Input: {user_input}"
         )
@@ -159,10 +154,7 @@ class TaskEncoder(
         self.seq_len = self.args.max_padding_length
 
         self.vision_root = self.args.vision_root
-        # 预缓存常用token IDs - 避免重复查找
         self._token_cache = self._build_token_cache()
-
-        # 预缓存action tokens - 批量生成
         self._action_token_cache = self._build_action_token_cache()
 
         assert self.vision_root is not None, "Please give the vision root."
@@ -255,21 +247,18 @@ class TaskEncoder(
         return image
 
     def _safe_encode(self, text):
-        """简化的安全编码"""
         try:
             return self.tokenizer.encode(text, add_special_tokens=False)
         except TypeError:
             return self.tokenizer.encode(text)
 
     def decode_token_ids_to_readable(self, token_ids, max_tokens=100):
-        """将token IDs转换为可读格式 - 临时查找版本"""
-        print("=== 对话复原（前{}个tokens）===".format(max_tokens))
+        logger.info("=== Text recover: first {} tokens ===".format(max_tokens))
 
         result_text = ""
         boa_id = self._token_cache.get('boa')
         EOA_id = self._token_cache.get('EOA')
         for i, token_id in enumerate(token_ids[:max_tokens]):
-            # 先检查常用的特殊tokens
             if token_id == self._token_cache['im_start']:
                 result_text += "\n<|im_start|>"
             elif token_id == self._token_cache['im_end']:
@@ -291,7 +280,6 @@ class TaskEncoder(
             elif token_id == self._token_cache['system']:
                 result_text += "system"
             else:
-                # 临时查找其他tokens
                 found_token = None
                 for text, tid in self.tokenizer.vocab.items():
                     if tid == token_id:
@@ -303,11 +291,10 @@ class TaskEncoder(
                 else:
                     result_text += f"[UNK_{token_id}]"
 
-        print(result_text)
+        logger.info(result_text)
         return result_text
 
     def _build_token_cache(self):
-        """一次性缓存所有常用token IDs"""
         cache_start = time.time()
 
         token_cache = {
@@ -328,15 +315,12 @@ class TaskEncoder(
         }
 
         cache_end = time.time()
-        print(f"Token cache built in {(cache_end - cache_start) * 1000:.2f} ms")
+        logger.info(f"Token cache built in {(cache_end - cache_start) * 1000:.2f} ms")
         return token_cache
 
     def _build_action_token_cache(self):
-        """预缓存所有可能的action tokens"""
         cache_start = time.time()
-
         action_cache = {}
-        # action token ID范围是0-2047
         for action_id in range(2048):
             token_string = f"<action_token_{action_id}>"
             token_id = self.tokenizer.vocab.get(token_string, 149595 + action_id)
@@ -344,18 +328,16 @@ class TaskEncoder(
                 action_cache[action_id] = token_id
 
         cache_end = time.time()
-        print(
+        logger.info(
             f"Action token cache built in {(cache_end - cache_start) * 1000:.2f} ms with {len(action_cache)} tokens"
         )
         return action_cache
 
     def build_conversation_tokens(self, conversation, action_tokens_list):
-        """使用缓存避免词汇表查找"""
         build_start = time.time()
 
         final_token_ids = []
 
-        # 使用缓存的token IDs - 不需要查找
         im_start_id = self._token_cache['im_start']
         im_end_id = self._token_cache['im_end']
         newline_id = self._token_cache['newline']
@@ -365,7 +347,6 @@ class TaskEncoder(
         image_pad_id = self._token_cache['image_pad']
         vision_start_id = self._token_cache['vision_start']
         vision_end_id = self._token_cache.get('vision_end')
-        # space_id = self._token_cache['space']
 
         conversation_loop_start = time.time()
         for turn_idx, turn in enumerate(conversation):
@@ -374,8 +355,6 @@ class TaskEncoder(
             action_tokens = (
                 action_tokens_list[turn_idx] if turn_idx < len(action_tokens_list) else []
             )
-
-            # 开始标记
             final_token_ids.append(im_start_id)
 
             if role == "system":
@@ -388,8 +367,6 @@ class TaskEncoder(
             elif role == "user":
                 final_token_ids.append(user_id)
                 final_token_ids.append(newline_id)
-
-                # 处理用户内容
                 if isinstance(content, list):
                     for item in content:
                         if item["type"] == "text":
@@ -399,12 +376,10 @@ class TaskEncoder(
                         elif item["type"] == "image":
                             if vision_start_id:
                                 final_token_ids.append(vision_start_id)
-                            # 使用缓存的image_pad_id
                             final_token_ids.append(image_pad_id)
                             if vision_end_id:
                                 final_token_ids.append(vision_end_id)
                 else:
-                    # 纯文本内容
                     if content.strip():
                         text_ids = self._safe_encode(content)
                         final_token_ids.extend(text_ids)
@@ -415,7 +390,6 @@ class TaskEncoder(
                 if content.strip():
                     text_ids = self._safe_encode(content)
                     final_token_ids.extend(text_ids)
-                # 使用缓存的action tokens
                 if action_tokens and len(action_tokens) > 0:
                     boa_id = self._token_cache['boa']
                     EOA_id = self._token_cache['EOA']
@@ -423,35 +397,19 @@ class TaskEncoder(
                     if content.strip():
                         final_token_ids.append(boa_id)
                     for i, action_id in enumerate(action_tokens):
-                        # 从缓存中获取token ID
                         if action_id == -1:
-                            # 如果遇到哨兵值，就添加真正的分隔符ID
                             final_token_ids.append(action_split_id)
                         elif action_id == -2:
-                            print("EOA has been loaded successfully")
-                            # 如果遇到EOA的哨兵值, 添加EOA的ID
+                            logger.info("EOA has been loaded successfully")
                             final_token_ids.append(EOA_id)
                         else:
                             correct_token_id = self._action_token_cache.get(action_id)
                             if correct_token_id is None:
                                 raise ValueError(f"Action token {action_id} not found in cache.")
                             final_token_ids.append(correct_token_id)
-
-            # 结束标记
             final_token_ids.append(im_end_id)
             final_token_ids.append(newline_id)
-
-        # conversation_loop_end = time.time()
-        # print(f"    Optimized conversation loop time: {(conversation_loop_end - conversation_loop_start) * 1000:.2f} ms")
-
-        # 数组转换
         result = np.array(final_token_ids, dtype=np.int64)
-        # print("\n" + "="*50)
-        # self.decode_token_ids_to_readable(result, max_tokens=100)
-
-        # build_end = time.time()
-        # print(f"    Optimized build_conversation_tokens total time: {(build_end - build_start) * 1000:.2f} ms")
-
         return result
 
     def encode_chatml(self, sample: ChatMLSample):
@@ -563,14 +521,10 @@ class TaskEncoder(
                     current_action_tokens = []
                     action_tokens_loaded = False
                     action_token_paths = None
-                    # 检查是否有直接提供的 action_token 字段
-                    # print(sample.metadata)
-                    # print(isinstance(sample.metadata, dict))
                     if hasattr(sample, 'metadata') and isinstance(sample.metadata, dict):
                         action_token_data = sample.metadata.get('action_eepose_token')
                         if action_token_data is None:
                             action_token_data = sample.metadata.get('action_token')
-                        # print("Action_token_data",action_token_data)
                         if action_token_data is not None:
                             action_token_count = action_part.count("<action_token>")
                             if (
@@ -581,7 +535,7 @@ class TaskEncoder(
                                 dataset_logger.info(
                                     f"Sample [{sample.__key__}]: Loading action tokens directly from list"
                                 )
-                                print("Loading action tokens directly from list")
+                                logger.info("Loading action tokens directly from list")
                                 if len(action_token_data) != action_token_count:
                                     dataset_logger.warning(
                                         f"Sample [{sample.__key__}]: action_token count mismatch. "
@@ -593,8 +547,8 @@ class TaskEncoder(
                                         current_action_tokens.extend(tokens)
                                         action_tokens_loaded = True
                                         if i < len(action_token_data) - 1:
-                                            print("Add Separate token")
-                                            current_action_tokens.append(-1)  # 使用 -1 作为分隔标记
+                                            logger.info("Add Separate token")
+                                            current_action_tokens.append(-1)
                                     except Exception as e:
                                         dataset_logger.warning(
                                             f"Failed to process action token list at index {i}. Error: {e}"
@@ -607,9 +561,8 @@ class TaskEncoder(
                                     f"Sample [{sample.__key__}]: Loading action tokens from file paths (legacy mode). "
                                     f"Consider updating to use direct token lists for better performance."
                                 )
-                                # 处理单个文件（字符串）或多个文件（列表）
                                 action_token_paths = action_token_data
-                                print("Loading action tokens from paths")
+                                logger.info("Loading action tokens from paths")
                                 if isinstance(action_token_paths, str):
                                     action_token_paths = [action_token_paths]
                                 elif not isinstance(action_token_paths, list):
@@ -617,15 +570,11 @@ class TaskEncoder(
                                         f"Sample [{sample.__key__}]: Unexpected action_token type: {type(action_token_paths)}"
                                     )
                                     action_token_paths = []
-
-                                # 验证文件数量
                                 if len(action_token_paths) != action_token_count:
                                     dataset_logger.warning(
                                         f"Sample [{sample.__key__}]: action_token count mismatch. "
                                         f"Found {action_token_count} <action_token> tags but {len(action_token_paths)} files."
                                     )
-
-                                # 按顺序加载所有 action token 文件
                                 for i, action_token_path in enumerate(action_token_paths):
                                     full_action_token_path = os.path.join(
                                         self.vision_root, action_token_path
@@ -638,12 +587,10 @@ class TaskEncoder(
                                             tokens = [int(token) for token in loaded_tokens]
                                             current_action_tokens.extend(tokens)
                                             action_tokens_loaded = True
-
-                                            # 如果需要分隔符
                                             if i < len(action_token_paths) - 1:
                                                 current_action_tokens.append(
                                                     -1
-                                                )  # 使用 -1 作为分隔标记
+                                                )
                                         except Exception as e:
                                             dataset_logger.warning(
                                                 f"Failed to load action token file: {full_action_token_path}. Error: {e}"
@@ -657,16 +604,12 @@ class TaskEncoder(
                                         )
                                         action_tokens_loaded = False
                                         break
-
-                    # 处理结果
                     if action_tokens_loaded and current_action_tokens:
-                        # 成功加载 action tokens，清空文本内容
                         content = text_before_action
                         dataset_logger.debug(
                             f"Sample [{sample.__key__}]: Loaded {len(current_action_tokens)} action tokens"
                         )
                     else:
-                        # 没有成功加载 action tokens
                         should_have_action_tokens = (
                             hasattr(sample, 'metadata')
                             and isinstance(sample.metadata, dict)
@@ -674,25 +617,19 @@ class TaskEncoder(
                         )
 
                         if should_have_action_tokens:
-                            # 样本应该有 action tokens 但加载失败
                             dataset_logger.error(
                                 f"Sample [{sample.__key__}]: Failed to load action tokens despite having 'action_eepose_token' in metadata. "
                                 f"File path might be incorrect: {sample.metadata.get('action_eepose_token')}. "
                                 f"Converting to regular text generation."
                             )
                         else:
-                            # 样本本来就没有 action tokens，这是正常的混合数据集情况
                             dataset_logger.debug(
                                 f"Sample [{sample.__key__}]: No action tokens available, treating as regular text generation."
                             )
-                        # 移除 <action_token> 标记，保留其他内容
                         content = content.replace("<action_token>", "").replace(
                             "<action_split>", ""
                         )
-                        # 清理多余的空白字符
                         content = re.sub(r'\s+', ' ', content).strip()
-
-                        # 如果清理后内容为空，提供默认回复
                         if not content:
                             content = "I understand the task."
 
@@ -793,9 +730,8 @@ class TaskEncoder(
         if cur_x < len(input_ids):
             final_input_ids[cur_y:] = input_ids[cur_x:]
             final_input_masks[cur_y:] = target[cur_x:]
-        print('=== 处理完成后的final_input_ids ===')
-        print('final_input_ids shape:', final_input_ids.shape)
-        print('final_input_ids:', final_input_ids[-100])
+        logger.info('final_input_ids shape:', final_input_ids.shape)
+        logger.info('final_input_ids:', final_input_ids[-100])
 
         target = np.roll(final_input_masks, shift=-1)
         target[-1] = pad_token_id
@@ -804,45 +740,40 @@ class TaskEncoder(
             raise InternalWarning(
                 f"Sample id [{sample.__key__}] has all masked labels. The data is invalid and will be dropped!"
             )
-        # # # # --- 开始添加/修改调试代码 ---
-        print(f"DEBUG FINAL CHECK FOR sample [{sample.__key__}]:")
-
-        # # 找到所有 action token 在 final_input_ids 中的位置
+        logger.info(f"DEBUG FINAL CHECK FOR sample [{sample.__key__}]:")
         action_token_indices = np.where(
             (final_input_ids >= self.ACTION_TOKEN_START_ID)
             & (final_input_ids < self.ACTION_TOKEN_END_ID)
         )[0]
 
-        # # DEBUG PRINT: Show final input_ids and target for verification
         if len(action_token_indices) > 0:
-            print("  --- Action Token Verification ---")
-            # 打印第一个和最后几个 action token 进行抽查
+            logger.info("  --- Action Token Verification ---")
             indices_to_check = list(action_token_indices[:3]) + list(action_token_indices[-3:])
 
-            for idx in sorted(list(set(indices_to_check))):  # sorted 和 set 防止重复打印
+            for idx in sorted(list(set(indices_to_check))):
                 input_token = final_input_ids[idx]
                 prev_input_token = final_input_ids[idx - 1]
                 target_for_prev_token = target[idx - 1]
 
-                print(f"  - At index {idx-1}:")
-                print(f"      Input Token: {prev_input_token}")
-                print(
+                logger.info(f"  - At index {idx-1}:")
+                logger.info(f"      Input Token: {prev_input_token}")
+                logger.info(
                     f"      Target:      {target_for_prev_token}  <-- This should be the token to predict"
                 )
-                print(f"  - At index {idx}:")
-                print(f"      Input Token: {input_token}  <-- This is the action token")
+                logger.info(f"  - At index {idx}:")
+                logger.info(f"      Input Token: {input_token}  <-- This is the action token")
 
                 if input_token == target_for_prev_token:
-                    print(
+                    logger.info(
                         "      ✅ CHECK PASSED: Target correctly set to predict the action token."
                     )
                 else:
-                    print(
+                    logger.info(
                         f"      ❌ CHECK FAILED: Target is {target_for_prev_token}, but should be {input_token}."
                     )
-            print("  ---------------------------------")
+            logger.info("  ---------------------------------")
         else:
-            print("  - No action tokens found in this sample for verification.")
+            logger.info("  - No action tokens found in this sample for verification.")
 
         image_input_mask = final_input_ids == self.tokenizer.image_token_id
         video_input_mask = final_input_ids == self.tokenizer.video_token_id
@@ -1033,7 +964,6 @@ class TaskEncoder(
             text=torch.from_numpy(text_mat),
             target=torch.from_numpy(target_mat),
         )
-        # print(f"LZY:DEBUG: batch keys: {batch.__keys__}, imgs shape: {imgs.shape}, images_thw_grids shape: {batch.image_thw_grids.shape}, text shape: {batch.text.shape}")
         return batch
 
     def encode_batch(self, batch: VQATaskBatch) -> dict:
@@ -1045,7 +975,7 @@ class TaskEncoder(
 def print_error_handler(exc: Exception, key: Optional[str], debug=False):
     if not debug and isinstance(exc, InternalWarning):
         return
-    print(
+    logger.info(
         f"The following exception occurred in the dataloader for sample {key} and is skipped",
         file=sys.stderr,
     )
