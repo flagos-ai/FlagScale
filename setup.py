@@ -3,12 +3,10 @@ import shutil
 import subprocess
 import sys
 
-from setuptools import find_packages, setup
+from setuptools import setup
 from setuptools.command.build import build as _build
 from setuptools.command.build_ext import build_ext as _build_ext
 from setuptools.command.build_py import build_py as _build_py
-from setuptools.command.install import install
-from setuptools.command.install_lib import install_lib as _install_lib
 
 try:
     import git  # from GitPython
@@ -198,7 +196,14 @@ class FlagScaleBuild(_build):
             from tools.patch.patch import normalize_backend
 
             backends = self.backend.split(",")
-            self.backend = [normalize_backend(backend.strip()) for backend in backends]
+            normalized = []
+            for backend in backends:
+                item = normalize_backend(backend.strip())
+                if isinstance(item, list):
+                    normalized.extend(item)
+                else:
+                    normalized.append(item)
+            self.backend = normalized
             print(f"[build] Received backend = {self.backend}")
             print(f"[build] Received device = {self.device}")
         else:
@@ -463,15 +468,87 @@ class FlagScaleBuildExt(_build_ext):
                     raise ValueError(f"Unknown backend: {backend}")
         super().run()
 
+def _read_requirements_file(requirements_path):
+    """读取 requirements 文件并返回依赖列表"""
+    requirements_file = os.path.join(os.path.dirname(__file__), requirements_path)
+    if not os.path.exists(requirements_file):
+        return []
+    
+    requirements = []
+    with open(requirements_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # 跳过空行和注释
+            if not line or line.startswith('#'):
+                continue
+            # 跳过 -r 开头的行（递归引用）
+            if line.startswith('-r') or line.startswith('--'):
+                continue
+            requirements.append(line)
+    return requirements
 
-class FlagScaleInstallLib(_install_lib):
-    def run(self):
-        build_py_cmd = self.get_finalized_command("build_py")
-        backend = getattr(build_py_cmd, "backend", None)
-        print(f"[install_lib] Got backends from build_py: {backend}")
-        super().run()
 
-        raise ValueError(self.install_dir)
+def _get_install_requires():
+    """获取 install_requires 列表"""
+    install_requires = []
+    
+    # 读取 requirements-base.txt
+    install_requires.extend(_read_requirements_file('requirements/requirements-base.txt'))
+    
+    # 读取 requirements-common.txt
+    install_requires.extend(_read_requirements_file('requirements/requirements-common.txt'))
+    
+    # 添加必需的构建依赖（这些不在 requirements 文件中）
+    core_deps = [
+        "setuptools>=77.0.0",
+        "packaging>=24.2",
+        "importlib_metadata>=8.5.0",
+        "torch==2.7.0", 
+        "torchaudio==2.7.0",
+        "torchvision==0.22.0",
+    ]
+    
+    # 合并并去重（保留第一次出现的版本）
+    all_deps = install_requires + core_deps
+    seen = set()
+    result = []
+    for dep in all_deps:
+        # 提取包名（去掉版本号）用于去重
+        # 处理各种版本号格式：==, >=, <=, >, <, !=
+        pkg_name = dep.split("==")[0].split(">=")[0].split("<=")[0].split(">")[0].split("<")[0].split("!=")[0].strip()
+        pkg_name_lower = pkg_name.lower()
+        if pkg_name_lower not in seen:
+            seen.add(pkg_name_lower)
+            result.append(dep)
+    
+    return result
+
+
+def _get_extras_require():
+    """构建 extras_require 字典"""
+    extras_require = {}
+    
+    # 获取当前版本号，用于指定 flagscale-megatron-lm 的版本
+    from version import FLAGSCALE_VERSION
+    
+    # robotics-gpu extra
+    robotics_gpu_deps = []
+    # 添加 common requirements
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/requirements-common.txt'))
+    # 添加 serving requirements
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/serving/requirements.txt'))
+    # 添加 robotics serving requirements
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/serving/robotics/requirements.txt'))
+    # 添加 onnx requirements
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/train/robotics/requirements.txt'))
+    
+    # 添加 flagscale-megatron-lm 包依赖（unpatch 后的 Megatron-LM）
+    # 版本号与 flag_scale 主包版本保持一致
+    robotics_gpu_deps.append(f"flagscale-megatron-lm=={FLAGSCALE_VERSION}")
+
+    extras_require['robotics-gpu'] = robotics_gpu_deps
+    
+    return extras_require
 
 
 from version import FLAGSCALE_VERSION
@@ -501,14 +578,8 @@ setup(
         "flag_scale.tools": ["**/*"],
         "flag_scale.tests": ["**/*"],
     },
-    install_requires=[
-        "click",
-        "gitpython",
-        "cryptography",
-        "setuptools>=77.0.0",
-        "packaging>=24.2",
-        "importlib_metadata>=8.5.0",
-    ],
+    install_requires=_get_install_requires(),
+    extras_require=_get_extras_require(),
     entry_points={"console_scripts": ["flagscale=flag_scale.flagscale.cli:flagscale"]},
     cmdclass={
         "build": FlagScaleBuild,
