@@ -24,7 +24,7 @@ experiment:
           required: false
           default: []
   cmds:
-    before_start: export RAY_DEDUP_LOGS=0 && export VLLM_USE_V1=1
+    before_start: export RAY_DEDUP_LOGS=0
 
 action: run
 
