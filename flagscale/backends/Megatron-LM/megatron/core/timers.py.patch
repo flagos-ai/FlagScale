@@ -1,8 +1,8 @@
 diff --git a/megatron/core/timers.py b/megatron/core/timers.py
-index a34b6634..46876a5e 100644
+index 75387c33d..76c2a5d70 100644
 --- a/megatron/core/timers.py
 +++ b/megatron/core/timers.py
-@@ -283,6 +283,8 @@ class Timers:
+@@ -293,6 +293,8 @@ class Timers:
                  # groups inside their class.
                  rank_name_to_time[rank, i] = self._timers[name].elapsed(reset=reset)
  

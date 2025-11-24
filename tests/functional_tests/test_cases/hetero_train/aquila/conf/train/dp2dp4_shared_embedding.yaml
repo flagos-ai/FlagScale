@@ -75,6 +75,7 @@ data:
   # data_path: /share/project/lizhiyu/FlagScale/build/data/pile_wikipedia_demo
   split: 1
   tokenizer:
+    legacy_tokenizer: true
     tokenizer_type: AquilaTokenizerFS
     vocab_file: ./examples/aquila/tokenizer/vocab.json
     merge_file: ./examples/aquila/tokenizer/merges.txt

@@ -1,24 +1,20 @@
 diff --git a/tests/unit_tests/dist_checkpointing/test_optimizer.py b/tests/unit_tests/dist_checkpointing/test_optimizer.py
-index 7c1e5f15..596cf97d 100644
+index df501366f..c64bb93bb 100644
 --- a/tests/unit_tests/dist_checkpointing/test_optimizer.py
 +++ b/tests/unit_tests/dist_checkpointing/test_optimizer.py
-@@ -196,6 +196,19 @@ def initialize_1d_flatten_tensor_model(
-     return Model1dFlattenTensor()
+@@ -400,6 +400,7 @@ class TestDistributedOptimizer:
+                     model, optimizer_A = setup_model_and_optimizer(
+                         seed=2, tp=tp, pp=pp, initialize_fn=initialize_fn
+                     )
++                
+                 if test_step:
+                     # Simulate "step" not set in some of the param groups on rank 0.
+                     # TE FusedAdam may have "step" not set in some of the param groups on some ranks.
+@@ -422,6 +423,7 @@ class TestDistributedOptimizer:
+                     preprocess_common_state_dict_fn=preprocess_common_state_dict,
+                 )
  
++                
+                 # Get optimizer A param state
+                 optim_param_state_A = optimizer_A.state_dict()
  
-+def init_mock_args(args):
-+    args.data_parallel_random_init = False
-+    args.virtual_pipeline_model_parallel_size = None
-+    args.bf16 = True
-+    args.accumulate_allreduce_grads_in_fp32 = False
-+    args.overlap_grad_reduce = False
-+    args.use_distributed_optimizer = True
-+    args.ddp_bucket_size = None
-+    args.load = None
-+    args.save_param_index_maps_only = False
-+    return args
-+
-+
- def load_checkpoint_no_arg_checks(*args, **kwargs):
-     with mock.patch('megatron.training.checkpointing.check_checkpoint_args'):
-         with mock.patch('megatron.training.checkpointing.update_num_microbatches'):

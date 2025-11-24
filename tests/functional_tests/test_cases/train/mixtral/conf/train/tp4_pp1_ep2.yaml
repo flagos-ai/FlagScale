@@ -67,6 +67,7 @@ data:
   data_path: /home/gitlab-runner/data/llama_00_text_document/llama_00_text_document
   split: 1
   tokenizer:
+    legacy_tokenizer: true
     tokenizer_type: Llama2Tokenizer
     tokenizer_model: /home/gitlab-runner/tokenizers/llama2/tokenizer.model
     vocab_size: 32000

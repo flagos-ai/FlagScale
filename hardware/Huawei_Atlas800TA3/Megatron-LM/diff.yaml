@@ -1,12 +1,12 @@
 backends_commit:
-  Megatron-LM: 47b99b6ca0132a8d7c5321ac16a32a0ec9f9e192
+  Megatron-LM: 3a2a972d9ffd5cee534b761f0803ea1b07389d2f
 backends_version:
-  FlagScale: 0.8.0
-  Megatron-LM: 0.12.0
-commit: 3568f8c9e08f94b8c5ed42f79cf0e295b99d4559
-contact: 762496815@qq.com
+  FlagScale: 0.9.0
+  Megatron-LM: 0.12.1
+commit: a9e7999232dc3c2a74793decbf2425098ba72a00
+contact: ''
 device_type: Huawei_Atlas800TA3
 models:
-- Llama3-70B
+- Qwen2.5-VL
 task:
 - train

@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/dist_checkpointing/utils.py b/tests/unit_tests/dist_checkpointing/utils.py
-index 18d50e71..eced1118 100644
+index e722ebe79..78b5e6237 100644
 --- a/tests/unit_tests/dist_checkpointing/utils.py
 +++ b/tests/unit_tests/dist_checkpointing/utils.py
 @@ -138,6 +138,7 @@ def init_checkpointing_mock_args(args, ckpt_dir, fully_parallel=False):

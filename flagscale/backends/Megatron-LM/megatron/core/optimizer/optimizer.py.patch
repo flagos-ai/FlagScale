@@ -1,23 +1,17 @@
 diff --git a/megatron/core/optimizer/optimizer.py b/megatron/core/optimizer/optimizer.py
-index b5bc894c..29f7b08e 100644
+index 1829cb424..ae2041cd6 100644
 --- a/megatron/core/optimizer/optimizer.py
 +++ b/megatron/core/optimizer/optimizer.py
-@@ -92,7 +92,13 @@ def _multi_tensor_copy_this_to_that(
+@@ -92,7 +92,7 @@ def _multi_tensor_copy_this_to_that(
              that_.copy_(this_)
  
  
 -param_group_identifier_keys = ('wd_mult', 'lr_mult', 'is_expert_parallel', 'is_decoupled_lr')
-+param_group_identifier_keys = (
-+    'wd_mult',
-+    'lr_mult',
-+    'is_expert_parallel',
-+    'is_decoupled_lr',
-+    'is_vision_model_param',
-+)  ####FlagScale add is_vision_model_param
++param_group_identifier_keys = ('wd_mult', 'lr_mult', 'is_expert_parallel', 'is_decoupled_lr', 'is_vision_model_param') ####FlagScale add is_vision_model_param
  
  
  class MegatronOptimizer(ABC):
-@@ -465,12 +471,21 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
+@@ -505,12 +505,23 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
              )
  
          # Update across all model parallel instances.
@@ -38,14 +32,16 @@ index b5bc894c..29f7b08e 100644
 +            groups = [groups]
 +        for group in groups:
 +            torch.distributed.all_reduce(
-+                self.found_inf, op=torch.distributed.ReduceOp.MAX, group=group
++                self.found_inf,
++                op=torch.distributed.ReduceOp.MAX,
++                group=group
 +            )
 +        if self.found_inf.device != torch.device('cuda'):
 +            self.found_inf = self.found_inf.cuda()
          # Check for nan.
          found_inf_flag = self.found_inf.item() > 0
  
-@@ -1042,6 +1057,7 @@ class ChainedOptimizer(MegatronOptimizer):
+@@ -1083,6 +1094,7 @@ class ChainedOptimizer(MegatronOptimizer):
          self.model_chunks = []
          # chained_optimizers would be empty in the case that a rank
          # has no trainable parameters
@@ -53,35 +49,37 @@ index b5bc894c..29f7b08e 100644
          if chained_optimizers:
              self.config = getattr(chained_optimizers[0], 'config', None)
              for optimizer in chained_optimizers:
-@@ -1137,36 +1153,115 @@ class ChainedOptimizer(MegatronOptimizer):
+@@ -1178,8 +1190,9 @@ class ChainedOptimizer(MegatronOptimizer):
              return [optimizer.state_dict() for optimizer in self.chained_optimizers]
  
      def sharded_state_dict(
 -        self, model_sharded_state_dict: ShardedStateDict, is_loading: bool = False, **kwargs
-+        self,
-+        model_sharded_state_dict: ShardedStateDict,
-+        is_loading: bool = False,
-+        convert_to_ep: bool = False,
-+        **kwargs,
++        self, model_sharded_state_dict: ShardedStateDict, is_loading: bool = False, convert_to_ep: bool = False, **kwargs
      ):
-+        self.convert_to_ep = convert_to_ep
-         if len(self.chained_optimizers) == 1:
-             return self.chained_optimizers[0].sharded_state_dict(
++        self.convert_to_ep = convert_to_ep ########## FlagScale Add ########
+         metadata = kwargs.get('metadata') or {}
+         # ChainedOptimizer should add its prefix to the tensor state keys only if
+         # DistributedOptimizer is used (non-empty 'distrib_optim_sharding_type') and uses
+@@ -1198,32 +1211,106 @@ class ChainedOptimizer(MegatronOptimizer):
                  model_sharded_state_dict, is_loading, **kwargs
              )
          else:
+-            self._synchronize_steps()
 -            sharded_state_dict = {}
 -            for optimizer_idx, optimizer in enumerate(self.chained_optimizers):
 -                optim_state_dict = optimizer.sharded_state_dict(
 -                    model_sharded_state_dict, is_loading, **kwargs
-+            if convert_to_ep and is_loading:
-+                # convert tp/pp chained_optimizers to ep chained_optimizers
-+                logger.info(
-+                    "sharded_state_dict:convert tp/pp chained_optimizers to ep chained_optimizers!"
-                 )
--                add_prefix_for_sharding(optim_state_dict, f'chained_{optimizer_idx}.')
+-                )
+-                if should_add_prefix:
+-                    add_prefix_for_sharding(optim_state_dict, f'chained_{optimizer_idx}.')
 -                sharded_state_dict[optimizer_idx] = optim_state_dict
 -            return sharded_state_dict
++            ######### FlagScale Begin #########
++            if convert_to_ep and is_loading:
++                logger.info(
++                    "sharded_state_dict:convert tp/pp chained_optimizers to ep chained_optimizers!"
++                 )
++                # convert tp/pp chained_optimizers to ep chained_optimizers
 +                sharded_state_dict = {}
 +                fake_sharded_state_dict = {
 +                    'optimizer': {},
@@ -119,19 +117,21 @@ index b5bc894c..29f7b08e 100644
 +                    self.original_sharded_state_dict = sharded_state_dict
 +                self.mapping_idx = mapping_idx
 +                return fake_sharded_state_dict
-+            else:  # megatron source apply ep
-+                logger.info("sharded_state_dict:megatron source chained_optimizers apply ep!")
++            ######### FlagScale Begin #########
++            else: # megatron source apply ep
++                self._synchronize_steps()
 +                sharded_state_dict = {}
 +                for optimizer_idx, optimizer in enumerate(self.chained_optimizers):
 +                    optim_state_dict = optimizer.sharded_state_dict(
 +                        model_sharded_state_dict, is_loading, **kwargs
 +                    )
-+                    add_prefix_for_sharding(optim_state_dict, f'chained_{optimizer_idx}.')
++                    if should_add_prefix:
++                        add_prefix_for_sharding(optim_state_dict, f'chained_{optimizer_idx}.')
 +                    sharded_state_dict[optimizer_idx] = optim_state_dict
 +                return sharded_state_dict
  
      def load_state_dict(self, state_dict):
-         # If there is only one optimizer, we read the state dict as a single optimizer.
+-        # If there is only one optimizer, we read the state dict as a single optimizer.
 -        if len(self.chained_optimizers) == 1:
 -            self.chained_optimizers[0].load_state_dict(state_dict)
 -            return
@@ -147,6 +147,7 @@ index b5bc894c..29f7b08e 100644
 -            state_dict = (v for k, v in sorted(state_dict.items()))
 -        for optimizer, state in zip(self.chained_optimizers, state_dict):
 -            optimizer.load_state_dict(state)
+-        self._synchronize_steps()
 +            new_state_dict = {}
 +            for optimizer_idx, optimizer in enumerate(self.chained_optimizers):
 +                new_state_dict[optimizer_idx] = {}
@@ -172,7 +173,7 @@ index b5bc894c..29f7b08e 100644
 +            for optimizer, state in zip(self.chained_optimizers, new_state_dict):
 +                optimizer.load_state_dict(state)
 +        else:  # megatron source apply ep
-+            logger.info("load_state_dict:megatron source chained_optimizers apply !")
++            # If there is only one optimizer, we read the state dict as a single optimizer.
 +            if len(self.chained_optimizers) == 1:
 +                self.chained_optimizers[0].load_state_dict(state_dict)
 +                return
@@ -185,10 +186,11 @@ index b5bc894c..29f7b08e 100644
 +                state_dict = (v for k, v in sorted(state_dict.items()))
 +            for optimizer, state in zip(self.chained_optimizers, state_dict):
 +                optimizer.load_state_dict(state)
++            self._synchronize_steps()
  
      @torch.no_grad()
      def prepare_grads(self) -> bool:
-@@ -1319,7 +1414,7 @@ class ChainedOptimizer(MegatronOptimizer):
+@@ -1378,7 +1465,7 @@ class ChainedOptimizer(MegatronOptimizer):
  
              # Lazy loading checkpoint, state dict is needed only when DP rank = 0.
              if optimizer.data_parallel_group.rank() == 0 and states is None:

@@ -1,6 +1,6 @@
 diff --git a/megatron/training/tokenizer/tokenization_utils.py b/megatron/training/tokenizer/tokenization_utils.py
 new file mode 100644
-index 00000000..8ec66b77
+index 000000000..8ec66b77a
 --- /dev/null
 +++ b/megatron/training/tokenizer/tokenization_utils.py
 @@ -0,0 +1,167 @@

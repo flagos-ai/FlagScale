@@ -1,32 +1,33 @@
 system:
-  # TODO: Update to your local output path
-  output_dir: /path/to/your/output
-  resume: false
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  wandb_enabled: true
   seed: 42
-  num_workers: 4
-  batch_size: 8
-  steps: 10000
-  eval_freq: 2000
-  log_freq: 100
-  save_checkpoint: "true"
-  save_freq: 2000
-  use_policy_training_preset: "true"
-  # optimizer.type choices: adam, adamw, sgd, multi_adam
-  optimizer.type: adamw
-  optimizer.lr: 1e-3
-  optimizer.weight_decay: 1e-2
-  optimizer.grad_clip_norm: 10
-  optimizer.eps: 1e-8
-  wandb.mode: offline
-model:
-  policy.type: pi0
-  # TODO: Update to your local model path
-  policy.repo_id: /path/to/your/models/lerobot/pi0
-  policy.n_obs_steps: 1
-  policy.device: cuda
-  policy.use_amp: "false"
-  policy.push_to_hub: "false"
+  project_name: ${experiment.exp_name}
+  exp_name: ${experiment.exp_name}
+  batch_size: 2
+  train_steps: 100
+  log_freq: 10
+  output_directory: ${experiment.exp_dir}/ckpt
+  tokenizer_max_length: 256
   
+model:
+  # change to your model path
+  checkpoint_dir: /models/lerobot/pi0 
+  resume: false
+  ckpt_overwrite: true
+  # change to your stat_path (lerobot format)
+  stat_path: /models/lerobot/aloha_mobile_cabinet/meta/stats.json
+  action_horizon: 14
+  action_steps: 30
+
 data:
-  dataset.repo_id: danaaubakirova/koch_test
-  dataset.video_backend: pyav
+  # change to your tokenizer path
+  tokenizer_path: /models/google/paligemma-3b-pt-224
+  # change to your data path
+  data_path: /repos/flagscale_new_robotics/FlagScale/demo_0913_n2/wds-2
+  state_key: eepose
+  action_key: eepose
+  action_token_key: action_eepose_token
+  vision_root: ""

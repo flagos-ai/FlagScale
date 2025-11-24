@@ -4,18 +4,20 @@ defaults:
 
 experiment:
   exp_name: pi0
-  exp_dir: ./outputs/${experiment.exp_name}
+  exp_dir: outputs/${experiment.exp_name}
+  model: /models/lerobot/pi0
   task:
     type: inference
-    backend: lerobot
-    entrypoint: flagscale/inference/inference_pi0.py
+    backend: vllm # TODO: Remove this restriction
+    entrypoint: flagscale/inference/embodied_entrypoint.py
   runner:
     hostfile: null
   cmds:
-    before_start: conda activate flagscale-inference
+    before_start: source /root/miniconda3/bin/activate flagscale-inference
   envs:
     CUDA_VISIBLE_DEVICES: 0
     CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # Optionally, set HF_HOME and HF_ENDPOINT
 
 action: run
 

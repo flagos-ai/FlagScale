@@ -1,19 +1,91 @@
 diff --git a/megatron/core/models/common/language_module/language_module.py b/megatron/core/models/common/language_module/language_module.py
-index 6000e35b..5272dbe6 100644
+index d855322c2..b2d34fe02 100644
 --- a/megatron/core/models/common/language_module/language_module.py
 +++ b/megatron/core/models/common/language_module/language_module.py
-@@ -171,9 +171,24 @@ class LanguageModule(MegatronModule):
+@@ -59,25 +59,48 @@ class LanguageModule(MegatronModule):
+     def _is_in_embd_group(self):
+         if self.embd_group is None:
+             return False
+-        if torch.distributed.get_rank() in torch.distributed.get_process_group_ranks(
+-            self.embd_group
+-        ):
+-            if (
+-                torch.distributed.get_rank()
+-                == torch.distributed.get_process_group_ranks(self.embd_group)[0]
++        if not isinstance(self.embd_group, list):
++            if torch.distributed.get_rank() in torch.distributed.get_process_group_ranks(
++                self.embd_group
              ):
+-                return is_vp_first_stage(self.vp_stage, self.vp_size) and is_pp_first_stage(
+-                    self.pp_group
+-                )
+-            elif (
+-                torch.distributed.get_rank()
+-                == torch.distributed.get_process_group_ranks(self.embd_group)[-1]
++                if (
++                    torch.distributed.get_rank()
++                    == torch.distributed.get_process_group_ranks(self.embd_group)[0]
++                ):
++                    return is_vp_first_stage(self.vp_stage, self.vp_size) and is_pp_first_stage(
++                        self.pp_group
++                    )
++                elif (
++                    torch.distributed.get_rank()
++                    == torch.distributed.get_process_group_ranks(self.embd_group)[-1]
++                ):
++                    return is_vp_last_stage(self.vp_stage, self.vp_size) and is_pp_last_stage(
++                        self.pp_group
++                    )
++                else:
++                    return True
++        ######### FlagScale Begin #########
++        else:
++            if torch.distributed.get_rank() in torch.distributed.get_process_group_ranks(
++                self.embd_group[0]
+             ):
+-                return is_vp_last_stage(self.vp_stage, self.vp_size) and is_pp_last_stage(
+-                    self.pp_group
+-                )
+-            else:
+-                return True
++                if (
++                    torch.distributed.get_rank()
++                    == torch.distributed.get_process_group_ranks(self.embd_group[0])[0]
++                ):
++                    return is_vp_first_stage(self.vp_stage, self.vp_size) and is_pp_first_stage(
++                        self.pp_group
++                    )
++                elif (
++                    torch.distributed.get_rank()
++                    == torch.distributed.get_process_group_ranks(self.embd_group[0])[-1]
++                ):
++                    return is_vp_last_stage(self.vp_stage, self.vp_size) and is_pp_last_stage(
++                        self.pp_group
++                    )
++                else:
++                    return True
++            ######### FlagScale End #########
+         return False
+ 
+     # pylint: disable=line-too-long
+@@ -186,7 +209,8 @@ class LanguageModule(MegatronModule):
+         ):
+             return
+ 
+-        if self.config.pipeline_model_parallel_size == 1:
++        # if self.config.pipeline_model_parallel_size == 1: # original code of Megatron
++        if parallel_state.get_pipeline_model_parallel_world_size() == 1:
+             # Zero out wgrad if sharing embeddings between two layers on same
+             # pipeline stage to make sure grad accumulation into main_grad is
+             # correct and does not include garbage values (e.g., from torch.empty).
+@@ -231,7 +255,22 @@ class LanguageModule(MegatronModule):
+             if self._is_in_embd_group():
                  weight = self.shared_embedding_or_output_weight()
                  weight.data = weight.data.cuda()
--                torch.distributed.all_reduce(
--                    weight.data, group=parallel_state.get_embedding_group()
--                )
-+                embedding_group = parallel_state.get_embedding_group()
+-                torch.distributed.all_reduce(weight.data, group=self.embd_group)
++                embedding_group = self.embd_group
 +                if not isinstance(embedding_group, list):
-+                    torch.distributed.all_reduce(
-+                        weight.data, group=parallel_state.get_embedding_group()
-+                    )
++                    torch.distributed.all_reduce(weight.data, group=self.embd_group)
 +                else: # for multiple embedding groups in heterogeneous mode
 +                    with torch.no_grad():
 +                        original_dtype = weight.dtype

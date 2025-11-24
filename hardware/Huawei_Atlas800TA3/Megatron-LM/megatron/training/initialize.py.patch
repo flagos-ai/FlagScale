@@ -1,0 +1,103 @@
+diff --git a/megatron/training/initialize.py b/megatron/training/initialize.py
+index b4b5aa027..362f66b63 100644
+--- a/megatron/training/initialize.py
++++ b/megatron/training/initialize.py
+@@ -29,9 +29,12 @@ from megatron.training import inprocess_restart
+ from megatron.training.arguments import parse_args, validate_args
+ from megatron.training.async_utils import init_persistent_async_worker
+ from megatron.training.checkpointing import load_args_from_checkpoint
+-from megatron.training.global_vars import set_global_variables
++from megatron.training.global_vars import set_global_variables, set_global_writers
+ from megatron.training.yaml_arguments import validate_yaml
+ 
++from flagscale.train import FSTrainArguments
++from flagscale.train import set_parallel_context, set_get_spiky_loss_detector
++
+ logger = logging.getLogger(__name__)
+ 
+ 
+@@ -82,11 +85,18 @@ def initialize_megatron(
+     if args.async_save and args.use_persistent_ckpt_worker:
+         init_persistent_async_worker()
+ 
++    if args.hetero_process_meshes is not None:
++        fs_argument = FSTrainArguments(args)
++        fs_argument.pre_validate_args()
++
+     if args.yaml_cfg is not None:
+         args = validate_yaml(args, args_defaults)
+     else:
+         validate_args(args, args_defaults)
+ 
++    if args.hetero_process_meshes is not None:
++        fs_argument.post_validate_args()
++
+     # set global args, build tokenizer, and set adlr-autoresume,
+     # tensorboard-writer, and timers.
+     set_global_variables(args)
+@@ -114,6 +124,9 @@ def initialize_megatron(
+         result_rejected_tracker_filename=args.result_rejected_tracker_filename,
+     )
+ 
++    if args.auto_skip_spiky_loss:
++        set_get_spiky_loss_detector(args=args)
++
+     # torch.distributed initialization
+     def finish_mpu_init():
+         args = get_args()
+@@ -137,6 +150,9 @@ def initialize_megatron(
+ 
+             MoEAuxLossAutoScaler.set_loss_scale(torch.ones(1, device=torch.cuda.current_device()))
+ 
++        # Set tensorboard writer and wandb writer.
++        set_global_writers(args)
++
+     if skip_mpu_initialization:
+         return None
+ 
+@@ -177,7 +193,8 @@ def _compile_dependencies():
+     # Compile dataset C++ code.
+     # =========================
+     # TODO: move this to ninja
+-    if torch.distributed.get_rank() == 0:
++    from megatron.core.datasets.utils import is_built_on_zero_rank
++    if is_built_on_zero_rank():
+         start_time = time.time()
+         print("> compiling dataset index builder ...")
+         from megatron.core.datasets.utils import compile_helpers
+@@ -332,6 +349,14 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
+             'rank': args.rank,
+             'timeout': timedelta(minutes=args.distributed_timeout_minutes),
+         }
++        
++        if args.enable_hetero and args.hetero_use_cpu_communication:
++            # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
++            #     init_process_group_kwargs['backend'] = 'gloo'
++            init_process_group_kwargs['backend'] = "cpu:gloo"
++        # TODO: @aoyulong the init_process_group will be hanging if the device_id is set 
++        # if packaging.version.Version(torch.__version__) >= packaging.version.Version("2.3.0"):
++        #     init_process_group_kwargs['device_id'] = device_id
+ 
+         torch.distributed.init_process_group(**init_process_group_kwargs)
+         inprocess_restart.maybe_force_nccl_backend_init(device_id)
+@@ -339,6 +364,11 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
+     # Set the tensor model-parallel, pipeline model-parallel, and
+     # data-parallel communicators.
+     if device_count > 0:
++        # Set the parallel context.
++        if args.enable_hetero:
++            set_parallel_context(args)
++            return
++
+         if mpu.model_parallel_is_initialized():
+             print("model parallel is already initialized")
+         else:
+@@ -378,6 +408,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
+                 get_position_embedding_ranks=get_position_embedding_ranks,
+                 create_gloo_process_groups=args.enable_gloo_process_groups,
+                 high_priority_stream_groups=args.high_priority_stream_groups,
++                create_dualpipev_parallel_size=args.use_dualpipev,
+             )
+             if args.rank == 0:
+                 print(
+

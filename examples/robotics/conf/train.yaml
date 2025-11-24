@@ -12,7 +12,7 @@ experiment:
   task:
     type: train
     backend: robotics
-    entrypoint: flagscale/train/train_robotics_ddp.py
+    entrypoint: flagscale/train/train_robotics.py
   runner:
     per_node_task: false
     no_shared_fs: false

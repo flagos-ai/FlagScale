@@ -1,8 +1,8 @@
 diff --git a/megatron/core/transformer/moe/experts.py b/megatron/core/transformer/moe/experts.py
-index c215c43e..200be4f9 100644
+index fc741aa46..0a86aa60e 100644
 --- a/megatron/core/transformer/moe/experts.py
 +++ b/megatron/core/transformer/moe/experts.py
-@@ -226,6 +226,12 @@ class GroupedMLP(MegatronModule):
+@@ -232,6 +232,12 @@ class GroupedMLP(MegatronModule):
          setattr(self.weight1, 'allreduce', not self.expert_parallel)
          setattr(self.weight2, 'allreduce', not self.expert_parallel)
  

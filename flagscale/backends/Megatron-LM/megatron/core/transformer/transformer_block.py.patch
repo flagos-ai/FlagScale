@@ -1,50 +1,51 @@
 diff --git a/megatron/core/transformer/transformer_block.py b/megatron/core/transformer/transformer_block.py
 old mode 100755
 new mode 100644
-index af0b3234..64fd6d60
+index c14f8ea1f..c30fd3a5b
 --- a/megatron/core/transformer/transformer_block.py
 +++ b/megatron/core/transformer/transformer_block.py
-@@ -1,5 +1,5 @@
+@@ -1,5 +1,6 @@
  # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
--
+ import logging
 +import os
  from contextlib import nullcontext
  from dataclasses import dataclass
  from typing import List, Optional, Union
-@@ -51,12 +51,13 @@ except ImportError:
-         LayerNormImpl = WrappedTorchNorm
+@@ -74,13 +75,14 @@ logger = logging.getLogger(__name__)
  
- 
--def get_num_layers_to_build(config: TransformerConfig, vp_stage: Optional[int] = None) -> int:
-+def get_num_layers_to_build(config: TransformerConfig, vp_stage: Optional[int] = None, is_dualpipev_first_chunk: Optional[bool] = False) -> int:
+ def get_num_layers_to_build(
+     config: TransformerConfig, vp_stage: Optional[int] = None, pp_rank: Optional[int] = None
+-) -> int:
++, is_dualpipev_first_chunk: Optional[bool] = False) -> int:
      """
      Determine the number of transformer layers to build for the current pipeline stage.
      Args:
          config (TransformerConfig): Configuration object containing transformer model parameters.
          vp_stage (Optional[int]): Virtual pipeline stage number.
+         pp_rank (Optional[int]): Pipeline parallel rank.
 +        is_dualpipev_first_chunk(Optional[bool]): Is dualpipev first model chunk or not
  
      Returns:
          int: The number of layers to be built for the current pipeline stage.
-@@ -117,7 +118,7 @@ def get_num_layers_to_build(config: TransformerConfig, vp_stage: Optional[int] =
-             and config.num_layers_in_last_pipeline_stage is not None
-         ):
+@@ -143,7 +145,7 @@ def get_num_layers_to_build(
+ 
+         if is_last_pp_stage and config.num_layers_in_last_pipeline_stage is not None:
              num_layers_per_pipeline_rank = config.num_layers_in_last_pipeline_stage
 -    else:
 +    elif not config.enable_hetero:
          # Include the embedding layer and loss layer into pipeline parallelism partition
          num_layers = config.num_layers
          if config.account_for_embedding_in_pipeline_split:
-@@ -134,7 +135,7 @@ def get_num_layers_to_build(config: TransformerConfig, vp_stage: Optional[int] =
-     if (
-         parallel_state.get_virtual_pipeline_model_parallel_world_size() is not None
-         and config.pipeline_model_parallel_size > 1
--    ):
-+    ) and parallel_state.get_virtual_pipeline_model_parallel_world_size() > 1:
+@@ -158,7 +160,7 @@ def get_num_layers_to_build(
+         num_layers_per_pipeline_rank = num_layers // config.pipeline_model_parallel_size
+ 
+     vp_size = config.virtual_pipeline_model_parallel_size
+-    if vp_size is not None and config.pipeline_model_parallel_size > 1:
++    if vp_size is not None and config.pipeline_model_parallel_size > 1 and parallel_state.get_virtual_pipeline_model_parallel_world_size() > 1:
          # Interleaved pipeline parallelism:
          # Number of layers in each model chunk is the number of layers in the stage,
          # divided by the number of model chunks in a stage.
-@@ -155,11 +156,26 @@ def get_num_layers_to_build(config: TransformerConfig, vp_stage: Optional[int] =
+@@ -178,11 +180,26 @@ def get_num_layers_to_build(
          num_layers_per_virtual_stage = num_layers_per_pipeline_rank // vp_size
  
          num_layers_to_build = num_layers_per_virtual_stage
@@ -73,7 +74,7 @@ index af0b3234..64fd6d60
  
      # The embedding (or loss) layer cannot function as a standalone transformer layer
      # Reduce the number of layers to construct by 1 on the first (or last) stage if the
-@@ -505,6 +521,14 @@ class TransformerBlock(MegatronModule):
+@@ -556,6 +573,14 @@ class TransformerBlock(MegatronModule):
              [s, b, h], and optionally the updated context tensor if cross-attention is used.
          """
  
@@ -88,10 +89,11 @@ index af0b3234..64fd6d60
          inference_context = deprecate_inference_params(inference_context, inference_params)
  
          # Delete the obsolete reference to the initial input tensor if necessary
-@@ -546,6 +570,71 @@ class TransformerBlock(MegatronModule):
-         use_inner_fp8_context = self.config.fp8 and self.config.fp8_recipe != Fp8Recipe.delayed
-         outer_fp8_context = get_fp8_context(self.config) if use_outer_fp8_context else nullcontext()
- 
+@@ -609,6 +634,71 @@ class TransformerBlock(MegatronModule):
+             use_outer_quantization_context = False
+             use_inner_quantization_context = False
+             outer_quantization_context = nullcontext()
++        ########## FlagScale Begin ##########
 +        if self.config.recompute_method_per_stage_micro_batch != None:
 +            if self.config.virtual_pipeline_model_parallel_size != None:
 +                if (
@@ -131,7 +133,7 @@ index af0b3234..64fd6d60
 +                    self.config.recompute_method = 'block'
 +                else:
 +                    raise ValueError("the item of recompute_method_per_stage_micor_batch must be '0' or '1' ")
-+
++            ########## FlagScale End ##########
 +        if self.config.recompute_num_layers_per_stage_micro_batch != None:
 +            if self.config.virtual_pipeline_model_parallel_size != None:
 +                self.config.recompute_num_layers = self.config.recompute_num_layers_per_stage_micro_batch[
@@ -156,11 +158,10 @@ index af0b3234..64fd6d60
 +        ):
 +            self.config.recompute_granularity = None
 +            self.config.recompute_method = None
-+
-         with rng_context, outer_fp8_context:
+ 
+         with rng_context, outer_quantization_context:
              # Forward pass.
-             if self.config.recompute_granularity == 'full' and self.training:
-@@ -634,6 +723,16 @@ class TransformerBlock(MegatronModule):
+@@ -710,6 +800,16 @@ class TransformerBlock(MegatronModule):
          elif isinstance(self.config.moe_layer_freq, list):
              non_homogeneous_layers = True
  

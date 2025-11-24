@@ -130,9 +130,6 @@ class FSTrainArguments:
         assert (
             self.args.standalone_embedding_stage == False
         ), "standalone not supported with process_meshes set!"
-        assert (
-            self.args.pipeline_model_parallel_split_rank == None
-        ), "pipeline_model_parallel_split_rank not supported with process_meshes set!"
         self.args.transformer_pipeline_model_parallel_size = self.args.pipeline_model_parallel_size
 
         # if untie_embeddings_and_output_weights is False, the first and last stage should have the same tp degree

@@ -1,0 +1,35 @@
+diff --git a/flagscale/train/models/qwen2_5_vl/QuickStart.md b/flagscale/train/models/qwen2_5_vl/QuickStart.md
+index 8c2fa82d..4c42d8ea 100644
+--- a/flagscale/train/models/qwen2_5_vl/QuickStart.md
++++ b/flagscale/train/models/qwen2_5_vl/QuickStart.md
+@@ -16,6 +16,8 @@ python ./tools/patch/unpatch.py --backend=Megatron-Energon
+ cd ./third_party/Megatron-Energon/
+ pip install -e .
+ cp -r src/megatron/energon/ ../Megatron-LM/megatron/
++cd ../Megatron-LM/
++mv tools tools_bk # avoid the confict with the `tools` in the root dir
+ ```
+ 
+ You can also refered the readme in `https://github.com/FlagOpen/FlagScale.git`
+@@ -52,7 +54,9 @@ unzip images.zip
+ 
+ #convert to webdataset format
+ cd ./tools/datasets/qwenvl/
+-export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
++export PYTHONPATH=../../../:../../../third_party/Megatron-LM/:$PYTHONPATH
++export LD_PRELOAD=/usr/local/python3.11.5/lib/python3.11/site-packages/scikit_learn.libs/libgomp-947d5fa1.so.1.0.0
++export CUDA_VISIBLE_DEVICES=0
+ 
+ python convert_custom_dataset_to_wds_chatml_str.py \
+     --dataset-root=/mnt/LLaVA-Pretrain \
+@@ -99,6 +103,9 @@ Reference [convert.md](../../../../tools/checkpoint/qwen2_5_vl/convert.md)
+ 
+ ``` bash
+ cd ./tools/checkpoint/qwen2_5_vl/
++export PYTHONPATH=../../../:../../../third_party/Megatron-LM/:$PYTHONPATH
++export LD_PRELOAD=/usr/local/python3.11.5/lib/python3.11/site-packages/scikit_learn.libs/libgomp-947d5fa1.so.1.0.0
++export CUDA_VISIBLE_DEVICES=0
+ bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
+ ./train_qwen2_5_vl_7b/checkpoints \
+ /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct-fs2hf-tp2 \
+

@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - inference: t2v
+  - inference: 1.3b
 
 experiment:
   exp_name: wan2_1
@@ -15,7 +15,7 @@ experiment:
   cmds:
     before_start: source /root/miniconda3/bin/activate flagscale-inference
   envs:
-    CUDA_VISIBLE_DEVICES: 1
+    CUDA_VISIBLE_DEVICES: 0
     CUDA_DEVICE_MAX_CONNECTIONS: 1
     # Optionally, set HF_HOME and HF_ENDPOINT
 

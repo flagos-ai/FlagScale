@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/models/test_bert_model.py b/tests/unit_tests/models/test_bert_model.py
-index b30d1413..cff91738 100644
+index b30d1413c..cff917385 100644
 --- a/tests/unit_tests/models/test_bert_model.py
 +++ b/tests/unit_tests/models/test_bert_model.py
 @@ -6,6 +6,7 @@ from importlib.metadata import version

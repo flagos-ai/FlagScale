@@ -1,18 +1,30 @@
-llm:
-  # TODO: Update model_path to your local model path
-  model_path: /path/to/your/models/lerobot/pi0
-  compile_model: false
-  compile_mode: reduce-overhead
-dataset:
-  dataset_repo_id: lerobot/aloha_mobile_cabinet
-  episodes: [0, 10, 11, 23]
-  # Another option for video_backend: torchcodec 
-  # May cause problems: https://github.com/huggingface/lerobot/issues/970
-  video_backend: pyav
-  dtype: torch.float32
-data_loader:
-  batch_size: 1
-  shuffle: false
-  num_workers: 1
+engine:
+  model: /models/lerobot/pi0
+  tokenizer: /models/google/paligemma-3b-pt-224
+  stat_path: /models/lerobot/aloha_mobile_cabinet/meta/stats.json
+  loader: pi0
+  results_path: ${experiment.exp_dir}/results
+  device: "cuda"
+  output_format: image
+  torch_dtype: float32
+  transformations:
+    LogIOTransformation:
+      log_level: "info"
+    StateScopeTransformation:
+      {}
+
 generate:
-  num_inference: 1
+  images_keys:
+    - observation.images.camera0
+    - observation.images.camera1
+    - observation.images.camera2
+  images_shape: [3, 480, 640]
+  batch_size: 2
+  action_dim: 14
+  action_horizon: 10
+  state_key: observation.state
+  instruction:
+    task: 
+      - "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
+      - "retro serie of different cars with different colors and shapes"
+

@@ -1,0 +1,37 @@
+diff --git a/flagscale/train/npu_patch/features_manager/transformer/module_rearrange/mcore_rearrange.py b/flagscale/train/npu_patch/features_manager/transformer/module_rearrange/mcore_rearrange.py
+new file mode 100644
+index 00000000..e454a4af
+--- /dev/null
++++ b/flagscale/train/npu_patch/features_manager/transformer/module_rearrange/mcore_rearrange.py
+@@ -0,0 +1,30 @@
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
++
++from flagscale.train.npu_patch.features_manager.feature import MindSpeedFeature
++
++
++class MegatronMcoreRearrangeFeature(MindSpeedFeature):
++    """
++    rearrange attention's init&forward for overlap_param_gather.
++    """
++
++    def __init__(self):
++        super().__init__('mcore-rearrange', optimization_level=0)
++
++    def register_patches(self, patch_manager, args):
++        self.register_basic_patches(patch_manager, args)
++
++    def register_basic_patches(self, pm, args):
++        # args parser patch
++        from flagscale.train.npu_patch.features_manager.transformer.module_rearrange.mcore_model_rearrange import (
++            megatron_module_init_wrapper,
++            mindspeed_self_attention_init_wrapper,
++        )
++
++        pm.register_patch(
++            'megatron.core.transformer.attention.SelfAttention.__init__',
++            mindspeed_self_attention_init_wrapper,
++        )
++        pm.register_patch(
++            'megatron.core.transformer.module.MegatronModule.__init__', megatron_module_init_wrapper
++        )
+

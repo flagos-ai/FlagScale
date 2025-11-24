@@ -1,8 +1,8 @@
 diff --git a/megatron/core/pipeline_parallel/schedules.py b/megatron/core/pipeline_parallel/schedules.py
-index 317789ad..dcc4f0c3 100644
+index c0d8af394..ec0a1e491 100644
 --- a/megatron/core/pipeline_parallel/schedules.py
 +++ b/megatron/core/pipeline_parallel/schedules.py
-@@ -113,7 +113,11 @@ def get_forward_backward_func():
+@@ -123,7 +123,11 @@ def get_forward_backward_func():
      """
      pipeline_model_parallel_size = parallel_state.get_pipeline_model_parallel_world_size()
      if pipeline_model_parallel_size > 1:
@@ -15,11 +15,41 @@ index 317789ad..dcc4f0c3 100644
              forward_backward_func = forward_backward_pipelining_with_interleaving
          else:
              forward_backward_func = forward_backward_pipelining_without_interleaving
-@@ -1872,6 +1876,7 @@ def forward_backward_pipelining_without_interleaving(
+@@ -2066,9 +2070,14 @@ def forward_backward_pipelining_without_interleaving(
+     disable_grad_sync()
+ 
+     # Compute number of warmup microbatches.
+-    num_warmup_microbatches = (
+-        p2p_communicator.pp_group.size() - p2p_communicator.pp_group.rank() - 1
+-    )
++    if isinstance(p2p_communicator.pp_group, list):
++        num_warmup_microbatches = (
++            p2p_communicator.pp_group[0].size() - p2p_communicator.pp_group[0].rank() - 1
++        )
++    else:
++        num_warmup_microbatches = (
++            p2p_communicator.pp_group.size() - p2p_communicator.pp_group.rank() - 1
++        )
+     num_warmup_microbatches = min(num_warmup_microbatches, num_microbatches)
+     num_microbatches_remaining = num_microbatches - num_warmup_microbatches
+ 
+@@ -2086,7 +2095,10 @@ def forward_backward_pipelining_without_interleaving(
+ 
+     model_type = get_model_type(model)
+ 
+-    rank = p2p_communicator.pp_group.rank()
++    if isinstance(p2p_communicator.pp_group, list):
++        rank = p2p_communicator.pp_group[0].rank()
++    else:
++        rank = p2p_communicator.pp_group.rank()
+     recv_tensor_shapes = get_tensor_shapes(
+         seq_length=seq_length,
+         micro_batch_size=micro_batch_size,
+@@ -2118,6 +2130,7 @@ def forward_backward_pipelining_without_interleaving(
          output_tensors = []
      forward_data_store = []
  
-+    p2p_communication.warm_up_comm_group(config=config)
++    p2p_communicator.warm_up_comm_group() ########## FlagScale Add ##########
      # Run warmup forward passes.
      for i in range(num_warmup_microbatches):
          # Decide to checkpoint all layers' activations of the current micro-batch

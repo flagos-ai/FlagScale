@@ -1,8 +1,8 @@
 diff --git a/megatron/training/checkpointing.py b/megatron/training/checkpointing.py
-index 652333ac..36f06c9b 100644
+index 104fa6882..1c501cc1b 100644
 --- a/megatron/training/checkpointing.py
 +++ b/megatron/training/checkpointing.py
-@@ -255,12 +255,14 @@ def read_metadata(tracker_filename):
+@@ -286,12 +286,14 @@ def read_metadata(tracker_filename):
                  print_rank_0('ERROR: Invalid metadata file {}. Exiting'.format(
                      tracker_filename))
                  sys.exit()
@@ -19,7 +19,7 @@ index 652333ac..36f06c9b 100644
          torch.distributed.all_reduce(iters_cuda, op=torch.distributed.ReduceOp.MAX)
          max_iter = iters_cuda[0].item()
  
-@@ -592,6 +594,28 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+@@ -692,6 +694,28 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
      if not torch.distributed.is_initialized() \
         or is_last_rank():
          def wandb_finalize_fn():
@@ -48,7 +48,7 @@ index 652333ac..36f06c9b 100644
              wandb_utils.on_save_checkpoint_success(checkpoint_name, get_checkpoint_tracker_filename(save_dir), save_dir, iteration)
          if args.async_save:
              assert async_save_request is not None
-@@ -674,9 +698,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
+@@ -774,9 +798,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
  
      torch.distributed.barrier(group=mpu.get_data_parallel_group())
  
@@ -59,7 +59,7 @@ index 652333ac..36f06c9b 100644
      torch.distributed.barrier(group=mpu.get_data_parallel_group())
  
      dataloader_save_dict = {}
-@@ -1095,6 +1117,10 @@ def load_args_from_checkpoint(
+@@ -1239,6 +1261,10 @@ def load_args_from_checkpoint(
              checkpoint_args, 'add_bias_linear', not getattr(checkpoint_args, 'disable_bias_linear')
          )
  
@@ -70,7 +70,7 @@ index 652333ac..36f06c9b 100644
      def _set_arg(arg_name, old_arg_name=None, force=False):
          if not force and getattr(args, arg_name, None) is not None:
              return
-@@ -1130,6 +1156,8 @@ def load_args_from_checkpoint(
+@@ -1274,6 +1300,8 @@ def load_args_from_checkpoint(
      _set_arg('add_qkv_bias', force=True)
      _set_arg('squared_relu', force=True)
      _set_arg('swiglu', force=True)
@@ -79,34 +79,35 @@ index 652333ac..36f06c9b 100644
      _set_arg('untie_embeddings_and_output_weights', force=True)
      _set_arg('apply_layernorm_1p', force=True)
      _set_arg('normalization', force=True)
-@@ -1285,6 +1313,12 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+@@ -1432,6 +1460,14 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+         mismatch_msg = "(TP, PP) mismatch after resume ({} vs {} from checkpoint)".format(
              run_tp_pp, ckpt_tp_pp
          )
- 
++        
++        ########## FlagScale Begin ##########
 +        #Add support for changing parallel strategy from tp/pp to ep for ChainedOptimizer when using dist checkpointing
 +        convert_to_ep = (
 +            getattr(args, 'expert_model_parallel_size', 1) != 1 and
 +            getattr(state_dict['args'], 'expert_model_parallel_size', 1) == 1
 +        )
-+
++        ########## FlagScale End ##########
+ 
          # Determine if RNG state will be loaded
          if (ckpt_tp_pp == run_tp_pp and not release and not args.finetune and not args.no_load_rng
-                 and not getattr(state_dict['args'], 'no_save_rng', False)):
-@@ -1312,7 +1346,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
-                                                         if getattr(state_dict['args'], 'ckpt_fully_parallel_save', False)
-                                                         else 'dp_zero_gather_scatter'),
-                     }
--                if ckpt_tp_pp != run_tp_pp and sharded_sd_metadata['distrib_optim_sharding_type'] != 'fully_sharded_model_space':
-+                if ckpt_tp_pp != run_tp_pp and sharded_sd_metadata['distrib_optim_sharding_type'] != 'fully_sharded_model_space' and convert_to_ep: ##add tp/pp to ep
+@@ -1468,6 +1504,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+                     ckpt_tp_pp != run_tp_pp
+                     and sharded_sd_metadata['distrib_optim_sharding_type']
+                     not in DistributedOptimizer.checkpoint_fully_reshardable_formats
++                    and convert_to_ep ########## FlagScale Added ##########
+                 ):
                      raise RuntimeError(f"{mismatch_msg}: not supported for DistributedOptimizer with sharding type"
                                         f" {sharded_sd_metadata['distrib_optim_sharding_type']}."
-                                        f" Please use `--ckpt-fully-parallel-save` flag during checkpoint saving.")
-@@ -1320,7 +1354,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+@@ -1481,7 +1518,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
              gen_sd_optim = None
              gen_sd_opt_param_scheduler = None
  
 -        optim_sd_kwargs = dict(metadata=sharded_sd_metadata, is_loading=True)
-+        optim_sd_kwargs = dict(metadata=sharded_sd_metadata, is_loading=True, convert_to_ep=convert_to_ep) ##add tp/pp to ep 
++        optim_sd_kwargs = dict(metadata=sharded_sd_metadata, is_loading=True, convert_to_ep=convert_to_ep) ########## FlagScale Added ##########
          model_sd_kwargs = dict(metadata=sharded_sd_metadata)
  
          # Determine if rerun state will be loaded

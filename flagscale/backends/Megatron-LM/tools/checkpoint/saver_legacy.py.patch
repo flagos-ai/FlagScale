@@ -1,8 +1,8 @@
 diff --git a/tools/checkpoint/saver_legacy.py b/tools/checkpoint/saver_legacy.py
-index 50af6a57..ab8cfebb 100644
+index 0e582bccf..0fb029021 100644
 --- a/tools/checkpoint/saver_legacy.py
 +++ b/tools/checkpoint/saver_legacy.py
-@@ -132,6 +132,8 @@ def save_checkpoint(queue, args):
+@@ -134,6 +134,8 @@ def save_checkpoint(queue, args):
          sys.argv.append('--untie-embeddings-and-output-weights')
      if not md.linear_bias:
          sys.argv.append('--disable-bias-linear')
@@ -11,7 +11,7 @@ index 50af6a57..ab8cfebb 100644
  
      if md.model_type == 'BERT' and not md.bert_binary_head:
          sys.argv.append('--bert-no-binary-head')
-@@ -359,7 +361,35 @@ def save_checkpoint(queue, args):
+@@ -363,7 +365,35 @@ def save_checkpoint(queue, args):
                  if not hasattr(models[0].language_model, 'output_layer'):
                      print("ERROR: got an output layer, but model does not have one")
                      exit(1)

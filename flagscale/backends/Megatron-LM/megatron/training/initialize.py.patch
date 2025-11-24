@@ -1,5 +1,5 @@
 diff --git a/megatron/training/initialize.py b/megatron/training/initialize.py
-index b4b5aa02..362f66b6 100644
+index 85b771448..426d1cedc 100644
 --- a/megatron/training/initialize.py
 +++ b/megatron/training/initialize.py
 @@ -29,9 +29,12 @@ from megatron.training import inprocess_restart
@@ -92,10 +92,10 @@ index b4b5aa02..362f66b6 100644
          if mpu.model_parallel_is_initialized():
              print("model parallel is already initialized")
          else:
-@@ -378,6 +408,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
-                 get_position_embedding_ranks=get_position_embedding_ranks,
+@@ -361,6 +391,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
                  create_gloo_process_groups=args.enable_gloo_process_groups,
                  high_priority_stream_groups=args.high_priority_stream_groups,
+                 sharp_enabled_group=args.sharp_enabled_group,
 +                create_dualpipev_parallel_size=args.use_dualpipev,
              )
              if args.rank == 0:

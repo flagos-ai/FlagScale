@@ -1,8 +1,8 @@
 diff --git a/megatron/core/dist_checkpointing/strategies/torch.py b/megatron/core/dist_checkpointing/strategies/torch.py
-index 56225ddd..f6530b19 100644
+index 24e453399..d1ab8d2cd 100644
 --- a/megatron/core/dist_checkpointing/strategies/torch.py
 +++ b/megatron/core/dist_checkpointing/strategies/torch.py
-@@ -878,6 +878,13 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
+@@ -910,6 +910,13 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
  
          Returns: loaded state dict
          """
@@ -16,7 +16,7 @@ index 56225ddd..f6530b19 100644
          # Apply N-D tensors resharding
          reformulation_metadata = get_reformulation_metadata(sharded_state_dict, checkpoint_dir)
          sharded_state_dict, formulation_restore_data = apply_nd_flattened_tensors_reformulation(
-@@ -912,14 +919,24 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
+@@ -944,14 +951,24 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
          )
          # Load PyT Distributed format
          fsr = _get_filesystem_reader(checkpoint_dir, cache_metadata=True)
@@ -48,17 +48,18 @@ index 56225ddd..f6530b19 100644
  
          self.cached_global_metadata = (
              fsr.read_metadata()
-@@ -933,6 +950,13 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
-             k: v if not isinstance(v, TorchShardedTensor) else _unwrap_pyt_sharded_tensor(v)
-             for k, v in pyt_state_dict.items()
-         }
-+
+@@ -962,6 +979,14 @@ class TorchDistLoadShardedStrategy(LoadShardedStrategy):
+         )
+         # Unwrap ShardedTensors and return to original state dict
+         mcore_state_dict = {k: _unwrap_pyt_sharded_tensor(v) for k, v in pyt_state_dict.items()}
++        
++        ######### FlagScale Begin #########
 +        if single_file_per_tensor_ckpt: 
 +            mcore_state_dict = {
 +                k: [None] if (not isinstance(v, list) and "_extra_state" in k) else v
 +                for k, v in mcore_state_dict.items()
 +            }
-+
++        ######### FlagScale End #########
          mcore_state_dict = _replace_sharded_keys_with_state_dict_keys(
              mcore_state_dict, flat_mapping, rename_mapping  # type: ignore[arg-type]
          )

@@ -34,9 +34,38 @@ def inference(cfg: DictConfig) -> None:
     engine = InferenceEngine(cfg.get("engine", {}))
 
     generate_cfg = cfg.get("generate", {})
-    outputs = engine.generate(**generate_cfg)
 
-    engine.save(outputs)
+    def _to_plain_dict(dc):
+        if isinstance(dc, DictConfig):
+            return {k: dc.get(k) for k in dc}
+        return dc
+
+    def _normalize_runs(gen_cfg):
+        # List of full specs
+        if isinstance(gen_cfg, (list, ListConfig)):
+            return [(_to_plain_dict(spec) or {}) for spec in gen_cfg]
+
+        # Dict-like specs
+        if isinstance(gen_cfg, DictConfig):
+            # prompts array with shared kwargs
+            prompts = gen_cfg.get("prompts", None)
+            if prompts is not None and len(prompts) > 0:
+                base = {k: gen_cfg.get(k) for k in gen_cfg if k != "prompts"}
+                return [dict(base, prompt=p) for p in prompts]
+
+            # single run
+            return [{k: gen_cfg.get(k) for k in gen_cfg}]
+
+        # Fallback if plain dict provided
+        return [gen_cfg]
+
+    runs = _normalize_runs(generate_cfg)
+
+    for idx, run_cfg in enumerate(runs):
+        single_cfg = dict(run_cfg)
+        name_prefix = single_cfg.pop("name", None) or f"sample_{idx}"
+        outputs = engine.generate(**single_cfg)
+        engine.save(outputs, name_prefix=name_prefix)
 
 
 if __name__ == "__main__":

@@ -1,16 +1,17 @@
 diff --git a/megatron/training/utils.py b/megatron/training/utils.py
-index 698c5a07..8d1ee302 100644
+index cef711607..dcca6ca3b 100644
 --- a/megatron/training/utils.py
 +++ b/megatron/training/utils.py
-@@ -52,6 +52,7 @@ try:
- except ImportError:
-     ALL_MODULE_WRAPPER_CLASSNAMES = (DDP, custom_FSDP, Float16Module)
+@@ -43,6 +43,8 @@ from megatron.core.utils import (
+ )
+ from megatron.legacy.model.module import param_is_not_shared
  
-+from flagscale.train.hetero.p2p_communication import get_device_type_for_comm
++from flagscale.train.hetero.p2p_communication import get_device_type_for_comm # FlagScale Add
++
  
- def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
-     return_list = True
-@@ -181,13 +182,45 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
+ def calc_params_l2_norm(model, force_create_fp32_copy=False):
+     """Calculate l2 norm of parameters"""
+@@ -155,13 +157,45 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
      else:
          moe_norm_2 = torch.zeros_like(norm_2)
  
@@ -63,7 +64,7 @@ index 698c5a07..8d1ee302 100644
  
      # If dense and expert reduce groups are the same, sum then reduce.
      if ranks_in_dense_reduce_group == ranks_in_expert_reduce_group:
-@@ -205,6 +238,10 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
+@@ -179,6 +213,10 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
          )
          norm_2 += moe_norm_2
  
@@ -74,7 +75,7 @@ index 698c5a07..8d1ee302 100644
      return norm_2.item() ** 0.5
  
  
-@@ -227,10 +264,18 @@ def reduce_max_stat_across_model_parallel_group(stat: float) -> float:
+@@ -238,10 +276,18 @@ def reduce_max_stat_across_model_parallel_group(stat: float) -> float:
      """
      if stat is None:
          stat = -1.0
@@ -97,7 +98,7 @@ index 698c5a07..8d1ee302 100644
      if stat.item() == -1.0:
          return None
      else:
-@@ -245,10 +290,18 @@ def logical_and_across_model_parallel_group(input: bool) -> bool:
+@@ -256,10 +302,18 @@ def logical_and_across_model_parallel_group(input: bool) -> bool:
          input = 1
      else:
          input = 0
@@ -120,7 +121,7 @@ index 698c5a07..8d1ee302 100644
      return bool(input.item())
  
  
-@@ -373,8 +426,15 @@ def is_rank0():
+@@ -405,8 +459,15 @@ def is_rank0():
  
  
  def is_last_rank():
@@ -138,7 +139,7 @@ index 698c5a07..8d1ee302 100644
  
  def print_rank_last(message):
      """If distributed is initialized, print only on last rank."""
-@@ -495,9 +555,14 @@ def get_batch_on_this_tp_rank(data_iterator):
+@@ -536,9 +597,14 @@ def get_batch_on_this_tp_rank(data_iterator):
              _broadcast(batch['position_ids'])
  
          elif mpu.is_pipeline_first_stage():
@@ -156,7 +157,7 @@ index 698c5a07..8d1ee302 100644
  
          elif mpu.is_pipeline_last_stage():
              # Multi-Token Prediction (MTP) layers need tokens and position_ids to calculate embedding.
-@@ -549,12 +614,16 @@ def get_batch_on_this_tp_rank(data_iterator):
+@@ -590,12 +656,16 @@ def get_batch_on_this_tp_rank(data_iterator):
              _broadcast(position_ids)
  
          elif mpu.is_pipeline_first_stage():

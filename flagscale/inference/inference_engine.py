@@ -1,6 +1,7 @@
 import dataclasses
 import importlib
 import os
+import time
 
 from dataclasses import asdict, dataclass
 from typing import Any, List, Tuple, Union
@@ -14,7 +15,9 @@ from omegaconf import DictConfig
 
 from flagscale.inference.runtime_context import RuntimeContext
 from flagscale.inference.utils import parse_torch_dtype
-from flagscale.transforms import create_transformations_from_config
+from flagscale.models.pi0.modeling_pi0 import PI0Policy, PI0PolicyConfig
+from flagscale.runner.utils import logger
+from flagscale.transformations import create_transformations_from_config
 
 
 def _check_required_fields(config_dict: DictConfig, required_fields: List[str]) -> None:
@@ -36,6 +39,8 @@ class InferenceEngineArgs:
     torch_dtype: Any = None
     pipeline: Any = None
     components: Any = None
+    tokenizer: str = None
+    stat_path: str = None
 
     results_path: str = None
     output_format: str = None
@@ -72,6 +77,8 @@ class InferenceEngineArgs:
             torch_dtype=self.torch_dtype,
             pipeline=self.pipeline,
             components=self.components,
+            tokenizer=self.tokenizer,
+            stat_path=self.stat_path,
         )
         engine_obj = EngineConfig(
             results_path=self.results_path,
@@ -79,7 +86,6 @@ class InferenceEngineArgs:
             state_scopes=self.state_scopes,
             transformations=self.transformations if self.transformations is not None else {},
         )
-
         return InferenceConfig(model=model_obj, engine=engine_obj)
 
 
@@ -91,13 +97,15 @@ class ModelLoadConfig:
     torch_dtype: Any = None
     pipeline: Any = None
     components: Any = None
+    tokenizer: str = None
+    stat_path: str = None
 
     def __post_init__(self):
         if not self.model:
             raise ValueError("'model' is required")
         if not self.loader:
             raise ValueError("'loader' is required")
-        allowed_loaders = {"diffusers", "transformers", "custom", "auto"}
+        allowed_loaders = {"diffusers", "transformers", "custom", "auto", "pi0"}
         if self.loader not in allowed_loaders:
             raise ValueError(f"Unsupported loader: {self.loader}. Allowed: {allowed_loaders}")
 
@@ -156,17 +164,33 @@ class InferenceEngine:
         """
 
         loader = self.vconfig.model.loader
+        _kwargs = {
+            k: v
+            for k, v in asdict(self.vconfig.model).items()
+            if v is not None and k not in ("model", "loader")
+        }
 
         if loader == "diffusers":
-            return self.load_diffusers_pipeline(
-                self.vconfig.model.model, **asdict(self.vconfig.model)
-            )
+            return self.load_diffusers_pipeline(self.vconfig.model.model, **_kwargs)
         elif loader == "transformers":
             raise NotImplementedError("Transformers loader is not implemented")
         elif loader == "custom":
             raise NotImplementedError("Custom loader is not implemented")
         elif loader == "auto":
             raise NotImplementedError("Auto loader is not implemented")
+        elif loader == "pi0":
+            t_s = time.time()
+            config = PI0PolicyConfig.from_pretrained(self.vconfig.model.model)
+            policy = PI0Policy.from_pretrained(
+                model_path=self.vconfig.model.model,
+                tokenizer_path=self.vconfig.model.tokenizer,
+                stat_path=self.vconfig.model.stat_path,
+                config=config,
+            )
+            policy = policy.to(device=self.vconfig.model.device)
+            policy.eval()
+            logger.info(f"PI0 loaded: {time.time() - t_s:.2f}s")
+            return policy, policy.model
         else:
             raise ValueError(f"Unsupported loader: {loader}")
 
@@ -180,9 +204,10 @@ class InferenceEngine:
         transforms_cfg = self.vconfig.engine.transformations or {}
         transformations = create_transformations_from_config(transforms_cfg)
         for t in transformations:
-            success = t.apply(self.backbone)
-            if not success:
-                raise ValueError(f"Failed to apply transformation: {t}")
+            for name, mod in t.targets(self.backbone):
+                success = t.apply(mod)
+                if not success:
+                    raise ValueError(f"Failed to apply transformation: {t} on {name}")
 
     def generate(self, **kwargs) -> Any:
         """Generate the output."""
@@ -204,32 +229,36 @@ class InferenceEngine:
         if "generator" in kwargs and kwargs["generator"] is not None:
             kwargs["generator"] = _build_generator(kwargs["generator"], default_device)
 
-        # TODO(yupu): get num_timesteps from the kwargs
-        with RuntimeContext().session():
+        with RuntimeContext(self.vconfig.engine.state_scopes).session():
             outputs = self.model_or_pipeline(**kwargs)
             return outputs
 
-    def save(self, outputs) -> bool:
-        """Save the output."""
+    def save(self, outputs, name_prefix: Union[str, None] = None) -> bool:
+        """Save the output.
+
+        Args:
+            outputs: The output object returned by the pipeline.
+            name_prefix: Optional file name prefix to distinguish multiple runs.
+        """
 
         os.makedirs(self.vconfig.engine.results_path, exist_ok=True)
 
         if self.vconfig.engine.output_format == "image":
-            output_path = os.path.join(self.vconfig.engine.results_path, "output.png")
-            # TODO(yupu): Support multiple images
             if hasattr(outputs, "images") and len(outputs.images) > 0:
-                image = outputs.images[0]
+                for i, image in enumerate(outputs.images):
+                    fname = f"{name_prefix}_output_{i}.png" if name_prefix else f"output_{i}.png"
+                    image.save(os.path.join(self.vconfig.engine.results_path, fname))
             else:
                 raise NotImplementedError("Not implemented yet")
-            image.save(output_path)
         elif self.vconfig.engine.output_format == "video":
-            output_path = os.path.join(self.vconfig.engine.results_path, "output.mp4")
-            # TODO(yupu): Support multiple videos
             if hasattr(outputs, "frames") and len(outputs.frames) > 0:
-                video = outputs.frames[0]
+                for i, frame in enumerate(outputs.frames):
+                    fname = f"{name_prefix}_output_{i}.mp4" if name_prefix else f"output_{i}.mp4"
+                    export_to_video(
+                        frame, os.path.join(self.vconfig.engine.results_path, fname), fps=15
+                    )
             else:
                 raise NotImplementedError("Not implemented yet")
-            export_to_video(video, output_path, fps=15)
         else:
             raise ValueError(f"Unsupported output format: {self.vconfig.engine.output_format}")
 

@@ -1,0 +1,13 @@
+diff --git a/megatron/core/tensor_parallel/random.py b/megatron/core/tensor_parallel/random.py
+index 994560e51..5e5772afa 100644
+--- a/megatron/core/tensor_parallel/random.py
++++ b/megatron/core/tensor_parallel/random.py
+@@ -8,6 +8,7 @@ import logging
+ from typing import Optional, Union
+ 
+ import torch
++from torch_mlu.utils.gpu_migration import migration
+ from torch import _C
+ from torch.cuda import _lazy_call, _lazy_init
+ from torch.cuda import device as device_ctx_manager
+

@@ -22,6 +22,3 @@
 [submodule "third_party/verl"]
 	path = third_party/verl
 	url = https://github.com/volcengine/verl.git
-[submodule "third_party/lerobot"]
-	path = third_party/lerobot
-	url = https://github.com/huggingface/lerobot.git

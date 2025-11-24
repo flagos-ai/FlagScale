@@ -1,5 +1,5 @@
 diff --git a/megatron/training/tokenizer/gpt2_tokenization.py b/megatron/training/tokenizer/gpt2_tokenization.py
-index 55b95b8e..68e686ec 100644
+index 55b95b8ed..68e686ec1 100644
 --- a/megatron/training/tokenizer/gpt2_tokenization.py
 +++ b/megatron/training/tokenizer/gpt2_tokenization.py
 @@ -322,3 +322,55 @@ class GPT2Tokenizer(object):

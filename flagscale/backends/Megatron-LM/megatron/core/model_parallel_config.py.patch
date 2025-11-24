@@ -1,8 +1,8 @@
 diff --git a/megatron/core/model_parallel_config.py b/megatron/core/model_parallel_config.py
-index fc0041a0..9e53424b 100644
+index 9f5018c26..925c221d0 100644
 --- a/megatron/core/model_parallel_config.py
 +++ b/megatron/core/model_parallel_config.py
-@@ -346,6 +346,16 @@ class ModelParallelConfig:
+@@ -349,6 +349,16 @@ class ModelParallelConfig:
         the user adds a level 1 timer that is not called by all ranks.
      """
  

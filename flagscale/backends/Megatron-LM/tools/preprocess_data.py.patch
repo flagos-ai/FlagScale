@@ -1,5 +1,5 @@
 diff --git a/tools/preprocess_data.py b/tools/preprocess_data.py
-index 13e5b64a..c90feb5c 100644
+index 7d382a0d1..7e076c770 100644
 --- a/tools/preprocess_data.py
 +++ b/tools/preprocess_data.py
 @@ -12,6 +12,7 @@ import time
@@ -10,7 +10,7 @@ index 13e5b64a..c90feb5c 100644
  import numpy as np
  import multiprocessing
  try:
-@@ -258,7 +259,12 @@ def main():
+@@ -268,7 +269,12 @@ def main():
  
      if args.split_sentences:
          if nltk_available:

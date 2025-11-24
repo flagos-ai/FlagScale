@@ -1,8 +1,8 @@
 diff --git a/tests/unit_tests/models/test_llava_model.py b/tests/unit_tests/models/test_llava_model.py
-index 086a7838..3637e79d 100644
+index cee6d2b0b..b3f87613f 100644
 --- a/tests/unit_tests/models/test_llava_model.py
 +++ b/tests/unit_tests/models/test_llava_model.py
-@@ -770,6 +770,245 @@ def count_parameters(model):
+@@ -767,6 +767,245 @@ def count_parameters(model):
      return sum(p.numel() for p in model.parameters())
  
  
@@ -247,4 +247,4 @@ index 086a7838..3637e79d 100644
 +
  @pytest.mark.internal
  @pytest.mark.parametrize(
-     "cp_size, tp_size, has_sp, seq_len, expected_padding",
+     "cp_size, tp_size, has_sp, seq_len, fp8_enabled, expected_padding",

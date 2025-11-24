@@ -3,7 +3,7 @@ defaults:
   - train: pi0
 
 experiment:
-  exp_name: pi0
+  exp_name: PI0
   seed: 42
   save_steps: 10000
   load: null
@@ -11,8 +11,8 @@ experiment:
   ckpt_format: torch
   task:
     type: train
-    backend: lerobot
-    entrypoint: third_party/lerobot/src/lerobot/scripts/train.py 
+    backend: pi0
+    entrypoint: flagscale/train/train_pi0.py
   runner:
     per_node_task: false
     no_shared_fs: false
@@ -22,10 +22,10 @@ experiment:
     before_start: echo "Starting PI0 Training"
   envs:
     LOGLEVEL: "INFO"
-    CUDA_VISIBLE_DEVICES: "1"
+    CUDA_VISIBLE_DEVICES: "0,1"
     CUDA_DEVICE_MAX_CONNECTIONS: 1
     WANDB_MODE: offline
-
+    OTEL_SDK_DISABLED: true
 
 action: run
 

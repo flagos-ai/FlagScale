@@ -1,8 +1,8 @@
 diff --git a/megatron/core/dist_checkpointing/mapping.py b/megatron/core/dist_checkpointing/mapping.py
-index d6d8e3d2..c44100f2 100644
+index c4fb2f52a..e7873c32b 100644
 --- a/megatron/core/dist_checkpointing/mapping.py
 +++ b/megatron/core/dist_checkpointing/mapping.py
-@@ -205,7 +205,7 @@ class ShardedTensor(ShardedBase):
+@@ -225,7 +225,7 @@ class ShardedTensor(ShardedBase):
              )
  
          # TODO: np.unravel_index?

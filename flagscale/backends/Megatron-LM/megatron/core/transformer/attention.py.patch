@@ -1,8 +1,8 @@
 diff --git a/megatron/core/transformer/attention.py b/megatron/core/transformer/attention.py
-index 3d740f19..6ebaaced 100644
+index 6b2e898be..5a2c1d87a 100644
 --- a/megatron/core/transformer/attention.py
 +++ b/megatron/core/transformer/attention.py
-@@ -825,22 +825,44 @@ class SelfAttention(Attention):
+@@ -892,22 +892,44 @@ class SelfAttention(Attention):
          )
  
          if submodules.q_layernorm is not None:
@@ -59,7 +59,7 @@ index 3d740f19..6ebaaced 100644
          else:
              self.k_layernorm = None
  
-@@ -957,10 +979,24 @@ class SelfAttention(Attention):
+@@ -1024,10 +1046,24 @@ class SelfAttention(Attention):
          query = query.reshape(query.size(0), query.size(1), -1, self.hidden_size_per_attention_head)
  
          if self.q_layernorm is not None:

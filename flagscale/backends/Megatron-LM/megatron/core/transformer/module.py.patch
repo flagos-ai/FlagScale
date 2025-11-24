@@ -1,20 +1,20 @@
 diff --git a/megatron/core/transformer/module.py b/megatron/core/transformer/module.py
-index 8a8bd8c5..048a3066 100644
+index ff7dc7763..915a75f49 100644
 --- a/megatron/core/transformer/module.py
 +++ b/megatron/core/transformer/module.py
-@@ -232,12 +232,25 @@ class Float16Module(MegatronModule):
-         return self.module.set_input_tensor(input_tensor)
- 
-     def forward(self, *inputs, **kwargs):  # pylint: disable=missing-function-docstring
+@@ -258,15 +258,30 @@ class Float16Module(MegatronModule):
+             The wrapped module's outputs, potentially upcast to fp32 depending on pipeline stage
+             and ``fp32_output``.
+         """
 -        if parallel_state.is_pipeline_first_stage(ignore_virtual=False, vp_stage=self.vp_stage):
 -            inputs = fp32_to_float16(inputs, self.float16_convertor)
 -        outputs = self.module(*inputs, **kwargs)
--        if parallel_state.is_pipeline_last_stage(ignore_virtual=False, vp_stage=self.vp_stage):
--            outputs = float16_to_fp32(outputs)
--        return outputs
+-        if (
 +        ######### FlagScale Begin ########
-+        from flagscale.train.dualpipev.dualpipev_schedules import get_dualpipe_chunk
++        #TODO: Fix the dualpipev import issue in the latest Megatron codebase
++        # from flagscale.train.dualpipev.dualpipev_schedules import get_dualpipe_chunk
 +        if self.config.use_dualpipev:
++            from flagscale.train.dualpipev.dualpipev_schedules import get_dualpipe_chunk
 +            dualpipe_first_stage = parallel_state.is_pipeline_first_stage() and get_dualpipe_chunk() == 0
 +            if dualpipe_first_stage:
 +                inputs = fp32_to_float16(inputs, self.float16_convertor)
@@ -28,7 +28,12 @@ index 8a8bd8c5..048a3066 100644
 +            if parallel_state.is_pipeline_first_stage(ignore_virtual=False, vp_stage=self.vp_stage):
 +                inputs = fp32_to_float16(inputs, self.float16_convertor)
 +            outputs = self.module(*inputs, **kwargs)
-+            if parallel_state.is_pipeline_last_stage(ignore_virtual=False, vp_stage=self.vp_stage):
++            if (
+             parallel_state.is_pipeline_last_stage(ignore_virtual=False, vp_stage=self.vp_stage)
+             and fp32_output is True
+         ):
+-            outputs = float16_to_fp32(outputs)
+-        return outputs
 +                outputs = float16_to_fp32(outputs)
 +            return outputs
  

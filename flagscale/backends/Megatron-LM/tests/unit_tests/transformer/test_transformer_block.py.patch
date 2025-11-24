@@ -1,5 +1,5 @@
 diff --git a/tests/unit_tests/transformer/test_transformer_block.py b/tests/unit_tests/transformer/test_transformer_block.py
-index 48b678c5..97150997 100644
+index 6a37ceac3..2ad8d0d95 100644
 --- a/tests/unit_tests/transformer/test_transformer_block.py
 +++ b/tests/unit_tests/transformer/test_transformer_block.py
 @@ -74,14 +74,14 @@ class TestParallelTransformerBlock:

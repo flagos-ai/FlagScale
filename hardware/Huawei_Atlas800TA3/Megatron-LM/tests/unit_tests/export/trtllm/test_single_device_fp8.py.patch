@@ -1,0 +1,23 @@
+diff --git a/tests/unit_tests/export/trtllm/test_single_device_fp8.py b/tests/unit_tests/export/trtllm/test_single_device_fp8.py
+index 04bbfdb12..14e0b8576 100644
+--- a/tests/unit_tests/export/trtllm/test_single_device_fp8.py
++++ b/tests/unit_tests/export/trtllm/test_single_device_fp8.py
+@@ -101,7 +101,16 @@ def _forward_step_func(data_iterator, model):
+ 
+     return output_tensor, partial(_loss_func, loss_mask)
+ 
+-
++"""
++Author: phoenixdong
++Date: 2024-12-17
++Action: Add class-level skip decorator
++Reason: Skip all tests in this class if the device does not support CUDA or if its compute capability is less than 8.9.
++"""
++@pytest.mark.skipif(
++    not torch.cuda.is_available() or torch.cuda.get_device_capability(0) < (8, 9),
++    reason="Device compute capability 8.9 or higher required for FP8 execution"
++)
+ class TestTRTLLMSingleDeviceConverterFP8:
+     QUANTIZED_LAYERS = [
+         'transformer.layers.*.attention.dense.weight',
+

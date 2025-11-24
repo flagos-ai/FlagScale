@@ -1,16 +1,8 @@
 diff --git a/megatron/core/extensions/transformer_engine.py b/megatron/core/extensions/transformer_engine.py
-index 79de39b7..f90d97ff 100644
+index 9bdc7c0c3..49cb5d4da 100644
 --- a/megatron/core/extensions/transformer_engine.py
 +++ b/megatron/core/extensions/transformer_engine.py
-@@ -23,6 +23,7 @@ from megatron.core.parallel_state import (
-     get_expert_model_parallel_world_size,
-     get_hierarchical_context_parallel_groups,
-     get_tensor_model_parallel_group,
-+    get_tensor_model_parallel_world_size,
- )
- from megatron.core.process_groups_config import ModelCommProcessGroups
- from megatron.core.tensor_parallel.layers import (
-@@ -439,7 +440,7 @@ class TELayerNormColumnParallelLinear(te.pytorch.LayerNormLinear):
+@@ -564,7 +564,7 @@ class TELayerNormColumnParallelLinear(te.pytorch.LayerNormLinear):
              sequence_parallel=self.config.sequence_parallel,
              fuse_wgrad_accumulation=self.config.gradient_accumulation_fusion,
              tp_group=tp_group if torch.distributed.is_initialized() else None,
@@ -19,7 +11,7 @@ index 79de39b7..f90d97ff 100644
              get_rng_state_tracker=(
                  get_cuda_rng_tracker if get_cuda_rng_tracker().is_initialized() else None
              ),
-@@ -863,7 +864,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
+@@ -995,7 +995,7 @@ class TEDotProductAttention(te.pytorch.DotProductAttention):
              ),
              attn_mask_type=attn_mask_type.name,
              sequence_parallel=self.config.sequence_parallel,
@@ -28,7 +20,7 @@ index 79de39b7..f90d97ff 100644
              get_rng_state_tracker=(
                  get_cuda_rng_tracker if get_cuda_rng_tracker().is_initialized() else None
              ),
-@@ -1161,7 +1162,7 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
+@@ -1278,7 +1278,7 @@ if HAVE_TE and is_te_min_version("1.9.0.dev0"):
                  return pickle.loads(state.detach().cpu().numpy().tobytes())
              elif isinstance(state, io.BytesIO):
                  state.seek(0)

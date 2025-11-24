@@ -1,8 +1,8 @@
 diff --git a/tests/unit_tests/dist_checkpointing/models/test_mlp_glu.py b/tests/unit_tests/dist_checkpointing/models/test_mlp_glu.py
-index 1a085103..e45a23f9 100644
+index 18cfbf67c..1fecf3b46 100644
 --- a/tests/unit_tests/dist_checkpointing/models/test_mlp_glu.py
 +++ b/tests/unit_tests/dist_checkpointing/models/test_mlp_glu.py
-@@ -41,6 +41,9 @@ def get_pp_offsets():
+@@ -37,6 +37,9 @@ def initialize_mlp(glu=True):
  
  
  class TestParallelMLPWithGLU:

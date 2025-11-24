@@ -1,25 +1,25 @@
 diff --git a/megatron/core/optimizer/__init__.py b/megatron/core/optimizer/__init__.py
-index 5ecc707c..dc4a3f12 100644
+index 1846907e9..7fd0554c4 100644
 --- a/megatron/core/optimizer/__init__.py
 +++ b/megatron/core/optimizer/__init__.py
-@@ -53,6 +53,7 @@ def _get_param_groups(
-     min_lr: float,
+@@ -55,6 +55,7 @@ def _get_param_groups(
      decoupled_lr: Optional[float],
      decoupled_min_lr: Optional[float],
-+    vision_ration,
+     default_skip_embedding_weight_decay: bool = False,
++    vision_ration = 1.0,
  ) -> List[Dict]:
      """Create parameter groups for optimizer.
  
-@@ -108,6 +109,8 @@ def _get_param_groups(
-             else:
-                 # Do not regularize biases and norm parameters.
-                 no_wd = name.endswith(".bias") or len(param.shape) == 1
+@@ -106,6 +107,8 @@ def _get_param_groups(
+                     or len(param.shape) == 1
+                     or (default_skip_embedding_weight_decay and "embedding" in name)
+                 )
 +                # NOTE(lizhiyu): hack for qwen2.5vl
 +                # no_wd = name.endswith(".bias")
  
              if scale_lr_cond is not None:
                  scale_lr = scale_lr_cond(name, param)
-@@ -130,8 +133,14 @@ def _get_param_groups(
+@@ -128,8 +131,14 @@ def _get_param_groups(
                  param, 'is_embedding_or_output_parameter', False
              ):
                  is_decoupled_lr = True
@@ -34,17 +34,17 @@ index 5ecc707c..dc4a3f12 100644
 +            key = (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr, is_vision_model_param)
              if key not in params_map:
                  params_map[key] = []
-             if (
-@@ -143,7 +152,7 @@ def _get_param_groups(
-                 params_map[key].append(param)
+             params_map[key].append(param)
+@@ -147,7 +156,7 @@ def _get_param_groups(
  
      param_groups = []
--    for (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr), params in params_map.items():
-+    for (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr, is_vision_model_param), params in params_map.items():
-         assert len(params) > 0
+     for key in params_key:
+-        wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr = key
++        wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr, is_vision_model_param = key
+         params = params_map[key] if key in params_map else []
          param_group = {
              'params': params,
-@@ -151,6 +160,7 @@ def _get_param_groups(
+@@ -155,6 +164,7 @@ def _get_param_groups(
              'lr_mult': _lr_mult,
              'is_expert_parallel': is_expert_parallel,
              'is_decoupled_lr': is_decoupled_lr,
@@ -52,7 +52,7 @@ index 5ecc707c..dc4a3f12 100644
          }
          # Ensure param_group has required keys for matching when loading optimizer state
          # See MegatronOptimizer._filter_and_reorder_param_groups.
-@@ -163,6 +173,7 @@ def _get_param_groups(
+@@ -167,6 +177,7 @@ def _get_param_groups(
          min_lr=min_lr,
          decoupled_lr=decoupled_lr,
          decoupled_min_lr=decoupled_min_lr,
@@ -60,7 +60,7 @@ index 5ecc707c..dc4a3f12 100644
      )
  
      return param_groups
-@@ -174,6 +185,7 @@ def _update_min_and_max_lr_in_param_groups(
+@@ -178,6 +189,7 @@ def _update_min_and_max_lr_in_param_groups(
      min_lr: float,
      decoupled_lr: Optional[float],
      decoupled_min_lr: Optional[float],
@@ -68,7 +68,7 @@ index 5ecc707c..dc4a3f12 100644
  ) -> List[Dict]:
      """
      Updates `max_lr` and `min_lr` values in each parameter group, and returns new list.
-@@ -202,7 +214,7 @@ def _update_min_and_max_lr_in_param_groups(
+@@ -206,7 +218,7 @@ def _update_min_and_max_lr_in_param_groups(
              param_group['max_lr'] = decoupled_lr
              param_group['min_lr'] = decoupled_min_lr
          else:
@@ -77,36 +77,35 @@ index 5ecc707c..dc4a3f12 100644
              param_group['min_lr'] = min_lr
      return param_groups
  
-@@ -247,6 +259,7 @@ def _get_param_groups_and_buffers(
-         min_lr=config.min_lr,
+@@ -255,6 +267,7 @@ def _get_param_groups_and_buffers(
          decoupled_lr=config.decoupled_lr,
          decoupled_min_lr=config.decoupled_min_lr,
+         default_skip_embedding_weight_decay=default_skip_embedding_weight_decay,
 +        vision_ration=config.vision_ration, # NOTE(lizhiyu): The vision ration is used to scale the learning rate for vision model parameters. Added by FlagScale.
      )
      param_groups = list(filter(filter_fn, param_groups))
      buffers = {}
-@@ -486,7 +499,9 @@ def get_megatron_optimizer(
-     else:
-         all_dense_model_chunks = [model_chunks]
-         overlap_param_gather_with_optimizer_step_flags = [False]
--    model_parallel_rank = mpu.get_model_parallel_group().rank()
-+    mp_group = mpu.get_model_parallel_group()
+@@ -511,6 +524,10 @@ def get_megatron_optimizer(
+     intra_dp_cp_group = process_groups['intra_dp_cp_group']
+     intra_expt_dp_group = process_groups['intra_expt_dp_group']
+     mp_group = process_groups['mp_group']
++    ########## FlagScale Begin ##########
 +    mp_group = [mp_group] if not isinstance(mp_group, list) else mp_group
 +    model_parallel_rank = mp_group[0].rank()
- 
-     if (
-         mpu.get_data_parallel_group(with_context_parallel=True, partial_data_parallel=False).size()
-@@ -597,7 +612,12 @@ def get_megatron_optimizer(
-         buffer_name='expert_parallel_buffers',
++    ########## FlagScale End ##########
+     expt_tp_pp_group = process_groups['expt_tp_pp_group']
+     intra_dp_cp_group_gloo = process_groups['intra_dp_cp_group_gloo']
+     intra_expt_dp_group_gloo = process_groups['intra_expt_dp_group_gloo']
+@@ -609,7 +626,11 @@ def get_megatron_optimizer(
+         default_skip_embedding_weight_decay=default_skip_embedding_weight_decay,
      )
      if len(moe_param_groups) > 0:
--        model_parallel_rank = mpu.get_expert_tensor_model_pipeline_parallel_group().rank()
-+        expert_mp_group = mpu.get_expert_tensor_model_pipeline_parallel_group()
-+        if not isinstance(expert_mp_group, list):
-+            model_parallel_rank = mpu.get_expert_tensor_model_pipeline_parallel_group().rank()
+-        expt_model_parallel_rank = get_pg_rank(expt_tp_pp_group)
++        if not isinstance(expt_tp_pp_group, list):
++            expt_model_parallel_rank = get_pg_rank(expt_tp_pp_group)
 +        else:
-+            model_parallel_rank = expert_mp_group[0].rank()
-+
++            model_parallel_rank = expt_tp_pp_group[0].rank()
++        
          # Pass Gloo process groups into optimizer only if needed.
          if use_gloo_process_groups:
-             data_parallel_group_gloo = mpu.get_expert_data_parallel_group_gloo(
+             expt_data_parallel_group_gloo = intra_expt_dp_group_gloo

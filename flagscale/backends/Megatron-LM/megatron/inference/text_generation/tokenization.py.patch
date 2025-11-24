@@ -1,5 +1,5 @@
 diff --git a/megatron/inference/text_generation/tokenization.py b/megatron/inference/text_generation/tokenization.py
-index 541cc47b..a41c7f59 100644
+index 541cc47b3..a41c7f592 100644
 --- a/megatron/inference/text_generation/tokenization.py
 +++ b/megatron/inference/text_generation/tokenization.py
 @@ -41,6 +41,15 @@ def detokenize_generations(tokens_gpu_tensor,

@@ -1,5 +1,5 @@
 diff --git a/megatron/core/dist_checkpointing/exchange_utils.py b/megatron/core/dist_checkpointing/exchange_utils.py
-index def79fb7..2f791449 100644
+index def79fb77..2f7914490 100644
 --- a/megatron/core/dist_checkpointing/exchange_utils.py
 +++ b/megatron/core/dist_checkpointing/exchange_utils.py
 @@ -63,7 +63,7 @@ class ShardDistribution(NamedTuple):

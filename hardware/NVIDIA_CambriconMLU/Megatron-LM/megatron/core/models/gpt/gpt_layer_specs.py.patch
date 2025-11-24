@@ -1,0 +1,35 @@
+diff --git a/megatron/core/models/gpt/gpt_layer_specs.py b/megatron/core/models/gpt/gpt_layer_specs.py
+old mode 100755
+new mode 100644
+index f186eabd0..93a728fcf
+--- a/megatron/core/models/gpt/gpt_layer_specs.py
++++ b/megatron/core/models/gpt/gpt_layer_specs.py
+@@ -394,6 +394,7 @@ def get_gpt_decoder_block_spec(
+     normalization: Optional[str] = None,
+     qk_l2_norm: Optional[bool] = False,
+     vp_stage: Optional[int] = None,
++    is_dualpipev_first_chunk: Optional[bool] = False,
+ ) -> TransformerBlockSubmodules:
+     """GPT block spec."""
+     if use_transformer_engine:
+@@ -471,7 +472,8 @@ def get_gpt_decoder_block_spec(
+ 
+     # Slice the layer specs to only include the layers that are built in this pipeline stage.
+     # Note: MCore layer_number starts at 1
+-    num_layers_to_build = get_num_layers_to_build(config, vp_stage=vp_stage)
++    ######### FlagScale Modify ########
++    num_layers_to_build = get_num_layers_to_build(config, vp_stage=vp_stage, is_dualpipev_first_chunk=is_dualpipev_first_chunk)
+ 
+     if config.pipeline_model_parallel_layout is not None:
+         local_layer_specs = [
+@@ -481,7 +483,8 @@ def get_gpt_decoder_block_spec(
+             )
+         ]
+     else:
+-        offset = get_transformer_layer_offset(config, vp_stage=vp_stage)
++        ######### FlagScale Modify ########
++        offset = get_transformer_layer_offset(config, vp_stage=vp_stage, is_dualpipev_first_chunk=is_dualpipev_first_chunk)
+         local_layer_specs = layer_specs[offset : offset + num_layers_to_build]
+ 
+     # Block spec.
+

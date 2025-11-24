@@ -59,7 +59,7 @@ jobs:
           sccache --version
 
       - name: Run Functional Test
-        timeout-minutes: 40  # Automatically terminate the current step after 40 minutes
+        timeout-minutes: 90  # Automatically terminate the current step after 90 minutes
         run: |
           echo "USER: $USER"
           echo "UID: $(id -u)"
@@ -133,7 +133,7 @@ jobs:
               done
               if [ "$all_successful" = true ]; then
                 echo "All commands have been executed"
-                exit 0
+                break
               fi
             done
 

@@ -1,8 +1,8 @@
 diff --git a/megatron/core/dist_checkpointing/validation.py b/megatron/core/dist_checkpointing/validation.py
-index 7b423b7c..f8874bb7 100644
+index 969450553..9bcb59bdb 100644
 --- a/megatron/core/dist_checkpointing/validation.py
 +++ b/megatron/core/dist_checkpointing/validation.py
-@@ -503,7 +503,7 @@ def _validate_sharding_for_key_flattened(tensors_by_shard):
+@@ -519,7 +519,7 @@ def _validate_sharding_for_key_flattened(tensors_by_shard):
          all_slices.append((sharding.flattened_range.start, sharding.flattened_range.stop))
  
      starts, stops = map(np.asarray, zip(*sorted(all_slices)))

@@ -1,5 +1,5 @@
 diff --git a/megatron/core/optimizer/clip_grads.py b/megatron/core/optimizer/clip_grads.py
-index 0f33f919..ca7a34cf 100644
+index 70117858b..468ba0e0f 100644
 --- a/megatron/core/optimizer/clip_grads.py
 +++ b/megatron/core/optimizer/clip_grads.py
 @@ -47,6 +47,7 @@ from ..tensor_parallel import param_is_not_tensor_parallel_duplicate
@@ -60,7 +60,7 @@ index 0f33f919..ca7a34cf 100644
          total_norm = total_norm.item() ** (1.0 / norm_type)
  
      return total_norm
-@@ -223,9 +248,21 @@ def count_zeros_fp32(
+@@ -238,9 +263,21 @@ def count_zeros_fp32(
              total_num_zeros, op=torch.distributed.ReduceOp.SUM, group=data_parallel_group
          )
      # Sum across all model-parallel GPUs.

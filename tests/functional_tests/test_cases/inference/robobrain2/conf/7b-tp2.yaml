@@ -16,6 +16,7 @@ experiment:
       source /root/miniconda3/bin/activate flagscale-inference
   envs:
     HYDRA_FULL_ERROR: 1
+    VLLM_WORKER_MULTIPROC_METHOD: "spawn"
     CUBLAS_WORKSPACE_CONFIG: ":4096:8"
     CUDNN_BENCHMARK: "false"
     CUDNN_DETERMINISTIC: "true"

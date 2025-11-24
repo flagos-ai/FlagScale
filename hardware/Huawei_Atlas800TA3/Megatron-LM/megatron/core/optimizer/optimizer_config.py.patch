@@ -1,0 +1,19 @@
+diff --git a/megatron/core/optimizer/optimizer_config.py b/megatron/core/optimizer/optimizer_config.py
+index d425202b9..6a8bb1446 100644
+--- a/megatron/core/optimizer/optimizer_config.py
++++ b/megatron/core/optimizer/optimizer_config.py
+@@ -173,6 +173,13 @@ class OptimizerConfig:
+ 
+     config_logger_dir: str = ""
+     """When non-empty, dumps entry-point configs to config_logger_dir"""
++    
++    ########## FlagScale Begin ##########
++    ################
++    # Grouped learning rate for multi-model training.
++    ################
++    vision_ration: float = 1.0
++    ########## FlagScale End ##########
+ 
+     def __post_init__(self):
+         """Check the validity of the config."""
+

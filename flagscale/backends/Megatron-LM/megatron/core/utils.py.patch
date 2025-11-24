@@ -1,0 +1,26 @@
+diff --git a/megatron/core/utils.py b/megatron/core/utils.py
+index 0300f0f02..c03510624 100644
+--- a/megatron/core/utils.py
++++ b/megatron/core/utils.py
+@@ -435,6 +435,10 @@ def get_pg_size(group=None):
+     """
+     if not torch.distributed.is_initialized() or group is None:
+         return 1
++    ######### FlagScale Begin #########
++    if isinstance(group, list):
++        return group[0].size()
++    ######### FlagScale End #########
+     return group.size()
+ 
+ 
+@@ -449,6 +453,10 @@ def get_pg_rank(group=None):
+     """
+     if not torch.distributed.is_initialized() or group is None:
+         return 0
++    ########### FlagScale Begin #########
++    if isinstance(group, list):
++        return group[0].rank()
++    ########### FlagScale End #########
+     return group.rank()
+ 
+ 

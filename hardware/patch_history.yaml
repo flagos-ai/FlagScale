@@ -33,6 +33,13 @@ Cambricon_MLU:
     FlagScale:
     - 10faa30d1635fb8a102a48352d196870841100a0
     - 1d6faaad9c56e3e5ccae0526a6a977fae46650d2
+  train:
+    FlagScale+Megatron-LM:
+    - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    Megatron-LM:
+    - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    FlagScale:
+    - a4434373b7d0bf952d8d6eecb036243cd0a7a049
 Kunlunxin_R310p:
   inference:
     FlagScale+vllm:
@@ -151,6 +158,7 @@ Hygon_BW1000:
     - c09ee366981b5342e83c942a6ec46a4c3a2f83bb
     - 22d9731987a91fd91140e242ed015368595703f5
     - afa2bfa69bea8e2d6f441a14212a190f991660c1
+    - 9549599682b04fe58490c69b203039d5dee4159f
     vllm:
     - b51ca00869d4e61c35f07f65c76074f14ff47570
     - de2e27596c0cc54c73261060e9cca4ef4f74aaa5
@@ -158,6 +166,7 @@ Hygon_BW1000:
     - c09ee366981b5342e83c942a6ec46a4c3a2f83bb
     - 22d9731987a91fd91140e242ed015368595703f5
     - afa2bfa69bea8e2d6f441a14212a190f991660c1
+    - 9549599682b04fe58490c69b203039d5dee4159f
     FlagScale:
     - b51ca00869d4e61c35f07f65c76074f14ff47570
     - de2e27596c0cc54c73261060e9cca4ef4f74aaa5
@@ -165,6 +174,7 @@ Hygon_BW1000:
     - c09ee366981b5342e83c942a6ec46a4c3a2f83bb
     - 22d9731987a91fd91140e242ed015368595703f5
     - afa2bfa69bea8e2d6f441a14212a190f991660c1
+    - 9549599682b04fe58490c69b203039d5dee4159f
 Huawei_Atlas800TA3:
   train:
     FlagScale+Megatron-LM:
@@ -215,3 +225,7 @@ Tsing_micro:
     FlagScale:
     - ba7c854fbfeae7676229b5457c05694aaa6b7781
     - ff41d6d017730504fac2fc62226a615b38558433
+NVIDIA_CambriconMLU:
+  train:
+    Megatron-LM:
+    - 631ebb869a58a4d495a4c2bd1698e31409448ca6

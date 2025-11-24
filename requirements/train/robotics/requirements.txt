@@ -139,7 +139,6 @@ kornia
 kornia-rs
 labmaze
 lazy-loader
-lerobot
 libclang
 llvmlite
 lxml

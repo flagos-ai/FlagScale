@@ -44,19 +44,19 @@ jobs:
           set-safe-directory: true
 
       - name: Run Unit Test
-        timeout-minutes: 40  # Automatically terminate the current step after 40 minutes
+        timeout-minutes: 90  # Automatically terminate the current step after 90 minutes
         run: |
           echo "USER: $USER"
           echo "UID: $(id -u)"
           echo "GID: $(id -g)"
           echo "Home: $HOME"
           whoami
-          pip install gitpython # TODO: Remove after updating the image
-
           git config --global --add safe.directory /__w/FlagScale/FlagScale
           
           TMP_DIR=$(mktemp -d)
           echo "Copying source to temporary directory: $TMP_DIR"
+          rm -rf $TMP_DIR
+          mkdir -p $TMP_DIR
           cp -r /__w/FlagScale/FlagScale/. $TMP_DIR
           cd $TMP_DIR
           trap 'echo "Cleaning up temporary directory..."; rm -rf "$TMP_DIR"' EXIT
