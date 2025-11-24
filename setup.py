@@ -9,22 +9,84 @@ from setuptools.command.build_ext import build_ext as _build_ext
 from setuptools.command.build_py import build_py as _build_py
 from setuptools.command.install_lib import install_lib as _install_lib
 
-
-try:
-    import git  # from GitPython
-except:
-    try:
-        print("[INFO] GitPython not found. Installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "gitpython"])
-        import git
-    except:
-        print(
-            "[ERROR] Failed to install flagscale. Please use 'pip install . --no-build-isolation' to reinstall when the pip version > 23.1."
-        )
-        sys.exit(1)
-
 SUPPORTED_DEVICES = ["cpu", "gpu", "ascend", "cambricon", "bi", "metax", "kunlunxin", "musa"]
 VLLM_UNPATCH_DEVICES = ["ascend", "cambricon", "bi", "metax", "kunlunxin"]
+
+
+def _read_requirements_file(requirements_path):
+    """Read the requirements file and return the dependency list"""
+    requirements_file = os.path.join(os.path.dirname(__file__), requirements_path)
+    if not os.path.exists(requirements_file):
+        return []
+    
+    requirements = []
+    with open(requirements_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            # Skip lines starting with -r (recursive reference)
+            if line.startswith('-r') or line.startswith('--'):
+                continue
+            requirements.append(line)
+    return requirements
+
+
+def _is_in_build_isolation():
+    """Check if in the pip build isolation environment"""
+
+    for path in sys.path:
+        if '/pip-build-env-' in path:
+            return True
+    
+    # Check the path of the current Python executable
+    if '/pip-build-env-' in sys.executable:
+        return True
+    
+    # Check if the site-packages path contains the isolation environment
+    import site
+    try:
+        site_packages = site.getsitepackages()
+        for sp in site_packages:
+            if '/pip-build-env-' in sp:
+                return True
+    except:
+        pass
+    
+    return False
+
+# If not in an isolated environment, it means that --no-build-isolation is used
+_using_no_build_isolation = not _is_in_build_isolation()
+
+if _using_no_build_isolation:
+    print("[INFO] Detected --no-build-isolation flag, installing base and common requirements...")
+    
+    # Install base requirements
+    base_requirements = _read_requirements_file('requirements/requirements-base.txt')
+    if base_requirements:
+        print(f"[INFO] Installing {len(base_requirements)} packages from requirements-base.txt...")
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install"] + base_requirements,
+                stdout=subprocess.DEVNULL,  
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"[WARNING] Failed to install some base requirements: {e}")
+    
+    # Install common requirements
+    common_requirements = _read_requirements_file('requirements/requirements-common.txt')
+    if common_requirements:
+        print(f"[INFO] Installing {len(common_requirements)} packages from requirements-common.txt...")
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install"] + common_requirements,
+                stdout=subprocess.DEVNULL, 
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"[WARNING] Failed to install some common requirements: {e}")
+else:
+    raise ValueError("Not in an isolated environment, please use --no-build-isolation flag.")
 
 
 def _check_backend(backend):
@@ -479,54 +541,28 @@ class FlagScaleInstallLib(_install_lib):
         super().run()
 
         raise ValueError(self.install_dir)
-        
-def _read_requirements_file(requirements_path):
-    """读取 requirements 文件并返回依赖列表"""
-    requirements_file = os.path.join(os.path.dirname(__file__), requirements_path)
-    if not os.path.exists(requirements_file):
-        return []
-    
-    requirements = []
-    with open(requirements_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            # 跳过空行和注释
-            if not line or line.startswith('#'):
-                continue
-            # 跳过 -r 开头的行（递归引用）
-            if line.startswith('-r') or line.startswith('--'):
-                continue
-            requirements.append(line)
-    return requirements
 
 
 def _get_install_requires():
     """获取 install_requires 列表"""
     install_requires = []
     
-    # 读取 requirements-base.txt
     install_requires.extend(_read_requirements_file('requirements/requirements-base.txt'))
-    
-    # 读取 requirements-common.txt
     install_requires.extend(_read_requirements_file('requirements/requirements-common.txt'))
-    
-    # 添加必需的构建依赖（这些不在 requirements 文件中）
     core_deps = [
         "setuptools>=77.0.0",
         "packaging>=24.2",
         "importlib_metadata>=8.5.0",
-        "torch==2.7.0", 
-        "torchaudio==2.7.0",
-        "torchvision==0.22.0",
+        "torch==2.7.1", 
+        "torchaudio==2.7.1",
+        "torchvision==0.22.1",
     ]
     
-    # 合并并去重（保留第一次出现的版本）
     all_deps = install_requires + core_deps
     seen = set()
     result = []
     for dep in all_deps:
-        # 提取包名（去掉版本号）用于去重
-        # 处理各种版本号格式：==, >=, <=, >, <, !=
+        # Process various version number formats: ==, >=, <=, >, <, !=
         pkg_name = dep.split("==")[0].split(">=")[0].split("<=")[0].split(">")[0].split("<")[0].split("!=")[0].strip()
         pkg_name_lower = pkg_name.lower()
         if pkg_name_lower not in seen:
@@ -537,26 +573,18 @@ def _get_install_requires():
 
 
 def _get_extras_require():
-    """构建 extras_require 字典"""
+    """Build the extras_require dictionary"""
     extras_require = {}
-    
-    # 获取当前版本号，用于指定 flagscale-megatron-lm 的版本
-    from version import FLAGSCALE_VERSION
     
     # robotics-gpu extra
     robotics_gpu_deps = []
-    # 添加 common requirements
     robotics_gpu_deps.extend(_read_requirements_file('requirements/requirements-common.txt'))
-    # 添加 serving requirements
     robotics_gpu_deps.extend(_read_requirements_file('requirements/serving/requirements.txt'))
-    # 添加 robotics serving requirements
     robotics_gpu_deps.extend(_read_requirements_file('requirements/serving/robotics/requirements.txt'))
-    # 添加 onnx requirements
     robotics_gpu_deps.extend(_read_requirements_file('requirements/train/robotics/requirements.txt'))
     
-    # 添加 flagscale-megatron-lm 包依赖（unpatch 后的 Megatron-LM）
-    # 版本号与 flag_scale 主包版本保持一致
-    robotics_gpu_deps.append(f"flagscale-megatron-lm=={FLAGSCALE_VERSION}")
+    # TODO: add megatron-lm-fl dependency when it is published
+    # robotics_gpu_deps.append(f"megatron-lm-fl=={FLAGSCALE_VERSION}")
 
     extras_require['robotics-gpu'] = robotics_gpu_deps
     

@@ -5,7 +5,7 @@ import sys
 
 from packaging.version import parse
 
-FLAGSCALE_VERSION = "0.8.0"
+FLAGSCALE_VERSION = "0.8.1"
 
 BACKEND_DEVICE_VERSION = {
     "vllm": {
