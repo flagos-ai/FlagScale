@@ -130,6 +130,7 @@ class TaskEncoder(
     DefaultTaskEncoder[Union[VQASample, ChatMLSample], ImageTaskSample, VQATaskBatch, dict]
 ):
     """A simple task encoder for captioning."""
+
     ACTION_TOKEN_START_ID = 149595
     ACTION_TOKEN_END_ID = ACTION_TOKEN_START_ID + 2048
 
@@ -318,7 +319,9 @@ class TaskEncoder(
         action_cache = {}
         for action_id in range(2048):
             token_string = f"<action_token_{action_id}>"
-            token_id = self.tokenizer.vocab.get(token_string, TaskEncoder.ACTION_TOKEN_START_ID + action_id)
+            token_id = self.tokenizer.vocab.get(
+                token_string, TaskEncoder.ACTION_TOKEN_START_ID + action_id
+            )
             if token_id is not None:
                 action_cache[action_id] = token_id
 
