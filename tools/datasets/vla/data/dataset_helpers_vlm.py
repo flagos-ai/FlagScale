@@ -37,9 +37,10 @@ from PIL import Image
 from megatron.energon import Batch, DefaultTaskEncoder, VQASample
 from megatron.training import get_args
 from megatron.training.global_vars import get_tokenizer
-from flagscale.logger import logger
 from tools.datasets.qwenvl.data.image_processing import get_visual_transform
 from tools.datasets.vla.data.energon.chatml import ChatMLSample
+
+from flagscale.logger import logger
 
 dataset_logger = logging.getLogger(__name__)
 FIRST_MAX_PADDING_FLAG = True
@@ -722,8 +723,6 @@ class TaskEncoder(
         if cur_x < len(input_ids):
             final_input_ids[cur_y:] = input_ids[cur_x:]
             final_input_masks[cur_y:] = target[cur_x:]
-        logger.info('final_input_ids shape:', final_input_ids.shape)
-        logger.info('final_input_ids:', final_input_ids[-100])
 
         target = np.roll(final_input_masks, shift=-1)
         target[-1] = pad_token_id
@@ -967,8 +966,5 @@ class TaskEncoder(
 def print_error_handler(exc: Exception, key: Optional[str], debug=False):
     if not debug and isinstance(exc, InternalWarning):
         return
-    logger.info(
-        f"The following exception occurred in the dataloader for sample {key} and is skipped",
-        file=sys.stderr,
-    )
+    logger.info(f"Exception occurred in the dataloader for sample {key} and is skipped")
     traceback.print_exc()
