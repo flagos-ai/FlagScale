@@ -1,0 +1,24 @@
+- serve_id: vllm_model
+  engine: vllm
+  engine_args:
+    model: /share/step3
+    served_model_name: step3-nvidia-flagos
+    host: 0.0.0.0
+    port: 9010
+  engine_args_specific:
+    vllm:
+      tensor_parallel_size: 8
+      pipeline_parallel_size: 1
+      gpu_memory_utilization: 0.95
+      tool_call_parser: step3
+      reasoning_parser: step3
+      trust_remote_code: true
+      limit_mm_per_prompt.image: 8
+      enable_chunked_prefill: true
+      enable_auto_tool_choice: true
+  profile:
+    prefix_len: 0
+    input_len: 1024
+    output_len: 1024
+    num_prompts: 128
+    range_ratio: 1
