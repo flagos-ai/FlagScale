@@ -121,7 +121,6 @@ def convert_to_qwen2vl_content(
 
     if cur < len(user_input):
         contents.append({"type": "text", "text": user_input[cur : len(user_input)]})
-        num_images = sum(1 for item in contents if item["type"] == "image")
 
     return contents
 
@@ -130,8 +129,6 @@ class TaskEncoder(
     DefaultTaskEncoder[Union[VQASample, ChatMLSample], ImageTaskSample, VQATaskBatch, dict]
 ):
     """A simple task encoder for captioning."""
-
-    # ACTION_TOKEN_START_ID = 151665
     ACTION_TOKEN_START_ID = 149595
     ACTION_TOKEN_END_ID = ACTION_TOKEN_START_ID + 2048
 
@@ -155,7 +152,7 @@ class TaskEncoder(
         self._token_cache = self._build_token_cache()
         self._action_token_cache = self._build_action_token_cache()
 
-        assert self.vision_root is not None, "Please give the vision root."
+        assert self.vision_root is not None, "Please specify the vision root."
 
     def encode_sample(self, sample: Union[VQASample, ChatMLSample]):
         if isinstance(sample, VQASample):
@@ -221,8 +218,7 @@ class TaskEncoder(
             resize_factor = math.sqrt(image_max_pixels / (image.width * image.height))
             width, height = int(image.width * resize_factor), int(image.height * resize_factor)
             image = image.resize((width, height))
-
-        if (image.width * image.height) < image_min_pixels:
+        elif (image.width * image.height) < image_min_pixels:
             resize_factor = math.sqrt(image_min_pixels / (image.width * image.height))
             width, height = int(image.width * resize_factor), int(image.height * resize_factor)
             image = image.resize((width, height))
@@ -321,7 +317,7 @@ class TaskEncoder(
         action_cache = {}
         for action_id in range(2048):
             token_string = f"<action_token_{action_id}>"
-            token_id = self.tokenizer.vocab.get(token_string, 149595 + action_id)
+            token_id = self.tokenizer.vocab.get(token_string, TaskEncoder.ACTION_TOKEN_START_ID + action_id)
             if token_id is not None:
                 action_cache[action_id] = token_id
 
