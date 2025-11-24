@@ -1,0 +1,14 @@
+# Remote host IP address for accessing log files
+remote_host: 192.0.2.1  # This IP address or host name identifies the remote host where logs are stored
+
+# Username for SSH login to the remote host
+remote_user: example_user  # This is the username used to log in to the remote host via SSH
+
+# Port number used for SSH access
+remote_port: 22  # This is the standard SSH port used to connect to the remote host
+
+# Path to the log file on the remote host
+remote_log_path: /path/example_log_file.log
+
+# Interval in seconds for checking the logs
+check_interval: 1200
