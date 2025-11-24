@@ -1,8 +1,0 @@
-diff --git a/hostfile b/hostfile
-new file mode 100644
-index 000000000..638b9e417
---- /dev/null
-+++ b/hostfile
-@@ -0,0 +1 @@
-+172.24.135.56 slots=4 type=A800
-

@@ -1,0 +1,180 @@
+diff --git a/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl.py b/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl.py
+index 914a28a2..cdb3330b 100644
+--- a/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl.py
++++ b/tools/checkpoint/qwen2_5_vl/hf2mcore_qwen2.5_vl.py
+@@ -22,7 +22,7 @@ from collections import defaultdict
+ from typing import Dict, List, Tuple
+ 
+ import torch
+-
++import flagscale.train.npu_patch.megatron_adaptor  # noqa: F401
+ from transformers import AutoConfig, AutoTokenizer, Qwen2_5_VLForConditionalGeneration
+ 
+ path_dir = os.path.abspath(
+@@ -239,12 +239,20 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
+     safe_copy(mgvision.rotary_pos_emb.inv_freq, hfvision.rotary_pos_emb.inv_freq)
+     copied_numel += safe_copy(mgvision.patch_embed.proj.weight, hfvision.patch_embed.proj.weight)
+     for hfblock, mgblock in zip(hfvision.blocks, mgvision.decoder.layers):
+-        # linear_qkv.norm --> norm1
+-        copied_numel += safe_copy(
+-            mgblock.self_attention.linear_qkv.layer_norm_weight, hfblock.norm1.weight
+-        )
+-        # mlp.linear_fc1.norm --> norm2
+-        copied_numel += safe_copy(mgblock.mlp.linear_fc1.layer_norm_weight, hfblock.norm2.weight)
++        if use_te:
++            # linear_qkv.norm --> norm1
++            copied_numel += safe_copy(
++                mgblock.self_attention.linear_qkv.layer_norm_weight, hfblock.norm1.weight
++            )
++            # mlp.linear_fc1.norm --> norm2
++            copied_numel += safe_copy(
++                mgblock.mlp.linear_fc1.layer_norm_weight, hfblock.norm2.weight
++            )
++        else:
++            # input_layernorm --> norm1
++            copied_numel += safe_copy(mgblock.input_layernorm.weight, hfblock.norm1.weight)
++            # mlp.pre_mlp_layernorm.weight --> norm2
++            copied_numel += safe_copy(mgblock.pre_mlp_layernorm.weight, hfblock.norm2.weight)
+         # self_attention.linear_qkv --> qkv
+         converted_weight = (
+             mgblock.self_attention.linear_qkv.weight.view(
+@@ -302,9 +310,14 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
+     copied_numel = 0
+     copied_numel += safe_copy(mgllm.embedding.word_embeddings.weight, hfllm.embed_tokens.weight)
+     for mglayer, hflayer in zip(mgllm.decoder.layers, hfllm.layers):
+-        copied_numel += safe_copy(
+-            mglayer.self_attention.linear_qkv.layer_norm_weight, hflayer.input_layernorm.weight
+-        )
++        if use_te:
++            copied_numel += safe_copy(
++                mglayer.self_attention.linear_qkv.layer_norm_weight, hflayer.input_layernorm.weight
++            )
++        else:
++            copied_numel += safe_copy(
++                mglayer.input_layernorm.weight, hflayer.input_layernorm.weight
++            )
+ 
+         qkv_weight = mglayer.self_attention.linear_qkv.weight.view(
+             num_query_groups, -1, head_dim, hidden_size
+@@ -343,9 +356,14 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
+         copied_numel += safe_copy(fc1_weight, hflayer.mlp.up_proj.weight)
+         copied_numel += safe_copy(mglayer.mlp.linear_fc2.weight, hflayer.mlp.down_proj.weight)
+ 
+-        copied_numel += safe_copy(
+-            mglayer.mlp.linear_fc1.layer_norm_weight, hflayer.post_attention_layernorm.weight
+-        )
++        if use_te:
++            copied_numel += safe_copy(
++                mglayer.mlp.linear_fc1.layer_norm_weight, hflayer.post_attention_layernorm.weight
++            )
++        else:
++            copied_numel += safe_copy(
++                mglayer.pre_mlp_layernorm.weight, hflayer.post_attention_layernorm.weight
++            )
+ 
+     copied_numel += safe_copy(mgllm.decoder.final_layernorm.weight, hfllm.norm.weight)
+     if args.untie_embeddings_and_output_weights:
+@@ -371,6 +389,7 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
+         hfmodel = hfmodel.bfloat16()
+ 
+     # assert args.num_query_groups >= args.target_tensor_model_parallel_size
++    use_te = args.transformer_impl == "transformer_engine"
+ 
+     num_attention_heads = args.num_attention_heads
+     num_query_groups = args.num_query_groups
+@@ -388,12 +407,21 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
+     safe_copy(hfvision.rotary_pos_emb.inv_freq, mgvision.rotary_pos_emb.inv_freq)
+     copied_numel += safe_copy(hfvision.patch_embed.proj.weight, mgvision.patch_embed.proj.weight)
+     for hfblock, mgblock in zip(hfvision.blocks, mgvision.decoder.layers):
+-        # norm1 --> linear_qkv.norm
+-        copied_numel += safe_copy(
+-            hfblock.norm1.weight, mgblock.self_attention.linear_qkv.layer_norm_weight
+-        )
+-        # norm2 --> mlp.linear_fc1.norm
+-        copied_numel += safe_copy(hfblock.norm2.weight, mgblock.mlp.linear_fc1.layer_norm_weight)
++        if use_te:
++            # norm1 --> linear_qkv.norm
++            copied_numel += safe_copy(
++                hfblock.norm1.weight, mgblock.self_attention.linear_qkv.layer_norm_weight
++            )
++            # norm2 --> mlp.linear_fc1.norm
++            copied_numel += safe_copy(
++                hfblock.norm2.weight, mgblock.mlp.linear_fc1.layer_norm_weight
++            )
++        else:
++            # input_layernorm --> norm1
++            copied_numel += safe_copy(hfblock.norm1.weight, mgblock.input_layernorm.weight)
++            # mlp.pre_mlp_layernorm.weight --> norm2
++            copied_numel += safe_copy(hfblock.norm2.weight, mgblock.pre_mlp_layernorm.weight)
++
+         # qkv --> self_attention.linear_qkv
+         converted_weight = (
+             hfblock.attn.qkv.weight.view(
+@@ -444,9 +472,14 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
+     copied_numel = 0
+     copied_numel += safe_copy(hfllm.embed_tokens.weight, mgllm.embedding.word_embeddings.weight)
+     for mglayer, hflayer in zip(mgllm.decoder.layers, hfllm.layers):
+-        copied_numel += safe_copy(
+-            hflayer.input_layernorm.weight, mglayer.self_attention.linear_qkv.layer_norm_weight
+-        )
++        if use_te:
++            copied_numel += safe_copy(
++                hflayer.input_layernorm.weight, mglayer.self_attention.linear_qkv.layer_norm_weight
++            )
++        else:
++            copied_numel += safe_copy(
++                hflayer.input_layernorm.weight, mglayer.input_layernorm.weight
++            )
+ 
+         q_proj_weight = hflayer.self_attn.q_proj.weight.view(
+             num_query_groups, -1, head_dim, hidden_size
+@@ -477,9 +510,15 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
+         copied_numel += safe_copy(fc1_weight, mglayer.mlp.linear_fc1.weight)
+ 
+         copied_numel += safe_copy(hflayer.mlp.down_proj.weight, mglayer.mlp.linear_fc2.weight)
+-        copied_numel += safe_copy(
+-            hflayer.post_attention_layernorm.weight, mglayer.mlp.linear_fc1.layer_norm_weight
+-        )
++        if use_te:
++            copied_numel += safe_copy(
++                hflayer.post_attention_layernorm.weight,
++                mglayer.self_attention.linear_qkv.layer_norm_weight,
++            )
++        else:
++            copied_numel += safe_copy(
++                hflayer.post_attention_layernorm.weight, mglayer.pre_mlp_layernorm.weight
++            )
+ 
+     copied_numel += safe_copy(hfllm.norm.weight, mgllm.decoder.final_layernorm.weight)
+     if args.untie_embeddings_and_output_weights:
+@@ -798,6 +837,7 @@ def main():
+             args.hf_ckpt_path, torch_dtype=config.torch_dtype
+         )
+         mg_model = load_megatron_model(args)
++        check_parameters(hf_model, mg_model)
+         convert_checkpoint_from_megatron_to_transformers(mg_model, hf_model, args)
+         save_hfmodel(args, hf_model)
+     else:
+@@ -806,9 +846,21 @@ def main():
+             args.load, torch_dtype=config.torch_dtype
+         )
+         mg_model = model_provider()
++        check_parameters(hf_model, mg_model)
+         convert_checkpoint_from_transformers_to_megatron(hf_model, mg_model, args)
+         save_mgmodel(mg_model, args)
+ 
+ 
++def check_parameters(transformer_model, megatron_model):
++    transformer_params = dict(transformer_model.named_parameters())
++    megatron_params = dict(megatron_model.named_parameters())
++
++    hf_params_numel = sum([p.numel() for p in transformer_params.values()])
++    mg_params_numel = sum([p.numel() for p in megatron_params.values()])
++    assert (
++        hf_params_numel == mg_params_numel
++    ), f"Parameter count mismatch: HF={hf_params_numel}, MG={mg_params_numel}"
++
++
+ if __name__ == "__main__":
+     main()
+
