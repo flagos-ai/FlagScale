@@ -98,9 +98,7 @@ def convert_to_qwen2vl_content(
     Split user input into format Qwen2VL tokenizer accepts.
     """
     if not isinstance(user_input, str):
-        raise TypeError(
-            f"convert_to_qwen2vl_content was called with a non-string input of type {type(user_input)}. Input: {user_input}"
-        )
+        raise TypeError(f"Input not a string. {type(user_input)} {user_input}")
     pattern = r"({image}|{video})".format(image=image_pattern, video=video_pattern)
     contents = []
     cur = 0
