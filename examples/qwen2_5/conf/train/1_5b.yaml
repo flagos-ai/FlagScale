@@ -75,6 +75,7 @@ data:
   split: 1
   apply_sft_dataset_separated_loss_mask_if_existed: true
   tokenizer:
+    legacy_tokenizer: true
     tokenizer_type: HFTokenizerFS
     tokenizer_path: ${HF_model_path:??}
     vocab_size: 151665
