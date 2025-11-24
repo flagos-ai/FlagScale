@@ -146,7 +146,8 @@ jobs:
             echo "Unknown backend type: ${{ inputs.type }}"
             exit 1
           fi
-          cd /__w/FlagScale/FlagScale
+          cd /__w/FlagScale/FlagScale/tests/Metax_C550
+          echo "Current working directory: ${PWD}"
           tests/scripts/functional_tests/test_task.sh --type ${{ inputs.type }} --task ${{ inputs.task }}
           exit_code=$?
           echo "Exit code: $exit_code"

@@ -1,0 +1,20 @@
+llm:
+  model: /home/gitlab-runner/data/Qwen3-4B
+  tokenizer: /home/gitlab-runner/data/Qwen3-4B
+  trust_remote_code: true
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.9
+  seed: 1234
+  enforce_eager: true
+
+generate:
+  prompts: [
+    "The first President of the United States",
+    "The capital of France",
+  ]
+  sampling:
+    top_p: 0.1
+    top_k: 1
+    temperature: 0.0
+    seed: 1234
