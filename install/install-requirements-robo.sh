@@ -1,7 +1,7 @@
 #!/bin/bash
 # only include custom requirements for robotics
 
-set -ex
+set -e
 
 print_help() {
     echo "Usage: $0 [--env <train|inference>] [--llama-cpp-backend <cpu|metal|blas|openblas|blis|cuda|gpu|musa|vulkan_mingw64|vulkan_msys2|cann|arm_kleidi|hip|opencl_android|opencl_windows_arm64>]"
@@ -36,7 +36,7 @@ fi
 
 uv pip install torch==2.7.1+cu128 torchaudio==2.7.1+cu128 torchvision==0.22.1+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
 
-
+# flash-attention
 cu=$(nvcc --version | grep "Cuda compilation tools" | awk '{print $5}' | cut -d '.' -f 1)
 torch=$(pip show torch | grep Version | awk '{print $2}' | cut -d '+' -f 1 | cut -d '.' -f 1,2)
 cp=$(python3 --version | awk '{print $2}' | awk -F. '{print $1$2}')

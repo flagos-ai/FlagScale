@@ -225,7 +225,7 @@ def _build_megatron_energon(device):
             sys.exit(1)
     energon_path = os.path.join(os.path.dirname(__file__), "third_party", "Megatron-Energon")
     subprocess.check_call(
-        [sys.executable, '-m', 'pip', 'install', '-e', '.', '--no-build-isolation', '--verbose'],
+        [sys.executable, '-m', 'pip', 'install', '-e', '.[av_decode]', '--no-build-isolation', '--verbose'],
         cwd=energon_path,
     )
 
