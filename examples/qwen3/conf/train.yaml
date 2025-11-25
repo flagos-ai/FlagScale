@@ -11,6 +11,7 @@ experiment:
   load: null
   exp_dir: xxx
   ckpt_format: torch
+  #use_hf_config:  ##hf config path
   task:
     type: train
     backend: megatron

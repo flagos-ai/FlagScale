@@ -1,5 +1,5 @@
 diff --git a/megatron/training/tokenizer/tokenizer.py b/megatron/training/tokenizer/tokenizer.py
-index b1aad6819..15fb44bb1 100644
+index b1aad6819..05bb967b3 100644
 --- a/megatron/training/tokenizer/tokenizer.py
 +++ b/megatron/training/tokenizer/tokenizer.py
 @@ -12,8 +12,10 @@ from typing import Dict, List, Optional
@@ -13,7 +13,7 @@ index b1aad6819..15fb44bb1 100644
  from megatron.training.tokenizer.multimodal_tokenizer import MultimodalTokenizer
  from megatron.training.tokenizer.sft_tokenizer import SFTTokenizer
  
-@@ -104,6 +106,34 @@ def build_tokenizer(args, **kwargs):
+@@ -104,6 +106,38 @@ def build_tokenizer(args, **kwargs):
      elif args.tokenizer_type == 'NullMultimodalTokenizer':
          assert args.vocab_size is not None
          tokenizer = _NullMultimodalTokenizer(args.vocab_size)
@@ -32,6 +32,10 @@ index b1aad6819..15fb44bb1 100644
 +    elif args.tokenizer_type == "QwenTokenizerFS":
 +        assert args.tokenizer_path is not None
 +        tokenizer = _QwenTokenizerFS(args.tokenizer_path)
++        if args.use_hf:
++            tokenizer = _QwenTokenizerFS(args.tokenizer_path)
++            args.padded_vocab_size = _vocab_size_with_padding(args.vocab_size, args)
++            return tokenizer
 +    elif args.tokenizer_type == "HFTokenizersTokenizerFS":
 +        assert args.tokenizer_path is not None
 +        tokenizer = _HFTokenizersTokenizerFS(args.tokenizer_path)
@@ -48,7 +52,16 @@ index b1aad6819..15fb44bb1 100644
      else:
          raise NotImplementedError('{} tokenizer is not ' 'implemented.'.format(args.tokenizer_type))
  
-@@ -604,6 +634,16 @@ class _Llama2Tokenizer(_SentencePieceTokenizer):
+@@ -120,6 +154,8 @@ def _vocab_size_with_padding(orig_vocab_size, args, logging_enabled=True):
+ 
+     after = orig_vocab_size
+     multiple = args.make_vocab_size_divisible_by * args.tensor_model_parallel_size
++    if (args.make_vocab_size_divisible_by % args.tensor_model_parallel_size==0) and args.make_vocab_size_divisible_by > args.tensor_model_parallel_size and args.use_hf:
++        multiple=args.make_vocab_size_divisible_by
+     after = int(math.ceil(after / multiple) * multiple)
+     if args.rank == 0 and logging_enabled:
+         print(
+@@ -604,6 +640,16 @@ class _Llama2Tokenizer(_SentencePieceTokenizer):
              t = t + [self.eos_id]
          return t
  
@@ -65,7 +78,7 @@ index b1aad6819..15fb44bb1 100644
      def detokenize(self, ids):
          return self.tokenizer.decode_ids(ids)
  
-@@ -921,3 +961,276 @@ class _NullMultimodalTokenizer(MegatronLegacyTokenizer):
+@@ -921,3 +967,276 @@ class _NullMultimodalTokenizer(MegatronLegacyTokenizer):
      @property
      def additional_special_tokens_ids(self):
          return None
@@ -342,4 +355,3 @@ index b1aad6819..15fb44bb1 100644
 +    
 +    def encode(self, x):
 +        return self.tokenizer.encode(x)
-\ No newline at end of file
