@@ -493,7 +493,7 @@ class SSHTrainRunner(RunnerBase):
     ):
         # Read from config if not explicitly provided
         if enable_monitoring is None:
-            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", True)
+            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
 
         num_visible_devices = None
         runner_config = self.config.experiment.runner
@@ -903,7 +903,7 @@ class CloudTrainRunner(RunnerBase):
 
         # Read from config if not explicitly provided
         if enable_monitoring is None:
-            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", True)
+            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
 
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
