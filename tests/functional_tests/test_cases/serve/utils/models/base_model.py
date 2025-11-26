@@ -2,8 +2,8 @@ from util_models.util_model import fn
 
 
 class ModelA:
-    def forward(self, prompt):
-        result = prompt + "__add_model_A"
+    def forward(self, prompt, system_prompt="hello flagscale"):
+        result = prompt + "__add_model_A_" + system_prompt
         return fn(result)
 
 

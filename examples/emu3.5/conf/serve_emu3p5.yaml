@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - serve: multiple_models
+  - serve: emu3p5
 
 experiment:
-  exp_name: multiple_models
+  exp_name: emu3p5
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
@@ -11,13 +11,18 @@ experiment:
   runner:
     hostfile: null # /path/to/hostfile.txt
     deploy:
-      port: 6701
+      port: 9710
       use_fs_serve: true
       enable_composition: true
-      name: /generate
+      name: /emu3p5
+      working_dir: /path/to/FlagScale
       request:
-        - arg: prompt
+        - arg: prompt            # the text prompt for generation
           type: str
+        - arg: reference_image   # a list containing reference image paths
+          type: Optional[list]
+          required: false
+          default: []
   cmds:
     before_start: export RAY_DEDUP_LOGS=0
 

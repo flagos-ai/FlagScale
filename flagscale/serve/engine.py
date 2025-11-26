@@ -1,3 +1,5 @@
+import ast
+import builtins
 import importlib
 import importlib.util
 import inspect
@@ -9,7 +11,7 @@ import sys
 import threading
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, get_args, get_origin
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,6 +22,7 @@ import yaml
 
 from dag_utils import check_and_get_port
 from fastapi import FastAPI, HTTPException, Request
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, create_model
 from ray import serve
 from ray.serve.handle import DeploymentHandle
@@ -88,6 +91,117 @@ def load_class_from_file(file_path: str, class_name: str):
             sys.path.pop(0)
 
 
+# Allowed root types for safety
+_ALLOWED_BASES = {
+    int,
+    float,
+    str,
+    bool,
+    list,
+    dict,
+    tuple,
+    set,
+    Any,
+    List,
+    Dict,
+    Tuple,
+    Set,
+    Union,
+    Optional,
+}
+
+
+# Build all possible valid names for allowed types
+_NAME_MAP = {
+    n: t
+    for t in _ALLOWED_BASES
+    for n in (getattr(t, "__name__", None), getattr(t, "_name", None))
+    if n
+}
+
+
+def _parse(node):
+    if isinstance(node, ast.Name):
+        try:
+            return _NAME_MAP[node.id]
+        except KeyError:
+            raise ValueError(f"Unknown type: {node.id!r}")
+
+    if isinstance(node, ast.Subscript):
+        base = _parse(node.value)
+        if base not in _ALLOWED_BASES:
+            raise ValueError(f"Base type not allowed: {base}")
+        s = node.slice
+        args = tuple(_parse(e) for e in s.elts) if isinstance(s, ast.Tuple) else _parse(s)
+        return base[args]
+
+    if isinstance(node, ast.Tuple):
+        return tuple(_parse(e) for e in node.elts)
+
+    raise ValueError(f"Unsupported syntax: {type(node).__name__}")
+
+
+def parse_type(type_str: str):
+    if not isinstance(type_str, str) or not type_str.strip():
+        raise ValueError(f"Invalid type string: {type_str!r}")
+
+    try:
+        tree = ast.parse(type_str, mode="eval").body
+        # use ast.parse instead of eval(type_str), to avoid security issues
+    except Exception:
+        raise ValueError(f"Invalid type expression: {type_str!r}")
+
+    t = _parse(tree)
+    if (get_origin(t) or t) not in _ALLOWED_BASES:
+        raise ValueError(f"Type not allowed: {type_str!r}")
+
+    return t
+
+
+def build_request_model(request_config):
+    """
+    Build a Pydantic model dynamically from config.
+    New expected format:
+
+        request:
+          - arg: prompt
+            type: str
+          - arg: system_prompt
+            type: Optional[str]
+            required: false
+            default: "..."
+
+    """
+    request_config = OmegaConf.to_container(request_config, resolve=True)
+    logger.info(f"Building request model from config: {request_config}")
+
+    if not isinstance(request_config, list):
+        raise ValueError(
+            f"request_config must be a list of argument definitions, but got {request_config} of type {type(request_config)}."
+        )
+
+    fields = {}
+
+    for item in request_config:
+        if "arg" not in item:
+            raise ValueError(f"Missing 'arg' field in request item: {item}")
+        if "type" not in item:
+            raise ValueError(f"Missing 'type' field in request item: {item}")
+        name = item["arg"]
+        type_ = parse_type(item["type"])
+
+        required = item.get("required", True)
+        default = item.get("default", ...)
+
+        # optional fields must have explicit default
+        if not required and default is ...:
+            raise ValueError(f"Default value for optional field '{name}' must be provided")
+
+        fields[name] = (type_, default)
+
+    return create_model("Request", **fields)
+
+
 def make_deployment(logic_cls, **deploy_kwargs):
     @serve.deployment(**deploy_kwargs)
     class WrappedModel:
@@ -105,10 +219,7 @@ def make_deployment(logic_cls, **deploy_kwargs):
 @serve.deployment
 class FinalModel:
     def __init__(
-        self,
-        graph_config: Dict[str, Any],
-        handles: Dict[str, DeploymentHandle],
-        config: omegaconf.DictConfig,
+        self, graph_config: Dict[str, Any], handles: Dict[str, DeploymentHandle], config: DictConfig
     ):
         self.graph_config = graph_config
         self.handles = handles
@@ -119,13 +230,7 @@ class FinalModel:
         self.roots = list(all_nodes - dep_nodes)
         assert len(self.roots) == 1, "Only one return node is allowed"
         request_config = config.experiment.runner.deploy.request
-        self.request_base = create_model(
-            "Request",
-            **{
-                field: (type_, ...)
-                for field, type_ in zip(request_config.args, request_config.types)
-            },
-        )
+        self.request_base = build_request_model(request_config)
 
     async def __call__(self, http_request):
         origin_request = await http_request.json()
@@ -188,6 +293,8 @@ def build_graph(config):
             "num_replicas": resources.get("num_replicas", 1),
             "ray_actor_options": ray_actor_options,
         }
+        if "max_ongoing_requests" in resources:
+            deploy_kwargs["max_ongoing_requests"] = resources["max_ongoing_requests"]
         scale_config = {}
         for item in scale_config_items:
             if item in resources:
@@ -357,6 +464,8 @@ class ServeEngine:
             runtime_env["env_vars"] = {"PYTHONPATH": pythonpath}
 
         if working_dir:
+            if working_dir not in sys.path:
+                sys.path.append(working_dir)
             runtime_env["working_dir"] = working_dir
             runtime_env["excludes"] = [
                 "*.log",
