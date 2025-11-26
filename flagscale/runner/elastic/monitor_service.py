@@ -1,5 +1,6 @@
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -9,7 +10,7 @@ from typing import Any, Dict, Optional
 from flagscale.runner.elastic.diagnostic import generate_diagnostic_report
 from flagscale.runner.elastic.log_collector import collect_logs
 from flagscale.runner.runner_base import JobStatus
-from flagscale.runner.utils import logger
+from flagscale.runner.utils import get_remote_file_mtime, logger
 
 
 class MonitorService:
@@ -346,6 +347,9 @@ class MonitorService:
             else:
                 no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
                 if no_shared_fs:
+                    logger.warning(
+                        "no_shared_fs path has NOT been fully tested and may behave incorrectly!"
+                    )
                     src_log_file = os.path.join(
                         self.config.train.system.logging.log_dir, "host.output"
                     )
@@ -394,18 +398,21 @@ class MonitorService:
                     self.config.train.system.logging.log_dir, f"host_{node_rank}_{host}.output"
                 )
 
-            if not os.path.exists(log_file):
-                return False
-
-            def get_remote_mtime(host, log_file):
-                cmd = ["ssh", host, f"stat -c%Y {log_file}"]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                return int(result.stdout.strip())
-
             # Get current modification time
             if no_shared_fs:
-                current_mtime = get_remote_mtime(host, log_file)
+                logger.warning(
+                    "no_shared_fs path has NOT been fully tested and may behave incorrectly!"
+                )
+                # For remote files, get mtime via SSH
+                ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+                current_mtime = get_remote_file_mtime(host, log_file, ssh_port)
+                if current_mtime == -1:
+                    # Remote file doesn't exist or SSH failed
+                    return False
             else:
+                # For local/shared files, check existence and get mtime
+                if not os.path.exists(log_file):
+                    return False
                 current_mtime = os.path.getmtime(log_file)
             current_time = time.time()
 
@@ -442,6 +449,9 @@ class MonitorService:
             # Determine log file name for reference
             no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
             if no_shared_fs:
+                logger.warning(
+                    "no_shared_fs path has NOT been fully tested and may behave incorrectly!"
+                )
                 log_filename = "host.output"
             else:
                 log_filename = f"host_{node_rank}_{host}.output"
