@@ -428,6 +428,12 @@ def install(backend, device="gpu", version=None):
 
     if "metax" in device.lower():
         device = "metax"
+        
+    if backend == "robotics":
+        install_script = "install/install-requirements-robo.sh"
+        subprocess.check_call(["bash", install_script, "--env", "train"])
+        return
+
     versions, compatible_versions = get_whl_version(backend, device)
     if not compatible_versions:
         raise click.ClickException(f"No compatible versions found for {backend} on {device}.")
