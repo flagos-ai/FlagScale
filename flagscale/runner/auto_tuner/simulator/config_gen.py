@@ -214,7 +214,8 @@ class MeshArguments:
         self.pipeline_model_parallel_size = sum(mesh_config.mesh[4::5])
         self.tensor_model_parallel_size = mesh_config.mesh[0]
         self.virtual_pipeline_model_parallel_size = None
-        self.num_experts = 1
+        self.num_experts = None
+
         self.context_parallel_size = 1
         self.swiglu = True
         self.micro_batch_size = global_batch_size / num_micro_batches / self.data_parallel_size
@@ -222,8 +223,8 @@ class MeshArguments:
         self.num_attention_heads = 32
         self.group_query_attention = None  # TODO
         self.num_query_groups = 1  # TODO
-        self.moe_layer_freq = 2
-        self.moe_router_topk = 1
+        # self.moe_layer_freq = 2
+        # self.moe_router_topk = 1
         self.multi_latent_attention = False
         self.seq_length = 2048
         self.padded_vocab_size = 4096  # TODO
@@ -232,9 +233,9 @@ class MeshArguments:
         self.mtp_num_layers = None
         self.expert_model_parallel_size = 1
         self.world_size = 8
-        self.moe_shared_expert_intermediate_size = 16384
-        self.moe_ffn_hidden_size = 4 * self.hidden_size
-        # self.ffn_hidden_size
+        self.moe_shared_expert_intermediate_size = None
+        self.moe_ffn_hidden_size = None
+        ## self.ffn_hidden_size
         self.multiple_of = 256
         hidden_dim = int(4 * self.hidden_size * 2 / 3)
         self.ffn_hidden_size = self.multiple_of * (
@@ -246,7 +247,9 @@ class MeshArguments:
         self.recompute_granularity = mesh_config.recompute_granularity
         self.recompute_method = mesh_config.recompute_method
         self.recompute_num_layers = mesh_config.recompute_num_layers
+
         self.expert_tensor_parallel_size = 1
+
         self.use_flash_attn = True
         self.sequence_parallel = True
         self.use_distributed_optimizer = True
