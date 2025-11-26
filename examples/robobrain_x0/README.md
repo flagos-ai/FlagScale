@@ -31,6 +31,8 @@
 
 
 3. Install other custom Extensions
+    including TransfomerEngine, Apex, flash_attn. If they already exist in your environment, ignore this step.
+
     ```sh
     ./install/install-requirements-robo.sh --env [inference|train]
     ```
