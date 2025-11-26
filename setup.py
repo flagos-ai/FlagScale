@@ -232,21 +232,13 @@ class FlagScaleBuild(_build):
             self.device = os.environ.get("FLAGSCALE_DEVICE", "gpu")
         
         # Check if we need to install extra dependencies based on backend-device combination
-        # Check before normalize_backend, as it may change the backend value
         self.extras_to_install = []
         if self.backend and self.device:
-            # Get available extras from distribution
             if hasattr(self.distribution, 'extras_require') and self.distribution.extras_require:
                 available_extras = self.distribution.extras_require.keys()
-                
-                # Handle multiple backends (comma-separated)
                 original_backends = [b.strip() for b in self.backend.split(",")]
-                
                 for backend in original_backends:
-                    # Construct extra name as <backend>-<device>
                     extra_name = f"{backend.lower()}-{self.device.lower()}"
-                    
-                    # Check if this extra exists in extras_require
                     if extra_name in available_extras:
                         self.extras_to_install.append(extra_name)
                         print(f"[build] Detected backend={backend} and device={self.device}, will install {extra_name} extra dependencies")
@@ -275,45 +267,51 @@ class FlagScaleBuild(_build):
         else:
             print(f"[build] No backend specified, just build FlagScale python codes.")
 
-    def run(self):
-        # Install extra dependencies if needed
-        if self.extras_to_install:
-            if hasattr(self.distribution, 'extras_require') and self.distribution.extras_require:
-                all_deps_to_install = []
-                
-                for extra_name in self.extras_to_install:
-                    if extra_name in self.distribution.extras_require:
-                        deps = self.distribution.extras_require[extra_name]
-                        if deps:
-                            print(f"[build] Found {extra_name} extra with {len(deps)} dependencies")
-                            all_deps_to_install.extend(deps)
-                        else:
-                            print(f"[build] Warning: {extra_name} extra has no dependencies defined")
-                    else:
-                        print(f"[build] Warning: {extra_name} extra not found in extras_require")
-                
-                if all_deps_to_install:
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    unique_deps = []
-                    for dep in all_deps_to_install:
-                        if dep not in seen:
-                            seen.add(dep)
-                            unique_deps.append(dep)
-                    
-                    print(f"[build] Installing {len(unique_deps)} unique dependencies from extras: {self.extras_to_install}")
-                    install_cmd = [sys.executable, "-m", "pip", "install"] + unique_deps
-                    try:
-                        subprocess.check_call(install_cmd)
-                        print(f"[build] Successfully installed dependencies from extras: {self.extras_to_install}")
-                    except subprocess.CalledProcessError as e:
-                        print(f"[build] Warning: Failed to install some dependencies from extras {self.extras_to_install}: {e}")
-                        # Continue build even if some dependencies fail to install
-                else:
-                    print(f"[build] No dependencies to install from extras: {self.extras_to_install}")
-            else:
-                print(f"[build] Warning: distribution has no extras_require defined")
         
+    def install_extras(self):
+        """Install extra requirements from extras_require"""
+        if not self.extras_to_install:
+            return
+
+        if hasattr(self.distribution, 'extras_require') and self.distribution.extras_require:
+            all_deps_to_install = []
+            
+            for extra_name in self.extras_to_install:
+                if extra_name in self.distribution.extras_require:
+                    deps = self.distribution.extras_require[extra_name]
+                    if deps:
+                        print(f"[build] Found {extra_name} extra with {len(deps)} dependencies")
+                        all_deps_to_install.extend(deps)
+                    else:
+                        print(f"[build] Warning: {extra_name} extra has no dependencies defined")
+                else:
+                    print(f"[build] Warning: {extra_name} extra not found in extras_require")
+            
+            if all_deps_to_install:
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_deps = []
+                for dep in all_deps_to_install:
+                    if dep not in seen:
+                        seen.add(dep)
+                        unique_deps.append(dep)
+                
+                print(f"[build] Installing {len(unique_deps)} unique dependencies from extras: {self.extras_to_install}")
+                install_cmd = [sys.executable, "-m", "pip", "install"] + unique_deps
+                try:
+                    subprocess.check_call(install_cmd)
+                    print(f"[build] Successfully installed dependencies from extras: {self.extras_to_install}")
+                except subprocess.CalledProcessError as e:
+                    print(f"[build] Warning: Failed to install some dependencies from extras {self.extras_to_install}: {e}")
+                    # Continue build even if some dependencies fail to install
+            else:
+                print(f"[build] No dependencies to install from extras: {self.extras_to_install}")
+        else:
+            print(f"[build] Warning: distribution has no extras_require defined")
+
+
+    def run(self):
+        self.install_extras()
         if self.backend is not None:
             build_py_cmd = self.get_finalized_command('build_py')
             build_py_cmd.backend = self.backend
