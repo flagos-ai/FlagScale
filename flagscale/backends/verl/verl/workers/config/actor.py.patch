@@ -1,0 +1,20 @@
+diff --git a/verl/workers/config/actor.py b/verl/workers/config/actor.py
+index fe5b3e11..711d4314 100644
+--- a/verl/workers/config/actor.py
++++ b/verl/workers/config/actor.py
+@@ -65,6 +65,7 @@ class ActorConfig(BaseConfig):
+         ppo_micro_batch_size_per_gpu (Optional[int]): Micro-batch size per GPU for PPO training.
+         use_dynamic_bsz (bool): Whether to use dynamic batch sizing.
+         ppo_max_token_len_per_gpu (int): Maximum token length per GPU for PPO training.
++        balance_algorithm (str): Algorithm for batch balancing/sequence packing. Options: 'karmarkar_karp', 'modified_first_fit_decreasing', etc.
+         clip_ratio (float): PPO clipping ratio for policy loss.
+         clip_ratio_low (float): Lower bound for PPO clipping ratio.
+         clip_ratio_high (float): Upper bound for PPO clipping ratio.
+@@ -98,6 +99,7 @@ class ActorConfig(BaseConfig):
+     use_dynamic_bsz: bool = False
+     ppo_max_token_len_per_gpu: int = 16384
+     ppo_infer_max_token_len_per_gpu: int = 16384
++    balance_algorithm: str = "karmarkar_karp"  
+     clip_ratio: float = 0.2
+     clip_ratio_low: float = 0.2
+     clip_ratio_high: float = 0.2

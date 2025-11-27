@@ -22,6 +22,7 @@ actor_rollout_ref:
     path: /home/gitlab-runner/data/Qwen2.5-0.5B-Instruct-new
     use_remove_padding: true
     enable_gradient_checkpointing: true
+    trust_remote_code: True
   actor:
     optim:
       lr: 1e-6
@@ -57,8 +58,3 @@ trainer:
   total_epochs: 1
   default_local_dir: ${experiment.exp_dir}/checkpoints
   total_training_steps: 5
-
-append_kargs:
-  actor_rollout_ref:
-    rollout:
-      trust_remote_code: True

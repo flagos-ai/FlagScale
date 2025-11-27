@@ -1,0 +1,15 @@
+diff --git a/verl/trainer/config/actor/actor.yaml b/verl/trainer/config/actor/actor.yaml
+index 7c55df26..a2903856 100644
+--- a/verl/trainer/config/actor/actor.yaml
++++ b/verl/trainer/config/actor/actor.yaml
+@@ -24,6 +24,10 @@ ppo_micro_batch_size_per_gpu: null
+ # oc.select: the default val for ref.log_prob_use_dynamic_bsz
+ use_dynamic_bsz: false
+ 
++# Algorithm for batch balancing/sequence packing
++# Options: karmarkar_karp, modified_first_fit_decreasing, greedy_partition, first_fit_decreasing, concatenative, first_fit_shuffle
++balance_algorithm: karmarkar_karp
++
+ # Max tokens per GPU in one PPO batch; affects gradient accumulation
+ # Typically it should be: n * ${data.max_prompt_length} + ${data.max_response_length}
+ # oc.select: the default val for ref.log_prob_max_token_len_per_gpu
