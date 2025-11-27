@@ -488,16 +488,6 @@ class MonitorService:
                 if self._check_log_hang(host, node_rank):
                     self._generate_hang_diagnostic(host, node_rank)
 
-    def get_status_summary(self) -> Dict[str, Any]:
-        return {
-            "is_running": self.is_running,
-            "interval": self.interval,
-            "log_collection_enabled": self.log_collection_enabled,
-            "diagnostic_enabled": self.diagnostic_enabled,
-            "monitor_log_dir": self.monitor_log_dir,
-            "thread_alive": self.monitor_thread.is_alive() if self.monitor_thread else False,
-        }
-
 
 def main():
     """
