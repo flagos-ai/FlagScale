@@ -51,11 +51,13 @@ class PaliGemmaWithExpertConfig(PretrainedConfig):
         freeze_vision_encoder: bool = True,
         train_expert_only: bool = True,
         attention_implementation: str = "eager",
+        use_adarms: list = None,
         **kwargs,
     ):
         self.freeze_vision_encoder = freeze_vision_encoder
         self.train_expert_only = train_expert_only
         self.attention_implementation = attention_implementation
+        self.use_adarms = use_adarms or [False, False]
 
         if paligemma_config is None:
             # Default config from Pi0
@@ -207,7 +209,21 @@ class PaliGemmaWithExpertModel(PreTrainedModel):
             return self.paligemma.model.get_image_features(image)
 
     def embed_language_tokens(self, tokens: torch.Tensor):
-        return self.paligemma.language_model.embed_tokens(tokens)
+        # Handle different Gemma model architectures
+        if hasattr(self.paligemma.language_model, 'embed_tokens'):
+            return self.paligemma.language_model.embed_tokens(tokens)
+        elif hasattr(self.paligemma.language_model, 'model') and hasattr(
+            self.paligemma.language_model.model, 'embed_tokens'
+        ):
+            return self.paligemma.language_model.model.embed_tokens(tokens)
+        elif hasattr(self.paligemma.language_model, 'model') and hasattr(
+            self.paligemma.language_model.model, 'word_embeddings'
+        ):
+            return self.paligemma.language_model.model.word_embeddings(tokens)
+        else:
+            raise AttributeError(
+                f"Cannot find embedding layer in language model. Available attributes: {[attr for attr in dir(self.paligemma.language_model) if 'embed' in attr.lower()]}"
+            )
 
     # TODO: break down this huge forward into modules or functions
     def forward(
