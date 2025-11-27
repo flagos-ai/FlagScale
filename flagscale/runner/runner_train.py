@@ -482,14 +482,7 @@ class SSHTrainRunner(RunnerBase):
             run_local_command(f"bash {host_run_script_file}", dryrun)
 
     def run(
-        self,
-        with_test=False,
-        dryrun=False,
-        monitor=False,
-        interval=10,
-        enable_log_collection=True,
-        enable_diagnostic=True,
-        enable_monitoring=None,
+        self, with_test=False, dryrun=False, monitor=False, interval=10, enable_monitoring=None
     ):
         # Read from config if not explicitly provided
         if enable_monitoring is None:
@@ -567,9 +560,7 @@ class SSHTrainRunner(RunnerBase):
         if enable_monitoring:
             logger.info("Starting monitoring service...")
             monitor_service = MonitorService(self.config, self, interval)
-            monitor_service.start_monitoring(
-                enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
-            )
+            monitor_service.start_monitoring()
             logger.info("Monitoring service started in background")
             logger.info("Training job will continue running, monitor logs will be saved")
 
@@ -781,24 +772,18 @@ class SSHTrainRunner(RunnerBase):
         """
         return self._query_status()
 
-    def start_monitoring_service(
-        self, interval=10, enable_log_collection=True, enable_diagnostic=True
-    ):
+    def start_monitoring_service(self, interval=10):
         """
         Start independent monitoring service (non-blocking).
 
         Args:
             interval (int): Monitor interval in seconds
-            enable_log_collection (bool): Enable log collection
-            enable_diagnostic (bool): Enable diagnostic report generation
 
         Returns:
             MonitorService: Monitor service instance
         """
         monitor_service = MonitorService(self.config, self, interval)
-        monitor_service.start_monitoring(
-            enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
-        )
+        monitor_service.start_monitoring()
         logger.info(f"Independent monitoring service started with interval={interval}s")
         return monitor_service
 

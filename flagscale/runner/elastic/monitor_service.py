@@ -57,28 +57,21 @@ class MonitorService:
         self.stop()
         sys.exit(0)
 
-    def start_monitoring(self, enable_log_collection=True, enable_diagnostic=True):
+    def start_monitoring(self):
         """
         Start monitoring service (non-blocking)
 
-        Args:
-            enable_log_collection: Whether to enable log collection
-            enable_diagnostic: Whether to enable diagnostic report generation
         """
         if self.is_running:
             logger.warning("Monitor service is already running")
             return
 
-        self.log_collection_enabled = enable_log_collection
-        self.diagnostic_enabled = enable_diagnostic
         self.is_running = True
 
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
         logger.info(f"Monitor service started with interval={self.interval}s")
-        logger.info(f"Log collection enabled: {enable_log_collection}")
-        logger.info(f"Diagnostic enabled: {enable_diagnostic}")
         logger.info(f"Monitor logs will be saved to: {self.monitor_log_dir}")
 
     def stop(self):

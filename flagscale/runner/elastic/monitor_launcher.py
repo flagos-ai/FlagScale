@@ -97,9 +97,7 @@ def main():
     )
 
     # Start the monitoring service
-    monitor.start_monitoring(
-        enable_log_collection=args.enable_log_collection, enable_diagnostic=args.enable_diagnostic
-    )
+    monitor.start_monitoring()
 
     logger.info(f"The monitoring service has been started. Interval: {args.interval} seconds")
     logger.info(f"PID file: {args.pid_file}")
