@@ -88,10 +88,7 @@ def collect_logs(config, host, node_rank, destination_dir, dryrun=False):
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
     log_dir = logging_config.log_dir
     src_log_file = find_actual_log_file(log_dir, node_rank, host, no_shared_fs)
-    dest_log_file = os.path.join(
-        destination_dir,
-        f"host_{node_rank}_{host}_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
-    )
+    dest_log_file = os.path.join(destination_dir, f"host_{node_rank}_{host}_current.log")
 
     os.makedirs(destination_dir, exist_ok=True)
 
@@ -102,14 +99,14 @@ def collect_logs(config, host, node_rank, destination_dir, dryrun=False):
 
     try:
         if host != "localhost":
-            command = f"ssh -p {ssh_port} {host} 'tail -c +{offset + 1} {shlex.quote(src_log_file)}' > {shlex.quote(dest_log_file)}"
+            command = f"ssh -p {ssh_port} {host} 'tail -c +{offset + 1} {shlex.quote(src_log_file)}' >> {shlex.quote(dest_log_file)}"
             run_local_command(command, dryrun)
             logger.debug(
                 f"Collected incremental log from {host} (node {node_rank}) to {dest_log_file}"
             )
         else:
             command = (
-                f"tail -c +{offset + 1} {shlex.quote(src_log_file)} > {shlex.quote(dest_log_file)}"
+                f"tail -c +{offset + 1} {shlex.quote(src_log_file)} >> {shlex.quote(dest_log_file)}"
             )
             run_local_command(command, dryrun)
             logger.debug(f"Collected incremental local log to {dest_log_file}")

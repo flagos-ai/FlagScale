@@ -332,18 +332,11 @@ class MonitorService:
     def _generate_diagnostic_for_host(self, host: str, node_rank: int):
         try:
             log_file_path = None
-            log_files = [
-                f
-                for f in os.listdir(self.monitor_log_dir)
-                if f.startswith(f"host_{node_rank}_{host}_temp_") and f.endswith(".log")
-            ]
-
-            if log_files:
-                latest_log = max(
-                    log_files, key=lambda f: os.path.getmtime(os.path.join(self.monitor_log_dir, f))
-                )
-                log_file_path = os.path.join(self.monitor_log_dir, latest_log)
-
+            current_log_file = os.path.join(
+                self.monitor_log_dir, f"host_{node_rank}_{host}_current.log"
+            )
+            if os.path.exists(current_log_file):
+                log_file_path = current_log_file
             else:
                 no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
                 if no_shared_fs:
