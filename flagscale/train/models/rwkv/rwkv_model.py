@@ -56,7 +56,7 @@ if os.getenv("RWKV_COMPILE_ON", "0") == "1" and hasattr(torch, "compile"):
 
 # Safe defaults for env vars
 HEAD_SIZE = int(os.getenv("RWKV_HEAD_SIZE", "64"))
-_RWKV_MY_TESTING = os.getenv("RWKV_MY_TESTING", "")
+_RWKV_MY_TESTING = os.getenv("RWKV_MY_TESTING", "x070")
 
 # Prepare possible CUDA extension only if requested in env var
 RUN_CUDA_RWKV7g = None
@@ -76,7 +76,7 @@ if "x070" in _RWKV_MY_TESTING:
         ]
         load(
             name="wind_backstepping_hip",
-            sources=["megatron/core/models/rwkv/cuda/wkv7_hip.hip", "megatron/core/models/rwkv/cuda/wkv7_op.hip"],
+            sources=["flagscale/train/models/rwkv/cuda/wkv7_hip.hip", "flagscale/train/models/rwkv/cuda/wkv7_op.hip"],
             is_python_module=False,
             verbose=True,
             extra_cuda_cflags=flags,
@@ -93,7 +93,7 @@ if "x070" in _RWKV_MY_TESTING:
         ]
         load(
             name="wind_backstepping",
-            sources=["megatron/core/models/rwkv/cuda/wkv7_cuda.cu", "megatron/core/models/rwkv/cuda/wkv7_op.cpp"],
+            sources=["flagscale/train/models/rwkv/cuda/wkv7_cuda.cu", "flagscale/train/models/rwkv/cuda/wkv7_op.cpp"],
             is_python_module=False,
             verbose=True,
             extra_cuda_cflags=flags,
@@ -104,7 +104,21 @@ if "x070" in _RWKV_MY_TESTING:
         def forward(ctx, w, q, k, v, z, b):
             B, T, H, C = w.shape
             assert T % CHUNK_LEN == 0
-            assert all(i.dtype in [torch.bfloat16, torch.float16] for i in [w, q, k, v, z, b])
+            assert all(i.dtype == torch.bfloat16 for i in [w, q, k, v, z, b])
+            assert all(i.is_contiguous() for i in [w, q, k, v, z, b])
+            y = torch.empty_like(v)
+            s = torch.empty(
+                B, H, T // CHUNK_LEN, C, C, dtype=torch.float32, device=w.device
+            )
+            sa = torch.empty(B, T, H, C, dtype=torch.float32, device=w.device)
+            torch.ops.wind_backstepping.forward(w, q, k, v, z, b, y, s, sa)
+            ctx.save_for_backward(w, q, k, v, z, b, s, sa)
+            return y
+
+        @staticmethod
+        def backward(ctx, dy):
+            assert all(i.dtype == torch.bfloat16 for i in [dy])
+            assert all(i.is_contiguous() for i in [dy])
             w, q, k, v, z, b, s, sa = ctx.saved_tensors
             dw, dq, dk, dv, dz, db = [torch.empty_like(x) for x in [
                 w, q, k, v, z, b]]
@@ -118,24 +132,6 @@ if "x070" in _RWKV_MY_TESTING:
         # reshape to (B, T, H, C) with CHUNK of 64 in inner dim for the custom kernel
         q, w, k, v, a, b = [i.view(B, T, HC // 64, 64) for i in [q, w, k, v, a, b]]
         return WindBackstepping.apply(w, q, k, v, a, b).view(B, T, HC)
-
-else:
-    # Fallback: when custom kernel is not compiled/loaded, provide a clear fallback.
-    def RUN_CUDA_RWKV7g(q, w, k, v, a, b):
-        """
-        Fallback CPU/PyTorch implementation placeholder.
-        This is intentionally simple and will likely be much slower than the optimized kernel.
-        It ensures the name exists so other code won't NameError. If you expect to run fast
-        on GPU, compile and enable the native kernel and set RWKV_MY_TESTING to include 'x070'.
-        """
-        # Try a safe, pure-Torch (not optimized) computation that preserves shapes.
-        # Here we implement a plausible fallback: elementwise combination.
-        # NOTE: This fallback might not match the optimized kernel semantics exactly.
-        B, T, HC = q.shape
-        # reshape into (B,T,H,-1) if possible. We'll attempt dividing by head chunk 64 if matches,
-        # otherwise keep last dim intact.
-        return (q * w + k * v + a + b).view(B, T, HC)
-
 
 class RWKV_Tmix_x070(nn.Module):
     def __init__(self, args, layer_id):
