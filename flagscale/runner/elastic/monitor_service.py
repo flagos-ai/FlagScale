@@ -1,15 +1,14 @@
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
 
-from typing import Any, Dict, Optional
-
 from flagscale.runner.elastic.diagnostic import generate_diagnostic_report
 from flagscale.runner.elastic.log_collector import collect_logs
 from flagscale.runner.runner_base import JobStatus
-from flagscale.runner.utils import logger
+from flagscale.runner.utils import get_remote_file_mtime, logger
 
 
 class MonitorService:
@@ -17,7 +16,7 @@ class MonitorService:
     An independent monitoring service for background monitoring of training task status, log collection, and diagnostic report generation.
     """
 
-    def __init__(self, config, runner_instance, interval=10):
+    def __init__(self, config, runner_instance, interval=10, host=None, node_rank=None):
         """
         Initializing service
 
@@ -25,6 +24,8 @@ class MonitorService:
             config: Configuration object
             runner_instance: runner instance
             interval: interval time
+            host: Hostname or IP of this node (for single-node mode)
+            node_rank: Node rank of this node (for single-node mode)
         """
         self.config = config
         self.runner = runner_instance
@@ -39,6 +40,10 @@ class MonitorService:
         self.last_log_check_times = {}  # Track last modification time for each log file
         self.last_job_status = None  # Track previous job status for kill detection
         self.process_start_time = time.time()  # Track when monitoring started
+        # Single-node monitoring mode (each node monitors itself)
+        self.single_node_mode = host is not None and node_rank is not None
+        self.monitored_host = host
+        self.monitored_node_rank = node_rank
         self.monitor_log_dir = os.path.join(config.train.system.logging.log_dir, "monitor")
         os.makedirs(self.monitor_log_dir, exist_ok=True)
 
@@ -50,28 +55,21 @@ class MonitorService:
         self.stop()
         sys.exit(0)
 
-    def start_monitoring(self, enable_log_collection=True, enable_diagnostic=True):
+    def start_monitoring(self):
         """
         Start monitoring service (non-blocking)
 
-        Args:
-            enable_log_collection: Whether to enable log collection
-            enable_diagnostic: Whether to enable diagnostic report generation
         """
         if self.is_running:
             logger.warning("Monitor service is already running")
             return
 
-        self.log_collection_enabled = enable_log_collection
-        self.diagnostic_enabled = enable_diagnostic
         self.is_running = True
 
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
         logger.info(f"Monitor service started with interval={self.interval}s")
-        logger.info(f"Log collection enabled: {enable_log_collection}")
-        logger.info(f"Diagnostic enabled: {enable_diagnostic}")
         logger.info(f"Monitor logs will be saved to: {self.monitor_log_dir}")
 
     def stop(self):
@@ -205,9 +203,6 @@ class MonitorService:
                 with open(pid_file, 'r') as f:
                     pid = int(f.read().strip())
 
-                # Check if process exists
-                import subprocess
-
                 try:
                     result = subprocess.run(['ps', '-p', str(pid)], capture_output=True, text=True)
                     if result.returncode != 0:
@@ -230,11 +225,16 @@ class MonitorService:
             # Write monitor-detected kill entry (won't be re-detected by diagnostic.py)
             kill_entry = f"[{current_time}] MonitorDetected: MANUAL KILL DETECTED - Process terminated unexpectedly, likely killed manually"
 
-            if not hasattr(self.runner, 'resources') or self.runner.resources is None:
-                # Local mode
+            if self.single_node_mode:
+                # Single-node monitoring mode
+                self._write_diagnostic_entry(
+                    self.monitored_host, self.monitored_node_rank, kill_entry
+                )
+            elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+                # Local mode (backward compatibility)
                 self._write_diagnostic_entry("localhost", 0, kill_entry)
             else:
-                # Multi-node mode
+                # Multi-node mode (centralized monitoring)
                 for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                     self._write_diagnostic_entry(host, node_rank, kill_entry)
 
@@ -283,9 +283,14 @@ class MonitorService:
             logger.error(f"Failed to write status log: {e}")
 
     def _collect_logs(self):
-        if not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        if self.single_node_mode:
+            # Single-node monitoring mode - each node monitors only itself
+            self._collect_logs_for_host(self.monitored_host, self.monitored_node_rank)
+        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+            # Local mode (backward compatibility)
             self._collect_logs_for_host("localhost", 0)
         else:
+            # Multi-node mode (centralized monitoring)
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 self._collect_logs_for_host(host, node_rank)
 
@@ -301,30 +306,31 @@ class MonitorService:
             logger.error(f"Failed to collect logs for {host} (node {node_rank}): {e}")
 
     def _generate_diagnostics(self):
-        if not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        """Generate diagnostc report"""
+        if self.single_node_mode:
+            # Single-node monitoring mode - each node monitors only itself
+            self._generate_diagnostic_for_host(self.monitored_host, self.monitored_node_rank)
+        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
             self._generate_diagnostic_for_host("localhost", 0)
         else:
+            # Multi-nodes (centralized monitoring)
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 self._generate_diagnostic_for_host(host, node_rank)
 
     def _generate_diagnostic_for_host(self, host: str, node_rank: int):
         try:
             log_file_path = None
-            log_files = [
-                f
-                for f in os.listdir(self.monitor_log_dir)
-                if f.startswith(f"host_{node_rank}_{host}_temp_") and f.endswith(".log")
-            ]
-
-            if log_files:
-                latest_log = max(
-                    log_files, key=lambda f: os.path.getmtime(os.path.join(self.monitor_log_dir, f))
-                )
-                log_file_path = os.path.join(self.monitor_log_dir, latest_log)
-
+            current_log_file = os.path.join(
+                self.monitor_log_dir, f"host_{node_rank}_{host}_current.log"
+            )
+            if os.path.exists(current_log_file):
+                log_file_path = current_log_file
             else:
                 no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
                 if no_shared_fs:
+                    logger.warning(
+                        "no_shared_fs path has NOT been fully tested and may behave incorrectly!"
+                    )
                     src_log_file = os.path.join(
                         self.config.train.system.logging.log_dir, "host.output"
                     )
@@ -373,18 +379,21 @@ class MonitorService:
                     self.config.train.system.logging.log_dir, f"host_{node_rank}_{host}.output"
                 )
 
-            if not os.path.exists(log_file):
-                return False
-
-            def get_remote_mtime(host, log_file):
-                cmd = ["ssh", host, f"stat -c%Y {log_file}"]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                return int(result.stdout.strip())
-
             # Get current modification time
             if no_shared_fs:
-                current_mtime = get_remote_mtime(host, log_file)
+                logger.warning(
+                    "no_shared_fs path has NOT been fully tested and may behave incorrectly!"
+                )
+                # For remote files, get mtime via SSH
+                ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+                current_mtime = get_remote_file_mtime(host, log_file, ssh_port)
+                if current_mtime == -1:
+                    # Remote file doesn't exist or SSH failed
+                    return False
             else:
+                # For local/shared files, check existence and get mtime
+                if not os.path.exists(log_file):
+                    return False
                 current_mtime = os.path.getmtime(log_file)
             current_time = time.time()
 
@@ -421,6 +430,9 @@ class MonitorService:
             # Determine log file name for reference
             no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
             if no_shared_fs:
+                logger.warning(
+                    "no_shared_fs path has NOT been fully tested and may behave incorrectly!"
+                )
                 log_filename = "host.output"
             else:
                 log_filename = f"host_{node_rank}_{host}.output"
@@ -450,58 +462,16 @@ class MonitorService:
 
     def _check_and_report_hang(self):
         """Check for hanging processes and report them"""
-        if not hasattr(self.runner, 'resources') or self.runner.resources is None:
-            # Local mode
+        if self.single_node_mode:
+            # Single-node monitoring mode
+            if self._check_log_hang(self.monitored_host, self.monitored_node_rank):
+                self._generate_hang_diagnostic(self.monitored_host, self.monitored_node_rank)
+        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+            # Local mode (backward compatibility)
             if self._check_log_hang("localhost", 0):
                 self._generate_hang_diagnostic("localhost", 0)
         else:
-            # Multi-node mode
+            # Multi-node mode (centralized monitoring)
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 if self._check_log_hang(host, node_rank):
                     self._generate_hang_diagnostic(host, node_rank)
-
-    def get_status_summary(self) -> Dict[str, Any]:
-        return {
-            "is_running": self.is_running,
-            "interval": self.interval,
-            "log_collection_enabled": self.log_collection_enabled,
-            "diagnostic_enabled": self.diagnostic_enabled,
-            "monitor_log_dir": self.monitor_log_dir,
-            "thread_alive": self.monitor_thread.is_alive() if self.monitor_thread else False,
-        }
-
-
-def main():
-    """
-    python monitor_service.py [config_file] [interval]
-    """
-    import argparse
-
-    from omegaconf import OmegaConf
-
-    parser = argparse.ArgumentParser(description="Run FlagScale monitor service")
-    parser.add_argument("--config", type=str, help="Config file path")
-    parser.add_argument("--interval", type=int, default=10, help="Monitor interval in seconds")
-    parser.add_argument("--no-log-collection", action="store_true", help="Disable log collection")
-    parser.add_argument("--no-diagnostic", action="store_true", help="Disable diagnostic reports")
-
-    args = parser.parse_args()
-
-    if not args.config:
-        logger.error("Config file is required")
-        sys.exit(1)
-
-    try:
-        config = OmegaConf.load(args.config)
-
-        # Here needs to create a runner instance according to the actual situation
-        logger.info("Monitor service is designed to be integrated with runner_train.py")
-        logger.info("For standalone usage, additional runner initialization is needed")
-
-    except Exception as e:
-        logger.error(f"Failed to start monitor service: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

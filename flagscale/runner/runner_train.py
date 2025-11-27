@@ -282,13 +282,15 @@ def _generate_run_script_train(
             f.write(f'python {monitor_launcher_path} \\\n')
             f.write(f'  --log-dir "{logging_config.log_dir}" \\\n')
             f.write(f'  --pid-file "{host_pid_file}" \\\n')
+            f.write(f'  --host "{host}" \\\n')
+            f.write(f'  --node-rank {node_rank} \\\n')
             f.write(f'  {"--no-shared-fs" if no_shared_fs else ""} \\\n')
             f.write(f'  --ssh-port {ssh_port} \\\n')
             f.write(f'  --interval 5 \\\n')
             f.write(f'  --enable-log-collection \\\n')
             f.write(f'  --enable-diagnostic \\\n')
             f.write(f'  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n')
-            f.write(f'echo "Monitor service started in background"\n')
+            f.write(f'echo "Monitor service started in background for {host} (node {node_rank})"\n')
         f.write(f'\n')
 
         if with_test:
@@ -358,7 +360,6 @@ def run_node(
     available_port,
     with_test,
     dryrun,
-    enable_monitoring=True,
 ):
     cur_envs = update_nodes_envs(user_envs, host, resource_info)
     # Get the number of visible devices from the environment variable, e.g. CUDA_VISIBLE_DEVICES, MLU_VISIBLE_DEVICES
@@ -480,15 +481,11 @@ class SSHTrainRunner(RunnerBase):
             run_local_command(f"bash {host_run_script_file}", dryrun)
 
     def run(
-        self,
-        with_test=False,
-        dryrun=False,
-        monitor=False,
-        interval=10,
-        enable_log_collection=True,
-        enable_diagnostic=True,
-        enable_monitoring=False,
+        self, with_test=False, dryrun=False, monitor=False, interval=10, enable_monitoring=None
     ):
+        # Read from config if not explicitly provided
+        if enable_monitoring is None:
+            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
 
         num_visible_devices = None
         runner_config = self.config.experiment.runner
@@ -518,7 +515,6 @@ class SSHTrainRunner(RunnerBase):
                         available_port,
                         with_test,
                         dryrun,
-                        enable_monitoring,
                     )
                     tasks.append(args)
                 pool.starmap(run_node, tasks)
@@ -558,18 +554,6 @@ class SSHTrainRunner(RunnerBase):
                 logger.info("Job Ended.")
             except Exception as e:
                 logger.info(e)
-
-        if enable_monitoring:
-            logger.info("Starting monitoring service...")
-            monitor_service = MonitorService(self.config, self, interval)
-            monitor_service.start_monitoring(
-                enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
-            )
-            logger.info("Monitoring service started in background")
-            logger.info("Training job will continue running, monitor logs will be saved")
-
-            # Return the monitor_service instance for external control.
-            return monitor_service
 
         return None
 
@@ -776,24 +760,18 @@ class SSHTrainRunner(RunnerBase):
         """
         return self._query_status()
 
-    def start_monitoring_service(
-        self, interval=10, enable_log_collection=True, enable_diagnostic=True
-    ):
+    def start_monitoring_service(self, interval=10):
         """
         Start independent monitoring service (non-blocking).
 
         Args:
             interval (int): Monitor interval in seconds
-            enable_log_collection (bool): Enable log collection
-            enable_diagnostic (bool): Enable diagnostic report generation
 
         Returns:
             MonitorService: Monitor service instance
         """
         monitor_service = MonitorService(self.config, self, interval)
-        monitor_service.start_monitoring(
-            enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
-        )
+        monitor_service.start_monitoring()
         logger.info(f"Independent monitoring service started with interval={interval}s")
         return monitor_service
 
@@ -880,13 +858,7 @@ class CloudTrainRunner(RunnerBase):
         cmd = shlex.join(export_cmd + runner_cmd + [self.user_script] + self.user_args)
 
         host_run_script_file = _generate_run_script_train(
-            self.config,
-            host,
-            node_rank,
-            cmd,
-            background=False,
-            with_test=with_test,
-            enable_monitoring=enable_monitoring,
+            self.config, host, node_rank, cmd, background=False, with_test=with_test
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)

@@ -1,49 +1,20 @@
 import glob
 import os
 import shlex
-import subprocess
 
-from datetime import datetime
-
-from flagscale.runner.utils import logger, run_local_command
+from flagscale.runner.utils import get_remote_file_size, logger, run_local_command
 
 _log_offsets = {}
 
 
-def get_remote_file_size(host, filepath):
-    """
-    Retrieve the size of a file on a remote host (in bytes).
-
-    Parameters:
-        host (str): The address of the remote host (e.g., 'user@hostname').
-        filepath (str): The path to the file on the remote host.
-
-    Returns:
-        int: The size of the file in bytes if successful; returns -1 if an error occurs.
-
-    Exception Handling:
-        subprocess.CalledProcessError: Caught when the SSH command fails.
-    """
-    try:
-        result = subprocess.run(
-            ["ssh", host, f"stat -c%s {filepath}"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True,
-        )
-        return int(result.stdout.strip())
-    except subprocess.CalledProcessError:
-        return -1
-
-
-def get_file_size(host, filepath):
+def get_file_size(host, filepath, port=22):
     """
     Retrieve the size of a file, either locally or on a remote host (in bytes).
 
     Parameters:
         host (str): The address of the host (e.g., 'localhost' or 'user@hostname').
         filepath (str): The path to the file, either local or on the remote host.
+        port (int): SSH port number for remote hosts (default: 22).
 
     Returns:
         int: The size of the file in bytes if successful; returns -1 if the file does not exist
@@ -57,7 +28,7 @@ def get_file_size(host, filepath):
             return os.path.getsize(filepath)
         return -1
     else:
-        return get_remote_file_size(host, filepath)
+        return get_remote_file_size(host, filepath, port)
 
 
 def find_actual_log_file(log_dir, node_rank, host, no_shared_fs=False):
@@ -115,34 +86,32 @@ def collect_logs(config, host, node_rank, destination_dir, dryrun=False):
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
     log_dir = logging_config.log_dir
     src_log_file = find_actual_log_file(log_dir, node_rank, host, no_shared_fs)
-    dest_log_file = os.path.join(
-        destination_dir,
-        f"host_{node_rank}_{host}_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
-    )
+    dest_log_file = os.path.join(destination_dir, f"host_{node_rank}_{host}_current.log")
 
     os.makedirs(destination_dir, exist_ok=True)
 
     log_key = f"{host}_{node_rank}"
     offset = _log_offsets.get(log_key, 0)
 
+    ssh_port = config.experiment.runner.get("ssh_port", 22)
+
     try:
         if host != "localhost":
-            ssh_port = config.experiment.runner.get("ssh_port", 22)
-            command = f"ssh -p {ssh_port} {host} 'tail -c +{offset + 1} {shlex.quote(src_log_file)}' > {shlex.quote(dest_log_file)}"
+            command = f"ssh -p {ssh_port} {host} 'tail -c +{offset + 1} {shlex.quote(src_log_file)}' >> {shlex.quote(dest_log_file)}"
             run_local_command(command, dryrun)
             logger.debug(
                 f"Collected incremental log from {host} (node {node_rank}) to {dest_log_file}"
             )
         else:
             command = (
-                f"tail -c +{offset + 1} {shlex.quote(src_log_file)} > {shlex.quote(dest_log_file)}"
+                f"tail -c +{offset + 1} {shlex.quote(src_log_file)} >> {shlex.quote(dest_log_file)}"
             )
             run_local_command(command, dryrun)
             logger.debug(f"Collected incremental local log to {dest_log_file}")
 
         # Check if the source file exists and update the offset
         if os.path.exists(src_log_file):
-            current_src_size = get_file_size(host, src_log_file)
+            current_src_size = get_file_size(host, src_log_file, ssh_port)
             if current_src_size > 0:
                 if current_src_size > offset:  # There is new content in the source file
                     _log_offsets[log_key] = current_src_size
