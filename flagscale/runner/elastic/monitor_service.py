@@ -5,8 +5,6 @@ import sys
 import threading
 import time
 
-from typing import Any, Dict, Optional
-
 from flagscale.runner.elastic.diagnostic import generate_diagnostic_report
 from flagscale.runner.elastic.log_collector import collect_logs
 from flagscale.runner.runner_base import JobStatus
@@ -204,9 +202,6 @@ class MonitorService:
                 # PID file exists, check if process is still running
                 with open(pid_file, 'r') as f:
                     pid = int(f.read().strip())
-
-                # Check if process exists
-                import subprocess
 
                 try:
                     result = subprocess.run(['ps', '-p', str(pid)], capture_output=True, text=True)

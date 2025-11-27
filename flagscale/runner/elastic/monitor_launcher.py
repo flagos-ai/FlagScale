@@ -10,8 +10,6 @@ import subprocess
 import sys
 import time
 
-from pathlib import Path
-
 from omegaconf import OmegaConf
 
 from flagscale.runner.elastic.monitor_service import MonitorService
