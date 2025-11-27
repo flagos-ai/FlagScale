@@ -1,0 +1,12 @@
+- serve_id: vllm_model
+  engine: vllm
+  engine_args:
+    model: /share/DeepSeek-V3.2-Exp
+    served_model_name: DeepSeek-V3.2-Exp-nvidia-flagos
+    host: 0.0.0.0
+    uvicorn_log_level: warning
+    port: 9010
+  engine_args_specific:
+    vllm:
+      tensor_parallel_size: 8
+      gpu_memory_utilization: 0.9
