@@ -47,6 +47,8 @@ inference:
     -7b-tp2
 
 serve:
+  deepseek_r1_distill_qwen-huawei:
+    -32b
   qwen2_5:
     -0.5b
     -0.5b_multiple_instance

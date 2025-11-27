@@ -1,0 +1,14 @@
+- serve_id: vllm_model
+  engine: vllm
+  engine_args:
+    model: /data/weights/DeepSeek-R1-Distill-Qwen-32B # should be customized
+    host: 0.0.0.0
+    served_model_name: qwen
+    tensor_parallel_size: 8
+    max_model_len: 35536
+    max_num_seqs: 4
+    gpu_memory_utilization: 0.7
+    trust_remote_code: true
+    enforce_eager: true
+    no_enable_prefix_caching: true
+    block_size: 128

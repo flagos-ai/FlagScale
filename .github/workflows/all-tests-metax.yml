@@ -6,13 +6,13 @@ on:
     paths:
       - '.github/workflows/*metax*.yml'
       - 'hardware/Metax_C550/**'
-      - 'tests/**'
+      - 'tests/functional_tests/test_cases/**/*-metax'
   pull_request:
     branches: ["main"]
     paths:
       - '.github/workflows/*metax*.yml'
       - 'hardware/Metax_C550/**'
-      - 'tests/**'
+      - 'tests/functional_tests/test_cases/**/*-metax'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}

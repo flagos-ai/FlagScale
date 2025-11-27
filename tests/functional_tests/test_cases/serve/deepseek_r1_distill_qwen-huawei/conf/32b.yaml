@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - serve: 32b
+experiment:
+  exp_name: deepseek_r1_distill_qwen-huawei
+  exp_dir: tests/functional_tests/test_cases/serve/deepseek_r1_distill_qwen-huawei/results_test/32b
+  task:
+    type: serve
+    entrypoint: null
+  runner:
+    hostfile: null
+    deploy:
+      port: 6704
+      use_fs_serve: false
+  envs:
+    ASCEND_RT_VISIBLE_DEVICES: "8,9,10,11,12,13,14,15"
+    ASCEND_LAUNCH_BLOCKING: 0
+    CPU_AFFINITY_CONF: 2
+    PYTORCH_NPU_ALLOC_CONF: "max_split_size_mb:256"
+    VLLM_OPTIMIZATION_LEVEL: 3
+    VLLM_USE_V1: 1
+    USING_SAMPLING_TENSOR_CACHE: 1
+    USING_LCCL_COM: 1
+    no_proxy: "127.0.0.1,localhost"
+
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

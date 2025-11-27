@@ -115,6 +115,50 @@ wait_for_gpu_metax() {
     echo "All Metax GPUs have sufficient free memory, GPU memory usage ratio is below 50% (current max usage: ${max_usage_percent}%)"
 }
 
+# Function to wait for GPU availability using mx-smi
+# This function monitors Hwawei NPU memory usage and waits until it's below 50%
+wait_for_npu_ascend() {
+    local NPU_count
+    NPU_count=$(npu-smi info -l | grep "Total Count" | awk '{print $4}')
+
+    while true; do
+        local memory_usage_array=()
+        for ((i = 0; i < NPU_count; i++)); do
+            local chip_usage_array=()
+            mapfile -t chip_usage_array < <(npu-smi info -t usages -i $i | awk '/HBM Usage Rate\(%\)/ {print $NF}' 2>/dev/null)
+            # echo "chip_usage_array: ${chip_usage_array[@]}"
+            memory_usage=$(printf "%s\n" "${chip_usage_array[@]}" | sort -nr | head -n1)
+            memory_usage_array+=($memory_usage)
+            # echo "memory_usage_array: ${memory_usage_array[@]}"
+        done
+
+        local need_wait=false
+        local max_usage_percent=0
+
+        for ((i=0; i<${#memory_usage_array[@]}; i++)); do
+            local usage_percent=${memory_usage_array[$i]}
+            if [[ $usage_percent =~ ^[0-9]+$ ]] && [ "$usage_percent" -gt 0 ]; then
+                if [ $usage_percent -gt $max_usage_percent ]; then
+                    max_usage_percent=$usage_percent
+                fi
+            else
+                echo "Warning: Invalid memory values - usage: '$usage_percent'"
+                need_wait=true
+                break
+            fi
+        done
+
+        if [ "$need_wait" = false ] && [ $max_usage_percent -le 50 ]; then
+            break
+        fi
+
+        echo "Waiting for NPU memory usage to drop below 50% (current max usage: ${max_usage_percent}%)"
+        sleep 1m
+    done
+
+    echo "All NPUs have sufficient free memory, NPU memory usage ratio is below 50% (current max usage: ${max_usage_percent}%)"
+}
+
 # Main function to detect GPU tool and call appropriate wait function
 # Future: Additional chip types can be added here by extending the detection logic
 # and implementing corresponding wait functions (e.g., wait_for_gpu_amd, wait_for_gpu_intel, etc.)
@@ -125,6 +169,9 @@ wait_for_gpu() {
     elif command -v mx-smi &> /dev/null; then
         echo "Detected mx-smi, using Metax GPU monitoring"
         wait_for_gpu_metax
+    elif command -v npu-smi info &> /dev/null; then
+        echo "Detected npu-smi info, using Huawei NPU monitoring"
+        wait_for_npu_ascend
     else
         echo "Error: Neither nvidia-smi nor mx-smi is available"
         echo "Note: If you are using a new chip type, please add GPU idle detection method for your chip"

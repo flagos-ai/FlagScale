@@ -12,6 +12,9 @@ on:
       - 'hardware/MUSA_S5000/**'
       - 'hardware/Metax_C550/**'
       - 'hardware/Tsing_micro/**'
+      - 'tests/scripts/**'
+      - 'tests/functional_tests/test_cases/**/*-metax'
+      - 'tests/functional_tests/test_cases/**/*-huawei'
   pull_request:
     branches: ["main"]
     paths-ignore:
@@ -23,6 +26,9 @@ on:
       - 'hardware/MUSA_S5000/**'
       - 'hardware/Metax_C550/**'
       - 'hardware/Tsing_micro/**'
+      - 'tests/scripts/**'
+      - 'tests/functional_tests/test_cases/**/*-metax'
+      - 'tests/functional_tests/test_cases/**/*-huawei'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
