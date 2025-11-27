@@ -1,26 +1,41 @@
 #  Install FlagScale
 
-Clone FlagScale code from github.
+1. Clone FlagScale code from github.
+    ```sh
+    git clone https://github.com/FlagOpen/FlagScale.git
+    cd FlagScale/
+    ```
 
-```sh
-git clone https://github.com/FlagOpen/FlagScale.git
-cd FlagScale/
-```
+    If you don't have access to the international internet, import FlagScale project on [gitee](https://gitee.com/), then clone from gitee.
 
-If you don't have access to the international internet, import FlagScale project on [gitee](https://gitee.com/), then clone from gitee.
+    ```sh
+    git clone https://gitee.com/flagopen/FlagScale.git
+    cd FlagScale/
+    ```
+2. Install Requirements
 
-```sh
-git clone https://gitee.com/flagopen/FlagScale.git
-cd FlagScale/
-```
+    We provide two installation methods: source code installation and whl package installation.
+    - Source Installation
+        ```sh
+        # Python packages which do not require additional compilation
+        cd FlagScale
+        PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend=robotics --config-settings=device=gpu  --verbose --no-build-isolation
 
-Install train and inference env according to [README](https://github.com/FlagOpen/FlagScale/blob/main/README.md) 
+        # Other packages which need to be compiled include TransformerEngine, Apex, etc.
+        ./install/install-requirements-robo.sh --env [inference|train]
 
-Install transformers(v4.53.0). Higher version will cause problem on image pre-processing.
+        ```
+    - Whl Installation
+        ```sh
+        pip install flag-scale[robotics-gpu]
+        INSTALLED_LOC=$(pip show flag-scale | grep "^Location:" | awk '{print $2}') && \
+        cp -r "$INSTALLED_LOC/flag_scale/third_party"/* third_party/
 
-```sh
-pip install transformers==4.53.0
-```
+        # Other packages which need to be compiled include TransformerEngine, Apex, etc.
+        flagscale install robotics --device=gpu
+        ```
+    > **⚠️ 注意**: The robo environment depends on transformers (v4.53.0). Higher version will cause problem on image pre-processing.
+
 
 # Download Model
 

@@ -3,28 +3,68 @@ import shutil
 import subprocess
 import sys
 
-from setuptools import find_packages, setup
+from setuptools import setup
 from setuptools.command.build import build as _build
 from setuptools.command.build_ext import build_ext as _build_ext
 from setuptools.command.build_py import build_py as _build_py
-from setuptools.command.install import install
 from setuptools.command.install_lib import install_lib as _install_lib
-
-try:
-    import git  # from GitPython
-except:
-    try:
-        print("[INFO] GitPython not found. Installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "gitpython"])
-        import git
-    except:
-        print(
-            "[ERROR] Failed to install flagscale. Please use 'pip install . --no-build-isolation' to reinstall when the pip version > 23.1."
-        )
-        sys.exit(1)
 
 SUPPORTED_DEVICES = ["cpu", "gpu", "ascend", "cambricon", "bi", "metax", "kunlunxin", "musa"]
 VLLM_UNPATCH_DEVICES = ["ascend", "cambricon", "bi", "metax", "kunlunxin"]
+
+
+def _read_requirements_file(requirements_path):
+    """Read the requirements file and return the dependency list"""
+    requirements_file = os.path.join(os.path.dirname(__file__), requirements_path)
+    if not os.path.exists(requirements_file):
+        return []
+    
+    requirements = []
+    with open(requirements_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            # Skip lines starting with -r (recursive reference)
+            if line.startswith('-r') or line.startswith('--'):
+                continue
+            requirements.append(line)
+    return requirements
+
+
+def _is_in_build_isolation():
+    """Check if in the pip build isolation environment"""
+
+    for path in sys.path:
+        if '/pip-build-env-' in path:
+            return True
+    
+    # Check the path of the current Python executable
+    if '/pip-build-env-' in sys.executable:
+        return True
+    
+    # Check if the site-packages path contains the isolation environment
+    import site
+    try:
+        site_packages = site.getsitepackages()
+        for sp in site_packages:
+            if '/pip-build-env-' in sp:
+                return True
+    except:
+        pass
+    
+    return False
+
+# If not in an isolated environment, it means that --no-build-isolation is used
+_using_no_build_isolation = not _is_in_build_isolation()
+
+if _using_no_build_isolation:
+    build_sys_requires = ["setuptools>=77.0", "wheel", "gitpython", "pyyaml", "cryptography", "pip", "hatchling", "hatch-vcs", "editables"]
+    install_cmd = [sys.executable, "-m", "pip", "install"] + build_sys_requires
+    subprocess.check_call(install_cmd)
+else:
+    raise ValueError("Not in an isolated environment, please use --no-build-isolation flag.")
 
 
 def _check_backend(backend):
@@ -163,7 +203,7 @@ def _build_megatron_energon(device):
             sys.exit(1)
     energon_path = os.path.join(os.path.dirname(__file__), "third_party", "Megatron-Energon")
     subprocess.check_call(
-        [sys.executable, '-m', 'pip', 'install', '-e', '.', '--no-build-isolation', '--verbose'],
+        [sys.executable, '-m', 'pip', 'install', '-e', '.[av_decode]', '--no-build-isolation', '--verbose'],
         cwd=energon_path,
     )
 
@@ -182,6 +222,7 @@ class FlagScaleBuild(_build):
         super().initialize_options()
         self.backend = None
         self.device = None
+        self.extras_to_install = []  # List of extra names to install
 
     def finalize_options(self):
         super().finalize_options()
@@ -189,6 +230,21 @@ class FlagScaleBuild(_build):
             self.backend = os.environ.get("FLAGSCALE_BACKEND")
         if self.device is None:
             self.device = os.environ.get("FLAGSCALE_DEVICE", "gpu")
+        
+        # Check if we need to install extra dependencies based on backend-device combination
+        self.extras_to_install = []
+        if self.backend and self.device:
+            if hasattr(self.distribution, 'extras_require') and self.distribution.extras_require:
+                available_extras = self.distribution.extras_require.keys()
+                original_backends = [b.strip() for b in self.backend.split(",")]
+                for backend in original_backends:
+                    extra_name = f"{backend.lower()}-{self.device.lower()}"
+                    if extra_name in available_extras:
+                        self.extras_to_install.append(extra_name)
+                        print(f"[build] Detected backend={backend} and device={self.device}, will install {extra_name} extra dependencies")
+                    else:
+                        print(f"[build] No extra '{extra_name}' found in extras_require, skipping")
+        
         if self.backend is not None:
             # Set the environment variables for backends and device to use in the install command
             # os.environ["FLAGSCALE_BACKEND"] = self.backend
@@ -198,13 +254,64 @@ class FlagScaleBuild(_build):
             from tools.patch.patch import normalize_backend
 
             backends = self.backend.split(",")
-            self.backend = [normalize_backend(backend.strip()) for backend in backends]
+            normalized = []
+            for backend in backends:
+                item = normalize_backend(backend.strip())
+                if isinstance(item, list):
+                    normalized.extend(item)
+                else:
+                    normalized.append(item)
+            self.backend = normalized
             print(f"[build] Received backend = {self.backend}")
             print(f"[build] Received device = {self.device}")
         else:
             print(f"[build] No backend specified, just build FlagScale python codes.")
 
+        
+    def install_extras(self):
+        """Install extra requirements from extras_require"""
+        if not self.extras_to_install:
+            return
+
+        if hasattr(self.distribution, 'extras_require') and self.distribution.extras_require:
+            all_deps_to_install = []
+            
+            for extra_name in self.extras_to_install:
+                if extra_name in self.distribution.extras_require:
+                    deps = self.distribution.extras_require[extra_name]
+                    if deps:
+                        print(f"[build] Found {extra_name} extra with {len(deps)} dependencies")
+                        all_deps_to_install.extend(deps)
+                    else:
+                        print(f"[build] Warning: {extra_name} extra has no dependencies defined")
+                else:
+                    print(f"[build] Warning: {extra_name} extra not found in extras_require")
+            
+            if all_deps_to_install:
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_deps = []
+                for dep in all_deps_to_install:
+                    if dep not in seen:
+                        seen.add(dep)
+                        unique_deps.append(dep)
+                
+                print(f"[build] Installing {len(unique_deps)} unique dependencies from extras: {self.extras_to_install}")
+                install_cmd = [sys.executable, "-m", "pip", "install"] + unique_deps
+                try:
+                    subprocess.check_call(install_cmd)
+                    print(f"[build] Successfully installed dependencies from extras: {self.extras_to_install}")
+                except subprocess.CalledProcessError as e:
+                    print(f"[build] Warning: Failed to install some dependencies from extras {self.extras_to_install}: {e}")
+                    # Continue build even if some dependencies fail to install
+            else:
+                print(f"[build] No dependencies to install from extras: {self.extras_to_install}")
+        else:
+            print(f"[build] Warning: distribution has no extras_require defined")
+
+
     def run(self):
+        self.install_extras()
         if self.backend is not None:
             build_py_cmd = self.get_finalized_command('build_py')
             build_py_cmd.backend = self.backend
@@ -474,6 +581,54 @@ class FlagScaleInstallLib(_install_lib):
         raise ValueError(self.install_dir)
 
 
+def _get_install_requires():
+    """获取 install_requires 列表"""
+    install_requires = []
+    
+    install_requires.extend(_read_requirements_file('requirements/requirements-base.txt'))
+    install_requires.extend(_read_requirements_file('requirements/requirements-common.txt'))
+    core_deps = [
+        "setuptools>=77.0.0",
+        "packaging>=24.2",
+        "importlib_metadata>=8.5.0",
+        "torch==2.7.1", 
+        "torchaudio==2.7.1",
+        "torchvision==0.22.1",
+    ]
+    
+    all_deps = install_requires + core_deps
+    seen = set()
+    result = []
+    for dep in all_deps:
+        # Process various version number formats: ==, >=, <=, >, <, !=
+        pkg_name = dep.split("==")[0].split(">=")[0].split("<=")[0].split(">")[0].split("<")[0].split("!=")[0].strip()
+        pkg_name_lower = pkg_name.lower()
+        if pkg_name_lower not in seen:
+            seen.add(pkg_name_lower)
+            result.append(dep)
+    
+    return result
+
+
+def _get_extras_require():
+    """Build the extras_require dictionary"""
+    extras_require = {}
+    
+    # robotics-gpu extra
+    robotics_gpu_deps = []
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/requirements-common.txt'))
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/serving/requirements.txt'))
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/serving/robotics/requirements.txt'))
+    robotics_gpu_deps.extend(_read_requirements_file('requirements/train/robotics/requirements.txt'))
+    
+    # TODO: add megatron-lm-fl dependency when it is published
+    # robotics_gpu_deps.append(f"megatron-lm-fl=={FLAGSCALE_VERSION}")
+
+    extras_require['robotics-gpu'] = robotics_gpu_deps
+    
+    return extras_require
+
+
 from version import FLAGSCALE_VERSION
 
 setup(
@@ -500,15 +655,11 @@ setup(
         "flag_scale.examples": ["**/*"],
         "flag_scale.tools": ["**/*"],
         "flag_scale.tests": ["**/*"],
+        "flag_scale": ["third_party/Megatron-LM/**/*"],  # TODO: remove this after megatron-lm-fl is published
+
     },
-    install_requires=[
-        "click",
-        "gitpython",
-        "cryptography",
-        "setuptools>=77.0.0",
-        "packaging>=24.2",
-        "importlib_metadata>=8.5.0",
-    ],
+    install_requires=_get_install_requires(),
+    extras_require=_get_extras_require(),
     entry_points={"console_scripts": ["flagscale=flag_scale.flagscale.cli:flagscale"]},
     cmdclass={
         "build": FlagScaleBuild,
