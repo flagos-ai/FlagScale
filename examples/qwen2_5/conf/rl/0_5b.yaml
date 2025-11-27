@@ -10,7 +10,7 @@ algorithm:
 
 data:
   train_files: /workspace/data/gsm8k/train.parquet
-  val_files: /workspace/data/gsm8k/train.parquet
+  val_files: /workspace/data/gsm8k/test.parquet
   train_batch_size: 1024
   max_prompt_length: 512
   max_response_length: 1024
