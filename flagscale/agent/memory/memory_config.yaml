@@ -1,0 +1,40 @@
+# Memory Module Configuration
+
+memory:
+  short_term:
+    max_size: 1000
+    auto_cleanup: true
+  
+  long_term:
+    provider: "mem0"
+    agent_name: "my_agent"
+    user_name: null
+    run_name: null
+    
+    vector_store_type: "qdrant"
+    vector_store_path: "./qdrant_storage"
+    collection_name: "memory_collection"
+    on_disk: true
+    
+    default_memory_type: null
+    
+    llm:
+      provider: "openai"
+      model: "gpt-3.5-turbo"
+      api_base: null
+      api_key: "${OPENAI_API_KEY}"
+      temperature: 0.7
+      max_tokens: 2000
+    
+    embedding:
+      provider: "openai"
+      model: "text-embedding-3-small"
+      api_base: null
+      api_key: "${OPENAI_API_KEY}"
+      dimensions: 1536
+  
+  enable_short_term: true
+  enable_long_term: false
+  auto_record: false
+  auto_record_threshold: 10
+
