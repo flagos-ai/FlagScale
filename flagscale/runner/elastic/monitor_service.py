@@ -480,39 +480,3 @@ class MonitorService:
             for node_rank, (host, _) in enumerate(self.runner.resources.items()):
                 if self._check_log_hang(host, node_rank):
                     self._generate_hang_diagnostic(host, node_rank)
-
-
-def main():
-    """
-    python monitor_service.py [config_file] [interval]
-    """
-    import argparse
-
-    from omegaconf import OmegaConf
-
-    parser = argparse.ArgumentParser(description="Run FlagScale monitor service")
-    parser.add_argument("--config", type=str, help="Config file path")
-    parser.add_argument("--interval", type=int, default=10, help="Monitor interval in seconds")
-    parser.add_argument("--no-log-collection", action="store_true", help="Disable log collection")
-    parser.add_argument("--no-diagnostic", action="store_true", help="Disable diagnostic reports")
-
-    args = parser.parse_args()
-
-    if not args.config:
-        logger.error("Config file is required")
-        sys.exit(1)
-
-    try:
-        config = OmegaConf.load(args.config)
-
-        # Here needs to create a runner instance according to the actual situation
-        logger.info("Monitor service is designed to be integrated with runner_train.py")
-        logger.info("For standalone usage, additional runner initialization is needed")
-
-    except Exception as e:
-        logger.error(f"Failed to start monitor service: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
