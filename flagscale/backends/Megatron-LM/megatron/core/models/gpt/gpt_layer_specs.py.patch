@@ -1,10 +1,41 @@
 diff --git a/megatron/core/models/gpt/gpt_layer_specs.py b/megatron/core/models/gpt/gpt_layer_specs.py
 old mode 100755
 new mode 100644
-index 68c1eb8c9..1b60a4a13
+index 68c1eb8c9..2e3c5966d
 --- a/megatron/core/models/gpt/gpt_layer_specs.py
 +++ b/megatron/core/models/gpt/gpt_layer_specs.py
-@@ -408,6 +408,7 @@ def get_gpt_decoder_block_spec(
+@@ -32,6 +32,7 @@ from megatron.core.transformer.transformer_layer import (
+     TransformerLayerSubmodules,
+     get_transformer_layer_offset,
+ )
++from megatron.core.transformer.flex_attention import FlexAttention
+ 
+ try:
+     import transformer_engine as te  # pylint: disable=unused-import
+@@ -80,6 +81,7 @@ def get_gpt_layer_with_transformer_engine_spec(
+     use_te_op_fuser: Optional[bool] = False,
+     use_kitchen: bool = False,
+     use_te_activation_func: bool = False,
++    flex_attention: Optional[bool] = False,
+ ) -> ModuleSpec:
+     """Use this spec to use lower-level Transformer Engine modules (required for fp8 training).
+ 
+@@ -162,12 +164,13 @@ def get_gpt_layer_with_transformer_engine_spec(
+             ),
+         )
+     else:
++        attention_module = FlexAttention if flex_attention else SelfAttention
+         qk_norm = backend.layer_norm(for_qk=True)
+         return ModuleSpec(
+             module=TransformerLayer,
+             submodules=TransformerLayerSubmodules(
+                 self_attention=ModuleSpec(
+-                    module=SelfAttention,
++                    module=attention_module,
+                     params={"attn_mask_type": AttnMaskType.causal},
+                     submodules=SelfAttentionSubmodules(
+                         linear_qkv=backend.column_parallel_layer_norm_linear(),
+@@ -408,6 +411,7 @@ def get_gpt_decoder_block_spec(
      qk_l2_norm: Optional[bool] = False,
      vp_stage: Optional[int] = None,
      pp_rank: Optional[int] = None,
@@ -12,7 +43,7 @@ index 68c1eb8c9..1b60a4a13
  ) -> TransformerBlockSubmodules:
      """GPT block spec."""
      if use_transformer_engine:
-@@ -487,7 +488,8 @@ def get_gpt_decoder_block_spec(
+@@ -487,7 +491,8 @@ def get_gpt_decoder_block_spec(
  
      # Slice the layer specs to only include the layers that are built in this pipeline stage.
      # Note: MCore layer_number starts at 1
@@ -22,7 +53,7 @@ index 68c1eb8c9..1b60a4a13
  
      if config.pipeline_model_parallel_layout is not None:
          local_layer_specs = [
-@@ -497,7 +499,8 @@ def get_gpt_decoder_block_spec(
+@@ -497,7 +502,8 @@ def get_gpt_decoder_block_spec(
              )
          ]
      else:
