@@ -233,26 +233,6 @@ def get_remote_file_mtime(host, filepath, port=22):
         return -1
 
 
-def get_remote_file_exists(host, filepath, port=22):
-    """
-    Check if a file exists on a remote host.
-
-    Args:
-        host (str): The address of the remote host (e.g., 'user@hostname').
-        filepath (str): The path to the file on the remote host.
-        port (int): SSH port number (default: 22).
-
-    Returns:
-        bool: True if the file exists, False otherwise.
-    """
-    try:
-        cmd = ["ssh", "-p", str(port), host, f"test -f {filepath}"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
 def get_remote_file_size(host, filepath, port=22):
     """
     Get size of a file on a remote host (in bytes).
