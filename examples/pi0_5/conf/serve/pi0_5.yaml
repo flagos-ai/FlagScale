@@ -1,0 +1,35 @@
+serve:
+  engine:
+    host: 0.0.0.0
+    uvicorn_log_level: warning
+    port: 5000
+    model: /share/pi0_5/pi05_base
+    tokenizer: /share/paligemma-3b-pt-224
+    stat_path: /share/pi05_dataset/stats.json
+    loader: pi0_5
+    results_path: ${experiment.exp_dir}/results
+    device: "cuda"
+    output_format: image
+    torch_dtype: float32
+    transformations:
+      LogIOTransformation:
+        log_level: "info"
+      StateScopeTransformation:
+        {}
+
+  generate:
+    images_keys:
+      - observation.images.camera0
+      - observation.images.camera1
+      - observation.images.camera2
+    images_shape: [3, 480, 640]
+    batch_size: 1
+    action_dim: 32
+    action_steps: 16
+    state_key: observation.state
+    instruction:
+      task:
+        - "Pick up the red block and place it on the blue box"
+    pi05_mode: true
+    discrete_state_input: true
+    tokenizer_max_length: 200

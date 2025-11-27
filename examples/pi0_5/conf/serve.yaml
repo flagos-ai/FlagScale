@@ -1,0 +1,29 @@
+serve:
+  engine:
+    host: 0.0.0.0
+    uvicorn_log_level: warning
+    port: 5000
+    model: /share/pi0_5/pi05_base
+    tokenizer: /share/paligemma-3b-pt-224
+    stat_path: /share/pi05_dataset/stats.json
+    loader: pi0_5
+    device: cuda
+    torch_dtype: torch.float32
+
+  generate:
+    pi05_mode: true
+    discrete_state_input: true
+    tokenizer_max_length: 200
+    action_dim: 32
+    action_steps: 16
+    batch_size: 1
+    images_shape: [3, 480, 640]
+    images_keys:
+      - observation.images.camera0
+      - observation.images.camera1
+      - observation.images.camera2
+    instruction:
+      task:
+        - "Pick up the red block"
+        - "Move to the blue container"
+        - "Grasp the object"
