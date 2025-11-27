@@ -1,5 +1,5 @@
 diff --git a/verl/utils/seqlen_balancing.py b/verl/utils/seqlen_balancing.py
-index bc5588f7..0ac3a75a 100644
+index bc5588f7..905dcb74 100644
 --- a/verl/utils/seqlen_balancing.py
 +++ b/verl/utils/seqlen_balancing.py
 @@ -15,7 +15,9 @@
@@ -13,7 +13,7 @@ index bc5588f7..0ac3a75a 100644
  import torch
  from torch import distributed as dist
  
-@@ -34,162 +36,605 @@ def calculate_workload(seqlen_list: list[int]):
+@@ -34,162 +36,601 @@ def calculate_workload(seqlen_list: list[int]):
      return 24576 * seqlen_list + seqlen_list**2
  
  
@@ -442,7 +442,7 @@ index bc5588f7..0ac3a75a 100644
 +                and len(current_bin) >= self.max_sequences_per_bin
              )
 -    return partitions
- 
++
 +            # If adding this sequence would exceed constraints, start a new bin
 +            if exceeds_capacity or exceeds_sequence_limit:
 +                if current_bin:  # Only add the bin if it's not empty
@@ -459,8 +459,9 @@ index bc5588f7..0ac3a75a 100644
 +            bins.append(current_bin)
 +
 +        return bins
-+
-+
+ 
+ 
+-def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, equal_size: bool):
 +class FirstFitPacker(SequencePacker):
 +    """Base class for First-Fit algorithms.
 +
@@ -470,8 +471,12 @@ index bc5588f7..0ac3a75a 100644
 +    This is an abstract base class that provides the common implementation for
 +    First-Fit variants. Subclasses must implement the _prepare_sequences method
 +    to determine the order in which sequences are processed.
-+    """
-+
+     """
+-    Calculates partitions of indices from seqlen_list such that the sum of sequence lengths
+-    in each partition is balanced. Uses the Karmarkar-Karp differencing method.
+ 
+-    This is useful for balancing workload across devices or batches, especially when
+-    dealing with variable sequence lengths.
 +    def _prepare_sequences(self, seqlen_list: list[int]) -> list[tuple[int, int]]:
 +        raise NotImplementedError("Subclasses must implement _prepare_sequences")
 +
@@ -509,8 +514,7 @@ index bc5588f7..0ac3a75a 100644
 +
 +class FirstFitDecreasingPacker(FirstFitPacker):
 +    """First-Fit Decreasing (FFD) algorithm for sequence packing.
- 
--def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, equal_size: bool):
++
 +    This algorithm sorts sequences by length in descending order and then
 +    places each sequence into the first bin where it fits.
 +
@@ -534,12 +538,8 @@ index bc5588f7..0ac3a75a 100644
 +
 +    Time complexity: O(n * m) for packing, where n is the number of sequences
 +    and m is the number of bins.
-     """
--    Calculates partitions of indices from seqlen_list such that the sum of sequence lengths
--    in each partition is balanced. Uses the Karmarkar-Karp differencing method.
- 
--    This is useful for balancing workload across devices or batches, especially when
--    dealing with variable sequence lengths.
++    """
++
 +    def _prepare_sequences(self, seqlen_list: list[int]) -> list[tuple[int, int]]:
 +        # Create a list of (length, index) pairs
 +        indexed_lengths = [(length, i) for i, length in enumerate(seqlen_list)]
@@ -714,10 +714,6 @@ index bc5588f7..0ac3a75a 100644
 +):
 +    """
 +    Calculate balanced partitions of indices from seqlen_list.
-+
-+    Default behavior uses the Karmarkar-Karp differencing method (compatibility mode).
-+    If an "algorithm" is provided, switches to the generic packing path via get_packer,
-+    which supports multiple algorithms (FFD, KK, Greedy, etc.).
  
      Args:
 -        seqlen_list (List[int]): A list of sequence lengths for each item.
@@ -757,7 +753,7 @@ index bc5588f7..0ac3a75a 100644
          for i, partition in enumerate(partitions):
              assert len(partition) > 0, f"the {i}-th partition is empty"
              for idx in partition:
-@@ -198,8 +643,16 @@ def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, eq
+@@ -198,8 +639,16 @@ def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, eq
          assert seen_idx == set(range(len(seqlen_list)))
          return sorted_partitions
  
@@ -776,12 +772,12 @@ index bc5588f7..0ac3a75a 100644
  
  
  def log_seqlen_unbalance(seqlen_list: list[int], partitions: list[list[int]], prefix):
-@@ -266,18 +719,34 @@ def rearrange_micro_batches(
+@@ -266,18 +715,34 @@ def rearrange_micro_batches(
      same_micro_num_in_dp=True,
      min_num_micro_batch=None,
      use_dynamic_bsz_balance=True,
 +    use_sequence_packing_balance=False,
-+    algorithm="modified_first_fit_decreasing",
++    algorithm="karmarkar_karp",
 +    input_key="input_ids",
 +    input_lengths_key="input_lengths",
 +    sp_size=1,
@@ -813,15 +809,14 @@ index bc5588f7..0ac3a75a 100644
  
      Returns:
          List[TensorDict]: the micro-batches.
-@@ -311,7 +780,15 @@ def rearrange_micro_batches(
+@@ -311,7 +776,14 @@ def rearrange_micro_batches(
      assert num_micro_batches <= len(seq_len_effective)
  
      workloads = calculate_workload(seq_len_effective)
 -    micro_bsz_idx = get_seqlen_balanced_partitions(workloads, num_micro_batches, equal_size=False)
-+    # Use karmarkar_karp algorithm for dynamic batching
 +    micro_bsz_idx = get_seqlen_balanced_partitions(
 +        seqlen_list=workloads.tolist() if isinstance(workloads, torch.Tensor) else workloads,
-+        algorithm="karmarkar_karp",
++        algorithm=algorithm,
 +        bin_capacity=total_seqlen,  # Not used for karmarkar_karp when min_bin_count is set
 +        min_bin_count=num_micro_batches,
 +        bin_count_multiple=None,
