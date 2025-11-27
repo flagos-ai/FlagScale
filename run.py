@@ -49,7 +49,13 @@ def main(config: DictConfig) -> None:
 
             if config.action == "run":
                 enable_monitoring = config.experiment.runner.get("enable_monitoring", False)
-                runner.run(enable_monitoring=enable_monitoring)
+                enable_gpu_health_check = config.experiment.runner.get(
+                    "enable_gpu_health_check", False
+                )
+                runner.run(
+                    enable_monitoring=enable_monitoring,
+                    enable_gpu_health_check=enable_gpu_health_check,
+                )
                 from flagscale.logger import logger
 
                 if enable_monitoring:
@@ -58,6 +64,11 @@ def main(config: DictConfig) -> None:
                     )
                 else:
                     logger.info("Monitoring is disabled. No monitor service will be started.")
+
+                if enable_gpu_health_check:
+                    logger.info("GPU health check will run before training starts.")
+                else:
+                    logger.info("GPU health check is disabled.")
             elif config.action == "dryrun":
                 runner.run(dryrun=True)
             elif config.action == "test":
