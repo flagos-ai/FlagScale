@@ -1,0 +1,17 @@
+diff --git a/megatron/bridge/models/nemotron_vl/__init__.py b/megatron/bridge/models/nemotron_vl/__init__.py
+new file mode 100644
+index 000000000..18730d7f3
+--- /dev/null
++++ b/megatron/bridge/models/nemotron_vl/__init__.py
+@@ -0,0 +1,11 @@
++"""Nemotron-VL model family (Vision-Language) for Megatron Bridge."""
++
++from megatron.bridge.models.nemotron_vl.modeling_nemotron_vl import NemotronVLModel
++from megatron.bridge.models.nemotron_vl.nemotron_vl_bridge import NemotronVLBridge
++from megatron.bridge.models.nemotron_vl.nemotron_vl_provider import NemotronNano12Bv2Provider
++
++__all__ = [
++    "NemotronVLModel",
++    "NemotronVLBridge",
++    "NemotronNano12Bv2VLModelProvider",
++]

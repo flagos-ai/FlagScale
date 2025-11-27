@@ -1,5 +1,5 @@
 diff --git a/megatron/training/arguments.py b/megatron/training/arguments.py
-index 1120c7529..190fac52b 100644
+index 1120c7529..b69fca3dd 100644
 --- a/megatron/training/arguments.py
 +++ b/megatron/training/arguments.py
 @@ -67,6 +67,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
@@ -472,7 +472,19 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--exit-on-missing-checkpoint', action='store_true',
                         help="If '--load' is set, but checkpoint is not found "
                         "(e.g., path typo), then exit instead of random "
-@@ -2541,7 +2758,7 @@ def _add_distributed_args(parser):
+@@ -2455,6 +2672,11 @@ def _add_checkpointing_args(parser):
+     group.add_argument('--load-model-opt-format', action='store_true',
+                        help='Load a checkpoint for TensorRT model optimizer (nvidia-modelopt).'
+                             'This function can also be used to load NeMo .nemo sharded checkpoints.')
++    group.add_argument('--use-hf', action='store_true',default=None,
++                       help='Use the HF format for warm start, and save it in the torch_dict'
++                            'format while also saving it in the HF format.')
++    group.add_argument('--use-hf-config', default=None,
++                       help='Load the HF model from config.')
+     return parser
+ 
+ 
+@@ -2541,7 +2763,7 @@ def _add_distributed_args(parser):
                         default=False, help='if set, overlap pipeline parallel communication in warmup and flush',
                         dest='overlap_p2p_comm_warmup_flush')
      group.add_argument('--distributed-backend', default='nccl',
@@ -481,7 +493,7 @@ index 1120c7529..190fac52b 100644
                         help='Which backend to use for distributed training.')
      group.add_argument('--distributed-timeout-minutes', type=int, default=10,
                         help='Timeout minutes for torch.distributed.')
-@@ -2592,6 +2809,11 @@ def _add_distributed_args(parser):
+@@ -2592,6 +2814,11 @@ def _add_distributed_args(parser):
                         'complete it instead. Also turns on '
                         '--use-cpu-initialization flag. This is for '
                         'external DDP manager.' )
@@ -493,7 +505,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--account-for-embedding-in-pipeline-split', action='store_true',
                         default=False, help='If set, *input* embedding layer will be treated as a standard transformer'
                         'layer in the context of partition and placement for pipeline parallelism.')
-@@ -2636,6 +2858,10 @@ def _add_distributed_args(parser):
+@@ -2636,6 +2863,10 @@ def _add_distributed_args(parser):
                         help='If set, keep the fp8 transpose cache when using Megatron FSDP.')
      group.add_argument('--enable-full-sharding-in-hsdp', action='store_true',
                         help='If set, enable full sharding in megatron-fsdp Hybrid Sharded Data Parallel (HSDP) mode.')
@@ -504,7 +516,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--num-distributed-optimizer-instances', type=int, default=1,
                         help='Number of Distributed Optimizer copies across Data Parallel domain.')
      group.add_argument('--use-torch-fsdp2', action='store_true',
-@@ -2690,6 +2916,9 @@ def _add_validation_args(parser):
+@@ -2690,6 +2921,9 @@ def _add_validation_args(parser):
      group.add_argument('--eval-interval', type=int, default=1000,
                         help='Interval between running evaluation on '
                         'validation set.')
@@ -514,7 +526,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument("--test-mode", action="store_true", help='Run all real-time test alongside the experiment.')
      group.add_argument('--skip-train', action='store_true',
                         default=False, help='If set, bypass the training loop, '
-@@ -2708,6 +2937,8 @@ def _add_tokenizer_args(parser):
+@@ -2708,6 +2942,8 @@ def _add_tokenizer_args(parser):
                         'automatically calculated from vocab-size.')
      group.add_argument('--vocab-file', type=str, default=None,
                         help='Path to the vocab file.')
@@ -523,7 +535,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--merge-file', type=str, default=None,
                         help='Path to the BPE merge file.')
      group.add_argument('--vocab-extra-ids', type=int, default=0,
-@@ -2726,8 +2957,17 @@ def _add_tokenizer_args(parser):
+@@ -2726,8 +2962,17 @@ def _add_tokenizer_args(parser):
                                  'MultimodalTokenizer',
                                  'NullTokenizer',
                                  'NullMultimodalTokenizer',
@@ -542,7 +554,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--tokenizer-model', type=str, default=None,
                         help='Sentencepiece tokenizer model.')
      group.add_argument('--tokenizer-metadata', type=str, default=None,
-@@ -2768,6 +3008,11 @@ def _add_data_args(parser):
+@@ -2768,6 +3013,11 @@ def _add_data_args(parser):
      group.add_argument('--valid-data-path', nargs='*', default=None,
                         help='The weight and prefix list for an independent validation dataset. '
                         'Follows the same pattern rules as --data-path.')
@@ -554,7 +566,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--test-data-path', nargs='*', default=None,
                         help='The weight and prefix list for an independent test dataset. '
                         'Follows the same pattern rules as --data-path.')
-@@ -2816,11 +3061,18 @@ def _add_data_args(parser):
+@@ -2816,11 +3066,18 @@ def _add_data_args(parser):
                         'end-of-document token.')
      group.add_argument('--eod-mask-loss', action='store_true',
                         help='Mask loss for the end of document tokens.')
@@ -573,7 +585,7 @@ index 1120c7529..190fac52b 100644
      group.add_argument('--object-storage-cache-path', type=str, default=None,
                         help='Path to cache index files when using s3 or msc dataloader')
      group.add_argument('--mid-level-dataset-surplus', type=float, default=0.005,
-@@ -2897,6 +3149,19 @@ def _add_biencoder_args(parser):
+@@ -2897,6 +3154,19 @@ def _add_biencoder_args(parser):
      return parser
  
  
@@ -593,7 +605,7 @@ index 1120c7529..190fac52b 100644
  def _add_vision_args(parser):
      group = parser.add_argument_group(title="vision")
  
-@@ -2967,6 +3232,8 @@ def _add_vision_args(parser):
+@@ -2967,6 +3237,8 @@ def _add_vision_args(parser):
                         help='Whether to layer normalize the q and k attention embeddings.')
      group.add_argument('--qk-l2-norm', action='store_true',
                         help='Use llama 4 qk l2 norm')
@@ -602,7 +614,7 @@ index 1120c7529..190fac52b 100644
  
      return parser
  
-@@ -3275,3 +3542,75 @@ def _add_sft_args(parser):
+@@ -3275,3 +3547,75 @@ def _add_sft_args(parser):
      group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned", 
                         help='SFT prompt format.')
      return parser
