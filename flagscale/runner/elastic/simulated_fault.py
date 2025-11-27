@@ -16,8 +16,8 @@ error_keys_list = [
     "connection refused",
     "connection timeout",
     # Import and code errors
-    "importerror:",
-    "modulenotfounderror:",
+    "importerror",
+    "modulenotfounderror",
     "traceback (most recent call last)",
     "fatal error",
     "exception",
