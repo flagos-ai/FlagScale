@@ -1,10 +1,12 @@
 diff --git a/verl/utils/seqlen_balancing.py b/verl/utils/seqlen_balancing.py
-index bc5588f7..905dcb74 100644
+index bc5588f7..0fc9cf82 100644
 --- a/verl/utils/seqlen_balancing.py
 +++ b/verl/utils/seqlen_balancing.py
-@@ -15,7 +15,9 @@
+@@ -14,8 +14,11 @@
+ 
  import copy
  import heapq
++import random
  from itertools import chain
 -
 +import enum
@@ -13,7 +15,7 @@ index bc5588f7..905dcb74 100644
  import torch
  from torch import distributed as dist
  
-@@ -34,162 +36,601 @@ def calculate_workload(seqlen_list: list[int]):
+@@ -34,162 +37,601 @@ def calculate_workload(seqlen_list: list[int]):
      return 24576 * seqlen_list + seqlen_list**2
  
  
@@ -482,7 +484,7 @@ index bc5588f7..905dcb74 100644
 +
 +    def _pack_implementation(self, seqlen_list: list[int]) -> list[list[int]]:
 +        # Prepare sequences for packing (order determined by subclass)
-+        indexed_lengths = self._prepare_sequences(sequence_lengths)
++        indexed_lengths = self._prepare_sequences(seqlen_list)
 +
 +        bins = []  # List of bins, each bin is a list of sequence indices
 +        bin_remaining = []  # Remaining capacity for each bin
@@ -683,8 +685,8 @@ index bc5588f7..905dcb74 100644
 +def get_packer(
 +    algorithm: Union[PackingAlgorithm, str],
 +    bin_capacity: int,
-+    min_bin_count: Optional[int] = None,
-+    bin_count_multiple: Optional[int] = None,
++    min_bin_count: int,
++    bin_count_multiple: int,
 +    equal_size: bool = True,
 +) -> SequencePacker:
 +    """Get a sequence packer based on the specified algorithm."""
@@ -697,10 +699,10 @@ index bc5588f7..905dcb74 100644
 +        PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING: ModifiedFirstFitDecreasingPacker,
 +    }
 +    # Convert string to PackingAlgorithm enum if needed
-+    if isinstance(algorithm, str):
++    try:
 +        algorithm = PackingAlgorithm(algorithm)
-+    if algorithm not in packers:
-+        raise ValueError(f"Unknown packing algorithm: {algorithm}")
++    except ValueError:
++        raise ValueError(f"Unknown packing algorithm: {algorithm}") from None
 +    return packers[algorithm](bin_capacity, min_bin_count, bin_count_multiple, equal_size)
 +
 +
@@ -753,7 +755,7 @@ index bc5588f7..905dcb74 100644
          for i, partition in enumerate(partitions):
              assert len(partition) > 0, f"the {i}-th partition is empty"
              for idx in partition:
-@@ -198,8 +639,16 @@ def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, eq
+@@ -198,8 +640,16 @@ def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, eq
          assert seen_idx == set(range(len(seqlen_list)))
          return sorted_partitions
  
@@ -772,7 +774,7 @@ index bc5588f7..905dcb74 100644
  
  
  def log_seqlen_unbalance(seqlen_list: list[int], partitions: list[list[int]], prefix):
-@@ -266,18 +715,34 @@ def rearrange_micro_batches(
+@@ -266,18 +716,34 @@ def rearrange_micro_batches(
      same_micro_num_in_dp=True,
      min_num_micro_batch=None,
      use_dynamic_bsz_balance=True,
@@ -809,7 +811,7 @@ index bc5588f7..905dcb74 100644
  
      Returns:
          List[TensorDict]: the micro-batches.
-@@ -311,7 +776,14 @@ def rearrange_micro_batches(
+@@ -311,7 +777,14 @@ def rearrange_micro_batches(
      assert num_micro_batches <= len(seq_len_effective)
  
      workloads = calculate_workload(seq_len_effective)
