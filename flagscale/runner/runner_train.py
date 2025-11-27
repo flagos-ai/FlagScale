@@ -360,7 +360,6 @@ def run_node(
     available_port,
     with_test,
     dryrun,
-    enable_monitoring=True,
 ):
     cur_envs = update_nodes_envs(user_envs, host, resource_info)
     # Get the number of visible devices from the environment variable, e.g. CUDA_VISIBLE_DEVICES, MLU_VISIBLE_DEVICES
@@ -870,25 +869,15 @@ class CloudTrainRunner(RunnerBase):
         cmd = shlex.join(export_cmd + runner_cmd + [self.user_script] + self.user_args)
 
         host_run_script_file = _generate_run_script_train(
-            self.config,
-            host,
-            node_rank,
-            cmd,
-            background=False,
-            with_test=with_test,
-            enable_monitoring=enable_monitoring,
+            self.config, host, node_rank, cmd, background=False, with_test=with_test
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)
 
-    def run(self, with_test=False, dryrun=False, enable_monitoring=None):
+    def run(self, with_test=False, dryrun=False):
         if dryrun:
             logger.info("Dryrun mode is not supported in CloudRunner.")
             return
-
-        # Read from config if not explicitly provided
-        if enable_monitoring is None:
-            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
 
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
@@ -914,5 +903,4 @@ class CloudTrainRunner(RunnerBase):
             nproc_per_node,
             with_test=with_test,
             dryrun=dryrun,
-            enable_monitoring=enable_monitoring,
         )

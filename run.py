@@ -56,8 +56,6 @@ def main(config: DictConfig) -> None:
                     logger.info(
                         "Monitor service will be started automatically when training begins."
                     )
-                else:
-                    logger.info("Monitoring is disabled. No monitor service will be started.")
             elif config.action == "dryrun":
                 runner.run(dryrun=True)
             elif config.action == "test":
