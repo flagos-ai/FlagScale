@@ -556,16 +556,6 @@ class SSHTrainRunner(RunnerBase):
             except Exception as e:
                 logger.info(e)
 
-        if enable_monitoring:
-            logger.info("Starting monitoring service...")
-            monitor_service = MonitorService(self.config, self, interval)
-            monitor_service.start_monitoring()
-            logger.info("Monitoring service started in background")
-            logger.info("Training job will continue running, monitor logs will be saved")
-
-            # Return the monitor_service instance for external control.
-            return monitor_service
-
         return None
 
     def _stop_each(self, host, node_rank):
