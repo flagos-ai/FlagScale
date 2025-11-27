@@ -1,5 +1,5 @@
 diff --git a/megatron/training/arguments.py b/megatron/training/arguments.py
-index 1120c7529..190fac52b 100644
+index 1120c7529..4cad66e65 100644
 --- a/megatron/training/arguments.py
 +++ b/megatron/training/arguments.py
 @@ -67,6 +67,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
@@ -141,17 +141,6 @@ index 1120c7529..190fac52b 100644
  
      if args.hierarchical_context_parallel_sizes:
          from numpy import prod
-@@ -433,8 +443,8 @@ def validate_args(args, defaults={}):
-         assert args.hierarchical_context_parallel_sizes is not None, \
-         "--hierarchical-context-parallel-sizes must be set when a2a+p2p is used in cp comm"
- 
--    if args.expert_tensor_parallel_size is None:
--        args.expert_tensor_parallel_size = args.tensor_model_parallel_size
-+        if args.expert_tensor_parallel_size is None:
-+            args.expert_tensor_parallel_size = args.tensor_model_parallel_size
- 
-     # Deprecated arguments.
-     assert args.batch_size is None, '--batch-size argument is no longer ' \
 @@ -530,6 +540,7 @@ def validate_args(args, defaults={}):
          if args.virtual_pipeline_model_parallel_size == 1:
              args.virtual_pipeline_model_parallel_size = None
