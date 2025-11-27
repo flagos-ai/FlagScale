@@ -32,9 +32,11 @@ def get_hf_model(dtype, model_path=None, config=None):
 
 
 def get_mg_model(dtype, pre_process, post_process):
+    from gpt_builders import gpt_builder
+
     from flagscale.train.train_gpt import model_provider
 
     s_time = time.time()
-    model = model_provider(pre_process, post_process).to(dtype)
+    model = model_provider(gpt_builder, pre_process, post_process).to(dtype)
     print("> build megatron model elapsed time:", time.time() - s_time)
     return model
