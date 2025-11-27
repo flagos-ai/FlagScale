@@ -467,7 +467,8 @@ def compute_activation_memory(args, num_microbatches, verbose=False):
         2 * args.seq_length * args.micro_batch_size * args.hidden_size
     )
     # Attention:
-    if args.multi_latent_attention:
+    # if args.multi_latent_attention:
+    if getattr(args, "multi_latent_attention", False):
         # 1. Q, K, V matrix multiplies
         if args.q_lora_rank is None:
             QKV_activation_memory = (

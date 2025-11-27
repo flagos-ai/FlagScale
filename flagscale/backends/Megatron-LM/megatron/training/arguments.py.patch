@@ -1,5 +1,5 @@
 diff --git a/megatron/training/arguments.py b/megatron/training/arguments.py
-index 1120c7529..190fac52b 100644
+index 1120c7529..ebb1467c3 100644
 --- a/megatron/training/arguments.py
 +++ b/megatron/training/arguments.py
 @@ -67,6 +67,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
@@ -477,7 +477,7 @@ index 1120c7529..190fac52b 100644
                         dest='overlap_p2p_comm_warmup_flush')
      group.add_argument('--distributed-backend', default='nccl',
 -                       choices=['nccl', 'gloo'],
-+                       choices=['nccl', 'gloo', 'flagcx'],
++                       choices=['nccl', 'gloo', 'flagcx', 'dummy'],
                         help='Which backend to use for distributed training.')
      group.add_argument('--distributed-timeout-minutes', type=int, default=10,
                         help='Timeout minutes for torch.distributed.')
@@ -602,7 +602,7 @@ index 1120c7529..190fac52b 100644
  
      return parser
  
-@@ -3275,3 +3542,75 @@ def _add_sft_args(parser):
+@@ -3275,3 +3542,78 @@ def _add_sft_args(parser):
      group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned", 
                         help='SFT prompt format.')
      return parser
@@ -636,6 +636,9 @@ index 1120c7529..190fac52b 100644
 +
 +    group.add_argument('--auto-tune', action='store_true',
 +                       help='use auto tuner')
++
++    group.add_argument('--enable-simulator', action='store_true',
++            help='Use single process to simulate the distributed training.')
 +
 +    return parser
 +
