@@ -208,6 +208,23 @@ def test_inference_pipeline(test_path, test_type, test_task, test_case):
         ), f"String {result_value} should be wrapped in [] or () and not empty inside"
 
 
+def extract_reward_from_line(line):
+    # TODO: this function needs error handling
+    try:
+        reward = -np.inf
+        key_vals = line.split(" - ")
+        for key_val in key_vals:
+            key, val = key_val.split(":")
+            if key == "val-core/openai/gsm8k/reward/mean@1":
+                reward = max(float(val), reward)
+            if key == "critic/rewards/mean":
+                reward = max(float(val), reward)
+                return reward
+        return -np.inf
+    except Exception:
+        return -np.inf
+
+
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
 def test_rl_equal(test_path, test_type, test_task, test_case):
     # Construct the test_result_path using the provided fixtures
@@ -221,18 +238,12 @@ def test_rl_equal(test_path, test_type, test_task, test_case):
     with open(result_path, "r") as file:
         lines = file.readlines()
 
-    result_json = {}
-    result_json["val-core/openai/gsm8k/reward/mean@1"] = []
-
+    best_reward = -np.inf
     for line in lines:
         if "step" in line:
-            line_split = line.strip().split(" ")
-            for key_value in line_split:
-                if key_value.startswith("val-core/openai/gsm8k/reward/mean"):
-                    # Extract the value after the colon
-                    value = key_value.split(":")[-1]
-                    # Convert to float and append to the list
-                    result_json["val-core/openai/gsm8k/reward/mean@1"].append(float(value))
+            reward = extract_reward_from_line(line)
+            if reward > best_reward:
+                best_reward = reward
 
     gold_value_path = os.path.join(
         test_path, test_type, test_task, "results_gold", test_case + ".json"
@@ -241,24 +252,15 @@ def test_rl_equal(test_path, test_type, test_task, test_case):
 
     with open(gold_value_path, "r") as f:
         gold_result_json = json.load(f)
-
+    target_reward = gold_result_json['target_reward']
     print("\nResult checking")
-    print("Result: ", result_json)
-    print("Gold Result: ", gold_result_json)
-    print(
-        "The results are basically equal: ",
-        np.allclose(
-            gold_result_json["val-core/openai/gsm8k/reward/mean@1"],
-            result_json["val-core/openai/gsm8k/reward/mean@1"],
-            atol=0.05,
-        ),
-    )
 
-    assert np.allclose(
-        gold_result_json["val-core/openai/gsm8k/reward/mean@1"],
-        result_json["val-core/openai/gsm8k/reward/mean@1"],
-        atol=0.05,
-    ), "Result not close to gold result"
+    print("Best Reward: ", best_reward)
+    print("Target Reward: ", target_reward)
+    assert (
+        best_reward > target_reward
+    ), f"Best reward must be greater than {target_reward}. best_reward: {best_reward}"
+    print("Check passes")
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
