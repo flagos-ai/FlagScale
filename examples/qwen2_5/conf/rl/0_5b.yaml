@@ -9,8 +9,8 @@ algorithm:
   use_kl_in_reward: false
 
 data:
-  train_files: /nfs/lyrawen/gsm8k/data/train.parquet
-  val_files: /nfs/lyrawen/gsm8k/data/test.parquet
+  train_files: /workspace/data/gsm8k/train.parquet
+  val_files: /workspace/data/gsm8k/train.parquet
   train_batch_size: 1024
   max_prompt_length: 1024
   max_response_length: 1024
@@ -19,33 +19,30 @@ data:
 
 actor_rollout_ref:
   model:
-    path: /nfs/lyrawen/models/Qwen2.5-0.5B-Instruct
-    use_remove_padding: true
+    path: /workspace/models/Qwen/Qwen2.5-0.5B-Instruct
+    enable_gradient_checkpointing: true
     trust_remote_code: true
   actor:
     optim:
       lr: 1e-6
-    ppo_mini_batch_size: 128
-    ppo_micro_batch_size_per_gpu: 2     
+    ppo_mini_batch_size: 256
+    ppo_micro_batch_size_per_gpu: 40     
     use_kl_loss: true
     kl_loss_coef: 0.001
     kl_loss_type: low_var_kl
     entropy_coeff: 0
     balance_algorithm: "modified_first_fit_decreasing"
-    policy_loss:
-      loss_mode: "vanilla"
-      seqpack_loss: True
     megatron:
       pipeline_model_parallel_size: 2
       tensor_model_parallel_size: 2
   rollout:
-    log_prob_micro_batch_size_per_gpu: 4
+    log_prob_micro_batch_size_per_gpu: 40
     tensor_model_parallel_size: 2
     name: vllm
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.6
     n: 5
   ref:
-    log_prob_micro_batch_size_per_gpu: 2
+    log_prob_micro_batch_size_per_gpu: 40
     megatron:
       pipeline_model_parallel_size: 2
       tensor_model_parallel_size: 2
