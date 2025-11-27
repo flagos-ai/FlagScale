@@ -515,7 +515,6 @@ class SSHTrainRunner(RunnerBase):
                         available_port,
                         with_test,
                         dryrun,
-                        enable_monitoring,
                     )
                     tasks.append(args)
                 pool.starmap(run_node, tasks)
