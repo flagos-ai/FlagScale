@@ -1,5 +1,5 @@
 diff --git a/verl/trainer/config/actor/actor.yaml b/verl/trainer/config/actor/actor.yaml
-index 7c55df26..bbd0f51b 100644
+index 7c55df26..a2903856 100644
 --- a/verl/trainer/config/actor/actor.yaml
 +++ b/verl/trainer/config/actor/actor.yaml
 @@ -24,6 +24,10 @@ ppo_micro_batch_size_per_gpu: null
@@ -13,13 +13,3 @@ index 7c55df26..bbd0f51b 100644
  # Max tokens per GPU in one PPO batch; affects gradient accumulation
  # Typically it should be: n * ${data.max_prompt_length} + ${data.max_response_length}
  # oc.select: the default val for ref.log_prob_max_token_len_per_gpu
-@@ -65,6 +69,9 @@ policy_loss:
-   # KL divergence penalty coefficient
-   ppo_kl_coef: 0.1
- 
-+  # Enable sequence packing aware loss computation (requires packed data format)
-+  seqpack_loss: false
-+
- # Constant C in Dual-clip PPO; clips when advantage < 0 and ratio > C
- clip_ratio_c: 3.0
- 
