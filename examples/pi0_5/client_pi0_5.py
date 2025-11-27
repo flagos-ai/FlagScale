@@ -70,7 +70,7 @@ class PI05Client:
 
         # Send request
         try:
-            response = self.session.post(f"{self.base_url}/predict", json=data, timeout=30)
+            response = self.session.post(f"{self.base_url}/infer", json=data, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
