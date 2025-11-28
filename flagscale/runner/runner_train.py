@@ -269,7 +269,7 @@ def _generate_run_script_train(
         f.write(f"\n")
         f.write(f"cd {root_dir}\n")
         f.write(f"\n")
-        f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
+        f.write(f"export PYTHONPATH={megatron_dir}:{root_dir}:${{PYTHONPATH}}\n")
         f.write(f"\n")
         f.write(f'cmd="{cmd}"\n')
         f.write(f"\n")
@@ -432,6 +432,16 @@ class SSHTrainRunner(RunnerBase):
         runner_cmd = _get_runner_cmd_train(
             host, master_addr, master_port, nnodes, node_rank, nproc_per_node, self.config
         )
+
+        nsys_cmd = "/share/project/lixianduo/envs/nsys/nsight-system/2025.5.1/bin/nsys profile -s none -t nvtx,cuda,osrt -o /share/project/lixianduo/scale_gems_cx/nsys_reps/$HOSTNAME.nsys-rep --force-overwrite true --capture-range=cudaProfilerApi --capture-range-end=stop".split(
+            " "
+        )
+        if "USE_NSYS_PROFILE" in self.user_envs.keys():
+            runner_cmd = nsys_cmd + runner_cmd
+            print(f"use nsys profile")
+        else:
+            print(f"not use nsys profile")
+
         # update hetero-current-device-type according to the device_type in hostfile
         if device_type is not None:
             if "--hetero-current-device-type" in self.user_args:

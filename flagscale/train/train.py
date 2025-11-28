@@ -144,6 +144,15 @@ from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 from flagscale.train.peft.peft import PEFT
 from flagscale.train.peft.lora import LoRA
 
+try:
+    import flag_gems
+    HAVE_GEMS = True
+except ImportError:
+    HAVE_GEMS = False
+
+# wrapper for torch.cuda.xxx
+from device_wrapper import patch_cuda_to_new_device
+
 def destroy_global_state():
     destroy_global_vars()
     destroy_num_microbatches_calculator()
@@ -797,6 +806,14 @@ def pretrain(
 
     args = get_args()
     timers = get_timers()
+
+    ###### FlagScale Begin ######
+    args = get_args()
+    if args.use_transformer_engine_fl:
+        os.environ['USE_TRANSFORMER_ENGINE_FL'] = "True"
+        print(f"[TransformerEngineFL], apply device patching")
+        patch_cuda_to_new_device()
+    ###### FlagScale End   ######
 
     if args.log_progress:
         append_to_progress_log("Starting job")
@@ -2545,6 +2562,13 @@ def train(
             optimizers=[optimizer],
         )
         cuda_graph_helper.create_cudagraphs()
+
+    # enable flag_gems for transformer_engine_fl
+    if args.use_flag_gems:
+        if not HAVE_GEMS:
+            raise ValueError(f"Can not import flag gems")
+        else:
+            flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
 
     # Run training iterations till done.
     buffered_rollouts = None

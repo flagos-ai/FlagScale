@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
-index 5ff62f74c..4bea0c328 100644
+index 5ff62f74c..3c0571b2d 100644
 --- a/megatron/core/transformer/transformer_config.py
 +++ b/megatron/core/transformer/transformer_config.py
 @@ -317,6 +317,15 @@ class TransformerConfig(ModelParallelConfig):
@@ -41,7 +41,7 @@ index 5ff62f74c..4bea0c328 100644
      flash_decode: bool = False
      """ Use the optimized flash decoding kernel during inference. """
  
-@@ -705,6 +723,26 @@ class TransformerConfig(ModelParallelConfig):
+@@ -705,6 +723,31 @@ class TransformerConfig(ModelParallelConfig):
      """Transformer implementation to use.
      Options are 'transformer_engine' for Transformer Engine and 'local' for MCore."""
  
@@ -65,10 +65,15 @@ index 5ff62f74c..4bea0c328 100644
 +    lora_out_init_method: Optional[str] = None
 +    """Lora b init method"""
 +
++    ####################
++    # TransformerEngine-FL
++    ####################
++    use_transformer_engine_fl: Optional[bool] = False
++
      def __post_init__(self):
          """Python dataclass method that is used to modify attributes after initialization.
          See https://docs.python.org/3/library/dataclasses.html#post-init-processing for more
-@@ -1481,6 +1519,9 @@ class TransformerConfig(ModelParallelConfig):
+@@ -1481,6 +1524,9 @@ class TransformerConfig(ModelParallelConfig):
                      f"the number of layers ({self.num_layers})"
                  )
  
@@ -78,3 +83,8 @@ index 5ff62f74c..4bea0c328 100644
  
  @dataclass
  class MLATransformerConfig(TransformerConfig):
+@@ -1569,3 +1615,4 @@ class MLATransformerConfig(TransformerConfig):
+             assert (
+                 self.apply_rope_fusion is False
+             ), "Rope Fusion is not compatible with caching latents"
++
