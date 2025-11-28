@@ -36,7 +36,7 @@ system:
 
 model:
   transformer_impl: transformer_engine
-  enable_transformer_engine_fl: true
+  use_transformer_engine_fl: true
   flag_gems_log_path: /share/project/lixianduo/scale_gems_cx/gems_te_cx_gems_log
   flag_gems_unused: ['index_put', 'index_put_'] 
   num_layers: 4

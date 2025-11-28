@@ -809,7 +809,7 @@ def pretrain(
 
     ###### FlagScale Begin ######
     args = get_args()
-    if args.enable_transformer_engine_fl:
+    if args.use_transformer_engine_fl:
         os.environ['USE_TRANSFORMER_ENGINE_FL'] = "True"
         print(f"[TransformerEngineFL], apply device patching")
         patch_cuda_to_new_device()

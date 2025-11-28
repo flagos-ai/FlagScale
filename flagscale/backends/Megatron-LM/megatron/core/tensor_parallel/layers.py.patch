@@ -1,5 +1,5 @@
 diff --git a/megatron/core/tensor_parallel/layers.py b/megatron/core/tensor_parallel/layers.py
-index 5c6f34b70..669a7e394 100644
+index 5c6f34b70..ae07dc556 100644
 --- a/megatron/core/tensor_parallel/layers.py
 +++ b/megatron/core/tensor_parallel/layers.py
 @@ -448,6 +448,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
@@ -94,7 +94,7 @@ index 5c6f34b70..669a7e394 100644
          if not weight.requires_grad:
              return linear_with_frozen_weight(input, weight, *args, **kwargs)
          else:
-+            if self.config.enable_transformer_engine_fl:
++            if self.config.use_transformer_engine_fl:
 +                kwargs['use_transformer_engine_fl'] = True
              return linear_with_grad_accumulation_and_async_allreduce(input, weight, *args, **kwargs)
  

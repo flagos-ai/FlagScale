@@ -1,5 +1,5 @@
 diff --git a/megatron/training/arguments.py b/megatron/training/arguments.py
-index 1120c7529..99f7d7f44 100644
+index 1120c7529..aad514a3c 100644
 --- a/megatron/training/arguments.py
 +++ b/megatron/training/arguments.py
 @@ -67,6 +67,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
@@ -341,7 +341,7 @@ index 1120c7529..99f7d7f44 100644
 +        assert args.recompute_method is None and args.recompute_granularity is None and args.recompute_num_layers is None, "PEFT will raise comfilcts with recompute currently"
 +        assert args.ckpt_format == 'torch', "PEFT is only tested with torch format checkpoint"
 +
-+    if args.enable_transformer_engine_fl:
++    if args.use_transformer_engine_fl:
 +        assert args.context_parallel_size == 1, "DotProductAttention in FlagEngine, do not support context parallel now"
 +        assert not args.tp_comm_overlap, "Do not support gemm/sp comm in FlagEngine now"
 +        args.distributed_backend = 'flagcx'
@@ -687,7 +687,7 @@ index 1120c7529..99f7d7f44 100644
 +
 +def _add_transformer_engine_fl_args(parser):
 +    group = parser.add_argument_group(title="flag engine")
-+    group.add_argument('--enable-transformer-engine-fl', action='store_true',
++    group.add_argument('--use-transformer-engine-fl', action='store_true',
 +                       help='Enable transformer engine fl for training')
 +    group.add_argument('--use-flag-gems', action='store_true',
 +                       help='Enable flag gems for training')
