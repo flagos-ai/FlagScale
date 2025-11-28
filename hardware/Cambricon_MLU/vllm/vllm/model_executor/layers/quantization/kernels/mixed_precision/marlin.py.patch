@@ -1,0 +1,40 @@
+diff --git a/vllm/model_executor/layers/quantization/kernels/mixed_precision/marlin.py b/vllm/model_executor/layers/quantization/kernels/mixed_precision/marlin.py
+index 5eb993830..1597492a5 100644
+--- a/vllm/model_executor/layers/quantization/kernels/mixed_precision/marlin.py
++++ b/vllm/model_executor/layers/quantization/kernels/mixed_precision/marlin.py
+@@ -9,12 +9,10 @@ from vllm import _custom_ops as ops
+ from vllm.model_executor.layers.quantization.utils.marlin_utils import (
+     MARLIN_SUPPORTED_GROUP_SIZES, apply_gptq_marlin_linear,
+     check_marlin_supports_shape, marlin_is_k_full, marlin_make_empty_g_idx,
+-    marlin_make_workspace_new, marlin_permute_bias, marlin_permute_scales,
+-    marlin_sort_g_idx, marlin_zero_points, query_marlin_supported_quant_types,
+-    unpack_cols)
++    marlin_make_workspace_new, marlin_permute_scales, marlin_sort_g_idx,
++    marlin_zero_points, query_marlin_supported_quant_types, unpack_cols)
+ from vllm.model_executor.parameter import (BasevLLMParameter,
+                                            permute_param_layout_)
+-from vllm.platforms import current_platform
+ 
+ from .MPLinearKernel import MPLinearKernel, MPLinearLayerConfig
+ 
+@@ -28,9 +26,6 @@ class MarlinLinearKernel(MPLinearKernel):
+     @classmethod
+     def can_implement(cls,
+                       c: MPLinearLayerConfig) -> tuple[bool, Optional[str]]:
+-        # Marlin uses inline PTX, so it can only be compatible with Nvidia
+-        if not current_platform.is_cuda():
+-            return False, "Marlin only supported on CUDA"
+ 
+         quant_types = query_marlin_supported_quant_types(c.zero_points)
+         if c.weight_type not in quant_types:
+@@ -112,9 +107,6 @@ class MarlinLinearKernel(MPLinearKernel):
+         self._transform_param(layer, self.w_q_name, transform_w_q)
+         self._transform_param(layer, self.w_s_name, transform_w_s)
+ 
+-        if hasattr(layer, "bias") and layer.bias is not None:
+-            layer.bias.data = marlin_permute_bias(layer.bias)
+-
+     def apply_weights(self,
+                       layer: torch.nn.Module,
+                       x: torch.Tensor,
+

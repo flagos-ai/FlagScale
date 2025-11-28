@@ -1,9 +1,16 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/layers/quantization/fp8.py b/vllm_mlu/vllm_mlu/model_executor/layers/quantization/fp8.py
 new file mode 100644
-index 000000000..3ff56f3af
+index 000000000..3097f5d95
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/layers/quantization/fp8.py
-@@ -0,0 +1,561 @@
+@@ -0,0 +1,590 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++import functools
++import importlib.util
++from typing import Any, Callable, Optional, Union
++
 +import torch
 +from torch.nn import Module
 +from torch.nn.parameter import Parameter
@@ -24,14 +31,21 @@ index 000000000..3ff56f3af
 +from vllm.model_executor.parameter import (
 +    BlockQuantScaleParameter, ChannelQuantScaleParameter,
 +    ModelWeightParameter, PerTensorScaleParameter)
++from vllm.model_executor.utils import set_weight_attrs
 +from vllm.platforms import current_platform
 +
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +import vllm_mlu._mlu_ops as mlu_ops
 +
++from vllm_mlu.model_executor.layers.quantization.utils.fp8_utils import (
++    apply_w8a8_block_fp8_linear)
++
 +logger = init_logger(__name__)
 +
++has_deep_gemm = importlib.util.find_spec("deep_gemm") is not None
 +
++
++@classmethod
 +def vllm__model_executor__layers__quantization__fp8__Fp8Config__get_min_capability(cls) -> int:
 +    '''
 +    =============================
@@ -56,10 +70,10 @@ index 000000000..3ff56f3af
 +    activation_quant_method: Optional[str] = None,
 +    weight_quant_method: Optional[str] = None,
 +) -> None:
++    super(Fp8Config, self).__init__()
++
 +    self.is_checkpoint_fp8_serialized = is_checkpoint_fp8_serialized
-+    if is_checkpoint_fp8_serialized:
-+        logger.warning("Detected fp8 checkpoint. Please note that the "
-+                        "format is experimental and subject to change.")
++
 +    if activation_scheme not in ACTIVATION_SCHEMES:
 +        raise ValueError(
 +            f"Unsupported activation scheme {activation_scheme}")
@@ -92,7 +106,7 @@ index 000000000..3ff56f3af
 +    assert (self.weight_block_size or \
 +        self.activation_quant_method == "per_token" and self.weight_quant_method == "per_channel"
 +        and self.activation_scheme == "dynamic"), "Only support block-wise quantization, or "\
-+            "input dynamic per-token output per-channel quantization yet."
++            "input dynamic per-token weight per-channel quantization yet."
 +    '''
 +    ==================
 +    End of MLU Hijack
@@ -109,7 +123,7 @@ index 000000000..3ff56f3af
 +    activation_scheme = cls.get_from_keys(config, ["activation_scheme"])
 +    ignored_layers = cls.get_from_keys_or(config, ["ignored_layers"], None)
 +    weight_block_size = cls.get_from_keys_or(config, ["weight_block_size"],
-+                                                None)
++                                             None)
 +    '''
 +    =============================
 +    Modify by vllm_mlu
@@ -117,8 +131,12 @@ index 000000000..3ff56f3af
 +    @brief: Add config members activation_quant_method and weight_quant_method to
 +    indicate the granularity of quantization.
 +    '''
-+    activation_quant_method = cls.get_from_keys_or(config, ["activation_quant_method"], 'per_token')
-+    weight_quant_method = cls.get_from_keys_or(config, ["weight_quant_method"], None)
++    activation_quant_method = cls.get_from_keys_or(config,
++                                                   ["activation_quant_method"],
++                                                   'per_token')
++    weight_quant_method = cls.get_from_keys_or(config,
++                                               ["weight_quant_method"],
++                                               None)
 +    return cls(is_checkpoint_fp8_serialized=is_checkpoint_fp8_serialized,
 +                activation_scheme=activation_scheme,
 +                ignored_layers=ignored_layers,
@@ -136,7 +154,7 @@ index 000000000..3ff56f3af
 +    self,
 +    layer: torch.nn.Module,
 +    input_size_per_partition: int,
-+    output_partition_sizes: List[int],
++    output_partition_sizes: list[int],
 +    input_size: int,
 +    output_size: int,
 +    params_dtype: torch.dtype,
@@ -146,10 +164,29 @@ index 000000000..3ff56f3af
 +
 +    output_size_per_partition = sum(output_partition_sizes)
 +    weight_loader = extra_weight_attrs.get("weight_loader")
++    layer.logical_widths = output_partition_sizes
++    layer.input_size_per_partition = input_size_per_partition
++    layer.output_size_per_partition = output_size_per_partition
++    layer.orig_dtype = params_dtype
++    layer.weight_block_size = None
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: add tp_group.
++    '''
++    tp_group = extra_weight_attrs.get("tp_group", None)
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
 +
 +    if self.block_quant:
 +        tp_size = get_tensor_model_parallel_world_size()
 +        assert self.quant_config.weight_block_size is not None
++        layer.weight_block_size = self.quant_config.weight_block_size
 +        block_n, block_k = (
 +            self.quant_config.weight_block_size[0],
 +            self.quant_config.weight_block_size[1],
@@ -172,24 +209,30 @@ index 000000000..3ff56f3af
 +                        f"{output_partition_size} is not divisible by "
 +                        f"weight quantization block_n = {block_n}.")
 +
-+    layer.logical_widths = output_partition_sizes
-+
-+    layer.input_size_per_partition = input_size_per_partition
-+    layer.output_size_per_partition = output_size_per_partition
-+    layer.orig_dtype = params_dtype
-+
 +    # WEIGHT
 +    weight_dtype = (torch.float8_e4m3fn
 +                    if self.quant_config.is_checkpoint_fp8_serialized else
 +                    params_dtype)
 +
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: add tp_group.
++    '''
 +    weight = ModelWeightParameter(data=torch.empty(
 +        output_size_per_partition,
 +        input_size_per_partition,
 +        dtype=weight_dtype),
-+                                    input_dim=1,
-+                                    output_dim=0,
-+                                    weight_loader=weight_loader)
++                                  input_dim=1,
++                                  output_dim=0,
++                                  weight_loader=weight_loader,
++                                  tp_group=tp_group)
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
 +    layer.register_parameter("weight", weight)
 +
 +    # If checkpoint is serialized fp8, load them.
@@ -202,12 +245,14 @@ index 000000000..3ff56f3af
 +            Modify by vllm_mlu
 +            =============================
 +            @brief: Support weight per channel quantization.
++            @brief: Add tp_group to enable custom split.
 +            '''
 +            if self.weight_per_channel:
 +                scale = ChannelQuantScaleParameter(
 +                    data=torch.empty(sum(output_partition_sizes), dtype=torch.float32),
 +                    output_dim=0,
 +                    weight_loader=weight_loader,
++                    tp_group=tp_group,
 +                )
 +            else:
 +                scale = PerTensorScaleParameter(
@@ -216,6 +261,7 @@ index 000000000..3ff56f3af
 +                    weight_loader=weight_loader,
 +                )
 +            scale[:] = torch.finfo(torch.float32).min
++            set_weight_attrs(scale, {"scale_type": "weight_scale"})
 +            layer.register_parameter("weight_scale", scale)
 +            '''
 +            ==================
@@ -235,6 +281,7 @@ index 000000000..3ff56f3af
 +                weight_loader=weight_loader,
 +            )
 +            scale[:] = torch.finfo(torch.float32).min
++            set_weight_attrs(scale, {"scale_type": "weight_scale"})
 +            # The weight_scale_inv name is intentional for deepseekv3
 +            layer.register_parameter("weight_scale_inv", scale)
 +
@@ -245,6 +292,7 @@ index 000000000..3ff56f3af
 +                                            weight_loader=weight_loader)
 +
 +            scale[:] = torch.finfo(torch.float32).min
++            set_weight_attrs(scale, {"scale_type": "input_scale"})
 +            layer.register_parameter("input_scale", scale)
 +        else:
 +            layer.register_parameter("input_scale", None)
@@ -255,8 +303,8 @@ index 000000000..3ff56f3af
 +    quant_config: Fp8Config
 +):
 +    self.quant_config = quant_config
-+    self.cutlass_fp8_supported = cutlass_fp8_supported()
 +    self.cutlass_block_fp8_supported = cutlass_block_fp8_supported()
++    self.out_dtype = torch.get_default_dtype()
 +
 +    # For GPUs that lack FP8 hardware support, we can leverage the Marlin
 +    # kernel for fast weight-only FP8 quantization
@@ -266,10 +314,18 @@ index 000000000..3ff56f3af
 +    if current_platform.is_rocm():
 +        self.use_marlin = False
 +
++    # AITER is only supported on ROCm and only for FP8_FNUZ
++    # and at the moment are MI300 series
++    self.use_aiter_and_is_supported = (current_platform.is_rocm()
++                                        and envs.VLLM_ROCM_USE_AITER
++                                        and envs.VLLM_ROCM_USE_AITER_LINEAR
++                                        and current_platform.is_fp8_fnuz())
++
 +    self.block_quant = self.quant_config.weight_block_size is not None
 +    if self.block_quant:
 +        # Marlin doesn't support block-wise fp8
 +        self.use_marlin = False
++
 +    '''
 +    =============================
 +    Modify by vllm_mlu
@@ -279,7 +335,7 @@ index 000000000..3ff56f3af
 +    '''
 +    self.weight_per_channel = (self.quant_config.weight_quant_method == 'per_channel')
 +    self.activation_per_token = (self.quant_config.activation_quant_method == 'per_token')
-+    if self.weight_per_channel and  self.activation_per_token:
++    if self.weight_per_channel and self.activation_per_token:
 +        self.use_marlin = False
 +    '''
 +    ==================
@@ -289,6 +345,9 @@ index 000000000..3ff56f3af
 +    self.fp8_linear = Fp8LinearOp(
 +        # Default to using per_token quantization if cutlass is supported
 +        use_per_token_if_dynamic=cutlass_fp8_supported())
++
++
++Fp8LinearMethod__process_weights_after_loading__org = Fp8LinearMethod.process_weights_after_loading
 +
 +
 +def vllm__model_executor__layers__quantization__fp8__Fp8LinearMethod__process_weights_after_loading(
@@ -302,104 +361,17 @@ index 000000000..3ff56f3af
 +    @brief: For dynamic activation and channel-wise weight quantization,
 +    additional processing is not needed.
 +    '''
-+    if self.quant_config.is_checkpoint_fp8_serialized and \
-+        self.weight_per_channel and \
-+        self.quant_config.activation_scheme == "dynamic":
++    if (self.quant_config.is_checkpoint_fp8_serialized
++            and self.weight_per_channel
++            and self.quant_config.activation_scheme == "dynamic"):
 +        return
 +    '''
 +    ==================
 +    End of MLU Hijack
 +    ==================
 +    '''
++    Fp8LinearMethod__process_weights_after_loading__org(self=self, layer=layer)
 +
-+    # TODO(rob): refactor block quant into separate class.
-+    if self.block_quant:
-+        assert self.quant_config.activation_scheme == "dynamic"
-+        if current_platform.is_fp8_fnuz():
-+            weight, weight_scale_inv, _ = \
-+                normalize_e4m3fn_to_e4m3fnuz(
-+                    weight=layer.weight,
-+                    weight_scale=layer.weight_scale_inv)
-+        else:
-+            weight = layer.weight.data
-+            weight_scale_inv = layer.weight_scale_inv.data
-+
-+        weight = self._maybe_pad_weight(weight)
-+
-+        # Torch.compile cannot use Parameter subclasses.
-+        layer.weight = Parameter(weight, requires_grad=False)
-+        layer.weight_scale_inv = Parameter(weight_scale_inv,
-+                                            requires_grad=False)
-+        return
-+
-+    # If checkpoint not serialized fp8, quantize the weights.
-+    if not self.quant_config.is_checkpoint_fp8_serialized:
-+        qweight, weight_scale = ops.scaled_fp8_quant(layer.weight,
-+                                                        scale=None)
-+
-+        # If using marlin (w8a16), kernel uses channelwise weights,
-+        # so extend the weight scales to be channelwise.
-+        if self.use_marlin:
-+            assert weight_scale.numel() == 1
-+            weight_scale = convert_to_channelwise(
-+                weight_scale.expand(len(layer.logical_widths)),
-+                layer.logical_widths)
-+
-+        # Update the layer with the new values.
-+        layer.weight = Parameter(qweight.t(), requires_grad=False)
-+        layer.weight_scale = Parameter(weight_scale, requires_grad=False)
-+        layer.input_scale = None
-+
-+    # If checkpoint is fp8, handle that there are N scales for N
-+    # shards in a fused module
-+    else:
-+        layer.weight_scale = torch.nn.Parameter(layer.weight_scale.data,
-+                                                requires_grad=False)
-+        if self.quant_config.activation_scheme == "static":
-+            layer.input_scale = torch.nn.Parameter(layer.input_scale.data,
-+                                                    requires_grad=False)
-+        # If using marlin (w8a16), kernel uses channelwise weights,
-+        # so extend the weight scales to be channelwise.
-+        if self.use_marlin:
-+            weight = layer.weight
-+            weight_scale = convert_to_channelwise(layer.weight_scale,
-+                                                    layer.logical_widths)
-+
-+        # If using w8a8, torch._scaled_mm needs per tensor, so
-+        # requantize the logical shards as a single weight.
-+        else:
-+            # Dequant -> Quant with max scale so we can run per tensor.
-+            weight = layer.weight
-+            weight_scale = layer.weight_scale
-+
-+            if current_platform.is_fp8_fnuz():
-+                weight, weight_scale, input_scale = \
-+                    normalize_e4m3fn_to_e4m3fnuz(
-+                        weight=weight,
-+                        weight_scale=weight_scale,
-+                        input_scale=layer.input_scale)
-+                if input_scale is not None:
-+                    layer.input_scale = Parameter(input_scale,
-+                                                    requires_grad=False)
-+
-+            weight_scale, weight = requantize_with_max_scale(
-+                weight=weight,
-+                weight_scale=weight_scale,
-+                logical_widths=layer.logical_widths,
-+            )
-+
-+        weight = self._maybe_pad_weight(weight)
-+        # Update layer with new values.
-+        layer.weight = Parameter(weight.t(), requires_grad=False)
-+        layer.weight_scale = Parameter(weight_scale, requires_grad=False)
-+        if self.quant_config.activation_scheme == "static":
-+            layer.input_scale = Parameter(layer.input_scale.max(),
-+                                            requires_grad=False)
-+
-+    if self.use_marlin:
-+        prepare_fp8_layer_for_marlin(layer)
-+        # Activations not quantized for marlin.
-+        del layer.input_scale
 +
 +def vllm__model_executor__layers__quantization__fp8__Fp8LinearMethod__apply(
 +    self,
@@ -408,7 +380,7 @@ index 000000000..3ff56f3af
 +    bias: Optional[torch.Tensor] = None,
 +    residual: Optional[torch.Tensor] = None,
 +) -> torch.Tensor:
-+    assert residual is None, "residual is not supported yet."
++    assert residual is None, "Fp8Linear residual is not supported yet."
 +
 +    if self.use_marlin:
 +        return apply_fp8_marlin_linear(
@@ -420,9 +392,6 @@ index 000000000..3ff56f3af
 +            size_k=layer.input_size_per_partition,
 +            bias=bias)
 +
-+    # Note: lazy import to avoid triton import error.
-+    from vllm_mlu.model_executor.layers.quantization.utils.fp8_utils import (
-+        apply_w8a8_block_fp8_linear)
 +    if self.block_quant:
 +        assert self.quant_config.weight_block_size is not None
 +        return apply_w8a8_block_fp8_linear(
@@ -433,6 +402,7 @@ index 000000000..3ff56f3af
 +            input_scale=layer.input_scale,
 +            bias=bias,
 +            cutlass_block_fp8_supported=self.cutlass_block_fp8_supported,
++            use_aiter_and_is_supported=self.use_aiter_and_is_supported,
 +        )
 +    '''
 +    =============================
@@ -444,6 +414,7 @@ index 000000000..3ff56f3af
 +        input=x,
 +        weight=layer.weight,
 +        weight_scale=layer.weight_scale,
++        out_dtype=self.out_dtype,
 +        input_scale=layer.input_scale,
 +        bias=bias,
 +        use_per_token_if_dynamic=self.activation_per_token,
@@ -455,24 +426,78 @@ index 000000000..3ff56f3af
 +    ==================
 +    '''
 +
++
++def vllm__model_executor__layers__quantization__fp8__Fp8MoEMethod____init__(
++    self,
++    quant_config: Fp8Config
++):
++    from vllm.model_executor.layers.fused_moe import fused_experts
++    self.quant_config = quant_config
++    self.block_quant = self.quant_config.weight_block_size is not None
++
++    # For GPUs that lack FP8 hardware support, we can leverage the Marlin
++    # kernel for fast weight-only FP8 quantization
++    self.use_marlin = (not current_platform.has_device_capability(89)
++                        or envs.VLLM_TEST_FORCE_FP8_MARLIN)
++    # Disable marlin for rocm
++    if current_platform.is_rocm():
++        self.use_marlin = False
++
++    # Check for DeepGemm support.
++    self.allow_deep_gemm = False
++    if envs.VLLM_USE_DEEP_GEMM:
++        if not has_deep_gemm:
++            logger.warning_once("Failed to import DeepGemm kernels.")
++        elif not self.block_quant:
++            logger.warning_once("Model is not block quantized. Not using "
++                                " DeepGemm kernels")
++        elif (current_platform.is_cuda()
++                and current_platform.has_device_capability(90)):
++            logger.info_once("Using DeepGemm kernels for Fp8MoEMethod.")
++            self.allow_deep_gemm = True
++        else:
++            logger.warning_once(
++                "DeepGemm not supported on the current platform.")
++
++    self.topk_indices_dtype = None
++    self.fused_experts = functools.partial(  # type: ignore
++        fused_experts,
++        use_fp8_w8a8=True,
++        block_shape=self.quant_config.weight_block_size,
++        allow_deep_gemm=self.allow_deep_gemm)
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: In mlu, always set self.use_marlin as False.
++    '''
++    self.use_marlin = False
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++
++
 +def vllm__model_executor__layers__quantization__fp8__Fp8MoEMethod__apply(
-+        self,
-+        layer: torch.nn.Module,
-+        x: torch.Tensor,
-+        router_logits: torch.Tensor,
-+        top_k: int,
-+        renormalize: bool,
-+        use_grouped_topk: bool = False,
-+        topk_group: Optional[int] = None,
-+        num_expert_group: Optional[int] = None,
-+        global_num_experts: int = -1,
-+        expert_map: Optional[torch.Tensor] = None,
-+        custom_routing_function: Optional[Callable] = None,
-+        scoring_func: str = "softmax",
-+        e_score_correction_bias: Optional[torch.Tensor] = None,
-+        apply_router_weight_on_input: bool = False,
-+        activation: str = "silu",
-+    ) -> torch.Tensor:
++    self,
++    layer: torch.nn.Module,
++    x: torch.Tensor,
++    router_logits: torch.Tensor,
++    top_k: int,
++    renormalize: bool,
++    use_grouped_topk: bool = False,
++    topk_group: Optional[int] = None,
++    num_expert_group: Optional[int] = None,
++    global_num_experts: int = -1,
++    expert_map: Optional[torch.Tensor] = None,
++    custom_routing_function: Optional[Callable] = None,
++    scoring_func: str = "softmax",
++    e_score_correction_bias: Optional[torch.Tensor] = None,
++    apply_router_weight_on_input: bool = False,
++    activation: str = "silu",
++) -> torch.Tensor:
 +    '''
 +    =============================
 +    Modify by vllm_mlu
@@ -524,7 +549,6 @@ index 000000000..3ff56f3af
 +    )
 +
 +
-+
 +MluHijackObject.apply_hijack(
 +    Fp8LinearMethod,
 +    Fp8LinearMethod.apply,
@@ -559,6 +583,11 @@ index 000000000..3ff56f3af
 +    Fp8LinearMethod,
 +    Fp8LinearMethod.process_weights_after_loading,
 +    vllm__model_executor__layers__quantization__fp8__Fp8LinearMethod__process_weights_after_loading
++)
++MluHijackObject.apply_hijack(
++    Fp8MoEMethod,
++    Fp8MoEMethod.__init__,
++    vllm__model_executor__layers__quantization__fp8__Fp8MoEMethod____init__
 +)
 +MluHijackObject.apply_hijack(
 +    Fp8MoEMethod,

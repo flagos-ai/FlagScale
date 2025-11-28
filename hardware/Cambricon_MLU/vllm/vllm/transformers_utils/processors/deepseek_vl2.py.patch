@@ -1,0 +1,61 @@
+diff --git a/vllm/transformers_utils/processors/deepseek_vl2.py b/vllm/transformers_utils/processors/deepseek_vl2.py
+index d1d117b4e..b4669d12f 100644
+--- a/vllm/transformers_utils/processors/deepseek_vl2.py
++++ b/vllm/transformers_utils/processors/deepseek_vl2.py
+@@ -25,7 +25,6 @@
+ # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ 
+ import math
+-from typing import Any
+ 
+ import torch
+ import torchvision.transforms as T
+@@ -179,15 +178,17 @@ class DeepseekVLV2Processor(ProcessorMixin):
+         prompt: str,
+         images: list[Image.Image],
+         inference_mode: bool = True,
+-        **kwargs: Any,
++        **kwargs,
+     ):
+         """
+ 
+         Args:
+             prompt (str): the formatted prompt;
++            conversations (list[dict]): conversations with a list of messages;
+             images (list[ImageType]): the list of images;
+             inference_mode (bool): if True, then remove the last eos token;
+-            **kwargs: Additional keyword arguments.
++            system_prompt (str): the system prompt;
++            **kwargs:
+ 
+         Returns:
+             outputs (BaseProcessorOutput): the output of the processor,
+@@ -255,15 +256,15 @@ class DeepseekVLV2Processor(ProcessorMixin):
+     def __call__(
+         self,
+         *,
+-        text: str,
++        prompt: str,
+         images: list[Image.Image],
+         inference_mode: bool = True,
+-        **kwargs: Any,
++        **kwargs,
+     ):
+         """
+ 
+         Args:
+-            text (str): the formatted prompt;
++            prompt (str): the formatted prompt;
+             images (list[ImageType]): the list of images;
+             inference_mode (bool): if True, then remove the last eos token;
+             **kwargs:
+@@ -277,7 +278,7 @@ class DeepseekVLV2Processor(ProcessorMixin):
+         """
+ 
+         prepare = self.process_one(
+-            prompt=text,
++            prompt=prompt,
+             images=images,
+             inference_mode=inference_mode,
+         )
+

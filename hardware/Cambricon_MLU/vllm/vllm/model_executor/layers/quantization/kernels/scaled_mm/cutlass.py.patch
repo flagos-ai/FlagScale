@@ -1,0 +1,16 @@
+diff --git a/vllm/model_executor/layers/quantization/kernels/scaled_mm/cutlass.py b/vllm/model_executor/layers/quantization/kernels/scaled_mm/cutlass.py
+index 2f982f96b..6ddd4a9ec 100644
+--- a/vllm/model_executor/layers/quantization/kernels/scaled_mm/cutlass.py
++++ b/vllm/model_executor/layers/quantization/kernels/scaled_mm/cutlass.py
+@@ -25,8 +25,8 @@ class CutlassScaledMMLinearKernel(ScaledMMLinearKernel):
+     def can_implement(
+             cls, c: ScaledMMLinearLayerConfig) -> tuple[bool, Optional[str]]:
+ 
+-        if not current_platform.is_cuda():
+-            return False, "CutlassScaledMM requires running on CUDA."
++        if (not current_platform.is_cuda() and not current_platform.is_cpu()):
++            return False, "CutlassScaledMM requires running on CUDA or CPU."
+ 
+         return True, None
+ 
+

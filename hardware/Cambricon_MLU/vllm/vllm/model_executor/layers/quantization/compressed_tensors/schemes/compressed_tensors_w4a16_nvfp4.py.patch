@@ -1,0 +1,40 @@
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a16_nvfp4.py b/vllm/model_executor/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a16_nvfp4.py
+index 96dccf04d..8202ce951 100644
+--- a/vllm/model_executor/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a16_nvfp4.py
++++ b/vllm/model_executor/layers/quantization/compressed_tensors/schemes/compressed_tensors_w4a16_nvfp4.py
+@@ -18,8 +18,7 @@ __all__ = ["CompressedTensorsW4A16Fp4"]
+ 
+ class CompressedTensorsW4A16Fp4(CompressedTensorsScheme):
+ 
+-    def __init__(self, has_input_global_scale: bool = False):
+-        self.has_input_global_scale = has_input_global_scale
++    def __init__(self):
+         self.group_size = 16
+ 
+     @classmethod
+@@ -65,13 +64,6 @@ class CompressedTensorsW4A16Fp4(CompressedTensorsScheme):
+ 
+         layer.register_parameter("weight_scale", weight_scale)
+ 
+-        if self.has_input_global_scale:
+-            input_global_scale = PerTensorScaleParameter(
+-                data=torch.empty(len(output_partition_sizes),
+-                                 dtype=torch.float32),
+-                weight_loader=weight_loader)
+-            layer.register_parameter("input_global_scale", input_global_scale)
+-
+     def process_weights_after_loading(self, layer) -> None:
+         # Process parameters for marlin repacking
+ 
+@@ -85,10 +77,6 @@ class CompressedTensorsW4A16Fp4(CompressedTensorsScheme):
+             requires_grad=False)
+         del layer.weight_global_scale
+ 
+-        if self.has_input_global_scale:
+-            layer.input_global_scale = torch.nn.Parameter(
+-                layer.input_global_scale.data, requires_grad=False)
+-
+         prepare_fp4_layer_for_marlin(layer)
+ 
+     def apply_weights(self,
+

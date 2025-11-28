@@ -1,0 +1,28 @@
+diff --git a/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_sm90_fp8.cu b/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_sm90_fp8.cu
+index 1db6c41bf..e092c61ab 100644
+--- a/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_sm90_fp8.cu
++++ b/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_sm90_fp8.cu
+@@ -1,5 +1,6 @@
+ #include "scaled_mm_kernels.hpp"
+ #include "scaled_mm_sm90_fp8_dispatch.cuh"
++#include "cutlass_extensions/epilogue/scaled_mm_epilogues_c3x.hpp"
+ 
+ namespace vllm {
+ 
+@@ -12,11 +13,11 @@ void cutlass_scaled_mm_sm90_fp8(torch::Tensor& out, torch::Tensor const& a,
+   if (bias) {
+     TORCH_CHECK(bias->dtype() == out.dtype(),
+                 "currently bias dtype must match output dtype ", out.dtype());
+-    return cutlass_scaled_mm_sm90_fp8_epilogue<true>(out, a, b, a_scales,
+-                                                     b_scales, *bias);
++    return cutlass_scaled_mm_sm90_fp8_epilogue<c3x::ScaledEpilogueBias>(
++        out, a, b, a_scales, b_scales, *bias);
+   } else {
+-    return cutlass_scaled_mm_sm90_fp8_epilogue<false>(out, a, b, a_scales,
+-                                                      b_scales);
++    return cutlass_scaled_mm_sm90_fp8_epilogue<c3x::ScaledEpilogue>(
++        out, a, b, a_scales, b_scales);
+   }
+ }
+ 
+

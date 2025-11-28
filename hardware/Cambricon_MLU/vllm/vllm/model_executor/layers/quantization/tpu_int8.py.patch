@@ -1,0 +1,43 @@
+diff --git a/vllm/model_executor/layers/quantization/tpu_int8.py b/vllm/model_executor/layers/quantization/tpu_int8.py
+index 38de4b54f..83c8a98ea 100644
+--- a/vllm/model_executor/layers/quantization/tpu_int8.py
++++ b/vllm/model_executor/layers/quantization/tpu_int8.py
+@@ -13,7 +13,7 @@ from vllm.model_executor.layers.quantization.base_config import (
+     QuantizationConfig)
+ from vllm.model_executor.parameter import ModelWeightParameter
+ 
+-ACTIVATION_SCHEMES = ["none", "dynamic"]
++ACTIVATION_SCHEMES = ["none"]
+ 
+ 
+ class Int8TpuConfig(QuantizationConfig):
+@@ -61,9 +61,6 @@ class TPUInt8LinearMethod(LinearMethodBase):
+ 
+     def __init__(self, quant_config: Int8TpuConfig):
+         self.quant_config = quant_config
+-        self.quantize_activation = False
+-        if self.quant_config.activation_scheme == 'dynamic':
+-            self.quantize_activation = True
+ 
+     def create_weights(self, layer: Module, input_size_per_partition: int,
+                        output_partition_sizes: list[int], input_size: int,
+@@ -110,7 +107,7 @@ class TPUInt8LinearMethod(LinearMethodBase):
+               x: torch.Tensor,
+               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+         try:
+-            import torch_xla.experimental.custom_kernel  # noqa: F401
++            import torch_xla.experimental.xla_quantized_matmul  # noqa: F401
+         except ImportError as err:
+             raise ImportError(
+                 "Please install torch_xla by following the instructions at "
+@@ -118,8 +115,7 @@ class TPUInt8LinearMethod(LinearMethodBase):
+                 "to run vLLM on TPU.") from err
+         weight = layer.weight
+         scale = layer.scale
+-        out = torch.ops.xla.quantized_matmul_int8(
+-            x, weight, scale, quantize_activation=self.quantize_activation)
++        out = torch.ops.xla.quantized_matmul(x, weight, scale)
+         if bias is not None:
+             out = out + bias
+         return out
+

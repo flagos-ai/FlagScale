@@ -1,0 +1,29 @@
+diff --git a/csrc/quantization/cutlass_w8a8/scaled_mm_c3x_sm120.cu b/csrc/quantization/cutlass_w8a8/scaled_mm_c3x_sm120.cu
+deleted file mode 100644
+index dc87c5c35..000000000
+--- a/csrc/quantization/cutlass_w8a8/scaled_mm_c3x_sm120.cu
++++ /dev/null
+@@ -1,22 +0,0 @@
+-#include "c3x/scaled_mm_helper.hpp"
+-#include "c3x/scaled_mm_kernels.hpp"
+-
+-/*
+-   This file defines quantized GEMM operations using the CUTLASS 3.x API, for
+-   NVIDIA GPUs with sm120 (Blackwell).
+-*/
+-
+-#if defined ENABLE_SCALED_MM_SM120 && ENABLE_SCALED_MM_SM120
+-
+-void cutlass_scaled_mm_sm120(torch::Tensor& c, torch::Tensor const& a,
+-                             torch::Tensor const& b,
+-                             torch::Tensor const& a_scales,
+-                             torch::Tensor const& b_scales,
+-                             std::optional<torch::Tensor> const& bias) {
+-  dispatch_scaled_mm(c, a, b, a_scales, b_scales, bias,
+-                     vllm::cutlass_scaled_mm_sm120_fp8,
+-                     nullptr,  // int8 not supported on SM120
+-                     vllm::cutlass_scaled_mm_blockwise_sm120_fp8);
+-}
+-
+-#endif
+

@@ -1,0 +1,23 @@
+diff --git a/vllm/v1/structured_output/backend_types.py b/vllm/v1/structured_output/backend_types.py
+index 9a53aa7a1..d500783aa 100644
+--- a/vllm/v1/structured_output/backend_types.py
++++ b/vllm/v1/structured_output/backend_types.py
+@@ -110,7 +110,7 @@ class StructuredOutputBackend(ABC):
+ 
+         Args:
+             request_type (StructuredOutputOptions): The type of structured
+-                output request.
++              output request.
+             grammar_spec (str): The grammar specification to compile.
+ 
+         Returns:
+@@ -124,7 +124,7 @@ class StructuredOutputBackend(ABC):
+ 
+         Args:
+             max_num_seqs (int): The maximum number of sequences for which
+-                to allocate the bitmask.
++              to allocate the bitmask.
+         """
+ 
+     @abstractmethod
+

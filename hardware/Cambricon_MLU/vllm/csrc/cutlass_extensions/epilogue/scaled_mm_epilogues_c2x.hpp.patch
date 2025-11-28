@@ -1,0 +1,32 @@
+diff --git a/csrc/cutlass_extensions/epilogue/scaled_mm_epilogues_c2x.hpp b/csrc/cutlass_extensions/epilogue/scaled_mm_epilogues_c2x.hpp
+index ad8c0067d..64b7ddae3 100644
+--- a/csrc/cutlass_extensions/epilogue/scaled_mm_epilogues_c2x.hpp
++++ b/csrc/cutlass_extensions/epilogue/scaled_mm_epilogues_c2x.hpp
+@@ -153,7 +153,7 @@ struct ScaledEpilogueBias
+       cutlass::epilogue::threadblock::Sm80EVT<Compute0, ScaleB, Accum>;
+ 
+   using Compute1 = cutlass::epilogue::threadblock::VisitorCompute<
+-      cutlass::homogeneous_multiply_add, ElementD, float,
++      cutlass::multiply_add, ElementD, float,
+       cutlass::FloatRoundStyle::round_to_nearest>;
+ 
+  public:
+@@ -210,7 +210,7 @@ struct ScaledEpilogueBiasAzp
+                                               EVTComputeAzp>;
+ 
+   using ComputeScaleBiasA = cutlass::epilogue::threadblock::VisitorCompute<
+-      cutlass::homogeneous_multiply_add, ElementD, float,
++      cutlass::multiply_add, ElementD, float,
+       cutlass::FloatRoundStyle::round_to_nearest>;
+ 
+  public:
+@@ -288,7 +288,7 @@ struct ScaledEpilogueBiasAzpToken
+                                               EVTComputeAcc>;
+ 
+   using ComputeScaleBiasA = cutlass::epilogue::threadblock::VisitorCompute<
+-      cutlass::homogeneous_multiply_add, ElementD, float,
++      cutlass::multiply_add, ElementD, float,
+       cutlass::FloatRoundStyle::round_to_nearest>;
+ 
+  public:
+

@@ -1,0 +1,25 @@
+diff --git a/vllm/lora/ops/triton_ops/lora_kernel_metadata.py b/vllm/lora/ops/triton_ops/lora_kernel_metadata.py
+index e27604728..39e647b9b 100644
+--- a/vllm/lora/ops/triton_ops/lora_kernel_metadata.py
++++ b/vllm/lora/ops/triton_ops/lora_kernel_metadata.py
+@@ -83,8 +83,8 @@ class LoRAKernelMeta:
+         Prepare kernel metadata tensors for the current forward pass.
+ 
+         Args:
+-            token_lora_mapping (torch.Tensor): Tensor containing lora indices
+-                for each input token.
++            token_lora_tensor (torch.Tensor): Tensor containing lora indices
++            for each input token.
+         """
+ 
+         self._reset()
+@@ -136,7 +136,7 @@ class LoRAKernelMeta:
+ 
+         Args:
+             token_nums (int): Number of input tokens in the current forward
+-                pass of the kernel.
++            pass. 
+         """
+         return (
+             self.token_lora_mapping[:token_nums],
+

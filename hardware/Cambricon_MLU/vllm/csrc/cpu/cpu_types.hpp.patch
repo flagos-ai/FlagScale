@@ -1,0 +1,20 @@
+diff --git a/csrc/cpu/cpu_types.hpp b/csrc/cpu/cpu_types.hpp
+index 9cdcd2eda..17bbe04ee 100644
+--- a/csrc/cpu/cpu_types.hpp
++++ b/csrc/cpu/cpu_types.hpp
+@@ -14,12 +14,7 @@
+   // arm implementation
+   #include "cpu_types_arm.hpp"
+ #else
+-  #warning "unsupported vLLM cpu implementation, vLLM will compile with scalar"
+-  #include "cpu_types_scalar.hpp"
+-#endif
+-
+-#ifdef _OPENMP
+-  #include <omp.h>
++  #warning "unsupported vLLM cpu implementation"
+ #endif
+ 
+ #endif
+\ No newline at end of file
+

@@ -1,0 +1,20 @@
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/transform/utils.py b/vllm/model_executor/layers/quantization/compressed_tensors/transform/utils.py
+deleted file mode 100644
+index 2f353de1e..000000000
+--- a/vllm/model_executor/layers/quantization/compressed_tensors/transform/utils.py
++++ /dev/null
+@@ -1,13 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from typing import NamedTuple
+-
+-from compressed_tensors.transform import TransformArgs, TransformScheme
+-
+-__all__ = ["TransformTuple"]
+-
+-
+-class TransformTuple(NamedTuple):
+-    scheme_name: str
+-    scheme: TransformScheme
+-    args: TransformArgs
+

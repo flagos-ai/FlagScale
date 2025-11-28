@@ -1,0 +1,27 @@
+diff --git a/vllm/model_executor/layers/quantization/utils/mxfp8_utils.py b/vllm/model_executor/layers/quantization/utils/mxfp8_utils.py
+deleted file mode 100644
+index 2a6b21c91..000000000
+--- a/vllm/model_executor/layers/quantization/utils/mxfp8_utils.py
++++ /dev/null
+@@ -1,20 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-
+-import torch
+-
+-from vllm.logger import init_logger
+-
+-logger = init_logger(__name__)
+-
+-
+-def mxfp8_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+-
+-    try:
+-        from flashinfer import mxfp8_quantize
+-    except ImportError as err:
+-        raise ImportError("The package `flashinfer` is required to do "
+-                          "MX-FP8 quantization. Please install it with" \
+-                          "`pip install flashinfer`") from err
+-
+-    return mxfp8_quantize(x, is_sf_swizzled_layout=False)
+

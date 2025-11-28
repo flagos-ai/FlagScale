@@ -1,0 +1,9 @@
+diff --git a/requirements/kv_connectors.txt b/requirements/kv_connectors.txt
+deleted file mode 100644
+index 3b610e0d9..000000000
+--- a/requirements/kv_connectors.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-lmcache
+-nixl >= 0.5.1 # Required for disaggregated prefill
+

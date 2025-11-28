@@ -1,0 +1,34 @@
+diff --git a/vllm/model_executor/models/solar.py b/vllm/model_executor/models/solar.py
+index c774171b9..8dd52f1d2 100644
+--- a/vllm/model_executor/models/solar.py
++++ b/vllm/model_executor/models/solar.py
+@@ -47,6 +47,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
+     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, VocabParallelEmbedding)
+ from vllm.model_executor.model_loader.weight_utils import (
+     default_weight_loader, maybe_remap_kv_scale_name)
++from vllm.model_executor.sampling_metadata import SamplingMetadata
+ from vllm.sequence import IntermediateTensors
+ 
+ from .interfaces import SupportsLoRA, SupportsPP
+@@ -468,7 +469,6 @@ class SolarForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
+                 # compatibility
+                 if not lora_config else lora_config.lora_vocab_padding_size,
+                 quant_config=quant_config,
+-                prefix=maybe_prefix(prefix, "lm_head"),
+             )
+             if config.tie_word_embeddings:
+                 self.lm_head.weight = self.model.embed_tokens.weight
+@@ -494,8 +494,10 @@ class SolarForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
+                                   inputs_embeds)
+         return model_output
+ 
+-    def compute_logits(self, hidden_states: torch.Tensor) -> torch.Tensor:
+-        logits = self.logits_processor(self.lm_head, hidden_states)
++    def compute_logits(self, hidden_states: torch.Tensor,
++                       sampling_metadata: SamplingMetadata) -> torch.Tensor:
++        logits = self.logits_processor(self.lm_head, hidden_states,
++                                       sampling_metadata)
+         return logits
+ 
+     def load_weights(self, weights: Iterable[tuple[str,
+

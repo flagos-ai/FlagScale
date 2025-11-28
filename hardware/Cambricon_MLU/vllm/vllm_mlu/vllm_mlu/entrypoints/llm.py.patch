@@ -1,169 +1,28 @@
 diff --git a/vllm_mlu/vllm_mlu/entrypoints/llm.py b/vllm_mlu/vllm_mlu/entrypoints/llm.py
 new file mode 100644
-index 000000000..6a01d4a16
+index 000000000..e09ad9f08
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/entrypoints/llm.py
-@@ -0,0 +1,329 @@
-+import cloudpickle
+@@ -0,0 +1,157 @@
 +from tqdm import tqdm
 +from typing import Optional, Union, Any
 +from vllm.entrypoints.llm import LLM
-+from vllm.config import CompilationConfig
-+from vllm.engine.arg_utils import (EngineArgs, HfOverrides, PoolerConfig,
++from vllm.config import ModelDType, TokenizerMode
++from vllm.engine.arg_utils import (HfOverrides, PoolerConfig,
 +                                   TaskOption)
-+from vllm.engine.llm_engine import LLMEngine
++from vllm.model_executor.layers.quantization import QuantizationMethods
 +from vllm.outputs import PoolingRequestOutput, RequestOutput
-+from vllm.usage.usage_lib import UsageContext
-+from vllm.utils import Counter, deprecate_args
-+from vllm_mlu._mlu_utils import VLLM_LATENCY_DEBUG_EN, VLLM_LATENCY_DEBUG_WITH_DEVICE_EN
-+from vllm_mlu.mlu_hijack_utils import MluHijackObject
-+from vllm_mlu.mlu_metric import LLMMetric
-+from vllm_mlu.dump_info import LLMDumpInfo
++from vllm.utils import deprecate_args
 +from vllm.logger import init_logger
++
++import vllm_mlu._mlu_utils as mlu_envs
++from vllm_mlu.mlu_metric import LLMMetric
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
 +
 +logger = init_logger(__name__)
 +
-+
-+@deprecate_args(
-+    start_index=2,  # Ignore self and model
-+    is_deprecated=lambda: LLM.DEPRECATE_INIT_POSARGS,
-+    additional_message=(
-+        "All positional arguments other than `model` will be "
-+        "replaced with keyword arguments in an upcoming version."),
-+)
-+def vllm__entrypoints__llm__LLM____init__(
-+    self,
-+    model: str,
-+    tokenizer: Optional[str] = None,
-+    tokenizer_mode: str = "auto",
-+    skip_tokenizer_init: bool = False,
-+    trust_remote_code: bool = False,
-+    allowed_local_media_path: str = "",
-+    tensor_parallel_size: int = 1,
-+    dtype: str = "auto",
-+    quantization: Optional[str] = None,
-+    revision: Optional[str] = None,
-+    tokenizer_revision: Optional[str] = None,
-+    seed: Optional[int] = None,
-+    gpu_memory_utilization: float = 0.9,
-+    swap_space: float = 4,
-+    cpu_offload_gb: float = 0,
-+    enforce_eager: Optional[bool] = None,
-+    max_seq_len_to_capture: int = 8192,
-+    disable_custom_all_reduce: bool = False,
-+    disable_async_output_proc: bool = False,
-+    hf_overrides: Optional[HfOverrides] = None,
-+    mm_processor_kwargs: Optional[dict[str, Any]] = None,
-+    # After positional args are removed, move this right below `model`
-+    task: TaskOption = "auto",
-+    override_pooler_config: Optional[PoolerConfig] = None,
-+    compilation_config: Optional[Union[int, dict[str, Any]]] = None,
-+    **kwargs,
-+) -> None:
-+    '''
-+    LLM constructor.
-+
-+    Note: if enforce_eager is unset (enforce_eager is None)
-+    it defaults to False.
-+    '''
-+
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: 1) Initialize LLMDumpInfo
-+            2) Initialize context mlugraph params
-+    '''
-+    LLM.dump_info.init_param(
-+        tensor_parallel_size=tensor_parallel_size,
-+        dtype=dtype,
-+        kv_cache_dtype=kwargs.get('kv_cache_dtype', 'default_value'),
-+        quantization=quantization,
-+        model=model,
-+        trust_remote_code=kwargs.get('trust_remote_code', 'default_value'))
-+
-+    enable_context_mlugraph = kwargs.pop("enable_context_mlugraph", False)
-+    context_batch_size_to_capture = kwargs.pop("context_batch_size_to_capture", None)
-+    context_seq_len_to_capture = kwargs.pop("context_seq_len_to_capture", None)
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+
-+    if "disable_log_stats" not in kwargs:
-+        kwargs["disable_log_stats"] = True
-+
-+    if "worker_cls" in kwargs:
-+        worker_cls = kwargs["worker_cls"]
-+        # if the worker_cls is not qualified string name,
-+        # we serialize it using cloudpickle to avoid pickling issues
-+        if isinstance(worker_cls, type):
-+            kwargs["worker_cls"] = cloudpickle.dumps(worker_cls)
-+
-+    if compilation_config is not None:
-+        if isinstance(compilation_config, (int, dict)):
-+            compilation_config_instance = CompilationConfig.from_cli(
-+                str(compilation_config))
-+        else:
-+            compilation_config_instance = compilation_config
-+    else:
-+        compilation_config_instance = None
-+
-+    engine_args = EngineArgs(
-+        model=model,
-+        task=task,
-+        tokenizer=tokenizer,
-+        tokenizer_mode=tokenizer_mode,
-+        skip_tokenizer_init=skip_tokenizer_init,
-+        trust_remote_code=trust_remote_code,
-+        allowed_local_media_path=allowed_local_media_path,
-+        tensor_parallel_size=tensor_parallel_size,
-+        dtype=dtype,
-+        quantization=quantization,
-+        revision=revision,
-+        tokenizer_revision=tokenizer_revision,
-+        seed=seed,
-+        gpu_memory_utilization=gpu_memory_utilization,
-+        swap_space=swap_space,
-+        cpu_offload_gb=cpu_offload_gb,
-+        enforce_eager=enforce_eager,
-+        max_seq_len_to_capture=max_seq_len_to_capture,
-+        disable_custom_all_reduce=disable_custom_all_reduce,
-+        disable_async_output_proc=disable_async_output_proc,
-+        hf_overrides=hf_overrides,
-+        mm_processor_kwargs=mm_processor_kwargs,
-+        override_pooler_config=override_pooler_config,
-+        compilation_config=compilation_config_instance,
-+        **kwargs,
-+    )
-+
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: set context mlugraph params for EngineArgs
-+    '''
-+    setattr(engine_args, "enable_context_mlugraph", enable_context_mlugraph)
-+    setattr(engine_args, "context_batch_size_to_capture", context_batch_size_to_capture)
-+    setattr(engine_args, "context_seq_len_to_capture", context_seq_len_to_capture)
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+
-+    # Create the Engine (autoselects V0 vs V1)
-+    self.llm_engine = LLMEngine.from_engine_args(
-+        engine_args=engine_args, usage_context=UsageContext.LLM_CLASS)
-+    self.engine_class = type(self.llm_engine)
-+
-+    self.request_counter = Counter()
-+    self.default_sampling_params: Union[dict[str, Any], None] = None
-+
-+
-+def vllm__entrypoints__llm__LLM__get_metrics(
++def vllm__entrypoints__llm__LLM__get_mlu_metrics(
 +    self,
 +    metrics_idx_start,
 +    only_average,
@@ -171,11 +30,12 @@ index 000000000..6a01d4a16
 +    output_len,
 +    tp_nums,
 +    quantization,
-+    dump_info=None,
 +    show_per_iter=False,
 +    is_embedding_task=False,
-+    mm_kwargs={},
++    mm_kwargs=None,
 +    total_prefill_steps=1,
++    num_speculative_tokens=0,
++    dp_size=1,
 +) -> None:
 +    '''
 +    @brief:该函数用来打印vLLM调用generate接口过程中代码统计的各项性能指标数据
@@ -185,19 +45,28 @@ index 000000000..6a01d4a16
 +        only_average: True 只打印N次调用generate接口的平均性能 False 打印每次调用generate接口的性能及其均值 若N次性能数据波动较大，需自行排查测试环境是否稳定。
 +        其余参数:均为模型配置参数
 +    '''
-+    if VLLM_LATENCY_DEBUG_EN:
-+        self.metric.calc_metric(self.llm_engine.model_config.model,
++    if mlu_envs.VLLM_LATENCY_DEBUG_EN:
++        batch_size = self.metric.batch_size_list[-1] * dp_size
++        if mm_kwargs:
++            # The multimodal model doesn't support the hfu feature yet.
++            hfu_info = None
++            io_efficiency = None
++        else:
++            hfu_info, io_efficiency = self.llm_engine.get_hfu_info(batch_size, input_len, output_len)
++        self.metric.calc_metric(
++                                self.llm_engine.model_config.model,
 +                                self.llm_engine.model_config.dtype,
 +                                metrics_idx_start, only_average,
 +                                input_len, output_len, tp_nums,
-+                                quantization, dump_info, show_per_iter,
-+                                is_embedding_task, mm_kwargs, total_prefill_steps)
++                                quantization, show_per_iter,
++                                is_embedding_task, mm_kwargs, total_prefill_steps,
++                                num_speculative_tokens, dp_size=dp_size, hfu_info=hfu_info, io_efficiency=io_efficiency)
 +    else:
 +        print("Warnning:please set VLLM_LATENCY_DEBUG=true!")
 +
 +
 +def vllm__entrypoints__llm__LLM___run_engine(
-+        self, *, use_tqdm: bool
++    self, *, use_tqdm: bool
 +) -> list[Union[RequestOutput, PoolingRequestOutput]]:
 +    # Initialize tqdm.
 +    if use_tqdm:
@@ -215,16 +84,14 @@ index 000000000..6a01d4a16
 +    Added by vllm_mlu
 +    =============================
 +    '''
-+    is_latency_debug = VLLM_LATENCY_DEBUG_EN
-+    # Record start
-+    if is_latency_debug:
-+        speculative_config = self.llm_engine.model_executor.speculative_config
++    if mlu_envs.VLLM_LATENCY_DEBUG_EN:
 +        total_request_num = self.llm_engine.get_num_unfinished_requests()
-+        if not self.llm_engine.model_config.is_embedding_task():
-+            peak_memory, block_memory, num_total_gpu_blocks, num_total_cpu_blocks = \
-+                self.llm_engine.get_memory_usage()
-+            self.metric.update_memory_usage(peak_memory, block_memory, num_total_gpu_blocks, num_total_cpu_blocks)
 +        e2e_start_time = self.metric.get_mlu_cost_time()
++        if not self.llm_engine.model_config.is_embedding_task():
++            peak_memory, block_memory, num_gpu_blocks, num_cpu_blocks = \
++                self.llm_engine.get_memory_usage()
++            self.metric.update_memory_usage(peak_memory, block_memory,
++                                            num_gpu_blocks, num_cpu_blocks)
 +    '''
 +    ==================
 +    End of addition
@@ -236,47 +103,7 @@ index 000000000..6a01d4a16
 +    total_in_toks = 0
 +    total_out_toks = 0
 +    while self.llm_engine.has_unfinished_requests():
-+        '''
-+        =============================
-+        Added by vllm_mlu
-+        =============================
-+        '''
-+        if is_latency_debug:
-+            start_time = self.metric.get_mlu_cost_time()
-+        '''
-+        ==================
-+        End of addition
-+        ==================
-+        '''
 +        step_outputs = self.llm_engine.step()
-+        '''
-+        =============================
-+        Added by vllm_mlu
-+        =============================
-+        '''
-+        if is_latency_debug:
-+            end_time = self.metric.get_mlu_cost_time()
-+            step_latency = end_time - start_time
-+            batch_size = len(step_outputs)
-+            if batch_size > 0 and speculative_config and speculative_config.num_speculative_tokens < 1:
-+                assert batch_size == total_request_num, \
-+                    f"LLM has received {total_request_num} requests, but only processed {batch_size} requests in the current step.\n" + \
-+                    f"If you are running benchmark_latency test, please check if the input is correct.\n" + \
-+                    f"Otherwise, please set env VLLM_LATENCY_DEBUG=false, then run test again.\n"
-+            num_free_gpu_blocks, num_free_cpu_blocks = self.llm_engine.get_block_usage()
-+            self.metric.update_step_block_usage(num_free_gpu_blocks, num_free_cpu_blocks)
-+            self.metric.update_step_latency(step_latency)
-+            if hasattr(self.llm_engine, "stat_loggers"):
-+                spec_decode_metrics = self.llm_engine.stat_loggers['logging'].spec_decode_metrics
-+                if spec_decode_metrics is not None:
-+                    self.metric.update_spec_decode_metrics(spec_decode_metrics)
-+            if VLLM_LATENCY_DEBUG_WITH_DEVICE_EN:
-+                self.metric.update_step_latency_device(self.llm_engine.get_latency())
-+        '''
-+        ==================
-+        End of addition
-+        ==================
-+        '''
 +        for output in step_outputs:
 +            if output.finished:
 +                outputs.append(output)
@@ -302,9 +129,16 @@ index 000000000..6a01d4a16
 +    Added by vllm_mlu
 +    =============================
 +    '''
-+    if is_latency_debug:
++    if mlu_envs.VLLM_LATENCY_DEBUG_EN:
 +        e2e_end_time = self.metric.get_mlu_cost_time()
 +        e2e_latency = e2e_end_time - e2e_start_time
++
++        engine_step_latency, model_forward_latency, mm_encoder_latency = self.llm_engine.get_latency()
++        self.metric.update_step_latency(engine_step_latency)
++        if mlu_envs.VLLM_LATENCY_DEBUG_WITH_DEVICE_EN:
++            self.metric.update_step_latency_device(model_forward_latency)
++            self.metric.update_mm_encoder_latency_device(mm_encoder_latency)
++
 +        self.metric.add_metrics(total_request_num, e2e_latency)
 +    '''
 +    ==================
@@ -321,15 +155,9 @@ index 000000000..6a01d4a16
 +
 +
 +LLM.metric = LLMMetric()
-+
-+LLM.dump_info = LLMDumpInfo()
-+
 +MluHijackObject.apply_hijack(LLM,
-+                             LLM.__init__,
-+                             vllm__entrypoints__llm__LLM____init__)
-+MluHijackObject.apply_hijack(LLM,
-+                             "get_metrics",
-+                             vllm__entrypoints__llm__LLM__get_metrics)
++                             "get_mlu_metrics",
++                             vllm__entrypoints__llm__LLM__get_mlu_metrics)
 +MluHijackObject.apply_hijack(LLM,
 +                             LLM._run_engine,
 +                             vllm__entrypoints__llm__LLM___run_engine)

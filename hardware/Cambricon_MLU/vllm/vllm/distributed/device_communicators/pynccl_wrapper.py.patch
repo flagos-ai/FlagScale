@@ -1,0 +1,135 @@
+diff --git a/vllm/distributed/device_communicators/pynccl_wrapper.py b/vllm/distributed/device_communicators/pynccl_wrapper.py
+index c3e99e177..04a4d0147 100644
+--- a/vllm/distributed/device_communicators/pynccl_wrapper.py
++++ b/vllm/distributed/device_communicators/pynccl_wrapper.py
+@@ -41,7 +41,6 @@ logger = init_logger(__name__)
+ 
+ ncclResult_t = ctypes.c_int
+ ncclComm_t = ctypes.c_void_p
+-ncclWindow_t = ctypes.c_void_p
+ 
+ 
+ class ncclUniqueId(ctypes.Structure):
+@@ -155,17 +154,6 @@ class NCCLLibrary:
+             ncclRedOp_t, ncclComm_t, cudaStream_t
+         ]),
+ 
+-        # ncclResult_t  ncclReduce(
+-        #   const void* sendbuff, void* recvbuff, size_t count,
+-        #   ncclDataType_t datatype, ncclRedOp_t op, int root,
+-        #   ncclComm_t comm,  cudaStream_t stream);
+-        # note that cudaStream_t is a pointer type, so the last argument
+-        # is a pointer
+-        Function("ncclReduce", ncclResult_t, [
+-            buffer_type, buffer_type, ctypes.c_size_t, ncclDataType_t,
+-            ncclRedOp_t, ctypes.c_int, ncclComm_t, cudaStream_t
+-        ]),
+-
+         # ncclResult_t  ncclAllGather(
+         #   const void* sendbuff, void* recvbuff, size_t count,
+         #   ncclDataType_t datatype, ncclComm_t comm,
+@@ -219,28 +207,6 @@ class NCCLLibrary:
+         # it is better not to call it at all.
+         # ncclResult_t  ncclCommDestroy(ncclComm_t comm);
+         Function("ncclCommDestroy", ncclResult_t, [ncclComm_t]),
+-        # ncclResult_t ncclGroupStart();
+-        Function("ncclGroupStart", ncclResult_t, []),
+-        # ncclResult_t ncclGroupEnd();
+-        Function("ncclGroupEnd", ncclResult_t, []),
+-        # ncclResult_t ncclCommWindowRegister(
+-        #   ncclComm_t comm, void* buff, size_t size,
+-        #   ncclWindow_t* win, int winFlags);
+-        Function(
+-            "ncclCommWindowRegister",
+-            ncclResult_t,
+-            [
+-                ncclComm_t,
+-                buffer_type,
+-                ctypes.c_size_t,
+-                ctypes.POINTER(ncclWindow_t),
+-                ctypes.c_int,
+-            ],
+-        ),
+-        # ncclResult_t ncclCommWindowDeregister(
+-        #   ncclComm_t comm, ncclWindow_t win);
+-        Function("ncclCommWindowDeregister", ncclResult_t,
+-                 [ncclComm_t, ncclWindow_t]),
+     ]
+ 
+     # class attribute to store the mapping from the path to the library
+@@ -290,14 +256,10 @@ class NCCLLibrary:
+             error_str = self.ncclGetErrorString(result)
+             raise RuntimeError(f"NCCL error: {error_str}")
+ 
+-    def ncclGetRawVersion(self) -> int:
++    def ncclGetVersion(self) -> str:
+         version = ctypes.c_int()
+         self.NCCL_CHECK(self._funcs["ncclGetVersion"](ctypes.byref(version)))
+-        # something like 21903
+-        return version.value
+-
+-    def ncclGetVersion(self) -> str:
+-        version_str = str(self.ncclGetRawVersion())
++        version_str = str(version.value)
+         # something like 21903 --> "2.19.3"
+         major = version_str[0].lstrip("0")
+         minor = version_str[1:3].lstrip("0")
+@@ -310,14 +272,6 @@ class NCCLLibrary:
+             ctypes.byref(unique_id)))
+         return unique_id
+ 
+-    def unique_id_from_bytes(self, data: bytes) -> ncclUniqueId:
+-        if len(data) != 128:
+-            raise ValueError(
+-                f"Expected 128 bytes for ncclUniqueId, got {len(data)} bytes")
+-        unique_id = ncclUniqueId()
+-        ctypes.memmove(ctypes.addressof(unique_id.internal), data, 128)
+-        return unique_id
+-
+     def ncclCommInitRank(self, world_size: int, unique_id: ncclUniqueId,
+                          rank: int) -> ncclComm_t:
+         comm = ncclComm_t()
+@@ -338,18 +292,6 @@ class NCCLLibrary:
+                                                      datatype, op, comm,
+                                                      stream))
+ 
+-    def ncclReduce(self, sendbuff: buffer_type, recvbuff: buffer_type,
+-                   count: int, datatype: int, op: int, root: int,
+-                   comm: ncclComm_t, stream: cudaStream_t) -> None:
+-        # `datatype` actually should be `ncclDataType_t`
+-        # and `op` should be `ncclRedOp_t`
+-        # both are aliases of `ctypes.c_int`
+-        # when we pass int to a function, it will be converted to `ctypes.c_int`
+-        # by ctypes automatically
+-        self.NCCL_CHECK(self._funcs["ncclReduce"](sendbuff, recvbuff, count,
+-                                                  datatype, op, root, comm,
+-                                                  stream))
+-
+     def ncclReduceScatter(self, sendbuff: buffer_type, recvbuff: buffer_type,
+                           count: int, datatype: int, op: int, comm: ncclComm_t,
+                           stream: cudaStream_t) -> None:
+@@ -392,23 +334,6 @@ class NCCLLibrary:
+     def ncclCommDestroy(self, comm: ncclComm_t) -> None:
+         self.NCCL_CHECK(self._funcs["ncclCommDestroy"](comm))
+ 
+-    def ncclGroupStart(self) -> None:
+-        self.NCCL_CHECK(self._funcs["ncclGroupStart"]())
+-
+-    def ncclGroupEnd(self) -> None:
+-        self.NCCL_CHECK(self._funcs["ncclGroupEnd"]())
+-
+-    def ncclCommWindowRegister(self, comm: ncclComm_t, buff: buffer_type,
+-                               size: int, win_flags: int) -> ncclWindow_t:
+-        window = ncclWindow_t()
+-        self.NCCL_CHECK(self._funcs["ncclCommWindowRegister"](
+-            comm, buff, size, ctypes.byref(window), win_flags))
+-        return window
+-
+-    def ncclCommWindowDeregister(self, comm: ncclComm_t,
+-                                 window: ncclWindow_t) -> None:
+-        self.NCCL_CHECK(self._funcs["ncclCommWindowDeregister"](comm, window))
+-
+ 
+ __all__ = [
+     "NCCLLibrary", "ncclDataTypeEnum", "ncclRedOpTypeEnum", "ncclUniqueId",
+

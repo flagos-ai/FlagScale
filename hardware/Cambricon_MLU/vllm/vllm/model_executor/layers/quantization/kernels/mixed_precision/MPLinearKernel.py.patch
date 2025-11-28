@@ -1,0 +1,13 @@
+diff --git a/vllm/model_executor/layers/quantization/kernels/mixed_precision/MPLinearKernel.py b/vllm/model_executor/layers/quantization/kernels/mixed_precision/MPLinearKernel.py
+index 1280f5f1e..07ecc0962 100644
+--- a/vllm/model_executor/layers/quantization/kernels/mixed_precision/MPLinearKernel.py
++++ b/vllm/model_executor/layers/quantization/kernels/mixed_precision/MPLinearKernel.py
+@@ -20,7 +20,6 @@ class MPLinearLayerConfig:
+     group_size: int
+     zero_points: bool
+     has_g_idx: bool
+-    out_type: Optional[torch.dtype] = None
+ 
+ 
+ class MPLinearKernel(ABC):
+

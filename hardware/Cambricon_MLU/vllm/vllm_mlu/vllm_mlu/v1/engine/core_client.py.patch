@@ -1,0 +1,134 @@
+diff --git a/vllm_mlu/vllm_mlu/v1/engine/core_client.py b/vllm_mlu/vllm_mlu/v1/engine/core_client.py
+new file mode 100644
+index 000000000..cf496d1bf
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/v1/engine/core_client.py
+@@ -0,0 +1,127 @@
++# SPDX-License-Identifier: Apache-2.0
++from vllm.v1.engine.core_client import (InprocClient,
++                                        SyncMPClient,
++                                        AsyncMPClient)
++
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++
++
++class InprocClient_MluHiack(InprocClient):
++
++    def get_hfu_info(self, batch, input_len, output_len):
++        return self.engine_core.get_hfu_info(batch, input_len, output_len)
++
++    def get_latency(self):
++        return self.engine_core.get_latency()
++
++    def get_memory_usage(self):
++        return self.engine_core.get_memory_usage()
++
++    def recapture_model(self,
++                        prefill_enable_mlugraph: bool,
++                        batch_size: int,
++                        input_len: int):
++        return self.engine_core.recapture_model(
++            prefill_enable_mlugraph, batch_size, input_len)
++
++    def init_metric(self, use_unchunk_sched: bool, min_prefill_batch: int):
++        return self.engine_core.init_metric(
++                    use_unchunk_sched, min_prefill_batch)
++
++    def start_scheduler_profile(self):
++        self.engine_core.start_scheduler_profile()
++
++    def stop_scheduler_profile(self):
++        self.engine_core.stop_scheduler_profile()
++
++
++class SyncMPClient_MluHiack(SyncMPClient):
++
++    def get_hfu_info(self, batch, input_len, output_len):
++        try:
++            return self.call_utility("get_hfu_info", batch, input_len, output_len)
++        except Exception as e:
++            raise RuntimeError(f"Failed to get HFU info: {str(e)}")
++
++    def get_latency(self):
++        return self.call_utility("get_latency")
++
++    def get_memory_usage(self):
++        return self.call_utility("get_memory_usage")
++
++    def recapture_model(self,
++                        prefill_enable_mlugraph: bool,
++                        batch_size: int,
++                        input_len: int):
++        return self.call_utility("recapture_model",
++                                 prefill_enable_mlugraph, batch_size, input_len)
++
++    def init_metric(self, use_unchunk_sched: bool, min_prefill_batch: int):
++        return self.call_utility("init_metric",
++                                 use_unchunk_sched,
++                                 min_prefill_batch)
++
++    def start_scheduler_profile(self):
++        self.call_utility("start_scheduler_profile")
++
++    def stop_scheduler_profile(self):
++        self.call_utility("stop_scheduler_profile")
++
++
++class AsyncMPClient_MluHijack(AsyncMPClient):
++
++    async def start_scheduler_profile(self) -> None:
++        await self.call_utility_async("start_scheduler_profile")
++
++    async def stop_scheduler_profile(self) -> None:
++        await self.call_utility_async("stop_scheduler_profile")
++
++
++MluHijackObject.apply_hijack(InprocClient,
++                             "get_hfu_info",
++                             InprocClient_MluHiack.get_hfu_info)
++MluHijackObject.apply_hijack(InprocClient,
++                             "get_latency",
++                             InprocClient_MluHiack.get_latency)
++MluHijackObject.apply_hijack(InprocClient,
++                             "get_memory_usage",
++                             InprocClient_MluHiack.get_memory_usage)
++MluHijackObject.apply_hijack(InprocClient,
++                             "recapture_model",
++                             InprocClient_MluHiack.recapture_model)
++MluHijackObject.apply_hijack(InprocClient,
++                             "init_metric",
++                             InprocClient_MluHiack.init_metric)
++MluHijackObject.apply_hijack(InprocClient,
++                             "start_scheduler_profile",
++                             InprocClient_MluHiack.start_scheduler_profile)
++MluHijackObject.apply_hijack(InprocClient,
++                             "stop_scheduler_profile",
++                             InprocClient_MluHiack.stop_scheduler_profile)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "get_hfu_info",
++                             SyncMPClient_MluHiack.get_hfu_info)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "get_latency",
++                             SyncMPClient_MluHiack.get_latency)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "get_memory_usage",
++                             SyncMPClient_MluHiack.get_memory_usage)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "recapture_model",
++                             SyncMPClient_MluHiack.recapture_model)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "init_metric",
++                             SyncMPClient_MluHiack.init_metric)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "start_scheduler_profile",
++                             SyncMPClient_MluHiack.start_scheduler_profile)
++MluHijackObject.apply_hijack(SyncMPClient,
++                             "stop_scheduler_profile",
++                             SyncMPClient_MluHiack.stop_scheduler_profile)
++MluHijackObject.apply_hijack(AsyncMPClient,
++                             "start_scheduler_profile",
++                             AsyncMPClient_MluHijack.start_scheduler_profile)
++MluHijackObject.apply_hijack(AsyncMPClient,
++                             "stop_scheduler_profile",
++                             AsyncMPClient_MluHijack.stop_scheduler_profile)
+

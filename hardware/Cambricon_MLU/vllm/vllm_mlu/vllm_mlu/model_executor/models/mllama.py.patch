@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/models/mllama.py b/vllm_mlu/vllm_mlu/model_executor/models/mllama.py
 new file mode 100644
-index 000000000..7cfeb8ecb
+index 000000000..909740689
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/models/mllama.py
-@@ -0,0 +1,218 @@
+@@ -0,0 +1,276 @@
 +# Copyright 2024 the HuggingFace Inc. team. All rights reserved.
 +#
 +# Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,20 +22,75 @@ index 000000000..7cfeb8ecb
 +
 +import torch
 +import torch.utils.checkpoint
++from torch import nn
 +
 +from vllm_mlu import _mlu_ops as mlu_ops
 +from vllm.attention.selector import _Backend
 +from vllm.attention import AttentionMetadata
 +from vllm.attention.ops.paged_attn import PagedAttention
++from vllm.config import VllmConfig
 +from vllm.forward_context import get_forward_context
++from vllm.model_executor.layers.layernorm import RMSNorm
++from vllm.model_executor.layers.vocab_parallel_embedding import (
++    VocabParallelEmbedding)
 +from vllm.model_executor.models.mllama import (MllamaTextCrossAttention,
 +                                               MllamaTextModel,
-+                                               MllamaVisionSdpaAttention)
++                                               MllamaVisionSdpaAttention,
++                                               MllamaCrossAttentionDecoderLayer)
 +from vllm.logger import init_logger
 +
++from vllm_mlu.model_executor.models.llama import MLULlamaDecoderLayer
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
 +logger = init_logger(__name__)
++
++
++def vllm__model_executor__models__mllama__MllamaTextModel____init__(
++    self, *, vllm_config: VllmConfig, prefix: str = ""
++):
++    super(MllamaTextModel, self).__init__()
++
++    config = vllm_config.model_config.hf_config.text_config
++    cache_config = vllm_config.cache_config
++    quant_config = vllm_config.quant_config
++
++    self.vocab_size = config.vocab_size
++    self.embed_tokens = VocabParallelEmbedding(config.vocab_size + 8,
++                                                config.hidden_size)
++    self.cross_attention_layers = config.cross_attention_layers
++
++    layers = []
++    for layer_idx in range(config.num_hidden_layers):
++        if layer_idx in self.cross_attention_layers:
++            layers.append(
++                MllamaCrossAttentionDecoderLayer(
++                    config,
++                    layer_idx,
++                    quant_config=quant_config,
++                    prefix=f"{prefix}.layers.{layer_idx}",
++                ))
++        else:
++            '''
++            =============================
++            Modify by vllm_mlu
++            =============================
++            @brief: use MLULlamaDecoderLayer
++            '''
++            # TODO: force LlamaDecoderLayer to config.attention_bias=False
++            layers.append(
++                MLULlamaDecoderLayer(
++                    config,
++                    cache_config=cache_config,
++                    quant_config=quant_config,
++                    prefix=f"{prefix}.layers.{layer_idx}",
++                ))
++            '''
++            ==================
++            End of MLU Hijack
++            ==================
++            '''
++    self.layers = nn.ModuleList(layers)
++    self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 +
 +
 +def vllm__model_executor__models__mllama__MllamaTextModel__forward(
@@ -216,6 +271,9 @@ index 000000000..7cfeb8ecb
 +MluHijackObject.apply_hijack(MllamaTextCrossAttention,
 +                             MllamaTextCrossAttention._attention_with_mask,
 +                             vllm__model_executor__models__mllama__MllamaTextCrossAttention___attention_with_mask)
++MluHijackObject.apply_hijack(MllamaTextModel,
++                             MllamaTextModel.__init__,
++                             vllm__model_executor__models__mllama__MllamaTextModel____init__)
 +MluHijackObject.apply_hijack(MllamaTextModel,
 +                             MllamaTextModel.forward,
 +                             vllm__model_executor__models__mllama__MllamaTextModel__forward)

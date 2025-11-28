@@ -1,0 +1,19 @@
+diff --git a/vllm/model_executor/__init__.py b/vllm/model_executor/__init__.py
+index 3c094cfdb..55dfe8088 100644
+--- a/vllm/model_executor/__init__.py
++++ b/vllm/model_executor/__init__.py
+@@ -3,9 +3,13 @@
+ 
+ from vllm.model_executor.parameter import (BasevLLMParameter,
+                                            PackedvLLMParameter)
++from vllm.model_executor.sampling_metadata import (SamplingMetadata,
++                                                   SamplingMetadataCache)
+ from vllm.model_executor.utils import set_random_seed
+ 
+ __all__ = [
++    "SamplingMetadata",
++    "SamplingMetadataCache",
+     "set_random_seed",
+     "BasevLLMParameter",
+     "PackedvLLMParameter",
+

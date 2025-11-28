@@ -1,0 +1,46 @@
+diff --git a/vllm/entrypoints/cli/collect_env.py b/vllm/entrypoints/cli/collect_env.py
+index 785c18812..141aafdb1 100644
+--- a/vllm/entrypoints/cli/collect_env.py
++++ b/vllm/entrypoints/cli/collect_env.py
+@@ -1,21 +1,19 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+-from __future__ import annotations
+-
+ import argparse
+-import typing
+ 
+ from vllm.collect_env import main as collect_env_main
+ from vllm.entrypoints.cli.types import CLISubcommand
+-
+-if typing.TYPE_CHECKING:
+-    from vllm.utils import FlexibleArgumentParser
++from vllm.utils import FlexibleArgumentParser
+ 
+ 
+ class CollectEnvSubcommand(CLISubcommand):
+     """The `collect-env` subcommand for the vLLM CLI. """
+-    name = "collect-env"
++
++    def __init__(self):
++        self.name = "collect-env"
++        super().__init__()
+ 
+     @staticmethod
+     def cmd(args: argparse.Namespace) -> None:
+@@ -25,11 +23,12 @@ class CollectEnvSubcommand(CLISubcommand):
+     def subparser_init(
+             self,
+             subparsers: argparse._SubParsersAction) -> FlexibleArgumentParser:
+-        return subparsers.add_parser(
++        collect_env_parser = subparsers.add_parser(
+             "collect-env",
+             help="Start collecting environment information.",
+             description="Start collecting environment information.",
+             usage="vllm collect-env")
++        return collect_env_parser
+ 
+ 
+ def cmd_init() -> list[CLISubcommand]:
+

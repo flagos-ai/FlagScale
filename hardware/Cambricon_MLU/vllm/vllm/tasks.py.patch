@@ -1,0 +1,18 @@
+diff --git a/vllm/tasks.py b/vllm/tasks.py
+deleted file mode 100644
+index 85c5c6e43..000000000
+--- a/vllm/tasks.py
++++ /dev/null
+@@ -1,11 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from typing import Literal, get_args
+-
+-GenerationTask = Literal["generate", "transcription"]
+-GENERATION_TASKS = get_args(GenerationTask)
+-
+-PoolingTask = Literal["encode", "embed", "classify", "score"]
+-POOLING_TASKS = get_args(PoolingTask)
+-
+-SupportedTask = Literal[GenerationTask, PoolingTask]
+

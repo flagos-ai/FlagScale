@@ -1,0 +1,27 @@
+diff --git a/vllm/transformers_utils/config_parser_base.py b/vllm/transformers_utils/config_parser_base.py
+deleted file mode 100644
+index c27177f74..000000000
+--- a/vllm/transformers_utils/config_parser_base.py
++++ /dev/null
+@@ -1,20 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-
+-from abc import ABC, abstractmethod
+-from pathlib import Path
+-from typing import Optional, Union
+-
+-from transformers import PretrainedConfig
+-
+-
+-class ConfigParserBase(ABC):
+-
+-    @abstractmethod
+-    def parse(self,
+-              model: Union[str, Path],
+-              trust_remote_code: bool,
+-              revision: Optional[str] = None,
+-              code_revision: Optional[str] = None,
+-              **kwargs) -> tuple[dict, PretrainedConfig]:
+-        raise NotImplementedError
+

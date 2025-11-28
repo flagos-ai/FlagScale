@@ -1,0 +1,21 @@
+diff --git a/vllm/transformers_utils/configs/nemotron.py b/vllm/transformers_utils/configs/nemotron.py
+index 090fefa14..d65b572dc 100644
+--- a/vllm/transformers_utils/configs/nemotron.py
++++ b/vllm/transformers_utils/configs/nemotron.py
+@@ -26,7 +26,7 @@ logger = logging.get_logger(__name__)
+ class NemotronConfig(PretrainedConfig):
+     r"""
+     This is the configuration class to store the configuration of a
+-    [`NemotronModel`]. It is used to instantiate a Nemotron model
++    [`NemotronModel`]. It is used to instantiate an Nemotron model
+     according to the specified arguments, defining the model architecture.
+     Instantiating a configuration with the defaults will yield a similar
+     configuration to that of the Nemotron-8B.
+@@ -202,4 +202,4 @@ class NemotronConfig(PretrainedConfig):
+                 rope_scaling_factor, float) or rope_scaling_factor <= 1.0:
+             raise ValueError(
+                 "`rope_scaling`'s factor field must be a float > 1, got "
+-                f"{rope_scaling_factor}")
+\ No newline at end of file
++                f"{rope_scaling_factor}")
+

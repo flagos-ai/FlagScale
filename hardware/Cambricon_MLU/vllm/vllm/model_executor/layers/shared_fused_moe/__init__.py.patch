@@ -1,0 +1,13 @@
+diff --git a/vllm/model_executor/layers/shared_fused_moe/__init__.py b/vllm/model_executor/layers/shared_fused_moe/__init__.py
+deleted file mode 100644
+index b87c69d3e..000000000
+--- a/vllm/model_executor/layers/shared_fused_moe/__init__.py
++++ /dev/null
+@@ -1,6 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from vllm.model_executor.layers.shared_fused_moe.shared_fused_moe import (
+-    SharedFusedMoE)
+-
+-__all__ = ["SharedFusedMoE"]
+

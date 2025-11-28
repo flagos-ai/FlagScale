@@ -1,0 +1,25 @@
+diff --git a/vllm/distributed/kv_transfer/kv_pipe/pynccl_pipe.py b/vllm/distributed/kv_transfer/kv_pipe/pynccl_pipe.py
+index 7a79a8cc0..09de0b682 100644
+--- a/vllm/distributed/kv_transfer/kv_pipe/pynccl_pipe.py
++++ b/vllm/distributed/kv_transfer/kv_pipe/pynccl_pipe.py
+@@ -20,7 +20,7 @@ from typing import Callable, Optional
+ 
+ import torch
+ 
+-from vllm.config.kv_transfer import KVTransferConfig
++from vllm.config import KVTransferConfig
+ from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
+ from vllm.distributed.kv_transfer.kv_pipe.base import KVPipeBase
+ from vllm.distributed.utils import StatelessProcessGroup
+@@ -251,8 +251,8 @@ class PyNcclPipe(KVPipeBase):
+         """
+         Receives a tensor and its metadata from the source rank. Blocking call.
+ 
+-        Returns:
+-            The received tensor, or `None` if no tensor is received.
++        Args:
++            tensor: The received tensor, or `None` if no tensor is received.
+         """
+         if self.transport_thread is None:
+             self.transport_thread = ThreadPoolExecutor(max_workers=1)
+

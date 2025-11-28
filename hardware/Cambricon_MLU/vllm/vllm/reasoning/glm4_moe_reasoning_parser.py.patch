@@ -1,0 +1,25 @@
+diff --git a/vllm/reasoning/glm4_moe_reasoning_parser.py b/vllm/reasoning/glm4_moe_reasoning_parser.py
+index 11e828a70..6511fb49d 100644
+--- a/vllm/reasoning/glm4_moe_reasoning_parser.py
++++ b/vllm/reasoning/glm4_moe_reasoning_parser.py
+@@ -14,7 +14,7 @@ from vllm.reasoning import ReasoningParser, ReasoningParserManager
+ logger = init_logger(__name__)
+ 
+ 
+-@ReasoningParserManager.register_module("glm45")
++@ReasoningParserManager.register_module("glm4_moe")
+ class Glm4MoeModelReasoningParser(ReasoningParser):
+     """
+     Reasoning parser for the Glm4MoeModel model.
+@@ -26,8 +26,8 @@ class Glm4MoeModelReasoningParser(ReasoningParser):
+     from the model's output.
+     """
+ 
+-    def __init__(self, tokenizer: PreTrainedTokenizerBase, *args, **kwargs):
+-        super().__init__(tokenizer, *args, **kwargs)
++    def __init__(self, tokenizer: PreTrainedTokenizerBase):
++        super().__init__(tokenizer)
+         self.think_start_token = "<think>"
+         self.think_end_token = "</think>"
+ 
+

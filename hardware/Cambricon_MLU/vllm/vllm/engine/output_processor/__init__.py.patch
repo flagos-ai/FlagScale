@@ -1,0 +1,5 @@
+diff --git a/vllm/model_executor/warmup/__init__.py b/vllm/engine/output_processor/__init__.py
+similarity index 100%
+rename from vllm/model_executor/warmup/__init__.py
+rename to vllm/engine/output_processor/__init__.py
+

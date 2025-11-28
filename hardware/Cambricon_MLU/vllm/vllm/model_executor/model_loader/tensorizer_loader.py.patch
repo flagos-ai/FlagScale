@@ -1,0 +1,58 @@
+diff --git a/vllm/model_executor/model_loader/tensorizer_loader.py b/vllm/model_executor/model_loader/tensorizer_loader.py
+index 65ea49c64..0b62e744e 100644
+--- a/vllm/model_executor/model_loader/tensorizer_loader.py
++++ b/vllm/model_executor/model_loader/tensorizer_loader.py
+@@ -8,8 +8,7 @@ from typing import Union
+ import torch
+ from torch import nn
+ 
+-from vllm.config import ModelConfig, ParallelConfig, VllmConfig
+-from vllm.config.load import LoadConfig
++from vllm.config import LoadConfig, ModelConfig, ParallelConfig, VllmConfig
+ from vllm.logger import init_logger
+ from vllm.model_executor.model_loader.base_loader import BaseModelLoader
+ from vllm.model_executor.model_loader.tensorizer import (
+@@ -21,18 +20,6 @@ from vllm.model_executor.model_loader.utils import (get_model_architecture,
+ 
+ logger = init_logger(__name__)
+ 
+-BLACKLISTED_TENSORIZER_ARGS = {
+-    "device",  # vLLM decides this
+-    "dtype",  # vLLM decides this
+-    "mode",  # Not meant to be configurable by the user
+-}
+-
+-
+-def validate_config(config: dict):
+-    for k, v in config.items():
+-        if v is not None and k in BLACKLISTED_TENSORIZER_ARGS:
+-            raise ValueError(f"{k} is not an allowed Tensorizer argument.")
+-
+ 
+ class TensorizerLoader(BaseModelLoader):
+     """Model loader using CoreWeave's tensorizer library."""
+@@ -42,9 +29,8 @@ class TensorizerLoader(BaseModelLoader):
+         if isinstance(load_config.model_loader_extra_config, TensorizerConfig):
+             self.tensorizer_config = load_config.model_loader_extra_config
+         else:
+-            validate_config(load_config.model_loader_extra_config)
+             self.tensorizer_config = TensorizerConfig(
+-                **load_config.model_loader_extra_config["tensorizer_config"])
++                **load_config.model_loader_extra_config)
+ 
+     def _verify_config(self, model_config: ModelConfig,
+                        parallel_config: ParallelConfig):
+@@ -132,12 +118,10 @@ class TensorizerLoader(BaseModelLoader):
+     def save_model(
+         model: torch.nn.Module,
+         tensorizer_config: Union[TensorizerConfig, dict],
+-        model_config: ModelConfig,
+     ) -> None:
+         if isinstance(tensorizer_config, dict):
+             tensorizer_config = TensorizerConfig(**tensorizer_config)
+         serialize_vllm_model(
+             model=model,
+             tensorizer_config=tensorizer_config,
+-            model_config=model_config,
+         )
+

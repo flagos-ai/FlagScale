@@ -1,0 +1,15 @@
+diff --git a/vllm/logging_utils/__init__.py b/vllm/logging_utils/__init__.py
+index 7202259ca..cf690a89a 100644
+--- a/vllm/logging_utils/__init__.py
++++ b/vllm/logging_utils/__init__.py
+@@ -2,9 +2,7 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+ from vllm.logging_utils.formatter import NewLineFormatter
+-from vllm.logging_utils.log_time import logtime
+ 
+ __all__ = [
+     "NewLineFormatter",
+-    "logtime",
+ ]
+

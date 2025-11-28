@@ -1,0 +1,65 @@
+diff --git a/vllm/lora/punica_wrapper/punica_gpu.py b/vllm/lora/punica_wrapper/punica_gpu.py
+index 467f50050..6b038309d 100644
+--- a/vllm/lora/punica_wrapper/punica_gpu.py
++++ b/vllm/lora/punica_wrapper/punica_gpu.py
+@@ -7,10 +7,11 @@ Punica: Multi-Tenant LoRA Serving.
+ https://arxiv.org/abs/2310.18547
+ """
+ 
+-from typing import Optional, Union, final
++from typing import TYPE_CHECKING, Optional, Union, final
+ 
+ import torch
+ 
++import vllm.envs as envs
+ from vllm.lora.layers import LoRAMapping
+ from vllm.triton_utils import HAS_TRITON
+ 
+@@ -20,6 +21,10 @@ if HAS_TRITON:
+ 
+ from .punica_base import PunicaWrapperBase
+ 
++if TYPE_CHECKING:
++    # avoid circuit import
++    from vllm.lora.models import LongContextLoRAContext
++
+ 
+ @final
+ class PunicaWrapperGPU(PunicaWrapperBase):
+@@ -40,17 +45,30 @@ class PunicaWrapperGPU(PunicaWrapperBase):
+                                                       max_num_batched_tokens,
+                                                       device=device)
+ 
++        # When cudagraph capture size is greater than max_num_seqs (max_batches,
++        # here), V0 captures the graph as if max_num_seqs is set to
++        # the capture size.
++        # V1 doesn't have this problem and always respects max_num_seqs.
++        max_num_prompts = (max_batches
++                           if envs.VLLM_USE_V1 else max_num_batched_tokens)
+         self.prompt_mapping_meta = LoRAKernelMeta.make(self.max_loras,
+-                                                       max_batches,
++                                                       max_num_prompts,
+                                                        device=device)
+ 
+-    def update_metadata(self, mapping: LoRAMapping,
+-                        lora_index_to_id: list[Optional[int]], max_loras: int,
+-                        vocab_size: int, extra_vocab_size: int, **kwargs):
++    def update_metadata(
++            self,
++            mapping: LoRAMapping,
++            lora_index_to_id: list[Optional[int]],
++            max_loras: int,
++            vocab_size: int,
++            extra_vocab_size: int,
++            long_lora_context: Optional["LongContextLoRAContext"] = None,
++            **kwargs):
+ 
+         self.is_prefill = mapping.is_prefill
+         self._update_base_metadata(mapping, lora_index_to_id, max_loras,
+-                                   vocab_size, extra_vocab_size)
++                                   vocab_size, extra_vocab_size,
++                                   long_lora_context)
+ 
+         # Prepare cuda kernel metadata tensors
+         self.token_mapping_meta.prepare_tensors(self.token_lora_indices)
+

@@ -1,0 +1,157 @@
+diff --git a/vllm/model_executor/layers/quantization/utils/configs/N=36864,K=7168,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json b/vllm/model_executor/layers/quantization/utils/configs/N=36864,K=7168,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json
+index 94ce6e77f..7fa398c15 100644
+--- a/vllm/model_executor/layers/quantization/utils/configs/N=36864,K=7168,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json
++++ b/vllm/model_executor/layers/quantization/utils/configs/N=36864,K=7168,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json
+@@ -1,55 +1,55 @@
+ {
+     "1": {
+-        "BLOCK_SIZE_M": 16,
++        "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 1,
+-        "num_warps": 8,
+-        "num_stages": 3
++        "GROUP_SIZE_M": 16,
++        "num_warps": 4,
++        "num_stages": 5
+     },
+     "2": {
+-        "BLOCK_SIZE_M": 16,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_M": 64,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 1,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 3
++        "num_stages": 5
+     },
+     "4": {
+-        "BLOCK_SIZE_M": 16,
+-        "BLOCK_SIZE_N": 64,
++        "BLOCK_SIZE_M": 64,
++        "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 64,
++        "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+     "8": {
+-        "BLOCK_SIZE_M": 16,
++        "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 32,
++        "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+-        "num_stages": 3
++        "num_stages": 5
+     },
+     "16": {
+-        "BLOCK_SIZE_M": 16,
++        "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 1,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+     "24": {
+-        "BLOCK_SIZE_M": 32,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_M": 64,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+     "32": {
+-        "BLOCK_SIZE_M": 32,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_M": 64,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+@@ -59,31 +59,31 @@
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "64": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "96": {
+         "BLOCK_SIZE_M": 64,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "128": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+@@ -99,7 +99,7 @@
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+@@ -107,7 +107,7 @@
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+@@ -123,7 +123,7 @@
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 32,
++        "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+@@ -131,7 +131,7 @@
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 32,
++        "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+

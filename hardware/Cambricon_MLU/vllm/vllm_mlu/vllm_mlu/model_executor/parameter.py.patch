@@ -1,0 +1,179 @@
+diff --git a/vllm_mlu/vllm_mlu/model_executor/parameter.py b/vllm_mlu/vllm_mlu/model_executor/parameter.py
+new file mode 100644
+index 000000000..b82567afa
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/model_executor/parameter.py
+@@ -0,0 +1,172 @@
++from typing import Callable, Any
++
++import torch
++
++from vllm.model_executor.parameter import (BasevLLMParameter,
++                                           PackedColumnParameter,
++                                           PackedvLLMParameter,
++                                           RowvLLMParameter,
++                                           _ColumnvLLMParameter)
++from vllm.distributed import (
++    get_parallel_rank_with_group, get_parallel_world_size_with_group)
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++
++
++vllm__model_executor__parameter__BasevLLMParameter____init__org = BasevLLMParameter.__init__
++
++
++def vllm__model_executor__parameter__BasevLLMParameter____init__(
++        self,
++        data: torch.Tensor,
++        weight_loader: Callable,
++        tp_group: Any = None):
++    vllm__model_executor__parameter__BasevLLMParameter____init__org(
++        self, data, weight_loader)
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: add self.tp_group, world_size and tp_rank
++    '''
++    self.tp_group = tp_group
++    self.tp_world_size = get_parallel_world_size_with_group(self.tp_group)
++    self.tp_rank = get_parallel_rank_with_group(self.tp_group)
++    '''
++    =================
++    End of MLU Hijack
++    =================
++    '''
++
++
++def vllm__model_executor__parameter___ColumnvLLMParameter__load_column_parallel_weight(
++        self, loaded_weight: torch.Tensor):
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: modify get_tensor_model_parallel_rank() to self.tp_rank
++    '''
++    tp_rank = self.tp_rank
++    '''
++    =================
++    End of MLU Hijack
++    =================
++    '''
++    shard_size = self.data.shape[self.output_dim]
++    loaded_weight = loaded_weight.narrow(self.output_dim,
++                                         tp_rank * shard_size, shard_size)
++    assert self.data.shape == loaded_weight.shape
++    self.data.copy_(loaded_weight)
++
++
++def vllm__model_executor__parameter___ColumnvLLMParameter__load_merged_column_weight(
++        self, loaded_weight: torch.Tensor, **kwargs):
++
++    shard_offset = kwargs.get("shard_offset")
++    shard_size = kwargs.get("shard_size")
++    if isinstance(
++            self,
++        (PackedColumnParameter,
++         PackedvLLMParameter)) and self.packed_dim == self.output_dim:
++        shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
++            shard_offset=shard_offset, shard_size=shard_size)
++
++    param_data = self.data
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: modify get_tensor_model_parallel_rank() to self.tp_rank
++    '''
++    tp_rank = self.tp_rank
++    '''
++    =================
++    End of MLU Hijack
++    =================
++    '''
++    param_data = param_data.narrow(self.output_dim, shard_offset,
++                                   shard_size)
++    loaded_weight = loaded_weight.narrow(self.output_dim,
++                                         tp_rank * shard_size, shard_size)
++    assert param_data.shape == loaded_weight.shape
++    param_data.copy_(loaded_weight)
++
++
++def vllm__model_executor__parameter___ColumnvLLMParameter__load_qkv_weight(
++        self, loaded_weight: torch.Tensor, **kwargs):
++    shard_offset = kwargs.get("shard_offset")
++    shard_size = kwargs.get("shard_size")
++    shard_id = kwargs.get("shard_id")
++    num_heads = kwargs.get("num_heads")
++
++    if isinstance(
++            self,
++        (PackedColumnParameter,
++         PackedvLLMParameter)) and self.output_dim == self.packed_dim:
++        shard_size, shard_offset = self.adjust_shard_indexes_for_packing(
++            shard_offset=shard_offset, shard_size=shard_size)
++
++    param_data = self.data
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: modify get_tensor_model_parallel_rank() to self.tp_rank
++    '''
++    tp_rank = self.tp_rank
++    '''
++    =================
++    End of MLU Hijack
++    =================
++    '''
++    shard_id = tp_rank if shard_id == "q" else tp_rank // num_heads
++    param_data = param_data.narrow(self.output_dim, shard_offset,
++                                   shard_size)
++    loaded_weight = loaded_weight.narrow(self.output_dim,
++                                         shard_id * shard_size, shard_size)
++
++    assert param_data.shape == loaded_weight.shape
++    param_data.copy_(loaded_weight)
++
++
++def vllm__model_executor__parameter__RowvLLMParameter__load_row_parallel_weight(
++        self, loaded_weight: torch.Tensor):
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: modify get_tensor_model_parallel_rank() to self.tp_rank
++    '''
++    tp_rank = self.tp_rank
++    '''
++    =================
++    End of MLU Hijack
++    =================
++    '''
++    shard_size = self.data.shape[self.input_dim]
++    loaded_weight = loaded_weight.narrow(self.input_dim,
++                                         tp_rank * shard_size, shard_size)
++
++    if len(loaded_weight.shape) == 0:
++        loaded_weight = loaded_weight.reshape(1)
++
++    assert self.data.shape == loaded_weight.shape
++    self.data.copy_(loaded_weight)
++
++
++MluHijackObject.apply_hijack(BasevLLMParameter,
++                             BasevLLMParameter.__init__,
++                             vllm__model_executor__parameter__BasevLLMParameter____init__)
++MluHijackObject.apply_hijack(_ColumnvLLMParameter,
++                             _ColumnvLLMParameter.load_column_parallel_weight,
++                             vllm__model_executor__parameter___ColumnvLLMParameter__load_column_parallel_weight)
++MluHijackObject.apply_hijack(_ColumnvLLMParameter,
++                             _ColumnvLLMParameter.load_merged_column_weight,
++                             vllm__model_executor__parameter___ColumnvLLMParameter__load_merged_column_weight)
++MluHijackObject.apply_hijack(_ColumnvLLMParameter,
++                             _ColumnvLLMParameter.load_qkv_weight,
++                             vllm__model_executor__parameter___ColumnvLLMParameter__load_qkv_weight)
++MluHijackObject.apply_hijack(RowvLLMParameter,
++                             RowvLLMParameter.load_row_parallel_weight,
++                             vllm__model_executor__parameter__RowvLLMParameter__load_row_parallel_weight)
+

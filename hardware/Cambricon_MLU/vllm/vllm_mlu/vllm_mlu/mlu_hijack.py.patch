@@ -1,20 +1,12 @@
 diff --git a/vllm_mlu/vllm_mlu/mlu_hijack.py b/vllm_mlu/vllm_mlu/mlu_hijack.py
 new file mode 100644
-index 000000000..2a0c2734c
+index 000000000..db296974a
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/mlu_hijack.py
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,91 @@
++import importlib.util
 +import logging
 +from logging import Logger
-+
-+from transformers import AutoConfig
-+
-+from vllm.model_executor.models import ModelRegistry
-+
-+from vllm_mlu.transformers_utils.configs import CustomConfig
-+from vllm_mlu.model_executor.layers.quantization import (
-+    register_real_mlu_quantization_methods
-+)
 +from vllm_mlu._mlu_utils import *
 +
 +
@@ -37,92 +29,70 @@ index 000000000..2a0c2734c
 +logger = init_logger(__name__)
 +
 +
-+logger.info(f"Run vLLM in paged mode, Apply MLU optimization !")
++def is_module_available(module_name):
++    spec = importlib.util.find_spec(module_name)
++    return spec is not None
++
++def check_environ_compatibility():
++    if is_module_available('apex'):
++        logger.error(f"The `apex` package is currently present in your environment, "
++                     f"which may cause model accuracy issues or other problems. It is "
++                     f"strongly recommended that you uninstall it before using vLLM.")
++
++# Check environment compatibility first before applying mlu hijack.
++check_environ_compatibility()
 +
 +
++# Apply v1 hijack
++import vllm_mlu.v1.engine.core
++import vllm_mlu.v1.engine.core_client
++import vllm_mlu.v1.engine.llm_engine
++import vllm_mlu.v1.engine.async_llm
++import vllm_mlu.v1.core.sched.scheduler
++import vllm_mlu.v1.core.single_type_kv_cache_manager
++import vllm_mlu.v1.executor.abstract
++import vllm_mlu.v1.sample.rejection_sampler
++import vllm_mlu.v1.worker.lora_model_runner_mixin
++import vllm_mlu.v1.worker.block_table
++import vllm_mlu.compilation.fix_functionalization
++
++# Apply common hijack
 +import vllm_mlu.config
 +import vllm_mlu.utils
-+import vllm_mlu.attention.ops.prefix_prefill
 +import vllm_mlu.attention.layer
-+if VLLM_SCHEDULER_PROFILE:
-+    import vllm_mlu.core.scheduler
-+    import vllm_mlu.engine.async_llm_engine
-+    import vllm_mlu.engine.multiprocessing.client
-+    import vllm_mlu.engine.multiprocessing.engine
-+    import vllm_mlu.entrypoints.openai.serving_engine
 +import vllm_mlu.distributed.parallel_state
++import vllm_mlu.distributed.kv_transfer.kv_connector.factory
 +import vllm_mlu.engine.arg_utils
-+import vllm_mlu.engine.llm_engine
 +import vllm_mlu.entrypoints.llm
 +import vllm_mlu.executor.multiproc_worker_utils
 +import vllm_mlu.executor.executor_base
 +import vllm_mlu.executor.ray_distributed_executor
 +import vllm_mlu.lora.fully_sharded_layers
 +import vllm_mlu.lora.layers
++import vllm_mlu.model_executor.parameter
++import vllm_mlu.model_executor.guided_decoding.xgrammar_decoding
 +import vllm_mlu.model_executor.layers.linear
 +import vllm_mlu.model_executor.layers.rotary_embedding
-+
-+register_real_mlu_quantization_methods()
-+
 +import vllm_mlu.model_executor.layers.quantization.utils.w8a8_utils
 +import vllm_mlu.model_executor.layers.quantization.fp8
 +import vllm_mlu.model_executor.layers.activation
 +import vllm_mlu.model_executor.layers.layernorm
 +import vllm_mlu.model_executor.layers.fused_moe.layer
-+import vllm_mlu.model_executor.model_loader.tensorizer
-+import vllm_mlu.model_executor.models.deepseek_v2
-+import vllm_mlu.model_executor.models.baichuan
++import vllm_mlu.model_executor.model_loader.tensorizer_loader
++import vllm_mlu.model_executor.models.registry
 +import vllm_mlu.model_executor.models.bert
-+import vllm_mlu.model_executor.models.bloom
-+import vllm_mlu.model_executor.models.chatglm
 +import vllm_mlu.model_executor.models.clip
-+import vllm_mlu.model_executor.models.gpt_neox
-+import vllm_mlu.model_executor.models.llama
-+import vllm_mlu.model_executor.models.mixtral
-+import vllm_mlu.model_executor.models.qwen
-+import vllm_mlu.model_executor.models.qwen2
-+import vllm_mlu.model_executor.models.qwen2_moe
-+import vllm_mlu.model_executor.models.qwen3
-+import vllm_mlu.model_executor.models.qwen3_moe
-+import vllm_mlu.model_executor.models.qwen2_vl
-+import vllm_mlu.model_executor.models.qwen2_5_vl
-+import vllm_mlu.model_executor.models.falcon
-+import vllm_mlu.model_executor.models.internlm2
 +import vllm_mlu.model_executor.models.intern_vit
-+import vllm_mlu.model_executor.models.hunyuan
-+import vllm_mlu.model_executor.models.layer_utils
 +import vllm_mlu.model_executor.models.mllama
++import vllm_mlu.model_executor.models.deepseek_v2
 +import vllm_mlu.model_executor.models.deepseek_mtp
-+import vllm_mlu.spec_decode.spec_decode_worker
-+import vllm_mlu.spec_decode.multi_step_worker
-+import vllm_mlu.spec_decode.ngram_worker
++import vllm_mlu.model_executor.models.glm4_moe
++import vllm_mlu.model_executor.models.glm4_1v
 +import vllm_mlu.worker.cache_engine
 +
-+if VLLM_PRELOAD_SIZE > 0:
-+    logger.info("Apply feature -> Preload Weight !")
-+    import vllm_mlu.mlu_custom.preload.distributed.parallel_state
++if VLLM_CI_ACCURACY_TEST:
++    import vllm_mlu.model_executor.model_loader.dummy_loader
 +
-+    import vllm_mlu.mlu_custom.common.model_executor.layers.feed_forward
-+    import vllm_mlu.mlu_custom.common.model_executor.layers.linear
-+    import vllm_mlu.mlu_custom.common.model_executor.model_loader.loader
-+
-+if check_context_comm_cmpt_parallel():
-+    logger.info("Apply feature -> Context Communication Computation Parallel !")
-+    import vllm_mlu.mlu_custom.context_comm_cmpt_parallel.model_executor.custom_model.custom
-+    import vllm_mlu.mlu_custom.context_comm_cmpt_parallel.model_executor.layers.quantization.smoothquant
-+    import vllm_mlu.mlu_custom.context_comm_cmpt_parallel.model_executor.layers.sparse_moe_mlp
-+    import vllm_mlu.mlu_custom.context_comm_cmpt_parallel.model_executor.models.mixtral_quant
-+    import vllm_mlu.mlu_custom.context_comm_cmpt_parallel.model_executor.models.qwen2_moe
-+    import vllm_mlu.mlu_custom.context_comm_cmpt_parallel.model_executor.models.mixtral_quant
-+
-+    import vllm_mlu.mlu_custom.common.model_executor.layers.feed_forward
-+    import vllm_mlu.mlu_custom.common.model_executor.layers.linear
-+    import vllm_mlu.mlu_custom.common.model_executor.model_loader.loader
-+
-+
-+AutoConfig.register("custom", CustomConfig)
-+ModelRegistry.register_model(
-+    model_arch="CustomForCausalLM",
-+    model_cls="vllm_mlu.model_executor.custom_model.custom:CustomForCausalLM"
-+)
++if VLLM_SCHEDULER_PROFILE:
++    import vllm_mlu.entrypoints.openai.api_server
 

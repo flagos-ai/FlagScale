@@ -1,0 +1,5 @@
+diff --git a/vllm/v1/kv_offload/__init__.py b/vllm/spec_decode/__init__.py
+similarity index 100%
+rename from vllm/v1/kv_offload/__init__.py
+rename to vllm/spec_decode/__init__.py
+

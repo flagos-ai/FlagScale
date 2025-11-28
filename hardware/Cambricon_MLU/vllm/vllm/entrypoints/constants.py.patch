@@ -1,0 +1,17 @@
+diff --git a/vllm/entrypoints/constants.py b/vllm/entrypoints/constants.py
+deleted file mode 100644
+index b5bcccc35..000000000
+--- a/vllm/entrypoints/constants.py
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-"""
+-Shared constants for vLLM entrypoints.
+-"""
+-
+-# HTTP header limits for h11 parser
+-# These constants help mitigate header abuse attacks
+-H11_MAX_INCOMPLETE_EVENT_SIZE_DEFAULT = 4194304  # 4 MB
+-H11_MAX_HEADER_COUNT_DEFAULT = 256
+

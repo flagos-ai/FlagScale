@@ -1,0 +1,11 @@
+diff --git a/vllm/distributed/tpu_distributed_utils.py b/vllm/distributed/tpu_distributed_utils.py
+index 0a786b4a1..36ab2eb3a 100644
+--- a/vllm/distributed/tpu_distributed_utils.py
++++ b/vllm/distributed/tpu_distributed_utils.py
+@@ -1,5 +1,4 @@
+ # SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ from collections import OrderedDict
+ from typing import Optional
+ 
+

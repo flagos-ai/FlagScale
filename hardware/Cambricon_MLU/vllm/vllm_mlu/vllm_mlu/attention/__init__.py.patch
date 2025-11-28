@@ -1,4 +1,5 @@
-diff --git a/vllm_mlu/vllm_mlu/attention/__init__.py b/vllm_mlu/vllm_mlu/attention/__init__.py
-new file mode 100644
-index 000000000..e69de29bb
+diff --git a/vllm/v1/kv_offload/backends/__init__.py b/vllm_mlu/vllm_mlu/attention/__init__.py
+similarity index 100%
+rename from vllm/v1/kv_offload/backends/__init__.py
+rename to vllm_mlu/vllm_mlu/attention/__init__.py
 

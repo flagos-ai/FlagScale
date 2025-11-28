@@ -1,0 +1,20 @@
+diff --git a/vllm/entrypoints/cli/types.py b/vllm/entrypoints/cli/types.py
+index b88f094b3..0a7244312 100644
+--- a/vllm/entrypoints/cli/types.py
++++ b/vllm/entrypoints/cli/types.py
+@@ -1,13 +1,9 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+-from __future__ import annotations
+-
+ import argparse
+-import typing
+ 
+-if typing.TYPE_CHECKING:
+-    from vllm.utils import FlexibleArgumentParser
++from vllm.utils import FlexibleArgumentParser
+ 
+ 
+ class CLISubcommand:
+

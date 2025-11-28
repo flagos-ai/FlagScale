@@ -1,0 +1,5 @@
+diff --git a/vllm/attention/utils/__init__.py b/vllm/attention/backends/mla/__init__.py
+similarity index 100%
+rename from vllm/attention/utils/__init__.py
+rename to vllm/attention/backends/mla/__init__.py
+

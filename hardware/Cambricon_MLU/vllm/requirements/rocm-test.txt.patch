@@ -1,0 +1,12 @@
+diff --git a/requirements/rocm-test.txt b/requirements/rocm-test.txt
+index 869fb28c3..25f950a99 100644
+--- a/requirements/rocm-test.txt
++++ b/requirements/rocm-test.txt
+@@ -1,6 +1,5 @@
+ # Common dependencies
+ -r common.txt
+-tblib==3.1.0
+ 
+ # entrypoints test
+ # librosa==0.10.2.post1 # required by audio tests in entrypoints/openai
+

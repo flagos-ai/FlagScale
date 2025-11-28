@@ -1,0 +1,87 @@
+diff --git a/vllm/entrypoints/openai/tool_parsers/glm4_moe_tool_parser.py b/vllm/entrypoints/openai/tool_parsers/glm4_moe_tool_parser.py
+index 8fd14f171..20303ce7f 100644
+--- a/vllm/entrypoints/openai/tool_parsers/glm4_moe_tool_parser.py
++++ b/vllm/entrypoints/openai/tool_parsers/glm4_moe_tool_parser.py
+@@ -9,7 +9,6 @@ from typing import Any, Optional, Union
+ import regex as re
+ 
+ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
+-                                              ChatCompletionToolsParam,
+                                               DeltaFunctionCall, DeltaMessage,
+                                               DeltaToolCall,
+                                               ExtractedToolCallInformation,
+@@ -22,7 +21,7 @@ from vllm.transformers_utils.tokenizer import AnyTokenizer
+ logger = init_logger(__name__)
+ 
+ 
+-@ToolParserManager.register_module("glm45")
++@ToolParserManager.register_module("glm4_moe")
+ class Glm4MoeModelToolParser(ToolParser):
+ 
+     def __init__(self, tokenizer: AnyTokenizer):
+@@ -36,13 +35,36 @@ class Glm4MoeModelToolParser(ToolParser):
+ 
+         self.tool_calls_start_token = self.tool_call_start_token
+ 
+-        self.func_call_regex = re.compile(r"<tool_call>.*?</tool_call>",
+-                                          re.DOTALL)
+-        self.func_detail_regex = re.compile(
+-            r"<tool_call>([^\n]*)\n(.*)</tool_call>", re.DOTALL)
+-        self.func_arg_regex = re.compile(
+-            r"<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>",
+-            re.DOTALL)
++        # Updated regex for the XML-based format
++        self.tool_call_regex = re.compile(
++            r"<tool_call>\s*"
++            r"(?P<function_name>[^\n<]+)\s*"  # 函数名（到换行或 <）
++            r"(?P<arguments>(?:\s*<arg_key>[^<]+</arg_key>\s*"
++            r"<arg_value>[^<]*</arg_value>\s*)*)\s*"
++            r"</tool_call>",
++            re.DOTALL,
++        )
++
++        # Regex for parsing individual arguments
++        self.arg_regex = re.compile(
++            r"<arg_key>(?P<key>[^<]+)</arg_key>\s*<arg_value>(?P<value>[^<]*)</arg_value>",
++            re.DOTALL,
++        )
++
++        # Streaming regex
++        self.stream_tool_call_portion_regex = re.compile(
++            r"(?P<function_name>[^\n<]+)\s*"
++            r"(?P<arguments>(?:\s*<arg_key>[^<]+</arg_key>\s*"
++            r"<arg_value>[^<]*</arg_value>\s*)*)",
++            re.DOTALL,
++        )
++
++        # For streaming, we also need a regex to match just the function name
++        self.stream_tool_call_name_regex = re.compile(
++            r"(?P<function_name>[^\n<]+)",
++            re.DOTALL,
++        )
++
+         if not self.model_tokenizer:
+             raise ValueError(
+                 "The model tokenizer must be passed to the ToolParser "
+@@ -53,6 +75,20 @@ class Glm4MoeModelToolParser(ToolParser):
+         self.tool_call_end_token_id = self.vocab.get(self.tool_call_end_token)
+         self._buffer = ""
+ 
++    def _parse_arguments(self, args_text: str) -> str:
++        """Parse XML-based arguments into JSON format."""
++        if not args_text or not args_text.strip():
++            return "{}"
++
++        args_dict = {}
++        matches = self.arg_regex.findall(args_text)
++
++        for key, value in matches:
++            args_dict[key.strip()] = value.strip()
++
++        import json
++        return json.dumps(args_dict, ensure_ascii=False)
++
+     def extract_tool_calls(
+         self,
+         model_output: str,
+

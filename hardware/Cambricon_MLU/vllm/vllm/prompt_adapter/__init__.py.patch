@@ -1,0 +1,5 @@
+diff --git a/vllm/ray/__init__.py b/vllm/prompt_adapter/__init__.py
+similarity index 100%
+rename from vllm/ray/__init__.py
+rename to vllm/prompt_adapter/__init__.py
+

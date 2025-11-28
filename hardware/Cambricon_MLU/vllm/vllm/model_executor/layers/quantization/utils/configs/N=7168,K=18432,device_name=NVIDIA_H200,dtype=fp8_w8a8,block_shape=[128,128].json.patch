@@ -1,0 +1,183 @@
+diff --git a/vllm/model_executor/layers/quantization/utils/configs/N=7168,K=18432,device_name=NVIDIA_H200,dtype=fp8_w8a8,block_shape=[128,128].json b/vllm/model_executor/layers/quantization/utils/configs/N=7168,K=18432,device_name=NVIDIA_H200,dtype=fp8_w8a8,block_shape=[128,128].json
+index daaf21c28..4532f9368 100644
+--- a/vllm/model_executor/layers/quantization/utils/configs/N=7168,K=18432,device_name=NVIDIA_H200,dtype=fp8_w8a8,block_shape=[128,128].json
++++ b/vllm/model_executor/layers/quantization/utils/configs/N=7168,K=18432,device_name=NVIDIA_H200,dtype=fp8_w8a8,block_shape=[128,128].json
+@@ -1,67 +1,67 @@
+ {
+     "1": {
+-        "BLOCK_SIZE_M": 16,
++        "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 1,
+-        "num_warps": 8,
++        "GROUP_SIZE_M": 64,
++        "num_warps": 4,
+         "num_stages": 5
+     },
+     "2": {
+-        "BLOCK_SIZE_M": 16,
++        "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+     },
+     "4": {
+-        "BLOCK_SIZE_M": 16,
++        "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 64,
++        "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+     },
+     "8": {
+-        "BLOCK_SIZE_M": 16,
+-        "BLOCK_SIZE_N": 32,
++        "BLOCK_SIZE_M": 64,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 5
++        "num_stages": 4
+     },
+     "16": {
+-        "BLOCK_SIZE_M": 16,
+-        "BLOCK_SIZE_N": 32,
++        "BLOCK_SIZE_M": 64,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 1,
++        "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+-        "num_stages": 5
++        "num_stages": 4
+     },
+     "24": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 32,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+-        "num_stages": 5
++        "num_stages": 4
+     },
+     "32": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 1,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 5
++        "num_stages": 4
+     },
+     "48": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+-        "num_stages": 5
++        "num_stages": 4
+     },
+     "64": {
+         "BLOCK_SIZE_M": 64,
+@@ -73,25 +73,25 @@
+     },
+     "96": {
+         "BLOCK_SIZE_M": 64,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 64,
++        "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 5
+     },
+     "128": {
+         "BLOCK_SIZE_M": 64,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 5
+     },
+     "256": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+@@ -99,31 +99,31 @@
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 64,
++        "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "1024": {
+         "BLOCK_SIZE_M": 64,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "1536": {
+         "BLOCK_SIZE_M": 64,
+-        "BLOCK_SIZE_N": 128,
++        "BLOCK_SIZE_N": 64,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "2048": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+-        "GROUP_SIZE_M": 16,
++        "GROUP_SIZE_M": 64,
+         "num_warps": 4,
+         "num_stages": 3
+     },
+@@ -133,7 +133,7 @@
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     },
+     "4096": {
+         "BLOCK_SIZE_M": 64,
+@@ -141,6 +141,6 @@
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+-        "num_stages": 4
++        "num_stages": 3
+     }
+ }
+

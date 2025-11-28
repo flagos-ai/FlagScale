@@ -1,0 +1,372 @@
+diff --git a/vllm/compilation/backends.py b/vllm/compilation/backends.py
+index 17fc727b8..5af3b7efe 100644
+--- a/vllm/compilation/backends.py
++++ b/vllm/compilation/backends.py
+@@ -7,7 +7,6 @@ import os
+ import pprint
+ import time
+ from collections.abc import Sequence
+-from contextlib import contextmanager
+ from typing import Any, Callable, Optional
+ 
+ import torch
+@@ -15,7 +14,7 @@ import torch.fx as fx
+ from torch._dispatch.python import enable_python_dispatcher
+ 
+ import vllm.envs as envs
+-from vllm.config import CompilationConfig, CUDAGraphMode, VllmConfig
++from vllm.config import CompilationConfig, VllmConfig
+ from vllm.logger import init_logger
+ from vllm.platforms import current_platform
+ from vllm.utils import is_torch_equal_or_newer, resolve_obj_by_qualname
+@@ -31,11 +30,8 @@ logger = init_logger(__name__)
+ 
+ def make_compiler(compilation_config: CompilationConfig) -> CompilerInterface:
+     if compilation_config.use_inductor:
+-        # Use standalone compile only if requested, version is new enough,
+-        # and the symbol actually exists in this PyTorch build.
+-        if (envs.VLLM_USE_STANDALONE_COMPILE
+-                and is_torch_equal_or_newer("2.8.0.dev")
+-                and hasattr(torch._inductor, "standalone_compile")):
++        if envs.VLLM_USE_STANDALONE_COMPILE and is_torch_equal_or_newer(
++                "2.8.0"):
+             logger.debug("Using InductorStandaloneAdaptor")
+             return InductorStandaloneAdaptor()
+         else:
+@@ -70,25 +66,7 @@ class CompilerManager:
+     def compute_hash(self, vllm_config: VllmConfig) -> str:
+         return self.compiler.compute_hash(vllm_config)
+ 
+-    def initialize_cache(self,
+-                         cache_dir: str,
+-                         disable_cache: bool = False,
+-                         prefix: str = ""):
+-        """
+-        Initialize the cache directory for the compiler.
+-
+-        The organization of the cache directory is as follows:
+-        cache_dir=/path/to/hash_str/rank_i_j/prefix/
+-        inside cache_dir, there will be:
+-        - vllm_compile_cache.py
+-        - computation_graph.py
+-        - transformed_code.py
+-
+-        for multiple prefixes, they can share the same
+-        base cache dir of /path/to/hash_str/rank_i_j/ ,
+-        to store some common compilation artifacts.
+-        """
+-
++    def initialize_cache(self, cache_dir: str, disable_cache: bool = False):
+         self.disable_cache = disable_cache
+         self.cache_dir = cache_dir
+         self.cache_file_path = os.path.join(cache_dir, "vllm_compile_cache.py")
+@@ -102,8 +80,7 @@ class CompilerManager:
+                 self.cache = ast.literal_eval(f.read())
+ 
+         self.compiler.initialize_cache(cache_dir=cache_dir,
+-                                       disable_cache=disable_cache,
+-                                       prefix=prefix)
++                                       disable_cache=disable_cache)
+ 
+     def save_to_file(self):
+         if self.disable_cache or not self.is_cache_updated:
+@@ -123,15 +100,10 @@ class CompilerManager:
+         handle = self.cache[(runtime_shape, graph_index, self.compiler.name)]
+         compiled_graph = self.compiler.load(handle, graph, example_inputs,
+                                             graph_index, runtime_shape)
+-        if runtime_shape is None:
+-            logger.debug(
+-                "Directly load the %s-th graph for dynamic shape from %s via "
+-                "handle %s", graph_index, self.compiler.name, handle)
+-        else:
+-            logger.debug(
+-                "Directly load the %s-th graph for shape %s from %s via "
+-                "handle %s", graph_index, str(runtime_shape),
+-                self.compiler.name, handle)
++        logger.debug(
++            "Directly load the %s-th graph for shape %s from %s via "
++            "handle %s", graph_index, str(runtime_shape), self.compiler.name,
++            handle)
+         return compiled_graph
+ 
+     def compile(self,
+@@ -160,15 +132,9 @@ class CompilerManager:
+                 # there can be multiple graphs due to piecewise compilation.
+                 now = time.time()
+                 elapsed = now - compilation_start_time
+-                if runtime_shape is None:
+-                    logger.info(
+-                        "Directly load the compiled graph(s) for dynamic shape "
+-                        "from the cache, took %.3f s", elapsed)
+-                else:
+-                    logger.info(
+-                        "Directly load the compiled graph(s) for shape %s "
+-                        "from the cache, took %.3f s", str(runtime_shape),
+-                        elapsed)
++                logger.info(
++                    "Directly load the compiled graph(s) for shape %s "
++                    "from the cache, took %.3f s", str(runtime_shape), elapsed)
+             return compiled_graph
+ 
+         # no compiler cached the graph, or the cache is disabled,
+@@ -186,28 +152,17 @@ class CompilerManager:
+         assert compiled_graph is not None, "Failed to compile the graph"
+ 
+         # store the artifact in the cache
+-        if not envs.VLLM_DISABLE_COMPILE_CACHE and handle is not None:
++        if handle is not None:
+             self.cache[(runtime_shape, graph_index,
+                         self.compiler.name)] = handle
+-            compilation_counter.num_cache_entries_updated += 1
+             self.is_cache_updated = True
+             if graph_index == 0:
+                 # adds some info logging for the first graph
+-                if runtime_shape is None:
+-                    logger.info(
+-                        "Cache the graph for dynamic shape for later use")
+-                else:
+-                    logger.info("Cache the graph of shape %s for later use",
+-                                str(runtime_shape))
+-            if runtime_shape is None:
+-                logger.debug(
+-                    "Store the %s-th graph for dynamic shape from %s via "
+-                    "handle %s", graph_index, self.compiler.name, handle)
+-            else:
+-                logger.debug(
+-                    "Store the %s-th graph for shape %s from %s via handle %s",
+-                    graph_index, str(runtime_shape), self.compiler.name,
+-                    handle)
++                logger.info("Cache the graph of shape %s for later use",
++                            str(runtime_shape))
++            logger.debug(
++                "store the %s-th graph for shape %s from %s via handle %s",
++                graph_index, str(runtime_shape), self.compiler.name, handle)
+ 
+         # after compiling the last graph, record the end time
+         if graph_index == num_graphs - 1:
+@@ -215,7 +170,7 @@ class CompilerManager:
+             elapsed = now - compilation_start_time
+             compilation_config.compilation_time += elapsed
+             if runtime_shape is None:
+-                logger.info("Compiling a graph for dynamic shape takes %.2f s",
++                logger.info("Compiling a graph for general shape takes %.2f s",
+                             elapsed)
+             else:
+                 logger.info("Compiling a graph for shape %s takes %.2f s",
+@@ -274,12 +229,15 @@ def split_graph(graph: fx.GraphModule,
+         outputs.append(
+             SplitItem(name, graph_id, (graph_id in split_op_graphs), module))
+ 
+-    # sort by integer graph_id, rather than string name
++    # sort by intetger graph_id, rather than string name
+     outputs.sort(key=lambda x: x.graph_id)
+ 
+     return split_gm, outputs
+ 
+ 
++# we share the global graph pool among all the backends
++global_graph_pool = None
++
+ compilation_start_time = 0.0
+ 
+ 
+@@ -297,12 +255,13 @@ class PiecewiseCompileInterpreter(torch.fx.Interpreter):
+ 
+     def __init__(self, module: torch.fx.GraphModule,
+                  compile_submod_names: list[str], vllm_config: VllmConfig,
+-                 vllm_backend: "VllmBackend"):
++                 graph_pool, vllm_backend: "VllmBackend"):
+         super().__init__(module)
+         from torch._guards import detect_fake_mode
+         self.fake_mode = detect_fake_mode()
+         self.compile_submod_names = compile_submod_names
+         self.compilation_config = vllm_config.compilation_config
++        self.graph_pool = graph_pool
+         self.vllm_config = vllm_config
+         self.vllm_backend = vllm_backend
+         # When True, it annoyingly dumps the torch.fx.Graph on errors.
+@@ -329,8 +288,7 @@ class PiecewiseCompileInterpreter(torch.fx.Interpreter):
+                 i for i, x in enumerate(args) if isinstance(x, torch.SymInt)
+             ]
+             global compilation_start_time
+-
+-            compiled_graph_for_dynamic_shape = self.vllm_backend.\
++            compiled_graph_for_general_shape = self.vllm_backend.\
+                 compiler_manager.compile(
+                 submod,
+                 args,
+@@ -339,65 +297,19 @@ class PiecewiseCompileInterpreter(torch.fx.Interpreter):
+                 graph_index=index,
+                 num_graphs=len(self.compile_submod_names),
+                 runtime_shape=None)
+-            # Lazy import here to avoid circular import
+-            from .cuda_piecewise_backend import PiecewiseBackend
+ 
+-            piecewise_backend = PiecewiseBackend(
+-                submod, self.vllm_config, index,
++            piecewise_backend = resolve_obj_by_qualname(
++                current_platform.get_piecewise_backend_cls())
++            self.module.__dict__[target] = piecewise_backend(
++                submod, self.vllm_config, self.graph_pool, index,
+                 len(self.compile_submod_names), sym_shape_indices,
+-                compiled_graph_for_dynamic_shape, self.vllm_backend)
+-
+-            if (self.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
+-                    and
+-                    not self.compilation_config.use_inductor_graph_partition):
+-                # We're using Dynamo-based piecewise splitting, so we wrap
+-                # the whole subgraph with a static graph wrapper.
+-                from .cuda_graph import CUDAGraphOptions
+-
+-                # resolve the static graph wrapper class (e.g. CUDAGraphWrapper
+-                # class) as platform dependent.
+-                static_graph_wrapper_class = resolve_obj_by_qualname(
+-                    current_platform.get_static_graph_wrapper_cls())
+-
+-                # Always assign PIECEWISE runtime mode to the
+-                # CUDAGraphWrapper for piecewise_backend, to distinguish
+-                # it from the FULL cudagraph runtime mode, no matter it
+-                # is wrapped on a full or piecewise fx graph.
+-                self.module.__dict__[target] = static_graph_wrapper_class(
+-                    runnable=piecewise_backend,
+-                    vllm_config=self.vllm_config,
+-                    runtime_mode=CUDAGraphMode.PIECEWISE,
+-                    cudagraph_options=CUDAGraphOptions(
+-                        debug_log_enable=piecewise_backend.is_first_graph,
+-                        gc_disable=not piecewise_backend.is_first_graph,
+-                        weak_ref_output=piecewise_backend.is_last_graph))
+-            else:
+-                self.module.__dict__[target] = piecewise_backend
++                compiled_graph_for_general_shape, self.vllm_backend)
+ 
+             compilation_counter.num_piecewise_capturable_graphs_seen += 1
+ 
+         return output
+ 
+ 
+-# the tag for the part of model being compiled,
+-# e.g. backbone/eagle_head
+-model_tag: str = "backbone"
+-
+-
+-@contextmanager
+-def set_model_tag(tag: str):
+-    """Context manager to set the model tag."""
+-    global model_tag
+-    assert tag != model_tag, \
+-        f"Model tag {tag} is the same as the current tag {model_tag}."
+-    old_tag = model_tag
+-    model_tag = tag
+-    try:
+-        yield
+-    finally:
+-        model_tag = old_tag
+-
+-
+ class VllmBackend:
+     """The compilation backend for `torch.compile` with vLLM.
+     It is used for compilation level of `CompilationLevel.PIECEWISE`,
+@@ -412,6 +324,7 @@ class VllmBackend:
+ 
+     vllm_config: VllmConfig
+     compilation_config: CompilationConfig
++    graph_pool: Any
+     _called: bool = False
+     # the graph we compiled
+     graph: fx.GraphModule
+@@ -428,16 +341,15 @@ class VllmBackend:
+     def __init__(
+         self,
+         vllm_config: VllmConfig,
+-        prefix: str = "",
+     ):
++        global global_graph_pool
++        if global_graph_pool is None:
++            global_graph_pool = current_platform.graph_pool_handle()
+ 
+-        # if the model is initialized with a non-empty prefix,
+-        # then usually it's enough to use that prefix,
+-        # e.g. language_model, vision_model, etc.
+-        # when multiple parts are initialized as independent
+-        # models, we need to use the model_tag to distinguish
+-        # them, e.g. backbone (default), eagle_head, etc.
+-        self.prefix = prefix or model_tag
++        # TODO: in the future, if we want to use multiple
++        # streams, it might not be safe to share a global pool.
++        # only investigate this when we use multiple streams
++        self.graph_pool = global_graph_pool
+ 
+         # Passes to run on the graph post-grad.
+         self.post_grad_pass_manager = PostGradPassManager()
+@@ -463,12 +375,11 @@ class VllmBackend:
+         inductor_config = config.inductor_compile_config
+         PASS_KEY = "post_grad_custom_post_pass"
+         if PASS_KEY in inductor_config:
++            # Config should automatically wrap all inductor passes
+             if isinstance(inductor_config[PASS_KEY], PostGradPassManager):
+-                # PassManager already added to config, make sure it's correct
+                 assert (inductor_config[PASS_KEY].uuid() ==
+                         self.post_grad_pass_manager.uuid())
+             else:
+-                # Config should automatically wrap all inductor passes
+                 assert isinstance(inductor_config[PASS_KEY], InductorPass)
+                 self.post_grad_pass_manager.add(inductor_config[PASS_KEY])
+         inductor_config[PASS_KEY] = self.post_grad_pass_manager
+@@ -484,7 +395,7 @@ class VllmBackend:
+ 
+             factors = []
+             # 0. factors come from the env, for example, The values of
+-            # VLLM_PP_LAYER_PARTITION will affect the computation graph.
++            # VLLM_PP_LAYER_PARTITION will affects the computation graph.
+             env_hash = envs.compute_hash()
+             factors.append(env_hash)
+ 
+@@ -530,13 +441,16 @@ class VllmBackend:
+             )
+             self.compilation_config.cache_dir = cache_dir
+ 
+-        cache_dir = self.compilation_config.cache_dir
++        if compilation_counter.num_graphs_seen > 0:
++            cache_dir = self.compilation_config.cache_dir + \
++                f'-{compilation_counter.num_graphs_seen}'
++        else:
++            cache_dir = self.compilation_config.cache_dir
+         os.makedirs(cache_dir, exist_ok=True)
+         self.compilation_config.cache_dir = cache_dir
+         rank = vllm_config.parallel_config.rank
+         dp_rank = vllm_config.parallel_config.data_parallel_rank
+-        local_cache_dir = os.path.join(cache_dir, f"rank_{rank}_{dp_rank}",
+-                                       self.prefix)
++        local_cache_dir = os.path.join(cache_dir, f"rank_{rank}_{dp_rank}")
+         os.makedirs(local_cache_dir, exist_ok=True)
+         self.compilation_config.local_cache_dir = local_cache_dir
+ 
+@@ -548,8 +462,7 @@ class VllmBackend:
+             logger.info("Using cache directory: %s for vLLM's torch.compile",
+                         local_cache_dir)
+ 
+-        self.compiler_manager.initialize_cache(local_cache_dir, disable_cache,
+-                                               self.prefix)
++        self.compiler_manager.initialize_cache(local_cache_dir, disable_cache)
+ 
+         # when dynamo calls the backend, it means the bytecode
+         # transform and analysis are done
+@@ -586,7 +499,7 @@ class VllmBackend:
+         # propagate the split graph to the piecewise backend,
+         # compile submodules with symbolic shapes
+         PiecewiseCompileInterpreter(self.split_gm, submod_names_to_compile,
+-                                    self.vllm_config,
++                                    self.vllm_config, self.graph_pool,
+                                     self).run(*example_inputs)
+ 
+         graph_path = os.path.join(local_cache_dir, "computation_graph.py")
+@@ -603,7 +516,7 @@ class VllmBackend:
+ 
+         self._called = True
+ 
+-        if self.compilation_config.cudagraph_mode == CUDAGraphMode.NONE or \
++        if not self.compilation_config.use_cudagraph or \
+             not self.compilation_config.cudagraph_copy_inputs:
+             return self.split_gm
+ 
+

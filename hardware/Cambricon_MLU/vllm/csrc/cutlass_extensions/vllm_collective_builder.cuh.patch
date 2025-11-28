@@ -1,0 +1,13 @@
+diff --git a/csrc/cutlass_extensions/vllm_collective_builder.cuh b/csrc/cutlass_extensions/vllm_collective_builder.cuh
+index 085ee1290..e7fbba4cd 100644
+--- a/csrc/cutlass_extensions/vllm_collective_builder.cuh
++++ b/csrc/cutlass_extensions/vllm_collective_builder.cuh
+@@ -1,6 +1,6 @@
+ #pragma once
+ 
+-#include "cutlass/gemm/collective/collective_builder.hpp"
++#include "cutlass_extensions/gemm/collective/collective_builder.hpp"
+ 
+ namespace cutlass::gemm::collective {
+ using namespace cute;
+

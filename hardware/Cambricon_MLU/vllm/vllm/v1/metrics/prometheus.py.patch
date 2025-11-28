@@ -1,0 +1,14 @@
+diff --git a/vllm/v1/metrics/prometheus.py b/vllm/v1/metrics/prometheus.py
+index a43cf9ce2..61ba5d66c 100644
+--- a/vllm/v1/metrics/prometheus.py
++++ b/vllm/v1/metrics/prometheus.py
+@@ -36,7 +36,7 @@ def setup_multiprocess_prometheus():
+                        "and vLLM will properly handle cleanup.")
+ 
+ 
+-def get_prometheus_registry() -> CollectorRegistry:
++def get_prometheus_registry():
+     """Get the appropriate prometheus registry based on multiprocessing 
+     configuration.
+     
+

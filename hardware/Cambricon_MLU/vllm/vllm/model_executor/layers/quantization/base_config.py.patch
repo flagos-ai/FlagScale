@@ -1,0 +1,44 @@
+diff --git a/vllm/model_executor/layers/quantization/base_config.py b/vllm/model_executor/layers/quantization/base_config.py
+index 807a9866a..78c5c75c0 100644
+--- a/vllm/model_executor/layers/quantization/base_config.py
++++ b/vllm/model_executor/layers/quantization/base_config.py
+@@ -10,7 +10,6 @@ from torch import nn
+ 
+ if TYPE_CHECKING:
+     from vllm.model_executor.layers.quantization import QuantizationMethods
+-    from vllm.model_executor.models.utils import WeightsMapper
+ else:
+     QuantizationMethods = str
+ 
+@@ -128,7 +127,7 @@ class QuantizationConfig(ABC):
+     @staticmethod
+     def get_from_keys_or(config: dict[str, Any], keys: list[str],
+                          default: Any) -> Any:
+-        """Get an optional value from the model's quantization config."""
++        """Get a optional value from the model's quantization config."""
+         try:
+             return QuantizationConfig.get_from_keys(config, keys)
+         except ValueError:
+@@ -150,21 +149,3 @@ class QuantizationConfig(ABC):
+ 
+     def get_cache_scale(self, name: str) -> Optional[str]:
+         return None
+-
+-    def apply_vllm_mapper(  # noqa: B027
+-            self, hf_to_vllm_mapper: "WeightsMapper"):
+-        """
+-        Interface for models to update module names referenced in
+-        quantization configs in order to reflect the vllm model structure
+-
+-        :param hf_to_vllm_mapper: maps from hf model structure (the assumed
+-            structure of the qconfig) to vllm model structure
+-        """
+-        # TODO (@kylesayrs): add implementations for all subclasses
+-        pass
+-
+-    def maybe_update_config(self, model_name: str):  # noqa: B027
+-        """
+-        Interface to update values after config initialization.
+-        """
+-        pass
+

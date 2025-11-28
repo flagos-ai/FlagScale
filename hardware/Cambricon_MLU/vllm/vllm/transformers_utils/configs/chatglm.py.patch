@@ -1,0 +1,14 @@
+diff --git a/vllm/transformers_utils/configs/chatglm.py b/vllm/transformers_utils/configs/chatglm.py
+index 176d2b8f6..7c5de3e94 100644
+--- a/vllm/transformers_utils/configs/chatglm.py
++++ b/vllm/transformers_utils/configs/chatglm.py
+@@ -2,7 +2,7 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+ # Adapted from
+-# https://github.com/zai-org/ChatGLM2-6B
++# https://github.com/THUDM/ChatGLM2-6B
+ from transformers import PretrainedConfig
+ 
+ 
+

@@ -1,0 +1,65 @@
+diff --git a/vllm/connections.py b/vllm/connections.py
+index 1f341719a..103505eb3 100644
+--- a/vllm/connections.py
++++ b/vllm/connections.py
+@@ -54,7 +54,6 @@ class HTTPConnection:
+         stream: bool = False,
+         timeout: Optional[float] = None,
+         extra_headers: Optional[Mapping[str, str]] = None,
+-        allow_redirects: bool = True,
+     ):
+         self._validate_http_url(url)
+ 
+@@ -64,8 +63,7 @@ class HTTPConnection:
+         return client.get(url,
+                           headers=self._headers(**extra_headers),
+                           stream=stream,
+-                          timeout=timeout,
+-                          allow_redirects=allow_redirects)
++                          timeout=timeout)
+ 
+     async def get_async_response(
+         self,
+@@ -73,7 +71,6 @@ class HTTPConnection:
+         *,
+         timeout: Optional[float] = None,
+         extra_headers: Optional[Mapping[str, str]] = None,
+-        allow_redirects: bool = True,
+     ):
+         self._validate_http_url(url)
+ 
+@@ -82,17 +79,10 @@ class HTTPConnection:
+ 
+         return client.get(url,
+                           headers=self._headers(**extra_headers),
+-                          timeout=timeout,
+-                          allow_redirects=allow_redirects)
+-
+-    def get_bytes(self,
+-                  url: str,
+-                  *,
+-                  timeout: Optional[float] = None,
+-                  allow_redirects: bool = True) -> bytes:
+-        with self.get_response(url,
+-                               timeout=timeout,
+-                               allow_redirects=allow_redirects) as r:
++                          timeout=timeout)
++
++    def get_bytes(self, url: str, *, timeout: Optional[float] = None) -> bytes:
++        with self.get_response(url, timeout=timeout) as r:
+             r.raise_for_status()
+ 
+             return r.content
+@@ -102,10 +92,8 @@ class HTTPConnection:
+         url: str,
+         *,
+         timeout: Optional[float] = None,
+-        allow_redirects: bool = True,
+     ) -> bytes:
+-        async with await self.get_async_response(
+-                url, timeout=timeout, allow_redirects=allow_redirects) as r:
++        async with await self.get_async_response(url, timeout=timeout) as r:
+             r.raise_for_status()
+ 
+             return await r.read()
+

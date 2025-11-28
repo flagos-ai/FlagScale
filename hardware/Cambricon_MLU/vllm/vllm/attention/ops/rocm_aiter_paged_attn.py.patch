@@ -1,0 +1,16 @@
+diff --git a/vllm/attention/ops/rocm_aiter_paged_attn.py b/vllm/attention/ops/rocm_aiter_paged_attn.py
+index 2a0336de8..ad97152e2 100644
+--- a/vllm/attention/ops/rocm_aiter_paged_attn.py
++++ b/vllm/attention/ops/rocm_aiter_paged_attn.py
+@@ -81,8 +81,8 @@ class AITERPagedAttention(PagedAttention):
+                 blocksparse_head_sliding_step=blocksparse_head_sliding_step)
+ 
+         if "fp8" in kv_cache_dtype:
+-            key_cache = key_cache.view(current_platform.fp8_dtype())
+-            value_cache = value_cache.view(current_platform.fp8_dtype())
++            key_cache = key_cache.view(torch.float8_e4m3fnuz)
++            value_cache = value_cache.view(torch.float8_e4m3fnuz)
+ 
+         if blocksparse_vert_stride is not None and blocksparse_vert_stride > 1:
+             # use blocksparse paged attention
+

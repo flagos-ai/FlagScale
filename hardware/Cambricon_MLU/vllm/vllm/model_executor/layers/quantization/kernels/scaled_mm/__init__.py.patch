@@ -1,0 +1,23 @@
+diff --git a/vllm/model_executor/layers/quantization/kernels/scaled_mm/__init__.py b/vllm/model_executor/layers/quantization/kernels/scaled_mm/__init__.py
+index 2bc68ab3e..18f5ce04f 100644
+--- a/vllm/model_executor/layers/quantization/kernels/scaled_mm/__init__.py
++++ b/vllm/model_executor/layers/quantization/kernels/scaled_mm/__init__.py
+@@ -6,8 +6,6 @@ from typing import Optional
+ 
+ from vllm.model_executor.layers.quantization.kernels.scaled_mm.aiter import (
+     AiterScaledMMLinearKernel)
+-from vllm.model_executor.layers.quantization.kernels.scaled_mm.cpu import (
+-    CPUScaledMMLinearKernel)
+ from vllm.model_executor.layers.quantization.kernels.scaled_mm.cutlass import (
+     CutlassScaledMMLinearKernel)
+ from vllm.model_executor.layers.quantization.kernels.scaled_mm.ScaledMMLinearKernel import (  # noqa: E501
+@@ -20,7 +18,7 @@ from vllm.platforms import PlatformEnum, current_platform
+ 
+ # in priority/performance order (when available)
+ _POSSIBLE_KERNELS: dict[PlatformEnum, list[type[ScaledMMLinearKernel]]] = {
+-    PlatformEnum.CPU: [CPUScaledMMLinearKernel],
++    PlatformEnum.CPU: [CutlassScaledMMLinearKernel],
+     PlatformEnum.CUDA: [CutlassScaledMMLinearKernel],
+     PlatformEnum.ROCM: [AiterScaledMMLinearKernel, TritonScaledMMLinearKernel],
+     PlatformEnum.TPU: [XLAScaledMMLinearKernel],
+

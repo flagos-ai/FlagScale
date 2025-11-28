@@ -1,0 +1,40 @@
+diff --git a/vllm/model_executor/layers/quantization/hqq_marlin.py b/vllm/model_executor/layers/quantization/hqq_marlin.py
+index 8385ccac3..ee8a0e34b 100644
+--- a/vllm/model_executor/layers/quantization/hqq_marlin.py
++++ b/vllm/model_executor/layers/quantization/hqq_marlin.py
+@@ -14,7 +14,7 @@ from vllm.model_executor.layers.quantization.base_config import (
+     QuantizationConfig, QuantizeMethodBase)
+ from vllm.model_executor.layers.quantization.utils.marlin_utils import (
+     GPTQ_MARLIN_MAX_PARALLEL, GPTQ_MARLIN_MIN_THREAD_N,
+-    marlin_make_empty_g_idx, marlin_permute_bias, marlin_permute_scales)
++    marlin_make_empty_g_idx, marlin_permute_scales)
+ from vllm.model_executor.layers.quantization.utils.marlin_utils_test import (
+     MarlinWorkspace)
+ from vllm.model_executor.layers.quantization.utils.quant_utils import gptq_pack
+@@ -284,9 +284,6 @@ class HQQMarlinMethod(LinearMethodBase):
+         layer.marlin_zeros = marlin_zp
+         layer.marlin_scales = marlin_s
+ 
+-        if hasattr(layer, "bias") and layer.bias is not None:
+-            layer.bias.data = marlin_permute_bias(layer.bias)
+-
+     def apply(
+         self,
+         layer: torch.nn.Module,
+@@ -310,7 +307,6 @@ class HQQMarlinMethod(LinearMethodBase):
+             x,
+             None,
+             layer.marlin_qweight,
+-            bias,
+             scales,
+             None,
+             zeros,
+@@ -330,4 +326,7 @@ class HQQMarlinMethod(LinearMethodBase):
+         if orig_type != torch.float16:
+             marlin_out = marlin_out.to(orig_type)
+ 
++        if bias is not None:
++            marlin_out.add_(bias)
++
+         return marlin_out
+

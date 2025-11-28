@@ -1,0 +1,83 @@
+diff --git a/vllm/distributed/device_communicators/all_reduce_utils.py b/vllm/distributed/device_communicators/custom_all_reduce_utils.py
+similarity index 86%
+rename from vllm/distributed/device_communicators/all_reduce_utils.py
+rename to vllm/distributed/device_communicators/custom_all_reduce_utils.py
+index 87e0f8e1a..7c6001e87 100644
+--- a/vllm/distributed/device_communicators/all_reduce_utils.py
++++ b/vllm/distributed/device_communicators/custom_all_reduce_utils.py
+@@ -10,9 +10,8 @@ import sys
+ import tempfile
+ from collections.abc import Sequence
+ from itertools import product
+-from typing import Any, Optional
++from typing import Optional
+ 
+-import torch
+ import torch.distributed as dist
+ import torch.multiprocessing as mp
+ 
+@@ -24,63 +23,6 @@ from vllm.utils import (cuda_device_count_stateless,
+ 
+ logger = init_logger(__name__)
+ 
+-MiB = 1024 * 1024
+-# Max size for each world size in case symmetric memory is available
+-# For different SM architectures
+-CUSTOM_ALL_REDUCE_MAX_SIZES = {
+-    "9.0": {
+-        2: 64 * MiB,  # 64 MB
+-        4: 32 * MiB,  # 32 MB
+-        6: MiB // 2,  # 512 KB
+-        8: MiB // 4,  # 256 KB
+-    },
+-    "10.0": {
+-        2: 2 * MiB,  # 2 MB
+-        4: 2 * MiB,  # 2 MB
+-        6: 1 * MiB,  # 1 MB
+-        8: 1 * MiB,  # 1 MB
+-    }
+-}
+-
+-SYMM_MEM_ALL_REDUCE_MAX_SIZES = {
+-    "9.0": {
+-        2: 64 * MiB,  # 64 MB
+-        4: 32 * MiB,  # 32 MB
+-        6: 64 * MiB,  # 64 MB
+-        8: 64 * MiB,  # 64 MB
+-    },
+-    "10.0": {
+-        2: 8 * MiB,  # 8 MB
+-        4: 32 * MiB,  # 32 MB
+-        6: 128 * MiB,  # 128 MB
+-        8: 128 * MiB,  # 128 MB
+-    }
+-}
+-
+-NCCL_SYMM_MEM_ALL_REDUCE_CONFIG: dict[str, Any] = {
+-    "min_world_size": 4,
+-    "thresholds": {
+-        4: 2 * MiB,  # 2 MB
+-        8: 1 * MiB,  # 1 MB
+-    },
+-    "always_use_above_world_size": 8  # Always use symm mem for world_size > 8
+-}
+-
+-
+-def should_nccl_symm_mem_allreduce(world_size: int,
+-                                   input_tensor: torch.Tensor) -> bool:
+-    from vllm.distributed.device_communicators.pynccl_allocator import (
+-        is_symmetric_memory_enabled)
+-    if not is_symmetric_memory_enabled():
+-        return False
+-    if world_size < NCCL_SYMM_MEM_ALL_REDUCE_CONFIG["min_world_size"]:
+-        return False
+-    threshold = NCCL_SYMM_MEM_ALL_REDUCE_CONFIG["thresholds"].get(world_size)
+-    if threshold is not None and input_tensor.nbytes >= threshold:
+-        return True
+-    return (world_size
+-            > NCCL_SYMM_MEM_ALL_REDUCE_CONFIG["always_use_above_world_size"])
+-
+ 
+ def producer(batch_src: Sequence[int],
+              producer_queue,
+

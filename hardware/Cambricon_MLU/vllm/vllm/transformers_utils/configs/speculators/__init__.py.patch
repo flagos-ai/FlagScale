@@ -1,0 +1,9 @@
+diff --git a/vllm/transformers_utils/configs/speculators/__init__.py b/vllm/transformers_utils/configs/speculators/__init__.py
+deleted file mode 100644
+index 208f01a7c..000000000
+--- a/vllm/transformers_utils/configs/speculators/__init__.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+

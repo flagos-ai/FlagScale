@@ -1,0 +1,30 @@
+diff --git a/vllm/entrypoints/openai/tool_parsers/deepseekv3_tool_parser.py b/vllm/entrypoints/openai/tool_parsers/deepseekv3_tool_parser.py
+index ac272b0c3..60025af2a 100644
+--- a/vllm/entrypoints/openai/tool_parsers/deepseekv3_tool_parser.py
++++ b/vllm/entrypoints/openai/tool_parsers/deepseekv3_tool_parser.py
+@@ -6,7 +6,6 @@ from typing import Union
+ 
+ import regex as re
+ 
+-from vllm.entrypoints.chat_utils import make_tool_call_id
+ from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
+                                               DeltaFunctionCall, DeltaMessage,
+                                               DeltaToolCall,
+@@ -16,6 +15,7 @@ from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import (
+     ToolParser, ToolParserManager)
+ from vllm.logger import init_logger
+ from vllm.transformers_utils.tokenizer import AnyTokenizer
++from vllm.utils import random_uuid
+ 
+ logger = init_logger(__name__)
+ 
+@@ -267,7 +267,7 @@ class DeepSeekV3ToolParser(ToolParser):
+                         DeltaToolCall(
+                             index=self.current_tool_id,
+                             type="function",
+-                            id=make_tool_call_id(),
++                            id=f"chatcmpl-tool-{random_uuid()}",
+                             function=DeltaFunctionCall(
+                                 name=function_name).model_dump(
+                                     exclude_none=True),
+

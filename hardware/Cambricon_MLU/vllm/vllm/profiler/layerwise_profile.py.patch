@@ -1,0 +1,16 @@
+diff --git a/vllm/profiler/layerwise_profile.py b/vllm/profiler/layerwise_profile.py
+index 41136f738..2f9ebe531 100644
+--- a/vllm/profiler/layerwise_profile.py
++++ b/vllm/profiler/layerwise_profile.py
+@@ -353,8 +353,8 @@ class layerwise_profile(profile):
+ 
+         Args:
+             num_running_seqs (Optional[int], optional): When given,
+-                num_running_seqs will be passed to LayerProfileResults
+-                for metadata update. Defaults to None.
++            num_running_seqs will be passed to LayerProfileResults for metadata
++            update. Defaults to None.
+         """
+         super().__init__(
+             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+

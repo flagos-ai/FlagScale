@@ -1,0 +1,15 @@
+diff --git a/vllm/lora/layers/qkv_x_parallel_linear.py b/vllm/lora/layers/qkv_x_parallel_linear.py
+deleted file mode 100644
+index 367482d0e..000000000
+--- a/vllm/lora/layers/qkv_x_parallel_linear.py
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from .base import BaseLayerWithLoRA
+-
+-
+-#TODO: Implement this
+-class QKVCrossParallelLinearWithLoRA(BaseLayerWithLoRA):
+-    pass
+

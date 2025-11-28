@@ -1,0 +1,111 @@
+diff --git a/vllm/inputs/data.py b/vllm/inputs/data.py
+index 1718c0767..23cb5e502 100644
+--- a/vllm/inputs/data.py
++++ b/vllm/inputs/data.py
+@@ -7,8 +7,7 @@ import torch
+ from typing_extensions import NotRequired, TypedDict, TypeIs, TypeVar
+ 
+ if TYPE_CHECKING:
+-    from vllm.multimodal.inputs import (MultiModalDataDict, MultiModalInputs,
+-                                        MultiModalUUIDDict)
++    from vllm.multimodal.inputs import MultiModalDataDict, MultiModalInputs
+ 
+ 
+ class TextPrompt(TypedDict):
+@@ -31,15 +30,6 @@ class TextPrompt(TypedDict):
+     to pass the mm_processor_kwargs to each of them.
+     """
+ 
+-    multi_modal_uuids: NotRequired["MultiModalUUIDDict"]
+-    """
+-    Optional user-specified UUIDs for multimodal items, mapped by modality.
+-    Lists must match the number of items per modality and may contain `None`.
+-    For `None` entries, the hasher will compute IDs automatically; non-None
+-    entries override the default hashes for caching, and MUST be unique per
+-    multimodal item.
+-    """
+-
+     cache_salt: NotRequired[str]
+     """
+     Optional cache salt to be used for prefix caching.
+@@ -52,9 +42,6 @@ class TokensPrompt(TypedDict):
+     prompt_token_ids: list[int]
+     """A list of token IDs to pass to the model."""
+ 
+-    prompt: NotRequired[str]
+-    """The prompt text corresponding to the token IDs, if available."""
+-
+     token_type_ids: NotRequired[list[int]]
+     """A list of token type IDs to pass to the cross encoder model."""
+ 
+@@ -72,14 +59,6 @@ class TokensPrompt(TypedDict):
+     to pass the mm_processor_kwargs to each of them.
+     """
+ 
+-    multi_modal_uuids: NotRequired["MultiModalUUIDDict"]
+-    """
+-    Optional user-specified UUIDs for multimodal items, mapped by modality.
+-    Lists must match the number of items per modality and may contain `None`.
+-    For `None` entries, the hasher will compute IDs automatically; non-None
+-    entries override the default hashes for caching.
+-    """
+-
+     cache_salt: NotRequired[str]
+     """
+     Optional cache salt to be used for prefix caching.
+@@ -98,16 +77,6 @@ class EmbedsPrompt(TypedDict):
+     """
+ 
+ 
+-class DataPrompt(TypedDict):
+-    """Represents generic inputs handled by IO processor plugins."""
+-
+-    data: Any
+-    """The input data"""
+-
+-    data_format: str
+-    """The input data format"""
+-
+-
+ SingletonPrompt = Union[str, TextPrompt, TokensPrompt, EmbedsPrompt]
+ """
+ Set of possible schemas for a single prompt:
+@@ -205,6 +174,9 @@ class TokenInputs(TypedDict):
+     prompt_token_ids: list[int]
+     """The token IDs of the prompt."""
+ 
++    token_type_ids: NotRequired[list[int]]
++    """The token type IDs of the prompt."""
++
+     prompt: NotRequired[str]
+     """
+     The original prompt text corresponding to the token IDs, if available.
+@@ -218,6 +190,7 @@ class TokenInputs(TypedDict):
+ 
+ def token_inputs(
+     prompt_token_ids: list[int],
++    token_type_ids: Optional[list[int]] = None,
+     prompt: Optional[str] = None,
+     cache_salt: Optional[str] = None,
+ ) -> TokenInputs:
+@@ -227,6 +200,8 @@ def token_inputs(
+ 
+     if prompt is not None:
+         inputs["prompt"] = prompt
++    if token_type_ids is not None:
++        inputs["token_type_ids"] = token_type_ids
+     if cache_salt is not None:
+         inputs["cache_salt"] = cache_salt
+ 
+@@ -287,8 +262,8 @@ class EncoderDecoderInputs(TypedDict):
+ 
+ SingletonInputs = Union[TokenInputs, EmbedsInputs, "MultiModalInputs"]
+ """
+-A processed [`SingletonPrompt`][vllm.inputs.data.SingletonPrompt] which can be
+-passed to [`Sequence`][collections.abc.Sequence].
++A processed [`SingletonPrompt`][vllm.inputs.data.SingletonPrompt] which can be 
++passed to [`vllm.sequence.Sequence`][].
+ """
+ 
+ ProcessorInputs = Union[DecoderOnlyInputs, EncoderDecoderInputs]
+

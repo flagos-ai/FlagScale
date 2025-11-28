@@ -1,0 +1,42 @@
+diff --git a/vllm/multimodal/__init__.py b/vllm/multimodal/__init__.py
+index 8ea790784..2ef9f1ccc 100644
+--- a/vllm/multimodal/__init__.py
++++ b/vllm/multimodal/__init__.py
+@@ -1,10 +1,10 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from .hasher import MultiModalHasher
++from .base import MultiModalPlaceholderMap
++from .hasher import MultiModalHashDict, MultiModalHasher
+ from .inputs import (BatchedTensorInputs, ModalityData, MultiModalDataBuiltins,
+                      MultiModalDataDict, MultiModalKwargs,
+-                     MultiModalKwargsItems, MultiModalPlaceholderDict,
+-                     MultiModalUUIDDict, NestedTensors)
++                     MultiModalPlaceholderDict, NestedTensors)
+ from .registry import MultiModalRegistry
+ 
+ MULTIMODAL_REGISTRY = MultiModalRegistry()
+@@ -14,7 +14,7 @@ is used by model runners to dispatch data processing according to the target
+ model.
+ 
+ Info:
+-    [mm_processing](../../../design/mm_processing.md)
++    [mm_processing](../../../design/mm_processing.html)
+ """
+ 
+ __all__ = [
+@@ -22,11 +22,11 @@ __all__ = [
+     "ModalityData",
+     "MultiModalDataBuiltins",
+     "MultiModalDataDict",
++    "MultiModalHashDict",
+     "MultiModalHasher",
+     "MultiModalKwargs",
+-    "MultiModalKwargsItems",
+     "MultiModalPlaceholderDict",
+-    "MultiModalUUIDDict",
++    "MultiModalPlaceholderMap",
+     "NestedTensors",
+     "MULTIMODAL_REGISTRY",
+     "MultiModalRegistry",
+

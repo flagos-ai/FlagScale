@@ -1,0 +1,15 @@
+diff --git a/vllm/distributed/eplb/__init__.py b/vllm/distributed/eplb/__init__.py
+deleted file mode 100644
+index 80511024b..000000000
+--- a/vllm/distributed/eplb/__init__.py
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-'''
+-Expert parallelism load balancer (EPLB).
+-'''
+-
+-from .eplb_state import *
+-from .rebalance_algo import *
+

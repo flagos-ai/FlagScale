@@ -1,0 +1,5 @@
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/transform/__init__.py b/vllm/core/__init__.py
+similarity index 100%
+rename from vllm/model_executor/layers/quantization/compressed_tensors/transform/__init__.py
+rename to vllm/core/__init__.py
+

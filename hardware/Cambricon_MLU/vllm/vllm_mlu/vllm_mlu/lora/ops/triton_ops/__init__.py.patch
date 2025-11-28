@@ -1,17 +1,20 @@
 diff --git a/vllm_mlu/vllm_mlu/lora/ops/triton_ops/__init__.py b/vllm_mlu/vllm_mlu/lora/ops/triton_ops/__init__.py
 new file mode 100644
-index 000000000..1d40fde38
+index 000000000..46635e21f
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/lora/ops/triton_ops/__init__.py
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,13 @@
 +from vllm_mlu.lora.ops.triton_ops.sgmv_expand import sgmv_expand_mlu
 +from vllm_mlu.lora.ops.triton_ops.sgmv_expand_slice import sgmv_expand_slice_mlu
 +from vllm_mlu.lora.ops.triton_ops.sgmv_shrink import sgmv_shrink_mlu
++from vllm_mlu.lora.ops.triton_ops.lora_shrink_op import lora_shrink
++from vllm_mlu.lora.ops.triton_ops.lora_expand_op import lora_expand
 +
 +__all__ = [
 +    "sgmv_expand_mlu",
 +    "sgmv_expand_slice_mlu",
 +    "sgmv_shrink_mlu",
++    "lora_expand",
++    "lora_shrink"
 +]
-\ No newline at end of file
 

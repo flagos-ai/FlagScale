@@ -1,0 +1,5 @@
+diff --git a/vllm/attention/layers/__init__.py b/vllm/adapter_commons/__init__.py
+similarity index 100%
+rename from vllm/attention/layers/__init__.py
+rename to vllm/adapter_commons/__init__.py
+

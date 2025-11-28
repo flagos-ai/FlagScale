@@ -1,0 +1,28 @@
+diff --git a/vllm_mlu/vllm_mlu/v1/engine/async_llm.py b/vllm_mlu/vllm_mlu/v1/engine/async_llm.py
+new file mode 100644
+index 000000000..3f55772fa
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/v1/engine/async_llm.py
+@@ -0,0 +1,20 @@
++from vllm.v1.engine.async_llm import AsyncLLM
++
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++
++
++class AsyncLLM_MluHijack(AsyncLLM):
++
++    async def start_scheduler_profile(self) -> None:
++        await self.engine_core.start_scheduler_profile()
++
++    async def stop_scheduler_profile(self) -> None:
++        await self.engine_core.stop_scheduler_profile()
++
++
++MluHijackObject.apply_hijack(AsyncLLM,
++                             "start_scheduler_profile",
++                             AsyncLLM_MluHijack.start_scheduler_profile)
++MluHijackObject.apply_hijack(AsyncLLM,
++                             "stop_scheduler_profile",
++                             AsyncLLM_MluHijack.stop_scheduler_profile)
+\ No newline at end of file
+

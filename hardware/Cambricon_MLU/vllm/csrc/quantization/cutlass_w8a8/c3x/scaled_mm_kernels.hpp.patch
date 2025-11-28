@@ -1,0 +1,27 @@
+diff --git a/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_kernels.hpp b/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_kernels.hpp
+index 9ceb3a3ec..c1242fdb3 100644
+--- a/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_kernels.hpp
++++ b/csrc/quantization/cutlass_w8a8/c3x/scaled_mm_kernels.hpp
+@@ -36,21 +36,9 @@ void cutlass_scaled_mm_sm100_fp8(torch::Tensor& out, torch::Tensor const& a,
+                                  torch::Tensor const& b_scales,
+                                  std::optional<torch::Tensor> const& bias);
+ 
+-void cutlass_scaled_mm_sm120_fp8(torch::Tensor& out, torch::Tensor const& a,
+-                                 torch::Tensor const& b,
+-                                 torch::Tensor const& a_scales,
+-                                 torch::Tensor const& b_scales,
+-                                 std::optional<torch::Tensor> const& bias);
+-
+ void cutlass_scaled_mm_blockwise_sm100_fp8(torch::Tensor& out,
+                                            torch::Tensor const& a,
+                                            torch::Tensor const& b,
+                                            torch::Tensor const& a_scales,
+                                            torch::Tensor const& b_scales);
+-
+-void cutlass_scaled_mm_blockwise_sm120_fp8(torch::Tensor& out,
+-                                           torch::Tensor const& a,
+-                                           torch::Tensor const& b,
+-                                           torch::Tensor const& a_scales,
+-                                           torch::Tensor const& b_scales);
+ }  // namespace vllm
+

@@ -1,0 +1,38 @@
+diff --git a/vllm/model_executor/model_loader/sharded_state_loader.py b/vllm/model_executor/model_loader/sharded_state_loader.py
+index a85ca065d..2fd9cfba3 100644
+--- a/vllm/model_executor/model_loader/sharded_state_loader.py
++++ b/vllm/model_executor/model_loader/sharded_state_loader.py
+@@ -10,8 +10,7 @@ from typing import Any, Optional
+ import torch
+ from torch import nn
+ 
+-from vllm.config import ModelConfig
+-from vllm.config.load import LoadConfig
++from vllm.config import LoadConfig, ModelConfig
+ from vllm.logger import init_logger
+ from vllm.model_executor.model_loader.base_loader import BaseModelLoader
+ from vllm.model_executor.model_loader.weight_utils import (
+@@ -33,9 +32,12 @@ class ShardedStateLoader(BaseModelLoader):
+ 
+     DEFAULT_PATTERN = "model-rank-{rank}-part-{part}.safetensors"
+ 
+-    def __init__(self, load_config: LoadConfig):
++    def __init__(self,
++                 load_config: LoadConfig,
++                 runai_model_streamer: bool = False):
+         super().__init__(load_config)
+ 
++        self.runai_model_streamer = runai_model_streamer
+         extra_config = ({} if load_config.model_loader_extra_config is None
+                         else load_config.model_loader_extra_config.copy())
+         self.pattern = extra_config.pop("pattern", self.DEFAULT_PATTERN)
+@@ -150,7 +152,7 @@ class ShardedStateLoader(BaseModelLoader):
+ 
+     def iterate_over_files(
+             self, paths) -> Generator[tuple[str, torch.Tensor], None, None]:
+-        if self.load_config.load_format == "runai_streamer_sharded":
++        if self.runai_model_streamer:
+             yield from runai_safetensors_weights_iterator(paths, True)
+         else:
+             from safetensors.torch import safe_open
+

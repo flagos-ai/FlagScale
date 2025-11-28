@@ -1,0 +1,318 @@
+diff --git a/vllm_mlu/tools/install_depend.sh b/vllm_mlu/tools/install_depend.sh
+new file mode 100755
+index 000000000..2f55bdf55
+--- /dev/null
++++ b/vllm_mlu/tools/install_depend.sh
+@@ -0,0 +1,311 @@
++#!/bin/bash
++set -x
++
++function customize_urls() {
++    # Update the URL when customizing the environment.
++    CNCL_LIB_URL=""
++    CNNLEXTRA_LIB_URL=""
++    CNTOOLKIT_LIB_URL=""
++    CNNL_LIB_URL=""
++    MLUOPS_LIB_URL=""
++    CNCLEP_LIB_URL=""
++    TORCH_WHL_URL=""
++    TORCH_MLU_WHL_URL=""
++    TORCH_MLU_OPS_WHL_URL=""
++    TRITON_WHL_URL=""
++    XFORMERS_WHL_URL=""
++}
++
++function install_from_source() {
++    # Update components you want to install from source code.
++
++    # FIXME: Remove following codes after relase pt2.4 docker at October version.
++    pip install --no-cache-dir --force-reinstall ray==2.43.0
++    RAY_DIR=$(python -c "import ray; print(ray.__path__[0])")
++    cp ${BASE_DIR}/tools/ray_mlu/__init__.py ${RAY_DIR}/_private/accelerators/__init__.py
++    cp ${BASE_DIR}/tools/ray_mlu/mlu.py ${RAY_DIR}/_private/accelerators/
++    cp ${BASE_DIR}/tools/ray_mlu/nsight.py ${RAY_DIR}/_private/runtime_env/nsight.py
++    cp ${BASE_DIR}/tools/ray_mlu/node.py ${RAY_DIR}/_private/node.py
++    cp ${BASE_DIR}/tools/ray_mlu/worker.py ${RAY_DIR}/_private/worker.py
++    cp ${BASE_DIR}/tools/ray_mlu/device_manager/__init__.py ${RAY_DIR}/air/_internal/device_manager/__init__.py
++    cp ${BASE_DIR}/tools/ray_mlu/device_manager/mlu.py ${RAY_DIR}/air/_internal/device_manager/
++    if [ ! -f ${RAY_DIR}/_private/accelerators/mlu.py ]; then
++        echo "Install ray or patch of mlu failed !"
++        exit 1
++    fi
++
++    pip install ${BASE_DIR}/tools/vllm_release_whls/vllm-${VLLM_COMMUNITY_VERSION}+empty-py3-none-any.whl
++
++
++    # NOTE: temporarily uninstall apex.
++    # Apex may affect torch.mlu.empty_cache or gc.collect.
++    pip uninstall apex -y
++}
++
++function usage() {
++    echo "USAGE: customize the environment by updating package URLs or installing from source code."
++}
++
++function parse_os_info() {
++  OS_NAME=${OS_VER%%[0-9]*}
++  OS_ID=${OS_VER#$OS_NAME}
++  OS_NAME_PATH_STR=""
++  OS_ID_PATH_STR=""
++  case $OS_NAME in
++    ubuntu)
++        OS_NAME_PATH_STR="Ubuntu"
++        OS_ID_PATH_STR=$OS_ID
++        ;;
++    debian)
++        OS_NAME_PATH_STR="Debian"
++        OS_ID_PATH_STR=$OS_ID
++        ;;
++    centos)
++        OS_NAME_PATH_STR="CentOS"
++        OS_ID_PATH_STR=$(echo $OS_ID | cut -d'.' -f1)
++        ;;
++    *)
++        echo "invalid system"
++        exit -1
++        ;;
++  esac
++
++  OS_NAME_PATH_STR_LOW=$(echo "$OS_NAME_PATH_STR" | tr '[:upper:]' '[:lower:]')
++  echo $OS_VER, $OS_NAME, $OS_ID, $OS_NAME_PATH_STR, $OS_NAME_PATH_STR_LOW
++}
++
++function check_env() {
++    source /etc/os-release
++    OS_VER="$ID$VERSION_ID"
++    support_list=("ubuntu22.04" "ubuntu20.04" "debian10" "debian12" "centos8" "centos7")
++    if [[ ! "${support_list[@]}" =~ "${OS_VER}" ]]; then
++        echo "install_depend.sh only support ubuntu22.04/ubuntu20.04/debian10/debian12/centos8/centos7."
++        exit -1
++    fi
++    CPU_ARCH="x86_64"
++    PYTHON_MINOR_VERSION=$(python3 --version | cut -d '.' -f 2)
++}
++
++function get_package_urls() {
++    if [ $OS_NAME == "centos" ]; then
++        if [ -z ${CNCL_LIB_URL} ]; then
++            CNCL_LIB_URL="http://daily.software.cambricon.com/release/cncl/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/$OS_ID_PATH_STR/${CNCL_VERSION}/cncl-${CNCL_VERSION}.el${OS_ID_PATH_STR}.${CPU_ARCH}.rpm"
++        fi
++
++        if [ -z ${CNCLEP_LIB_URL} ]; then
++            CNCLEP_LIB_URL="http://daily.software.cambricon.com/release/cnclep/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/$OS_ID_PATH_STR/${CNCLEP_VERSION}/cnclep-${CNCLEP_VERSION}.el${OS_ID_PATH_STR}.${CPU_ARCH}.rpm"
++        fi
++
++        if [ -z ${CNNLEXTRA_LIB_URL} ]; then
++            CNNLEXTRA_LIB_URL="http://daily.software.cambricon.com/release/cnnlextra/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${CNNLEXTRA_VERSION}/cnnlextra-${CNNLEXTRA_VERSION}.el${OS_ID_PATH_STR}.${CPU_ARCH}.rpm"
++        fi
++
++        if [ -z ${CNTOOLKIT_LIB_URL} ]; then
++            CNTOOLKIT_LIB_URL="http://daily.software.cambricon.com/release/cntoolkit/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${CNTOOLKIT_VERSION}/cntoolkit-${CNTOOLKIT_VERSION}.el${OS_ID_PATH_STR}.${CPU_ARCH}.rpm"
++        fi
++
++        if [ -z ${CNNL_LIB_URL} ]; then
++            CNNL_LIB_URL="http://daily.software.cambricon.com/release/cnnl/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${CNNL_VERSION}/cnnl-${CNNL_VERSION}.el${OS_ID_PATH_STR}.${CPU_ARCH}.rpm"
++        fi
++
++        if [ -z ${MLUOPS_LIB_URL} ]; then
++            MLUOPS_LIB_URL="http://daily.software.cambricon.com/release/mluops/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${MLUOPS_VERSION}/mluops-${MLUOPS_VERSION}.el${OS_ID_PATH_STR}.${CPU_ARCH}.rpm"
++        fi
++    else
++        if [ -z ${CNCL_LIB_URL} ]; then
++            CNCL_LIB_URL="http://daily.software.cambricon.com/release/cncl/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/$OS_ID_PATH_STR/${CNCL_VERSION}/cncl_${CNCL_VERSION}.${OS_VER}_amd64.deb"
++        fi
++
++        if [ -z ${CNCLEP_LIB_URL} ]; then
++            CNCLEP_LIB_URL="http://daily.software.cambricon.com/release/cnclep/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/$OS_ID_PATH_STR/${CNCLEP_VERSION}/cnclep_${CNCLEP_VERSION}.${OS_VER}_amd64.deb"
++        fi
++
++        if [ -z ${CNNLEXTRA_LIB_URL} ]; then
++            CNNLEXTRA_LIB_URL="http://daily.software.cambricon.com/release/cnnlextra/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${CNNLEXTRA_VERSION}/cnnlextra_${CNNLEXTRA_VERSION}.${OS_VER}_amd64.deb"
++        fi
++
++        if [ -z ${CNTOOLKIT_LIB_URL} ]; then
++            CNTOOLKIT_LIB_URL="http://daily.software.cambricon.com/release/cntoolkit/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${CNTOOLKIT_VERSION}/cntoolkit_${CNTOOLKIT_VERSION}.${OS_VER}_amd64.deb"
++        fi
++
++        if [ -z ${CNNL_LIB_URL} ]; then
++            CNNL_LIB_URL="http://daily.software.cambricon.com/release/cnnl/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${CNNL_VERSION}/cnnl_${CNNL_VERSION}.${OS_VER}_amd64.deb"
++        fi
++
++        if [ -z ${MLUOPS_LIB_URL} ]; then
++            MLUOPS_LIB_URL="http://daily.software.cambricon.com/release/mluops/Linux/$CPU_ARCH/${OS_NAME_PATH_STR}/${OS_ID_PATH_STR}/${MLUOPS_VERSION}/mluops_${MLUOPS_VERSION}.${OS_VER}_amd64.deb"
++        fi
++    fi
++
++    if [ -z ${TORCH_MLU_WHL_URL} ]; then
++        TORCH_MLU_WHL_URL="http://daily.software.cambricon.com/release/pytorch${TORCH_COMMUNITY_VERSION}/${TORCH_MLU_VERSION}/wheel/x86_64/manylinux/python3.${PYTHON_MINOR_VERSION}/torch_mlu-${TORCH_MLU_VERSION}%2Btorch${TORCH_COMMUNITY_VERSION}-cp3${PYTHON_MINOR_VERSION}-cp3${PYTHON_MINOR_VERSION}-linux_x86_64.whl"
++    fi
++
++    if [ -z ${TORCH_MLU_OPS_WHL_URL} ]; then
++        TORCH_MLU_OPS_WHL_URL="http://daily.software.cambricon.com/release/torch_mlu_ops/${TORCH_MLU_OPS_SHORT_VER}/wheel/x86_64/manylinux/pytorch${TORCH_COMMUNITY_VERSION}/python3.${PYTHON_MINOR_VERSION}/torch_mlu_ops-${TORCH_MLU_OPS_SHORT_VER}%2Btorch${TORCH_COMMUNITY_VERSION}-cp3${PYTHON_MINOR_VERSION}-cp3${PYTHON_MINOR_VERSION}-manylinux_2_27_x86_64.whl"
++    fi
++
++    if [ -z ${TRITON_WHL_URL} ]; then
++        TRITON_WHL_URL="http://daily.software.cambricon.com/release/triton/${TRITON_MLU_VERSION}/wheel/x86_64/manylinux/python3.${PYTHON_MINOR_VERSION}/triton-${TRITON_COMMUNITY_VERSION}%2Bmlu${TRITON_MLU_VERSION}-cp3${PYTHON_MINOR_VERSION}-cp3${PYTHON_MINOR_VERSION}-manylinux2014_x86_64.whl"
++    fi
++
++    # if [ -z ${XFORMERS_WHL_URL} ]; then
++    #     XFORMERS_MLU_VERSION=$(echo $XFORMERS_VERSION | grep -oP '(?<=mlu)\d+\.\d+\.\d+')
++    #     XFORMERS_WHL_URL="http://daily.software.cambricon.com/release/xformers/${XFORMERS_MLU_VERSION}/wheel/x86_64/manylinux/pytorch${TORCH_COMMUNITY_VERSION}/python3.${PYTHON_MINOR_VERSION}/xformers-${XFORMERS_VERSION}-cp3${PYTHON_MINOR_VERSION}-cp3${PYTHON_MINOR_VERSION}-linux_x86_64.whl"
++    # fi
++}
++
++function print_package_urls() {
++  echo ${CNCL_LIB_URL}
++  echo ${CNNLEXTRA_LIB_URL}
++  echo ${CNTOOLKIT_LIB_URL}
++  echo ${CNNL_LIB_URL}
++  echo ${MLUOPS_LIB_URL}
++  echo ${CNCLEP_LIB_URL}
++  echo ${TORCH_MLU_OPS_WHL_URL}
++  echo ${TORCH_MLU_WHL_URL}
++  echo ${TRITON_WHL_URL}
++  echo ${XFORMERS_WHL_URL}
++}
++
++function try_uninstall_deb_package() {
++  apt-get -s remove $1
++  if [ $? -eq 0 ]; then
++    apt-get --purge remove -y $1
++  fi
++}
++
++function try_uninstall_rpm_package() {
++    yum remove -y --assumeno $1 > /dev/null 2>&1
++    if [ $? -eq 0 ]; then
++        yum remove -y $1
++        yum autoremove -y
++    fi
++}
++
++function install_ci_tools() {
++    wget http://daily.software.cambricon.com/download/vllm/nvm.tar.gz
++    tar -zxvf nvm.tar.gz -C /
++    pip3 install pre-commit
++
++    #install bitsandbytes-0.42.0
++    pip3 install http://daily.software.cambricon.com/download/vllm/bitsandbytes-0.42.0-py3-none-any.whl
++    #install opencv_python_headless-4.10.0.84
++    pip3 install http://daily.software.cambricon.com/download/vllm/opencv_python_headless-4.10.0.84-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
++    pip3 install http://daily.software.cambricon.com/download/vllm/device_info-1.0-py3-none-any.whl
++}
++
++function reinstall_packages() {
++    if [ $OS_NAME == "centos" ]; then
++        try_uninstall_rpm_package cntoolkit
++        try_uninstall_rpm_package cntoolkit-cloud
++        rm -rf /usr/local/neuware/*
++        wget -q -O cntoolkit_package.rpm ${CNTOOLKIT_LIB_URL}
++        rpm -i cntoolkit_package.rpm && yum clean expire-cache && sudo yum install -y cntoolkit-cloud
++
++        wget -q -O cncl.rpm ${CNCL_LIB_URL}
++        yum reinstall -y --oldpackage ${PWD}/cncl.rpm
++
++        wget -q -O cnclep.rpm ${CNCLEP_LIB_URL}
++        yum reinstall -y --oldpackage ${PWD}/cnclep.rpm
++
++        wget -q -O cnnl.rpm ${CNNL_LIB_URL}
++        yum reinstall -y --oldpackage ${PWD}/cnnl.rpm
++
++        wget -q -O cnnlextra.rpm ${CNNLEXTRA_LIB_URL}
++        yum reinstall -y --oldpackage ${PWD}/cnnlextra.rpm
++
++        wget -q -O mluops.rpm ${MLUOPS_LIB_URL}
++        yum reinstall -y --oldpackage ${PWD}/mluops.rpm
++    else
++        try_uninstall_deb_package cntoolkit
++        try_uninstall_deb_package cntoolkit-cloud
++        rm -rf /usr/local/neuware/*
++        wget -q -O cntoolkit_package.deb ${CNTOOLKIT_LIB_URL}
++        dpkg -i ${PWD}/cntoolkit_package.deb && sudo apt update && sudo apt-get install -y cntoolkit-cloud
++        declare -a packages=(
++            cndrv cnrt cnrtc cndev cnpapi cnlicense
++            cncc cnas cngdb cnbin cnperf cncodec3 cnpx
++        )
++        for pkg in "${packages[@]}"; do
++            try_uninstall_deb_package "$pkg"
++        done
++        for pkg in "${packages[@]}"; do
++            apt-get --reinstall -y install "$pkg"
++        done
++
++        wget -q -O cncl.deb ${CNCL_LIB_URL}
++        apt-get install -y --reinstall --allow-downgrades ${PWD}/cncl.deb
++
++        wget -q -O cnnl.deb ${CNNL_LIB_URL}
++        apt-get install -y --reinstall --allow-downgrades ${PWD}/cnnl.deb
++
++        wget -q -O cnnlextra.deb ${CNNLEXTRA_LIB_URL}
++        apt-get install -y --reinstall --allow-downgrades ${PWD}/cnnlextra.deb
++
++        wget -q -O mluops.deb ${MLUOPS_LIB_URL}
++        apt-get install -y --reinstall --allow-downgrades ${PWD}/mluops.deb
++
++        wget -q -O cnclep.deb ${CNCLEP_LIB_URL}
++        apt-get install -y --reinstall --allow-downgrades ${PWD}/cnclep.deb
++    fi
++
++    # Since we do not maintain torch release package, only reinstall when custom
++    # url is provided.
++    if [[ -n ${TORCH_WHL_URL} ]]; then
++        pip install --no-cache-dir --no-deps --force-reinstall ${TORCH_WHL_URL}
++    fi
++    pip install --no-cache-dir --no-deps --force-reinstall ${TORCH_MLU_OPS_WHL_URL}
++    pip install --no-cache-dir --no-deps --force-reinstall ${TORCH_MLU_WHL_URL}
++    pip install --no-cache-dir --no-deps --force-reinstall ${TRITON_WHL_URL}
++    # pip install --no-cache-dir --no-deps --force-reinstall ${XFORMERS_WHL_URL}
++}
++
++function set_package_version() {
++    # Get default component versions.
++    source ${BASE_DIR}/tools/build.property
++    TORCH_MLU_OPS_SHORT_VER=$(echo ${TORCH_MLU_OPS_VERSION} | cut -d '+' -f 1)
++    TRITON_COMMUNITY_VERSION=$(echo ${TRITON_VERSION} | cut -d '+' -f 1)
++    TRITON_MLU_VERSION=$(echo ${TRITON_VERSION} | cut -d'u' -f2)
++    TORCH_MLU_VERSION=$(echo ${CATCH_VERSION} | cut -d '+' -f 1)
++    TORCH_COMMUNITY_VERSION=$(echo ${CATCH_VERSION} | cut -d'h' -f2)
++    VLLM_COMMUNITY_VERSION=$(echo ${VLLM_VERSION} | cut -d '+' -f 1)
++}
++
++function main() {
++    usage
++
++    BASE_DIR="$( cd "$( dirname "$0" )/.." && pwd )"
++    pip uninstall -y transformer_engine flash_attn vllm vllm_mlu
++
++    check_env
++    parse_os_info
++    set_package_version
++
++    # use the cambricon and aliyun mirrors for pip
++    source ${BASE_DIR}/tools/utils.sh
++    config_apt_sources
++    config_pip
++
++    customize_urls
++    get_package_urls
++    print_package_urls
++
++    TMP_DIR=$(mktemp -d -p "${BASE_DIR}")
++    pushd ${TMP_DIR}
++        install_ci_tools
++        reinstall_packages
++        # For components that lack a readily available installation package, we
++        # install them directly from the source code.
++        install_from_source
++    popd
++    rm -r ${TMP_DIR}
++
++    # check install result
++    dpkg -l | grep -E "cnnl:|cnnlextra:|cncl:|cnclep:|cnrt:|cntoolkit:"
++    pip list | grep torch
++    pip list | grep triton
++    pip list | grep vllm
++}
++
++main $@
+

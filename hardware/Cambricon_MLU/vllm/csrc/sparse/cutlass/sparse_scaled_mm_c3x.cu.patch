@@ -1,0 +1,14 @@
+diff --git a/csrc/sparse/cutlass/sparse_scaled_mm_c3x.cu b/csrc/sparse/cutlass/sparse_scaled_mm_c3x.cu
+index d053ecc8d..3dcaa6373 100644
+--- a/csrc/sparse/cutlass/sparse_scaled_mm_c3x.cu
++++ b/csrc/sparse/cutlass/sparse_scaled_mm_c3x.cu
+@@ -277,7 +277,7 @@ CompressorResult cutlass_sparse_compress_sm90(torch::Tensor const& a) {
+   uint32_t const m = 1;  // Set M to 1 for compression
+   uint32_t const n = a.size(1);
+ 
+-  // Note: For correctness, the compressed format must be invariant in:
++  // Note: For correctess, the compressed format must be invariant in:
+   //  - M, the flattened number of tokens
+   //  - Whether output dtype is fp16 or bf16
+   //  - CUTLASS epilogues
+

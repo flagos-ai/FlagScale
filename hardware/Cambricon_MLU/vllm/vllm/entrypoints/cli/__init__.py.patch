@@ -1,0 +1,19 @@
+diff --git a/vllm/entrypoints/cli/__init__.py b/vllm/entrypoints/cli/__init__.py
+index 41671b5b9..e69de29bb 100644
+--- a/vllm/entrypoints/cli/__init__.py
++++ b/vllm/entrypoints/cli/__init__.py
+@@ -1,12 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from vllm.entrypoints.cli.benchmark.latency import BenchmarkLatencySubcommand
+-from vllm.entrypoints.cli.benchmark.serve import BenchmarkServingSubcommand
+-from vllm.entrypoints.cli.benchmark.throughput import (
+-    BenchmarkThroughputSubcommand)
+-
+-__all__: list[str] = [
+-    "BenchmarkLatencySubcommand",
+-    "BenchmarkServingSubcommand",
+-    "BenchmarkThroughputSubcommand",
+-]
+\ No newline at end of file
+

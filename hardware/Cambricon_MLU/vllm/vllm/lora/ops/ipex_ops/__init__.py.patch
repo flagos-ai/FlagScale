@@ -1,0 +1,14 @@
+diff --git a/vllm/lora/ops/ipex_ops/__init__.py b/vllm/lora/ops/ipex_ops/__init__.py
+deleted file mode 100644
+index 5daa43249..000000000
+--- a/vllm/lora/ops/ipex_ops/__init__.py
++++ /dev/null
+@@ -1,7 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-
+-from vllm.lora.ops.ipex_ops.lora_ops import (bgmv_expand, bgmv_expand_slice,
+-                                             bgmv_shrink)
+-
+-__all__ = ["bgmv_expand", "bgmv_expand_slice", "bgmv_shrink"]
+

@@ -1,0 +1,15 @@
+diff --git a/vllm/model_executor/layers/fla/__init__.py b/vllm/model_executor/layers/fla/__init__.py
+deleted file mode 100644
+index 0e89cf9f7..000000000
+--- a/vllm/model_executor/layers/fla/__init__.py
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-# SPDX-FileCopyrightText: Songlin Yang, Yu Zhang
+-#
+-# This file contains code copied from the flash-linear-attention project.
+-# The original source code was licensed under the MIT license and included
+-# the following copyright notice:
+-# Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
+

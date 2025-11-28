@@ -1,0 +1,5 @@
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/p2p/__init__.py b/vllm/attention/ops/blocksparse_attention/__init__.py
+similarity index 100%
+rename from vllm/distributed/kv_transfer/kv_connector/v1/p2p/__init__.py
+rename to vllm/attention/ops/blocksparse_attention/__init__.py
+

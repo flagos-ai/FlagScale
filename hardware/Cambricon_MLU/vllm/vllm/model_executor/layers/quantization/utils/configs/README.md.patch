@@ -1,0 +1,10 @@
+diff --git a/vllm/model_executor/layers/quantization/utils/configs/README.md b/vllm/model_executor/layers/quantization/utils/configs/README.md
+deleted file mode 100644
+index 1110ced4f..000000000
+--- a/vllm/model_executor/layers/quantization/utils/configs/README.md
++++ /dev/null
+@@ -1,3 +0,0 @@
+-# Quantization Kernel Config
+-
+-Use scripts under `benchmarks/kernels/` to generate these config files.
+

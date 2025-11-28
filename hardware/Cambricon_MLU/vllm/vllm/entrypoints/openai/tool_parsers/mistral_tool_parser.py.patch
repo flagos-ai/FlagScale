@@ -1,0 +1,25 @@
+diff --git a/vllm/entrypoints/openai/tool_parsers/mistral_tool_parser.py b/vllm/entrypoints/openai/tool_parsers/mistral_tool_parser.py
+index e6b300fd8..ab1cfd4b6 100644
+--- a/vllm/entrypoints/openai/tool_parsers/mistral_tool_parser.py
++++ b/vllm/entrypoints/openai/tool_parsers/mistral_tool_parser.py
+@@ -77,8 +77,8 @@ class MistralToolParser(ToolParser):
+         self.bot_token_id = self.vocab.get(self.bot_token)
+         self.tool_call_regex = re.compile(r"\[{.*}\]", re.DOTALL)
+         if _is_fn_name_regex_support(self.model_tokenizer):
+-            self.fn_name_regex = re.compile(
+-                r'([a-zA-Z0-9_-]+)(\{[\s\S]*?\})(?=\s*$|,|\s)', re.DOTALL)
++            self.fn_name_regex = re.compile(r'([a-zA-Z0-9_-]+)(\{.*?\})',
++                                            re.DOTALL)
+         else:
+             self.fn_name_regex = None
+ 
+@@ -143,7 +143,7 @@ class MistralToolParser(ToolParser):
+             except json.JSONDecodeError:
+                 # use a regex to find the part corresponding to the tool call.
+                 # NOTE: This use case should not happen if the model is trained
+-                # correctly. It's an easy possible fix so it's included, but
++                # correctly. It's a easy possible fix so it's included, but
+                 # can be brittle for very complex / highly nested tool calls
+                 raw_tool_call = self.tool_call_regex.findall(tool_content)[0]
+                 function_call_arr = json.loads(raw_tool_call)
+

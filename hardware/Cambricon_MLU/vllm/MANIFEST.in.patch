@@ -1,0 +1,13 @@
+diff --git a/MANIFEST.in b/MANIFEST.in
+index fb3cccbb4..82fd22b84 100644
+--- a/MANIFEST.in
++++ b/MANIFEST.in
+@@ -2,6 +2,7 @@ include LICENSE
+ include requirements/common.txt
+ include requirements/cuda.txt
+ include requirements/rocm.txt
++include requirements/neuron.txt
+ include requirements/cpu.txt
+ include CMakeLists.txt
+ 
+

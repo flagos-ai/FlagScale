@@ -1,0 +1,17 @@
+diff --git a/vllm/triton_utils/__init__.py b/vllm/triton_utils/__init__.py
+index 828536e64..0fcf5d15a 100644
+--- a/vllm/triton_utils/__init__.py
++++ b/vllm/triton_utils/__init__.py
+@@ -7,10 +7,8 @@ from vllm.triton_utils.importing import (HAS_TRITON, TritonLanguagePlaceholder,
+ if HAS_TRITON:
+     import triton
+     import triton.language as tl
+-    import triton.language.extra.libdevice as tldevice
+ else:
+     triton = TritonPlaceholder()
+     tl = TritonLanguagePlaceholder()
+-    tldevice = TritonLanguagePlaceholder()
+ 
+-__all__ = ["HAS_TRITON", "triton", "tl", "tldevice"]
++__all__ = ["HAS_TRITON", "triton", "tl"]
+

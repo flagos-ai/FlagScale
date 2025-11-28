@@ -1,0 +1,34 @@
+diff --git a/csrc/attention/attention_kernels.cuh b/csrc/attention/attention_kernels.cuh
+index 57382c1dd..79a546554 100644
+--- a/csrc/attention/attention_kernels.cuh
++++ b/csrc/attention/attention_kernels.cuh
+@@ -24,7 +24,6 @@
+ 
+ #include "attention_dtypes.h"
+ #include "attention_utils.cuh"
+-#include "../cuda_compat.h"
+ 
+ #ifdef USE_ROCM
+   #include <hip/hip_bf16.h>
+@@ -34,6 +33,12 @@ typedef __hip_bfloat16 __nv_bfloat16;
+   #include "../quantization/fp8/nvidia/quant_utils.cuh"
+ #endif
+ 
++#ifndef USE_ROCM
++  #define WARP_SIZE 32
++#else
++  #define WARP_SIZE warpSize
++#endif
++
+ #define MAX(a, b) ((a) > (b) ? (a) : (b))
+ #define MIN(a, b) ((a) < (b) ? (a) : (b))
+ #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
+@@ -665,6 +670,7 @@ __global__ void paged_attention_v2_reduce_kernel(
+ 
+ }  // namespace vllm
+ 
++#undef WARP_SIZE
+ #undef MAX
+ #undef MIN
+ #undef DIVIDE_ROUND_UP
+

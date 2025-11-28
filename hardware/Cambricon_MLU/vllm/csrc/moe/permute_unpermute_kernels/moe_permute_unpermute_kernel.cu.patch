@@ -1,0 +1,14 @@
+diff --git a/csrc/moe/permute_unpermute_kernels/moe_permute_unpermute_kernel.cu b/csrc/moe/permute_unpermute_kernels/moe_permute_unpermute_kernel.cu
+index 2271c1bc7..de2c15388 100644
+--- a/csrc/moe/permute_unpermute_kernels/moe_permute_unpermute_kernel.cu
++++ b/csrc/moe/permute_unpermute_kernels/moe_permute_unpermute_kernel.cu
+@@ -177,7 +177,7 @@ __global__ void getMIndicesKernel(int64_t* expert_first_token_offset,
+   int tidx = threadIdx.x;
+   extern __shared__ int64_t smem_expert_first_token_offset[];
+   for (int i = tidx; i <= num_local_expert; i += blockDim.x) {
+-    smem_expert_first_token_offset[i] = __ldg(expert_first_token_offset + i);
++    smem_expert_first_token_offset[tidx] = __ldg(expert_first_token_offset + i);
+   }
+   __syncthreads();
+   auto last_token_offset = smem_expert_first_token_offset[eidx + 1];
+
