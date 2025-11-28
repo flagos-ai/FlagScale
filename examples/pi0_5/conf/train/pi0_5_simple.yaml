@@ -1,4 +1,5 @@
 # Simplified Pi0.5 Training Configuration (following Pi0 pattern)
+# Optimized for timeout resolution and performance
 
 system:
   tensor_model_parallel_size: 1
@@ -13,6 +14,15 @@ system:
   log_freq: 10
   output_directory: outputs/pi05_test/ckpt
   tokenizer_max_length: 200
+
+# Environment variables for NCCL timeout optimization
+environment:
+  NCCL_SOCKET_TIMEOUT: 1800000    # 30 minutes socket timeout
+  NCCL_NET_TIMEOUT: 1800000       # 30 minutes network timeout
+  NCCL_DEBUG: WARN               # Reduce debug overhead
+  NCCL_ALGO: Tree                # More efficient for large models
+  CUDA_LAUNCH_BLOCKING: 1       # Better debugging support
+  NCCL_P2P_DISABLE: 1           # Disable P2P if causing issues
 
 model:
   # change to your model path
@@ -36,3 +46,37 @@ data:
   action_key: action
   action_token_key: action_token
   vision_root: ""
+
+  # Data processing optimizations for timeout prevention
+  batch_size: 1
+  num_workers: 2  # Reduced from 4 to lower resource contention
+  pin_memory: false  # Reduce memory pressure
+
+# Training optimizations for stability and timeout prevention
+training:
+  # Optimizer settings
+  learning_rate: 1e-4
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1e-8
+
+  # Gradient settings for stability
+  max_grad_norm: 0.5  # Reduced from 1.0 for more stable gradients
+  gradient_accumulation_steps: 8  # Increased from default to maintain effective batch size
+
+  # Checkpointing and saving
+  save_interval: 50  # More frequent saves to prevent progress loss
+  save_steps: [25, 50, 75, 100]  # Save at specific milestones
+  keep_last: 2  # Keep only recent checkpoints to save space
+
+  # Regularization
+  dropout: 0.1
+  adam_eps: 1e-8
+
+  # Flow matching parameters (Pi0.5 specific)
+  flow_matching:
+    sigma_min: 0.002
+    sigma_max: 80.0
+    num_timesteps: 1000
+    prediction_type: "epsilon"
