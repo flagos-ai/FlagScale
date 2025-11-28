@@ -1,0 +1,134 @@
+# Pi0.5 Training Configuration
+# Based on OpenPI Pi0.5 training setup
+
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  wandb_enabled: true
+  seed: 42
+  project_name: ${experiment.exp_name}
+  exp_name: ${experiment.exp_name}
+  batch_size: 2  # Pi0.5 may need smaller batch size due to larger context
+  train_steps: 10000
+  log_freq: 100
+  output_directory: ${experiment.exp_dir}/ckpt
+  tokenizer_max_length: 200  # Pi0.5 supports longer sequences
+  checkpoint:
+    save: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/checkpoints
+    load: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/checkpoints
+  logging:
+    log_dir: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/logs
+    scripts_dir: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/logs/scripts
+    pids_dir: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/logs/pids
+    details_dir: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/logs/details
+    tensorboard_dir: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/tensorboard
+    wandb_save_dir: /nfs/wzp/robot/FlagScale/outputs/${experiment.exp_name}/wandb
+
+model:
+  # Pi0.5 specific model configuration
+  checkpoint_dir: /share/pi0_5/pi05_base  # Base model for fine-tuning
+  resume: false
+  ckpt_overwrite: true
+  stat_path: /share/pi05_dataset/stats.json
+
+  # Pi0.5 architecture parameters
+  pi05: true  # Enable Pi0.5 mode
+  discrete_state_input: true  # Discrete state input
+  action_dim: 32  # Pi0.5 action dimension
+  action_steps: 16  # Pi0.5 action steps
+  tokenizer_max_length: 200  # Pi0.5 supports longer sequences
+
+  # PaliGemma configuration
+  paligemma_variant: "gemma_2b"
+  action_expert_variant: "gemma_300m"
+
+  # AdaRMSNorm parameters for flow matching
+  ada_norm_eps: 1e-6
+  ada_norm_hidden_size: 2048
+
+  # Training parameters
+  dtype: "bfloat16"
+  vision_encoder_type: "siglip"
+  vision_encoder_pretrained: "google/siglip-so400m-patch14-384"
+
+data:
+  # Dataset configuration
+  tokenizer_path: /share/paligemma-3b-pt-224
+  data_path: /share/pi05_dataset/wds-2  # Pi0.5 dataset in WebDataset format
+
+  # Pi0.5 specific data parameters
+  state_key: eepose  # State observation key
+  action_key: eepose  # Action key
+  action_token_key: action_eepose_token  # Action token key
+
+  # Image configuration (same as Pi0)
+  images_keys:
+    - observation.images.camera0
+    - observation.images.camera1
+    - observation.images.camera2
+  images_shape: [3, 480, 640]
+
+  # Data processing
+  batch_size: 2
+  num_workers: 4
+  image_augmentation: true
+  image_size: [224, 224]  # Vision encoder input size
+
+  # Pi0.5 specific processing
+  discrete_state_input: true
+  state_vocab_size: 1000  # Vocabulary size for state discretization
+  normalize_states: true
+
+  # Dataset split
+  train_split: 0.9
+  val_split: 0.1
+
+  # Normalization statistics
+  norm_stats: null  # Will be computed automatically
+
+training:
+  # Optimizer configuration
+  learning_rate: 1e-4
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.999
+  epsilon: 1e-8
+
+  # Learning rate schedule
+  lr_scheduler: "cosine"
+  warmup_steps: 1000
+  min_lr: 1e-6
+
+  # Gradient settings
+  max_grad_norm: 1.0
+  gradient_accumulation_steps: 4
+
+  # Regularization
+  dropout: 0.1
+  adam_eps: 1e-8
+
+  # Flow matching parameters (Pi0.5 specific)
+  flow_matching:
+    sigma_min: 0.002
+    sigma_max: 80.0
+    num_timesteps: 1000
+    prediction_type: "epsilon"
+
+  # Knowledge insulation parameters (Pi0.5 specific)
+  knowledge_insulation:
+    enabled: true
+    insulation_strength: 0.1
+
+  # Checkpointing
+  save_interval: 1000
+  save_steps: [1000, 2000, 5000, 10000]
+  keep_last: 3
+
+# Experiment configuration
+experiment:
+  exp_name: pi05_finetune
+  exp_dir: outputs/${experiment.exp_name}
+  seed: 42
+  description: "Fine-tuning Pi0.5 model on custom dataset"
+  tags: ["pi05", "vla", "robotics", "finetune"]
