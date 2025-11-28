@@ -1,8 +1,9 @@
 import argparse
 
-from typing import Union
+from typing import Any, Union
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
+from omegaconf.base import DictKeyType
 
 from flagscale.inference.inference_engine import InferenceEngine
 from flagscale.runner.utils import logger
@@ -61,7 +62,7 @@ def inference(cfg: DictConfig) -> None:
 
     runs = _normalize_runs(generate_cfg)
 
-    for idx, run_cfg in enumerate(runs):
+    for idx, run_cfg in enumerate[dict[DictKeyType, Any] | dict[str, Any]](runs):
         single_cfg = dict(run_cfg)
         name_prefix = single_cfg.pop("name", None) or f"sample_{idx}"
         outputs = engine.generate(**single_cfg)
