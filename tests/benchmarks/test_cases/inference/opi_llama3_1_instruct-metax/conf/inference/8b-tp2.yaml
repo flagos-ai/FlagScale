@@ -1,0 +1,17 @@
+llm:
+  model: /home/gitlab-runner/data/OPI-Llama-3.1-8B-Instruct
+  tokenizer: /home/gitlab-runner/data/OPI-Llama-3.1-8B-Instruct
+  trust_remote_code: true
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+  max_model_len: 2048
+  gpu_memory_utilization: 0.9
+  seed: 1234
+  enforce_eager: true
+
+generate:
+  prompts: ["The president of the United States"]
+  sampling:
+    top_k: 1
+    seed: 1234
+  num_iters: 10

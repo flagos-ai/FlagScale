@@ -1,0 +1,40 @@
+defaults:
+  - _self_
+  - train: tp2_pp2_ep2
+
+experiment:
+  exp_name: tp2_pp2_ep2
+  exp_dir: tests/benchmarks/test_cases/train/deepseek/results_test/tp2_pp2_ep2
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/train_gpt.py
+  runner:
+    backend: torchrun
+    ssh_port: null
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+    NCCL_ALGO: "Ring"
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    CUDNN_BENCHMARK: "false"
+    CUDNN_DETERMINISTIC: "true"
+    # Only for debug
+    # NVTE_DEBUG: 1
+    # NVTE_DEBUG_LEVEL: 2
+    # CUDNN_LOGERR_DBG: 1
+    # The following parameters passed the local test
+    # CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    # CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # NVTE_TORCH_COMPILE: 0
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-train
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

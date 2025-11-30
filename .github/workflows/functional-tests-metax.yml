@@ -148,6 +148,9 @@ jobs:
           fi
           cd /__w/FlagScale/FlagScale
           tests/scripts/functional_tests/test_task.sh --type ${{ inputs.type }} --task ${{ inputs.task }}
+          if [ "${{ inputs.type }}" = "inference" ]; then
+             tests/benchmarks/scripts/benchmark_tests/test_task.sh --type ${{ inputs.type }} --task ${{ inputs.task }}
+          fi
           exit_code=$?
           echo "Exit code: $exit_code"
           sccache --show-stats
