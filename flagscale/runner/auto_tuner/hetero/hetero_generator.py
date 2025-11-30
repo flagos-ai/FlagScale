@@ -34,3 +34,19 @@ class HeteroGenerator(Generator):
 
         # Override sequence parallel based on the strategy.
         config.train.system["sequence_parallel"] = strategy["sequence_parallel"]
+
+        if strategy.get("use_recompute"):
+            if strategy.get("recompute_granularity_per_stage_micro_batch"):
+                config.train.system.recompute_granularity_per_stage_micro_batch = strategy[
+                    "recompute_granularity_per_stage_micro_batch"
+                ]
+
+            if strategy.get("recompute_method_per_stage_micro_batch"):
+                config.train.system.recompute_method_per_stage_micro_batch = strategy[
+                    "recompute_method_per_stage_micro_batch"
+                ]
+
+            if strategy.get("recompute_num_layers_per_stage_micro_batch"):
+                config.train.system.recompute_num_layers_per_stage_micro_batch = strategy[
+                    "recompute_num_layers_per_stage_micro_batch"
+                ]
