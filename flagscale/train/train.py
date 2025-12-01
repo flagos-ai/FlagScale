@@ -136,6 +136,7 @@ from flagscale.train.stablelm2_scheduler import StableLM2SchedulerConfig
 from flagscale.train.global_vars import get_parallel_context, get_spiky_loss_detector
 from flagscale.train.hetero.p2p_communication import get_device_type_for_comm
 from flagscale.train.theoretical_memory_usage import report_theoretical_memory as fs_report_theoretical_memory
+from flagscale.train.flagcx_tuner import FlagCXTuner
 
 stimer = StragglerDetector()
 
@@ -2565,6 +2566,8 @@ def train(
             raise ValueError(f"Can not import flag gems")
         else:
             flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
+    if args.flagcx_tune:
+        flagcx_tuner = FlagCXTuner()
 
     # Run training iterations till done.
     buffered_rollouts = None
@@ -2661,6 +2664,8 @@ def train(
                     )
                 train_data_iterator = buffered_rollouts
 
+        
+
         ft_integration.on_training_step_start()
         (
             loss_dict,
@@ -2724,6 +2729,18 @@ def train(
         num_floating_point_operations_in_batch = num_floating_point_operations(args, batch_size)
         num_floating_point_operations_so_far += num_floating_point_operations_in_batch
         num_floating_point_operations_since_last_log_event += num_floating_point_operations_in_batch
+
+        if args.flagcx_tune and not flagcx_tuner.tuning_done():
+            flagcx_tuner.update_iter()
+            if flagcx_tuner.need_config_update():
+                flagcx_tuner.check_flagcx_done()
+                flagcx_tuner.update_config()
+            if flagcx_tuner.need_eval():
+                flagcx_tuner.eval_e2e_perf()
+
+        if args.flagcx_tune and flagcx_tuner.tuning_done():
+            flagcx_tuner.set_best_config()
+
 
         # Logging.
         if not optimizer.is_stub_optimizer:

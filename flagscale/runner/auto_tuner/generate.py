@@ -42,6 +42,14 @@ class Generator:
                     continue
                 config.train.system[value] = strategy[key]
 
+    def _set_flagcx_tuning_params(self, config):
+        if config.experiment.auto_tuner.flagcx_tune:
+            config.train.system.flagcx_tune = True
+            # set a large number so that training won't stop before flagcx tuning ends
+            config.train.model.train_iters = 100 
+            config.experiment.envs["TUNING_WITH_FLAGSCALE"] = 1
+            config.experiment.envs["FLAGCX_TUNE_FILE"] = os.path.join(config.experiment.exp_dir, "flagcx_tune", "tune_objects.json")
+
     def gen(self, strategy):
         config = copy.deepcopy(self.config)
         self._set_value(strategy, config)
@@ -95,6 +103,8 @@ class Generator:
 
     def gen_best_task(self, strategy, config):
         self._set_value(strategy, config)
+        # enable flagcx tuning after best strategy is found
+        self._set_flagcx_tuning_params(config)
         return config
 
 
