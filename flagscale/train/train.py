@@ -2732,11 +2732,11 @@ def train(
 
         if args.flagcx_tune and not flagcx_tuner.tuning_done():
             flagcx_tuner.update_iter()
+            if flagcx_tuner.need_eval():
+                flagcx_tuner.eval_e2e_perf()
             if flagcx_tuner.need_config_update():
                 flagcx_tuner.check_flagcx_done()
                 flagcx_tuner.update_config()
-            if flagcx_tuner.need_eval():
-                flagcx_tuner.eval_e2e_perf()
 
         if args.flagcx_tune and flagcx_tuner.tuning_done():
             flagcx_tuner.set_best_config()
