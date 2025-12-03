@@ -1,5 +1,5 @@
 diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
-index a438c7777..83356afec 100644
+index a438c7777..0a40a9505 100644
 --- a/vllm/v1/worker/gpu_model_runner.py
 +++ b/vllm/v1/worker/gpu_model_runner.py
 @@ -125,6 +125,23 @@ AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
@@ -42,7 +42,7 @@ index a438c7777..83356afec 100644
              )
              self.requests[req_id] = req_state
  
-@@ -616,11 +635,19 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -616,11 +635,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
              num_computed_tokens = req_data.num_computed_tokens[i]
              new_block_ids = req_data.new_block_ids[i]
              resumed_from_preemption = req_data.resumed_from_preemption[i]
@@ -50,29 +50,17 @@ index a438c7777..83356afec 100644
 +                req_state.sampling_params = req_data.sampling_params[i]
 +            if getattr(req_data, 'hybrid_metadata', None) is not None:
 +                req_state.hybrid_metadata = req_data.hybrid_metadata[i]
-+            #req_state.sampling_params = req_data.sampling_params[i]
-+            #req_state.hybrid_metadata = req_data.hybrid_metadata[i]
  
              # Update the cached states.
              req_state.num_computed_tokens = num_computed_tokens
  
 -            if not is_last_rank:
 +            # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-+            #if not is_last_rank :
 +            if not is_last_rank or getattr(req_data, 'hybrid_metadata', None) is not None:
                  # When using PP, the scheduler sends the sampled tokens back,
                  # because there's no direct communication between the first-
                  # stage worker and the last-stage worker.
-@@ -628,7 +655,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
-                 # Add the sampled token(s) from the previous step (if any).
-                 # This doesn't include "unverified" tokens like spec tokens.
-                 num_new_tokens = (num_computed_tokens + len(new_token_ids) -
--                                  req_state.num_tokens)
-+                                req_state.num_tokens)
-                 if num_new_tokens == 1:
-                     # Avoid slicing list in most common case.
-                     req_state.output_token_ids.append(new_token_ids[-1])
-@@ -664,9 +691,15 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -664,9 +688,14 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                  self.input_batch.block_table.append_row(
                      new_block_ids, req_index)
  
@@ -84,12 +72,11 @@ index a438c7777..83356afec 100644
              # because the sampled tokens are already cached.
 -            if not is_last_rank:
 +            # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-+            #if not is_last_rank:
 +            if not is_last_rank or getattr(req_data, 'hybrid_metadata', None) is not None:
                  # Add new_token_ids to token_ids_cpu.
                  start_token_index = num_computed_tokens
                  end_token_index = num_computed_tokens + len(new_token_ids)
-@@ -676,6 +709,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -676,6 +705,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                  self.input_batch.num_tokens_no_spec[
                      req_index] = end_token_index
                  self.input_batch.num_tokens[req_index] = end_token_index
