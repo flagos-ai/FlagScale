@@ -1,5 +1,5 @@
 diff --git a/vllm/v1/core/sched/output.py b/vllm/v1/core/sched/output.py
-index 209fc2a44..0d0e70a1b 100644
+index 209fc2a44..525bf06e9 100644
 --- a/vllm/v1/core/sched/output.py
 +++ b/vllm/v1/core/sched/output.py
 @@ -20,6 +20,7 @@ if TYPE_CHECKING:
@@ -37,8 +37,8 @@ index 209fc2a44..0d0e70a1b 100644
      new_token_ids: list[list[int]]
      new_block_ids: list[Optional[tuple[list[int], ...]]]
      num_computed_tokens: list[int]
-+    sampling_params: list[SamplingParams]
-+    hybrid_metadata: list[HybridSchedulerMetadata]
++    sampling_params: Optional[list[SamplingParams]]=None
++    hybrid_metadata: Optional[list[HybridSchedulerMetadata]]=None
  
      @property
      def num_reqs(self) -> int:
