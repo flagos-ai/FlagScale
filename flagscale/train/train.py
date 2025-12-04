@@ -137,6 +137,97 @@ from flagscale.train.global_vars import get_parallel_context, get_spiky_loss_det
 from flagscale.train.hetero.p2p_communication import get_device_type_for_comm
 from flagscale.train.theoretical_memory_usage import report_theoretical_memory as fs_report_theoretical_memory
 
+# FlagScale Straggler Detection
+from flagscale.runner.straggler import (
+    StragglerConfig as FSStragglerConfig,
+    StragglerDetector as FSStragglerDetector,
+    StragglerReport,
+    SectionContext,
+)
+
+# Global FlagScale straggler detector instance
+_fs_straggler_detector = None
+
+def get_fs_straggler_detector():
+    """Get the global FlagScale straggler detector instance."""
+    return _fs_straggler_detector
+
+def init_fs_straggler_detector(args):
+    """Initialize the FlagScale straggler detector based on args."""
+    global _fs_straggler_detector
+
+    if not getattr(args, 'enable_straggler_detection', False):
+        _fs_straggler_detector = None
+        return None
+
+    config = FSStragglerConfig(
+        enabled=True,
+        profiling_interval=getattr(args, 'straggler_profiling_interval', 10),
+        report_interval_steps=getattr(args, 'straggler_report_interval', 100),
+        straggler_threshold=getattr(args, 'straggler_threshold', 1.5),
+        warmup_steps=getattr(args, 'straggler_warmup_steps', 10),
+        gather_on_rank0=True,
+        enable_comm_logging=getattr(args, 'straggler_enable_comm_logging', True),
+        enable_gpu_profile=getattr(args, 'straggler_enable_gpu_profile', True),
+    )
+
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+
+    _fs_straggler_detector = FSStragglerDetector(
+        config=config,
+        rank=rank,
+        world_size=world_size,
+        node_name=os.environ.get('HOSTNAME', f'rank-{rank}'),
+    )
+
+    return _fs_straggler_detector
+
+def add_straggler_args(parser):
+    """Add straggler detection arguments to the parser."""
+    group = parser.add_argument_group(title='FlagScale Straggler Detection')
+
+    group.add_argument('--enable-straggler-detection', action='store_true',
+                       default=False,
+                       help='Enable FlagScale straggler detection.')
+    group.add_argument('--straggler-profiling-interval', type=int, default=10,
+                       help='Profile every N steps for straggler detection.')
+    group.add_argument('--straggler-report-interval', type=int, default=100,
+                       help='Generate straggler report every N steps.')
+    group.add_argument('--straggler-threshold', type=float, default=1.5,
+                       help='Threshold for identifying stragglers (slowdown factor).')
+    group.add_argument('--straggler-warmup-steps', type=int, default=10,
+                       help='Skip first N steps for straggler detection (warmup).')
+    group.add_argument('--straggler-enable-comm-logging', action='store_true',
+                       default=True,
+                       help='Enable communication logging for straggler detection.')
+    group.add_argument('--straggler-enable-gpu-profile', action='store_true',
+                       default=True,
+                       help='Enable GPU profiling for straggler detection.')
+    group.add_argument('--straggler-log-dir', type=str, default=None,
+                       help='Directory to save straggler detection logs.')
+
+    return parser
+
+def _save_straggler_report(report, log_dir, iteration):
+    """Save straggler report to file."""
+    if log_dir is None:
+        return
+
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Save JSON report
+    json_path = os.path.join(log_dir, f'straggler_report_step_{iteration}.json')
+    try:
+        import json
+        with open(json_path, 'w') as f:
+            json.dump(report.to_dict(), f, indent=2)
+    except Exception as e:
+        print_rank_0(f"Warning: Could not save straggler report: {e}")
+
+    # Also print text report to stdout
+    print_rank_0(f"\n{report.to_text()}")
+
 stimer = StragglerDetector()
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
@@ -786,9 +877,16 @@ def pretrain(
         iteration = inprocess_call_wrapper.iteration
         store = torch.distributed.PrefixStore(str(iteration), store)
 
+    # Wrap extra_args_provider to include straggler args
+    def combined_extra_args_provider(parser):
+        if extra_args_provider is not None:
+            parser = extra_args_provider(parser)
+        parser = add_straggler_args(parser)
+        return parser
+
     # Initalize and get arguments, timers, and Tensorboard writer.
     initialize_megatron(
-        extra_args_provider=extra_args_provider,
+        extra_args_provider=combined_extra_args_provider,
         args_defaults=args_defaults,
         get_embedding_ranks=get_embedding_ranks,
         get_position_embedding_ranks=get_position_embedding_ranks,
@@ -797,6 +895,11 @@ def pretrain(
 
     args = get_args()
     timers = get_timers()
+
+    # Initialize FlagScale straggler detector
+    fs_straggler = init_fs_straggler_detector(args)
+    if fs_straggler is not None:
+        print_rank_0(f"FlagScale Straggler Detection enabled with threshold={args.straggler_threshold}")
 
     if args.log_progress:
         append_to_progress_log("Starting job")
@@ -1548,6 +1651,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     args = get_args()
     timers = get_timers()
 
+    # Get FlagScale straggler detector for section profiling
+    fs_straggler = get_fs_straggler_detector()
+    should_profile_straggler = (fs_straggler is not None and
+                                 fs_straggler.is_enabled() and
+                                 fs_straggler.should_profile())
+
     rerun_state_machine = get_rerun_state_machine()
     while rerun_state_machine.should_run_forward_backward(data_iterator):
         # Set grad to zero.
@@ -1571,6 +1680,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                 if isinstance(optim_instance, DistributedOptimizer):
                     optim_instance._copy_main_params_to_param_buffer()
 
+        # Forward and backward pass with optional straggler profiling
+        if should_profile_straggler:
+            forward_backward_start = time.perf_counter()
+
         # Forward pass.
         losses_reduced = forward_backward_func(
             forward_step_func=forward_step_func,
@@ -1583,6 +1696,15 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             forward_only=False,
             adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
         )
+
+        if should_profile_straggler:
+            forward_backward_end = time.perf_counter()
+            # Record combined forward+backward time
+            fs_straggler.record_section(
+                name="forward_backward",
+                cpu_time=forward_backward_end - forward_backward_start,
+            )
+
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
         return {}, True, should_checkpoint, should_exit, exit_code, None, None
@@ -1608,11 +1730,22 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         unwrapped_model = unwrap_model(model[0])
         unwrapped_model.cancel_gradients_last_layer(args.curr_iteration)
 
+    # Update parameters with optional straggler profiling.
+    if should_profile_straggler:
+        optimizer_start = time.perf_counter()
+
     # Update parameters.
 
     timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
     update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
     timers('optimizer').stop()
+
+    if should_profile_straggler:
+        optimizer_end = time.perf_counter()
+        fs_straggler.record_section(
+            name="optimizer",
+            cpu_time=optimizer_end - optimizer_start,
+        )
 
     # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
     # so we must gather across mp ranks
@@ -2736,6 +2869,22 @@ def train(
             params_norm,
             num_zeros_in_grad,
         )
+
+        ########## FlagScale Straggler Detection Begin ##########
+        fs_straggler = get_fs_straggler_detector()
+        if fs_straggler is not None and fs_straggler.is_enabled():
+            # Increment step counter
+            fs_straggler.increment_step()
+
+            # Check if we should generate a report
+            if fs_straggler.should_report(iteration):
+                report = fs_straggler.generate_report(step=iteration)
+
+                # Save report (only on rank 0)
+                if torch.distributed.get_rank() == 0:
+                    straggler_log_dir = getattr(args, 'straggler_log_dir', None)
+                    _save_straggler_report(report, straggler_log_dir, iteration)
+        ########## FlagScale Straggler Detection End ##########
 
         # Evaluation.
         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid:

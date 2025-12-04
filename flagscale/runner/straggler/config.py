@@ -32,9 +32,15 @@ class StragglerConfig:
     node_name: Optional[str] = None
 
     # List of sections to monitor
-    # Common sections: dataloader, forward, backward, optimizer
+    # Common sections: dataloader, forward, backward, optimizer, forward_backward
     monitor_sections: List[str] = field(
-        default_factory=lambda: ["dataloader", "forward", "backward", "optimizer"]
+        default_factory=lambda: [
+            "dataloader",
+            "forward",
+            "backward",
+            "optimizer",
+            "forward_backward",
+        ]
     )
 
     # Enable communication logging and profiling
