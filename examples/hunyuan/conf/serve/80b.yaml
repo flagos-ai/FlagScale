@@ -1,0 +1,14 @@
+- serve_id: vllm_model
+  engine: vllm
+  engine_args:
+    model: /data/Hunyuan-A13B-Instruct
+    served_model_name: Hunyuan-A13B-Instruct-nvidia-flagos
+    host: 0.0.0.0
+    port: 9010
+  engine_args_specific:
+    vllm:
+      tensor_parallel_size: 4
+      pipeline_parallel_size: 1
+      gpu_memory_utilization: 0.9
+      trust_remote_code: true
+      compilation_config: '{"cudagraph_mode": "PIECEWISE"}'
