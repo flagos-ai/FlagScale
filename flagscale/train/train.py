@@ -1652,10 +1652,9 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     timers = get_timers()
 
     # Get FlagScale straggler detector for section profiling
+    # Always profile when straggler detection is enabled (removed should_profile() check)
     fs_straggler = get_fs_straggler_detector()
-    should_profile_straggler = (fs_straggler is not None and
-                                 fs_straggler.is_enabled() and
-                                 fs_straggler.should_profile())
+    should_profile_straggler = (fs_straggler is not None and fs_straggler.is_enabled())
 
     rerun_state_machine = get_rerun_state_machine()
     while rerun_state_machine.should_run_forward_backward(data_iterator):

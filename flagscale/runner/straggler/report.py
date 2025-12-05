@@ -62,25 +62,40 @@ class StragglerReport:
 
         # Straggler ranks
         if self.straggler_ranks:
-            lines.append(f"\nDetected Stragglers: {self.straggler_ranks}")
+            lines.append(f"\n⚠️  Detected Stragglers: {self.straggler_ranks}")
             for rank in self.straggler_ranks:
                 node_name = self.node_names.get(rank, f"rank-{rank}")
                 lines.append(f"  - Rank {rank} ({node_name})")
         else:
-            lines.append("\nNo stragglers detected.")
+            lines.append("\n✓ No stragglers detected.")
 
-        # Section scores summary
+        # Section timing summary (show times in ms)
         if self.section_scores:
-            lines.append("\nSection Scores:")
-            for section_name, rank_scores in self.section_scores.items():
+            lines.append("\nSection Timings (ms):")
+            for section_name, rank_times in self.section_scores.items():
+                if not rank_times:
+                    continue
+                # Calculate min, max, avg for summary
+                times = list(rank_times.values())
+                min_time = min(times) * 1000  # convert to ms
+                max_time = max(times) * 1000
+                avg_time = sum(times) / len(times) * 1000
+                slowdown = max_time / min_time if min_time > 0 else 1.0
+
                 lines.append(f"\n  {section_name}:")
-                for rank, score in sorted(rank_scores.items()):
+                lines.append(
+                    f"    Min: {min_time:.2f}ms, Max: {max_time:.2f}ms, Avg: {avg_time:.2f}ms, Slowdown: {slowdown:.2f}x"
+                )
+
+                # Show per-rank details
+                for rank, time_val in sorted(rank_times.items()):
+                    time_ms = time_val * 1000
                     node_name = self.node_names.get(rank, f"rank-{rank}")
-                    lines.append(f"    Rank {rank} ({node_name}): {score:.4f}")
+                    lines.append(f"    Rank {rank}: {time_ms:.2f}ms")
 
         # GPU scores summary
         if self.gpu_scores:
-            lines.append("\nGPU Performance Scores:")
+            lines.append("\nGPU Performance Scores (higher=faster):")
             for rank, score in sorted(self.gpu_scores.items()):
                 node_name = self.node_names.get(rank, f"rank-{rank}")
                 lines.append(f"  Rank {rank} ({node_name}): {score:.4f}")

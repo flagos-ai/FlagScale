@@ -5,6 +5,14 @@ Main StragglerDetector class for detecting and reporting performance stragglers.
 import json
 import time
 
+try:
+    import torch
+    import torch.distributed as dist
+
+    TORCH_DISTRIBUTED_AVAILABLE = True
+except ImportError:
+    TORCH_DISTRIBUTED_AVAILABLE = False
+
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -249,6 +257,69 @@ class StragglerDetector:
 
         return sorted(stragglers)
 
+    def _gather_section_times_across_ranks(self) -> Dict[str, Dict[int, float]]:
+        """
+        Gather section timing data from all ranks using torch.distributed.
+
+        Returns:
+            Dictionary mapping section name to {rank: avg_time}
+        """
+        if not TORCH_DISTRIBUTED_AVAILABLE or not dist.is_initialized():
+            # Fallback to local data only
+            result = {}
+            for section_name in self.config.monitor_sections:
+                avg_time = self.get_recent_section_time(section_name, num_samples=5)
+                if avg_time is not None:
+                    result[section_name] = {self.rank: avg_time}
+            return result
+
+        # Collect local section times
+        local_times = {}
+        for section_name in self.config.monitor_sections:
+            avg_time = self.get_recent_section_time(section_name, num_samples=5)
+            local_times[section_name] = avg_time if avg_time is not None else -1.0
+
+        # Gather from all ranks
+        result = {}
+        for section_name in self.config.monitor_sections:
+            local_time = local_times.get(section_name, -1.0)
+
+            # Create tensor for all-gather
+            local_tensor = torch.tensor([local_time], dtype=torch.float64, device='cuda')
+            gathered_tensors = [
+                torch.zeros(1, dtype=torch.float64, device='cuda') for _ in range(self.world_size)
+            ]
+
+            dist.all_gather(gathered_tensors, local_tensor)
+
+            # Convert to dict
+            section_times = {}
+            for rank, tensor in enumerate(gathered_tensors):
+                time_val = tensor.item()
+                if time_val >= 0:  # Valid time (not -1.0 placeholder)
+                    section_times[rank] = time_val
+
+            if section_times:
+                result[section_name] = section_times
+
+        return result
+
+    def _gather_node_names_across_ranks(self) -> Dict[int, str]:
+        """
+        Gather node names from all ranks.
+
+        Returns:
+            Dictionary mapping rank to node name
+        """
+        if not TORCH_DISTRIBUTED_AVAILABLE or not dist.is_initialized():
+            return {self.rank: self.node_name}
+
+        # Use all_gather_object for string data
+        node_names_list = [None] * self.world_size
+        dist.all_gather_object(node_names_list, self.node_name)
+
+        return {rank: name for rank, name in enumerate(node_names_list) if name is not None}
+
     def generate_report(
         self, step: Optional[int] = None, gather_on_rank0: Optional[bool] = None
     ) -> StragglerReport:
@@ -266,17 +337,34 @@ class StragglerDetector:
         if gather_on_rank0 is None:
             gather_on_rank0 = self.config.gather_on_rank0
 
-        # Compute section scores
-        section_scores = self.compute_all_section_scores()
+        # Gather section times from all ranks
+        section_scores = self._gather_section_times_across_ranks()
 
-        # Compute GPU scores
-        gpu_scores = self.compute_gpu_scores()
+        # Compute GPU scores based on gathered section times
+        # GPU score = inverse of total compute time (higher = faster)
+        gpu_scores = {}
+        compute_sections = ["forward_backward", "forward", "backward"]
+        for section_name in compute_sections:
+            if section_name in section_scores:
+                for rank, time_val in section_scores[section_name].items():
+                    if time_val > 0:
+                        # Accumulate time for GPU score calculation
+                        if rank not in gpu_scores:
+                            gpu_scores[rank] = 0.0
+                        gpu_scores[rank] += time_val
 
-        # Identify stragglers
-        straggler_ranks = self.identify_stragglers(section_scores)
+        # Convert total time to score (inverse)
+        for rank in gpu_scores:
+            if gpu_scores[rank] > 0:
+                gpu_scores[rank] = 1.0 / gpu_scores[rank]
+            else:
+                gpu_scores[rank] = 0.0
 
-        # Create node names mapping
-        node_names = {self.rank: self.node_name}
+        # Identify stragglers based on section times
+        straggler_ranks = self._identify_stragglers_from_times(section_scores)
+
+        # Gather node names from all ranks
+        node_names = self._gather_node_names_across_ranks()
 
         # Create report
         report = StragglerReport(
@@ -289,10 +377,54 @@ class StragglerDetector:
 
         report.timestamp = time.time()
 
-        # In a real implementation, we would gather data from all ranks here
-        # using all-reduce or similar collective operations
-
         return report
+
+    def _identify_stragglers_from_times(
+        self, section_times: Dict[str, Dict[int, float]], threshold: Optional[float] = None
+    ) -> List[int]:
+        """
+        Identify straggler ranks based on section timing data.
+
+        Args:
+            section_times: Dictionary mapping section name to {rank: time}
+            threshold: Straggler threshold (uses config.straggler_threshold if None)
+
+        Returns:
+            List of straggler ranks
+        """
+        if threshold is None:
+            threshold = self.straggler_threshold
+
+        if not section_times:
+            return []
+
+        # Combine times from all sections
+        total_times = defaultdict(float)
+        for section_name, rank_times in section_times.items():
+            for rank, time_val in rank_times.items():
+                total_times[rank] += time_val
+
+        if not total_times:
+            return []
+
+        # Find the fastest rank (minimum total time)
+        fastest_rank = min(total_times.items(), key=lambda x: x[1])[0]
+        fastest_time = total_times[fastest_rank]
+
+        if fastest_time <= 0:
+            return []
+
+        # Identify stragglers (ranks that are significantly slower)
+        stragglers = []
+        for rank, total_time in total_times.items():
+            if rank == fastest_rank:
+                continue
+
+            slowdown_ratio = total_time / fastest_time
+            if slowdown_ratio >= threshold:
+                stragglers.append(rank)
+
+        return sorted(stragglers)
 
     def save_report(self, report: StragglerReport, filepath: str):
         """
