@@ -319,7 +319,6 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
         use_vllm_v1 = (str(os.getenv("VLLM_USE_V1", "true")).lower() in ("1", "true")) and (
             str(envs.get("VLLM_USE_V1", "true")).lower() in ("1", "true")
         )
-
         if nodes:
             if deploy_config.get("prefill_decode_disaggregation", False):
                 resource_manager = ResourceManager(nodes)
@@ -420,12 +419,17 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                     p_instance_log_path = os.path.join(default_log_dir, f"prefill_{i}.log")
 
                     if update_p_address != master_ip and len(nodes) > 1:
-                        p_kv_config_formate_json = p_kv_config_json.replace('"', '\\"')
-                        node_cmd = f"{ids_env} && {vllm_command} --port {http_port} --kv-transfer-config '\\''{p_kv_config_formate_json}'\\''"
                         if docker_name:
+                            p_kv_config_formate_json = p_kv_config_json.replace('"', '\\"')
+                            node_cmd = f"{ids_env} && {vllm_command} --port {http_port} --kv-transfer-config '\\''{p_kv_config_formate_json}'\\''"
                             ssh_cmd = f"ssh -f -n -p {ssh_port} {update_p_address} \"docker exec {docker_name} /bin/bash -c '{node_cmd} > {p_instance_log_path} 2>&1 &'\""
                         else:
-                            ssh_cmd = f'ssh -f -n -p {ssh_port} {update_p_address} "{node_cmd} > {p_instance_log_path} 2>&1 &"'
+                            p_kv_config_formate_json = p_kv_config_json.replace('"', '\\\\\\"')
+                            vllm_command = vllm_command.replace("vllm serve", "(vllm serve")
+                            node_cmd = f'{vllm_command} --port {http_port} --kv-transfer-config \\"{p_kv_config_formate_json}\\" > {p_instance_log_path} 2>&1 &) && disown'
+                            node_cmd = f"{ids_env} &&" + node_cmd
+                            logger.info(f"node_cmd = {node_cmd}")
+                            ssh_cmd = f'ssh -f -n -p {ssh_port} {update_p_address} "{node_cmd}"'
                         f.write(f"{ssh_cmd}\n\n")
                     else:
                         p_cmd = f"{ids_env} && {vllm_command} --port {http_port} --kv-transfer-config '\\''{p_kv_config_json}'\\''"
@@ -479,12 +483,17 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                     d_instance_log_path = os.path.join(default_log_dir, f"decode_{j}.log")
 
                     if update_d_address != master_ip and len(nodes) > 1:
-                        d_kv_config_formate_json = d_kv_config_json.replace('"', '\\"')
-                        node_cmd = f"{ids_env} && {vllm_command} --port {http_port} --gpu-memory-utilization {decode_gpu_memory_utilization} --kv-transfer-config '\\''{d_kv_config_formate_json}'\\''"
                         if docker_name:
+                            d_kv_config_formate_json = d_kv_config_json.replace('"', '\\"')
+                            node_cmd = f"{ids_env} && {vllm_command} --port {http_port} --gpu-memory-utilization {decode_gpu_memory_utilization} --kv-transfer-config '\\''{d_kv_config_formate_json}'\\''"
                             ssh_cmd = f"ssh -f -n -p {ssh_port} {update_d_address} \"docker exec {docker_name} /bin/bash -c '{node_cmd} > {d_instance_log_path} 2>&1 &'\""
                         else:
-                            ssh_cmd = f'ssh -f -n -p {ssh_port} {update_d_address} "{node_cmd} > {d_instance_log_path} 2>&1 &"'
+                            d_kv_config_formate_json = d_kv_config_json.replace('"', '\\\\\\"')
+                            vllm_command = vllm_command.replace("vllm serve", "(vllm serve")
+                            node_cmd = f'{vllm_command} --port {http_port} --gpu-memory-utilization {decode_gpu_memory_utilization} --kv-transfer-config \\"{d_kv_config_formate_json}\\" > {d_instance_log_path} 2>&1 &) && disown'
+                            node_cmd = f"{ids_env} && " + node_cmd
+                            logger.info(f"node_cmd = {node_cmd}")
+                            ssh_cmd = f'ssh -f -n -p {ssh_port} {update_d_address} "{node_cmd}"'
                         f.write(f"{ssh_cmd}\n\n")
                     else:
                         d_cmd = f"{ids_env} && {vllm_command} --port {http_port} --gpu-memory-utilization {decode_gpu_memory_utilization} --kv-transfer-config '\\''{d_kv_config_json}'\\''"
@@ -1127,7 +1136,6 @@ class SSHServeRunner(RunnerBase):
                 export_cmd += [f"{k}={v}"]
 
         cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
-
         host_run_script_file = _generate_run_script_serve(
             self.config, host, node_rank, cmd, background=True, with_test=with_test
         )
