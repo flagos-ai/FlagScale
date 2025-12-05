@@ -45,8 +45,7 @@ class Generator:
     def _set_flagcx_tuning_params(self, config):
         if config.experiment.auto_tuner.flagcx_tune:
             config.train.system.flagcx_tune = True
-            # set a large number so that training won't stop before flagcx tuning ends
-            config.train.model.train_iters = 100 
+            # set a large number so that training won't stop before flagcx tuning ends 
             config.experiment.envs["FLAGCX_USE_TUNER"] = 1
             config.experiment.envs["TUNING_WITH_FLAGSCALE"] = 1
             config.experiment.envs["FLAGCX_TUNE_FILE"] = os.path.abspath(os.path.join(config.experiment.exp_dir, "flagcx_tune", "tune_objects.json"))
