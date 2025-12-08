@@ -1,5 +1,5 @@
 diff --git a/megatron/core/parallel_state.py b/megatron/core/parallel_state.py
-index 86c5bbbe4..c630700bb 100644
+index 86c5bbbe4..32a6899a9 100644
 --- a/megatron/core/parallel_state.py
 +++ b/megatron/core/parallel_state.py
 @@ -12,6 +12,15 @@ import torch
@@ -43,7 +43,7 @@ index 86c5bbbe4..c630700bb 100644
          return None
  
 +def get_flagcx_options():
-+    flagcx_options = flagcx._C.ProcessGroupFlagCX.Options()
++    flagcx_options = flagcx._C.ProcessGroupFlagCX.Options(enable_tuner=True)
 +    return flagcx_options
 +
  
