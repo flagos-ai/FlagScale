@@ -8,9 +8,7 @@ class FlagCXTuneRecorder:
         self.timer.start(barrier=True)
 
     def record(self):
-        print("flagcxTuner recording time")
         time = self.timer.elapsed()
-        print(f"flagcxTuner recorded time: {time}")
         self.records.append(time)
 
     def get_records(self):
