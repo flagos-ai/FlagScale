@@ -1,7 +1,10 @@
 import os
 import subprocess
+
 import torch
+
 from flagscale.train.flagcx_tuner.recorder import FlagCXTuneRecorder
+
 
 class FlagCXTuner:
 
@@ -13,6 +16,7 @@ class FlagCXTuner:
         self.perf_map = {}
         self.best_perf = float("inf")
         self.finished_tuning = False
+        self.best_config_set = False
         os.environ["FLAGCX_TUNER_CONFIG_ID"] = str(self.config_id)
         os.environ["FLAGCX_TUNER_BEST_CONFIG_ID"] = str(self.best_config_id)
 
@@ -25,22 +29,19 @@ class FlagCXTuner:
 
     def tuning_done(self):
         return self.finished_tuning
-    
+
     def check_flagcx_done(self):
         # os.envirion cannot read env variables set outside of python
         # so execute a shell command to read it
-        result = subprocess.check_output(
-            "echo $FLAGCX_TUNER_DONE",
-            shell=True
-        ).decode().strip()
+        result = subprocess.check_output("echo $FLAGCX_TUNER_DONE", shell=True).decode().strip()
         if result == "1":
             self.finished_tuning = True
-    
+
     def need_config_update(self):
         if self.iter % 5 == 0:
             return True
         return False
-    
+
     def update_iter(self):
         self.iter += 1
         self.recorder.record()
@@ -56,17 +57,20 @@ class FlagCXTuner:
         if self.iter > 0 and self.iter % 5 == 0:
             return True
         return False
-    
+
     def eval_e2e_perf(self):
         records = self.recorder.get_records()
         assert len(records) >= 5
         # calculate the average time of last 4 iters
         self.perf_map[self.config_id] = sum(records[-4:]) / 4.0
-        if (self.perf_map[self.config_id] < self.best_perf):
+        if self.perf_map[self.config_id] < self.best_perf:
             self.best_perf = self.perf_map[self.config_id]
             self.best_config_id = self.config_id
         self.recorder.reset()
 
+    def best_config_set(self):
+        return self.best_config_set
+
     def set_best_config(self):
         os.environ["FLAGCX_TUNER_BEST_CONFIG_ID"] = str(self.best_config_id)
-        
+        self.best_config_set = True

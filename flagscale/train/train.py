@@ -2664,7 +2664,7 @@ def train(
                     )
                 train_data_iterator = buffered_rollouts
 
-        
+
 
         ft_integration.on_training_step_start()
         (
@@ -2738,7 +2738,7 @@ def train(
                 flagcx_tuner.check_flagcx_done()
                 flagcx_tuner.update_config()
 
-        if args.flagcx_tune and flagcx_tuner.tuning_done():
+        if args.flagcx_tune and flagcx_tuner.tuning_done() and not flagcx_tuner.best_config_set():
             flagcx_tuner.set_best_config()
 
 
