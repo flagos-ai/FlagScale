@@ -1,5 +1,5 @@
 diff --git a/vllm/v1/sample/logits_processor/builtin.py b/vllm/v1/sample/logits_processor/builtin.py
-index fc655d993..133579e59 100644
+index fc655d993..7690e62a7 100644
 --- a/vllm/v1/sample/logits_processor/builtin.py
 +++ b/vllm/v1/sample/logits_processor/builtin.py
 @@ -9,6 +9,7 @@ from vllm import SamplingParams
@@ -28,7 +28,7 @@ index fc655d993..133579e59 100644
          if (state := new_state(params, prompt_tok_ids,
                                 output_tok_ids)) is not None:
              req_entries[index] = state
-@@ -273,3 +274,86 @@ def process_dict_updates(
+@@ -273,3 +274,88 @@ def process_dict_updates(
                      req_entries[a_index] = b_entry
  
      return updated
@@ -50,6 +50,8 @@ index fc655d993..133579e59 100644
 +            return
 +
 +        for index, params, _, _, metadata in batch_update.added:
++            if not getattr(params, "extra_args", None):
++                continue
 +            guidance_scale = params.extra_args.get("guidance_scale", None)
 +            if metadata is None or guidance_scale is None:
 +                continue
