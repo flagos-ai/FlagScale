@@ -1,0 +1,13 @@
+diff --git a/vllm/model_executor/models/glm4v.py b/vllm/model_executor/models/glm4v.py
+index 034c7654f..b36e2cbad 100644
+--- a/vllm/model_executor/models/glm4v.py
++++ b/vllm/model_executor/models/glm4v.py
+@@ -481,6 +481,7 @@ class GLM4VMultiModalProcessor(BaseMultiModalProcessor[GLM4VProcessingInfo]):
+         prompt_text: str,
+         mm_items: MultiModalDataItems,
+         hf_processor_mm_kwargs: Mapping[str, object],
++        tokenization_kwargs: Mapping[str, object],
+     ) -> bool:
+         return False
+ 
+

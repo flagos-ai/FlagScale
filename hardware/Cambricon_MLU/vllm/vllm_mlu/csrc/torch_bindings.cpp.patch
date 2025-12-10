@@ -1,0 +1,23 @@
+diff --git a/vllm_mlu/csrc/torch_bindings.cpp b/vllm_mlu/csrc/torch_bindings.cpp
+new file mode 100644
+index 000000000..32ed15da5
+--- /dev/null
++++ b/vllm_mlu/csrc/torch_bindings.cpp
+@@ -0,0 +1,16 @@
++#include <torch/extension.h>
++#include <torch/library.h>
++#include <torch/version.h>
++#include <pybind11/pybind11.h>
++#include "ops.h"
++#include "utils.h"
++
++
++TORCH_LIBRARY_EXPAND(_C, ops)
++{
++    // vLLM-MLU custom ops
++    ops.def("weak_ref_tensor(Tensor input) -> Tensor");
++    ops.impl("weak_ref_tensor", torch::kPrivateUse1, &vllm_mlu::weak_ref_tensor);
++}
++
++REGISTER_EXTENSION(_C)
+

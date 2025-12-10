@@ -1,11 +1,12 @@
 diff --git a/vllm_mlu/vllm_mlu/_mlu_utils.py b/vllm_mlu/vllm_mlu/_mlu_utils.py
 new file mode 100644
-index 000000000..7d02d142e
+index 000000000..fd7921a9a
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/_mlu_utils.py
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,96 @@
 +import os
 +import torch
++import vllm.envs as envs
 +
 +
 +def _check_env(env, default=False):
@@ -23,6 +24,16 @@ index 000000000..7d02d142e
 +    return default
 +
 +
++def _check_env_float(env, default=0):
++    if env in os.environ:
++        try:
++            value = float(os.environ[env])
++        except ValueError:
++            raise ValueError(f"'{env}' should be set with float")
++        return value
++    return default
++
++
 +# VLLM_LATENCY_DEBUG: Get more kernel info for benchmark latency.
 +VLLM_LATENCY_DEBUG = _check_env("VLLM_LATENCY_DEBUG", default=False)
 +
@@ -35,6 +46,9 @@ index 000000000..7d02d142e
 +# VLLM_DUMP_MLU_INFO: Get device info when running vLLM inference.
 +VLLM_DUMP_MLU_INFO = _check_env("VLLM_DUMP_MLU_INFO", default=False)
 +
++# VLLM_DUMP_MLU_INFO_DEBUG: Dump device debug info when running vLLM inference.
++VLLM_DUMP_MLU_INFO_DEBUG = _check_env("VLLM_DUMP_MLU_INFO_DEBUG", default=False)
++
 +# VLLM_SCHEDULER_PROFILE: Profiling vLLM scheduler.
 +VLLM_SCHEDULER_PROFILE = _check_env("VLLM_SCHEDULER_PROFILE", default=False)
 +
@@ -42,20 +56,9 @@ index 000000000..7d02d142e
 +# Set to False to disable warning messages.
 +VLLM_GRAPH_DEBUG = _check_env("VLLM_GRAPH_DEBUG", default=True)
 +
-+# CHUNKED_PIPELINE_PARALLEL_EN: use chunked pipeline parallel, default value is False.
-+CHUNKED_PIPELINE_PARALLEL_EN = _check_env("CHUNKED_PIPELINE_PARALLEL_EN", default=False)
-+
-+# CONTEXT_PARALLEL_EN: use context parallel, default value is False.
-+CONTEXT_PARALLEL_EN = _check_env("CONTEXT_PARALLEL_EN", default=False)
-+
-+# EXPERT_PARALLEL_EN: use expert parallel, default value is False.
-+EXPERT_PARALLEL_EN = _check_env("EXPERT_PARALLEL_EN", default=False)
-+
-+# ATTN_DATA_PARALLEL_EN: use attn data parallel, default value is False.
-+ATTN_DATA_PARALLEL_EN = _check_env("ATTN_DATA_PARALLEL_EN", default=False)
-+
 +# VLLM_AVG_MOE_EN: make moe experts workload balance, default value is False.
-+VLLM_AVG_MOE_EN = _check_env("VLLM_AVG_MOE_EN", default=False)
++VLLM_AVG_MOE_EN = _check_env("VLLM_AVG_MOE_EN", default=False) or _check_env("VLLM_RANDOM_MOE_EN", default=False)
++VLLM_RANDOM_MOE_EN = _check_env("VLLM_RANDOM_MOE_EN", default=False)
 +
 +# VLLM_LOGITS_USE_ALL_GATHER: use allgather for logits collection, default value is False.
 +VLLM_LOGITS_USE_ALL_GATHER = _check_env("VLLM_LOGITS_USE_ALL_GATHER", default=False)
@@ -63,18 +66,31 @@ index 000000000..7d02d142e
 +VLLM_LATENCY_DEBUG_EN = (VLLM_LATENCY_DEBUG or VLLM_LATENCY_DEBUG_NO_DEVICE)
 +VLLM_LATENCY_DEBUG_WITH_DEVICE_EN = (VLLM_LATENCY_DEBUG and not VLLM_LATENCY_DEBUG_NO_DEVICE)
 +VLLM_DUMP_MLU_INFO_EN = (VLLM_LATENCY_DEBUG_WITH_DEVICE_EN and VLLM_DUMP_MLU_INFO)
-+CUSTOM_VLLM_HIJACK_EN = (CHUNKED_PIPELINE_PARALLEL_EN or CONTEXT_PARALLEL_EN
-+                         or EXPERT_PARALLEL_EN or ATTN_DATA_PARALLEL_EN)
++VLLM_DUMP_MLU_INFO_DEBUG = (VLLM_DUMP_MLU_INFO_DEBUG and VLLM_DUMP_MLU_INFO_EN)
 +
-+VLLM_PRELOAD_SIZE = _check_env_value("VLLM_PRELOAD_SIZE", default=0)
++# VLLM_V1_USE_UNCHUNK_SCHED: v1 use unchunk scheduler, default value is True.
++VLLM_V1_USE_UNCHUNK_SCHED = _check_env("VLLM_V1_USE_UNCHUNK_SCHED", default=True)
 +
-+# ATTN_PARALLEL_NUM & FFN_PARALLEL_NUM: use context comm cmpt parallel.
-+ATTN_PARALLEL_NUM = 'ATTN_PARALLEL_NUM'
-+FFN_PARALLEL_NUM = 'FFN_PARALLEL_NUM'
++# VLLM_V1_MIN_PREFILL_BATCH: the min scheduling batch in v1, default is 1.
++VLLM_V1_MIN_PREFILL_BATCH = _check_env_value("VLLM_V1_MIN_PREFILL_BATCH", default=1)
 +
++# VLLM_V1_USE_FULL_GRAPH: v1 use full graph capture, default value is True.
++VLLM_V1_USE_FULL_GRAPH = _check_env("VLLM_V1_USE_FULL_GRAPH", default=True)
 +
-+def check_context_comm_cmpt_parallel():
-+    return (ATTN_PARALLEL_NUM in os.environ) or (FFN_PARALLEL_NUM in os.environ)
++# VLLM_V1_BENCHMARK: v1 benchmark, default value is False.
++VLLM_V1_BENCHMARK = _check_env("VLLM_V1_BENCHMARK", default=False)
++
++# VLLM_MTP_FIXED_ACCEPTANCE_RATE: use fixed acceptance rate, default value is None.
++VLLM_MTP_FIXED_ACCEPTANCE_RATE = _check_env_float("VLLM_MTP_FIXED_ACCEPTANCE_RATE", default=None)
++
++# VLLM_V1_UNCHUNK_SCHED_LOG: print v1 unchunk scheduler state
++VLLM_V1_UNCHUNK_SCHED_LOG = _check_env("VLLM_V1_UNCHUNK_SCHED_LOG", default=False)
++
++# VLLM_MOE_PREFILL_CHUNK_SIZE: in number of tokens. enabled when > 0.
++VLLM_MOE_PREFILL_CHUNK_SIZE = _check_env_value("VLLM_MOE_PREFILL_CHUNK_SIZE", default=0)
++
++# VLLM_CI_ACCURACY_TEST: CI accuracy test, default value is False.
++VLLM_CI_ACCURACY_TEST = _check_env("VLLM_CI_ACCURACY_TEST", default=False)
 +
 +
 +def set_is_prompt(flag):
@@ -84,10 +100,4 @@ index 000000000..7d02d142e
 +
 +def get_is_prompt():
 +    return IS_PROMPT
-+
-+def get_dpsk_mcc_max_parallel_num():
-+    return _check_env_value("DPSK_MCC_PARALLEL_NUM", default=1)
-+
-+def is_dpsk_mcc_enabled():
-+    return get_dpsk_mcc_max_parallel_num() > 1
 

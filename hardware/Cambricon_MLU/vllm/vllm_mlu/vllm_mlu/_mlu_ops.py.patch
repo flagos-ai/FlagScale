@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/_mlu_ops.py b/vllm_mlu/vllm_mlu/_mlu_ops.py
 new file mode 100644
-index 000000000..c5f368fb1
+index 000000000..268ad2bc9
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/_mlu_ops.py
-@@ -0,0 +1,1102 @@
+@@ -0,0 +1,1211 @@
 +from typing import List, Optional, Tuple
 +
 +import torch
@@ -124,11 +124,11 @@ index 000000000..c5f368fb1
 +    q: torch.Tensor,
 +    k: torch.Tensor,
 +    v: torch.Tensor,
-+    out: torch.Tensor,
-+    cu_seq_lens_q: torch.Tensor,
-+    cu_seq_lens_kv: torch.Tensor,
-+    alibi_slope: torch.Tensor,
-+    attn_bias: torch.Tensor,
++    out: Optional[torch.Tensor],
++    cu_seq_lens_q: Optional[torch.Tensor],
++    cu_seq_lens_kv: Optional[torch.Tensor],
++    alibi_slope: Optional[torch.Tensor],
++    attn_bias: Optional[torch.Tensor],
 +    max_seq_len_q: int,
 +    max_seq_len_kv: int,
 +    softmax_scale: float,
@@ -137,9 +137,12 @@ index 000000000..c5f368fb1
 +    window_size_right: int = -1,
 +    compute_dtype: torch.dtype = torch.float,
 +    return_lse: bool = False,
-+    block_tables: torch.Tensor = None,
-+    k_cache_quant_scale: torch.Tensor = None,
-+    v_cache_quant_scale: torch.Tensor = None
++    block_tables: Optional[torch.Tensor] = None,
++    k_quant_scale: Optional[torch.Tensor] = None,
++    v_quant_scale: Optional[torch.Tensor] = None,
++    q_quant_scale: Optional[torch.Tensor] = None,
++    out_quant_scale: Optional[torch.Tensor] = None,
++    out_dtype: torch.dtype = torch.half
 +) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
 +    if v is None:
 +        v = k
@@ -151,8 +154,9 @@ index 000000000..c5f368fb1
 +        softmax_scale, is_causal,
 +        window_size_left, window_size_right,
 +        compute_dtype, return_lse,
-+        block_tables, k_cache_quant_scale,
-+        v_cache_quant_scale)
++        block_tables, k_quant_scale,
++        v_quant_scale, q_quant_scale,
++        out_quant_scale, out_dtype)
 +
 +
 +def split_head_nums(q_head_num, kv_head_num, max_q_head_num):
@@ -239,26 +243,39 @@ index 000000000..c5f368fb1
 +    q_head_dim: Optional[int] = 2,
 +    kv_head_dim: Optional[int] = 1,
 +    seq_q_dim: Optional[int] = 1,
-+    max_seq_q_mul_q_divide_kv: Optional[int] = 48,
++    max_seq_q_mul_q_divide_kv: Optional[int] = 128,
 +    head_size_v: Optional[int] = -1,
 +    compute_dtype: Optional[torch.dtype] = torch.float32,
++    q_quant_scale: Optional[torch.Tensor] = None,
++    decoder_attn_dtype: Optional[torch.dtype] = None,
 +) -> None:
 +    # FIXME(chenxiaobing): TMO only support windows_size_right = -1 yet.
 +    windows_size_right = -1
++    if decoder_attn_dtype is not None and q.dtype != decoder_attn_dtype and q_quant_scale is None:
++        q, q_quant_scale = tmo.scaled_quantize(q, quant_type=decoder_attn_dtype, quant_mode="dynamic_per_token")
++    if k_cache is not None and k_cache.dtype == torch.uint8:
++        k_cache = k_cache.view(torch.float8_e4m3fn)
++    if v_cache is not None and v_cache.dtype == torch.uint8:
++        v_cache = v_cache.view(torch.float8_e4m3fn)
 +
-+    # singleQwithkvCache limits seq_q * q_divide_kv <= max_seq_q_mul_q_divide_kv now.
++    if k_cache is not None and k_cache.dtype == torch.bfloat16:
++        max_seq_q_mul_q_divide_kv = 256
++
++    # single_query_cached_kv_attn limits seq_q * q_divide_kv <= max_seq_q_mul_q_divide_kv now,
++    # and this limitation only applies when using kv8 or floating point computation.
 +    # When the limitation is fixed, we should delete the split process.
 +    seq_q = q.shape[seq_q_dim]
 +    q_head_num = q.shape[q_head_dim]
 +    kv_head_num = k_cache.shape[kv_head_dim]
 +    q_divide_kv = q_head_num // kv_head_num
-+    if seq_q * q_divide_kv <= max_seq_q_mul_q_divide_kv:
++    if seq_q * q_divide_kv <= max_seq_q_mul_q_divide_kv or q_quant_scale is not None:
 +        tmo.single_query_cached_kv_attn(
 +            q, k_cache, v_cache, out,
 +            block_tables, context_lens,
 +            k_cache_quant_scale, v_cache_quant_scale,
 +            alibi_slopes, max_contxt_len,
 +            windows_size_left, windows_size_right, softmax_scale,
++            q_quant_scale=q_quant_scale,
 +            head_size_v=head_size_v,
 +            compute_dtype=compute_dtype)
 +    else:
@@ -362,34 +379,125 @@ index 000000000..c5f368fb1
 +) -> torch.Tensor:
 +    return tmo.active(input, act_mode, is_gated)
 +
++def fused_moe(hidden_states: torch.Tensor,
++              gating_output: torch.Tensor,
++              w1: torch.Tensor,
++              w2: torch.Tensor,
++              bias1: Optional[torch.Tensor],
++              bias2: Optional[torch.Tensor],
++              residual: Optional[torch.Tensor],
++              input_smooth: Optional[torch.Tensor],
++              act_smooth: Optional[torch.Tensor],
++              w1_scale: Optional[torch.Tensor],
++              w2_scale: Optional[torch.Tensor],
++              topk: int,
++              renormalize: bool,
++              gated: bool,
++              act_mode: str,
++              start_expert_id: int = 0,
++              block_n: int = 0,
++              cncl_comm: int = 0,
++              avg_moe: bool=False,
++              class_reduce_weight: Optional[torch.Tensor] = None,
++              class_expert_id: Optional[torch.Tensor] = None,
++              w1_quant_flag: Optional[List] = None,
++              w2_quant_flag: Optional[List] = None,
++              world_size: int = 0,
++              shared_expert_num: int = 0,
++              parallel_mode: str = 'ep'):
++    dtype = hidden_states.dtype
++    ori_input_shape = hidden_states.shape
++    hidden_states = hidden_states.reshape(-1, hidden_states.size(-1))
++    tokens = hidden_states.size(0)
++    gating_output = gating_output.reshape(-1, gating_output.size(-1))
++    residual = residual.reshape(-1, residual.size(-1)) if residual is not None else None
++    expert_num = gating_output.size(-1)
++    expert_size = w1.size(0) if w1_quant_flag is None else w1_scale.size(1)
 +
-+def fused_moe(
-+    hidden_states: torch.Tensor,
-+    gating_output: torch.Tensor,
-+    w1: torch.Tensor,
-+    w2: torch.Tensor,
-+    bias1: Optional[torch.Tensor],
-+    bias2: Optional[torch.Tensor],
-+    residual: Optional[torch.Tensor],
-+    input_smooth: Optional[torch.Tensor],
-+    act_smooth: Optional[torch.Tensor],
-+    w1_scale: Optional[torch.Tensor],
-+    w2_scale: Optional[torch.Tensor],
-+    topk: int,
-+    renormalize: bool,
-+    gated: bool,
-+    act_mode: str,
-+    start_expert_id: int = 0,
-+    block_n: int = 0,
-+    cncl_comm: int = 0
-+) -> torch.Tensor:
-+    return tmo.fused_moe(
-+        hidden_states, gating_output,
-+        w1, w2, bias1, bias2, residual,
-+        input_smooth, act_smooth,
-+        w1_scale, w2_scale, topk,
-+        renormalize, gated, act_mode, start_expert_id,
-+        block_n, cncl_comm)
++    per_token_sq = False
++    # check quant
++    check_list = [input_smooth, act_smooth, w1_scale, w2_scale]
++    if all(x is not None for x in check_list):
++        per_token_sq = True
++
++    if not (all(x is None for x in check_list) or all(x is not None for x in check_list)):
++        raise ValueError(
++            "input_smooth, act_smooth, w1_scale and w2_scale must be "
++            "present and absent at the same time."
++        )
++
++    # softmax_topk
++    reduce_weight, expert_id = tmo.moe_softmax_topk(gating_output, topk, renormalize)
++
++    # append shared
++    if shared_expert_num > 0:
++        reduce_weight, expert_id = tmo.moe_append_shared_expert(reduce_weight, expert_id, expert_num,
++                                                                shared_expert_num, world_size, parallel_mode)
++        if parallel_mode == "ep":
++            avg_shared_expert_num = (world_size + shared_expert_num - 1) // world_size
++            expert_num += avg_shared_expert_num * world_size
++        else:
++            expert_num += shared_expert_num
++
++    if avg_moe:
++        n_tokens = hidden_states.shape[0]
++        reduce_weight = class_reduce_weight[:n_tokens]
++        expert_id     = class_expert_id[:n_tokens]
++    # gen_idx
++    expand_idx, combine_idx, token_count, cusum_token_count = tmo.moe_gen_idx(expert_id, expert_num)
++
++    if per_token_sq:
++        quant_input, input_scale = tmo.moe_quantize(hidden_states,
++            input_smooth, None, token_count[start_expert_id:start_expert_id+expert_size], expand_idx,
++            cusum_token_count[start_expert_id].unsqueeze(0))
++    else:
++        expand_hidden_states = tmo.moe_expand_input(hidden_states, expand_idx,
++                cusum_token_count, start_expert_id, expert_size)
++
++    # group gemm
++    if per_token_sq:
++        gemm1_out = tmo.smooth_quant_group_gemm(quant_input,
++                                                w1,
++                                                token_count[start_expert_id:start_expert_id+expert_size],
++                                                None, None, None, None,
++                                                input_scale, w1_scale, dtype, tokens, quant_flag = w1_quant_flag)
++    else:
++        gemm1_out = tmo.group_gemm(expand_hidden_states,
++                                   w1,
++                                   token_count[start_expert_id:start_expert_id+expert_size],
++                                   None,
++                                   None,
++                                   None,
++                                   None, tokens)
++    if per_token_sq:
++        quant_input = quant_input[:, :gemm1_out.shape[-1] // 2] if gated else quant_input[:, :gemm1_out.shape[-1]]
++        input_scale = input_scale[:gemm1_out.shape[0]]
++        quant_input, input_scale = tmo.moe_quantize(gemm1_out, act_smooth, None,
++                                                    token_count[start_expert_id:start_expert_id+expert_size],
++                                                    output=quant_input,
++                                                    output_scale=input_scale,
++                                                    act_mode=act_mode,
++                                                    is_gated=gated)
++    else:
++        act_out = gemm1_out[:, :gemm1_out.shape[-1] // 2] if gated else gemm1_out
++        act_out = tmo.moe_active(gemm1_out, act_mode, gated, act_out, bias1, cusum_token_count, start_expert_id, expert_size)
++    if cncl_comm > 0:
++        raise ValueError("not support communication and computing fusion currently.")
++    else:
++        if per_token_sq:
++            gemm2_out = tmo.smooth_quant_group_gemm(quant_input,
++                                                    w2, token_count[start_expert_id:start_expert_id+expert_size],
++                                                    None, None, None, None, input_scale, w2_scale, dtype, tokens, quant_flag = w2_quant_flag)
++        else:
++            gemm2_out = tmo.group_gemm(act_out,
++                                       w2,
++                                       token_count[start_expert_id:start_expert_id+expert_size],
++                                       None, None, None, None, tokens)
++
++    output = tmo.moe_combine_result(gemm2_out, reduce_weight, combine_idx,
++                                    residual, cusum_token_count, start_expert_id,
++                                    expert_size, bias2)
++    return output.reshape(ori_input_shape)
 +
 +
 +def matmul(
@@ -432,13 +540,15 @@ index 000000000..c5f368fb1
 +    c: torch.Tensor = None,
 +    act_mode: str = "none",
 +    alpha: float = 1.0,
-+    beta: float = 1.0
++    beta: float = 1.0,
++    output: Optional[torch.Tensor] = None,
 +) -> torch.Tensor:
 +    return tmo.smooth_quant_matmul(
 +                a, a_scale,
 +                b, b_scale,
 +                dtype, bias, c,
-+                act_mode, alpha, beta)
++                act_mode, alpha, beta,
++                output=output)
 +
 +
 +def per_token_smooth_quantize(x: torch.Tensor,
@@ -469,6 +579,10 @@ index 000000000..c5f368fb1
 +    v_cache_quant_scale: torch.Tensor,
 +    slot_mapping: torch.Tensor,
 +) -> None:
++    if k_cache is not None and k_cache.dtype == torch.uint8:
++        k_cache = k_cache.view(torch.float8_e4m3fn)
++    if v_cache is not None and v_cache.dtype == torch.uint8:
++        v_cache = v_cache.view(torch.float8_e4m3fn)
 +    return tmo.quant_to_paged_cache(
 +        k, v, k_cache, v_cache, k_cache_quant_scale, v_cache_quant_scale, slot_mapping
 +    )
@@ -529,122 +643,6 @@ index 000000000..c5f368fb1
 +                               block_size,
 +                               TILE_SIZE)
 +
-+def preload(
-+    weight: torch.Tensor,
-+    size: int
-+) -> None:
-+    """
-+    Preload weights of layer.
-+
-+    Args:
-+        weight (torch.Tensor): Weight to preload。
-+        size (int): Preload size (byte)。
-+
-+    Returns:
-+        None
-+    """
-+    return tmo.preload(weight, size)
-+
-+
-+def matmul_allreduce(
-+    cncl_comm,
-+    a: torch.Tensor,
-+    b: torch.Tensor,
-+    bias: Optional[torch.Tensor] = None,
-+    c: Optional[torch.Tensor] = None,
-+    alpha: float = 1.0,
-+    beta: float = .0,
-+    block_m: int = 0
-+) -> torch.Tensor:
-+    return tmo.matmul_allreduce(cncl_comm=cncl_comm,
-+                                a=a, b=b,
-+                                bias=bias, c=c,
-+                                alpha=alpha,
-+                                beta=beta,
-+                                block_m=block_m)
-+
-+
-+def smooth_quant_matmul_allreduce(
-+    cncl_comm,
-+    a: torch.Tensor,
-+    a_scale: torch.Tensor,
-+    b: torch.Tensor,
-+    b_scale: torch.Tensor,
-+    dtype: torch.dtype,
-+    bias: torch.Tensor = None,
-+    c: torch.Tensor = None,
-+    alpha: float = 1.0,
-+    beta: float = 1.0,
-+    block_m: int = 0):
-+    return tmo.smooth_quant_matmul_allreduce(
-+                cncl_comm=cncl_comm,
-+                a=a, a_scale=a_scale,
-+                b=b, b_scale=b_scale,
-+                dtype=dtype, bias=bias, c=c,
-+                alpha=alpha, beta=beta, block_m=block_m)
-+
-+
-+def quant_matmul_allreduce(
-+    cncl_comm,
-+    a_tensor: torch.Tensor,
-+    a_scale: Optional[torch.Tensor],
-+    a_zero: Optional[torch.Tensor],
-+    b_tensor: torch.Tensor,
-+    b_scale: Optional[torch.Tensor],
-+    b_zero: Optional[torch.Tensor],
-+    bias: Optional[torch.Tensor],
-+    c_tensor: Optional[torch.Tensor],
-+    c_scale: Optional[torch.Tensor],
-+    c_zero: Optional[torch.Tensor],
-+    gemm_output_scale: Optional[torch.Tensor],
-+    gemm_output_zero: Optional[torch.Tensor],
-+    data_type: Optional[str],
-+    quant_algo: str,
-+    a_quant_layout: str,
-+    b_quant_layout: str,
-+    quant_bit_size: int = 8,
-+    alpha: float = 1.0,
-+    beta: float = 1.0,
-+    trans_a: bool = False,
-+    trans_b: bool = True,
-+    block_m: int = 0
-+) -> torch.Tensor:
-+    return tmo.quant_matmul_allreduce(
-+        cncl_comm=cncl_comm, a_tensor=a_tensor, a_scale=a_scale, a_zero=a_zero,
-+        b_tensor=b_tensor, b_scale=b_scale, b_zero=b_zero, bias=bias,
-+        c_tensor=c_tensor, c_scale=c_scale, c_zero=c_zero,
-+        gemm_output_scale=gemm_output_scale, gemm_output_zero=gemm_output_zero,
-+        data_type=data_type, quant_algo=quant_algo,
-+        a_quant_layout=a_quant_layout, b_quant_layout=b_quant_layout,
-+        quant_bit_size=quant_bit_size,
-+        alpha=alpha, beta=beta, trans_a=trans_a, trans_b=trans_b, block_m=block_m)
-+
-+
-+def flash_attn_sq_mm_allreduce(
-+    cncl_comm: int,
-+    q: torch.Tensor,
-+    k: torch.Tensor,
-+    v: torch.Tensor,
-+    cu_seq_lens_q: Optional[torch.Tensor],
-+    cu_seq_lens_kv: Optional[torch.Tensor],
-+    alibi_slope: Optional[torch.Tensor],
-+    attn_bias: Optional[torch.Tensor],
-+    smooth: torch.Tensor,
-+    weight: torch.Tensor,
-+    weight_scale: torch.Tensor,
-+    bias: Optional[torch.Tensor],
-+    max_seq_len_q: int,
-+    max_seq_len_kv: int,
-+    softmax_scale: float,
-+    is_causal: bool,
-+    window_size_left: int = -1,
-+    window_size_right: int = -1,
-+    compute_dtype: torch.dtype = torch.float,
-+    block_seq: int = 0) -> torch.Tensor:
-+    return tmo.flash_attn_sq_mm_allreduce(cncl_comm, q, k, v,
-+                                cu_seq_lens_q, cu_seq_lens_kv, alibi_slope, attn_bias, smooth, weight, weight_scale,
-+                                bias, max_seq_len_q, max_seq_len_kv, softmax_scale, is_causal, window_size_left,
-+                                window_size_right, compute_dtype, block_seq)
 +
 +#Moe inner kernels
 +def moe_softmax_topk(input: torch.Tensor,
@@ -654,8 +652,12 @@ index 000000000..c5f368fb1
 +                     topk_group: int = 0,
 +                     mask: Optional[torch.Tensor] = None,
 +                     normed_by : str = "topk_logit",
-+                     route_scale : float = 1.0) -> Tuple[torch.Tensor]:
-+    return tmo.moe_softmax_topk(input, topk, normalize, num_expert_group, topk_group, mask, normed_by, route_scale)
++                     route_scale : float = 1.0,
++                     reduce_weight: Optional[torch.Tensor] = None,
++                     expert_id: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor]:
++    return tmo.moe_softmax_topk(input, topk, normalize, num_expert_group,
++                                topk_group, mask, normed_by, route_scale,
++                                reduce_weight, expert_id)
 +
 +def moe_sigmoid_topk(input: torch.Tensor,
 +                     topk: int,
@@ -663,10 +665,14 @@ index 000000000..c5f368fb1
 +                     num_expert_group: int = -1,
 +                     topk_group: int = 0,
 +                     route_scale: float = 1.0,
-+                     score_bias: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor]:
++                     score_bias: Optional[torch.Tensor] = None,
++                     reduce_weight: Optional[torch.Tensor] = None,
++                     expert_id: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor]:
 +    return tmo.moe_sigmoid_topk(input, topk, normalize, num_expert_group,
 +                                topk_group, route_scale = route_scale,
-+                                score_bias = score_bias)
++                                score_bias = score_bias,
++                                reduce_weight=reduce_weight,
++                                expert_id=expert_id)
 +
 +def moe_gen_idx(expert_id: torch.Tensor,
 +                expert_num: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -769,6 +775,42 @@ index 000000000..c5f368fb1
 +        key, value, key_cache, value_cache, key_cache_quant_scale, value_cache_quant_scale,
 +        context_lengths, max_context_len, context_seq_offset, block_tables, quant_mode, quant_bit)
 +
++def random_sample(
++    probs: torch.Tensor,
++    is_gumbel_max: bool,
++    generators: dict[int, torch.Generator],
++) -> torch.Tensor:
++    return tmo.random_sample(probs, is_gumbel_max, generators)
++
++def rejection_sample(draft_token_ids: torch.Tensor,
++                     num_draft_tokens: torch.Tensor,
++                     cu_num_draft_tokens: torch.Tensor,
++                     draft_probs: torch.Tensor,
++                     target_probs: torch.Tensor,
++                     bonus_token_ids: torch.Tensor,
++                     uniform_rand: torch.Tensor,
++                     uniform_probs: torch.Tensor,
++                     max_spec_len: int,
++                     high_acc: bool = True) -> torch.Tensor:
++    return tmo.rejection_sample(
++        draft_token_ids, num_draft_tokens, cu_num_draft_tokens, draft_probs,
++        target_probs, bonus_token_ids, uniform_rand, uniform_probs, max_spec_len, high_acc)
++
++def apply_topkp_v2(logits: torch.Tensor,
++                   index_in: torch.Tensor,
++                   temperature_list: torch.Tensor,
++                   minp_list: torch.Tensor,
++                   topk_list: torch.Tensor,
++                   topp_list: torch.Tensor,
++                   logits_out: Optional[torch.Tensor] = None,
++                   sorted_logits_out: Optional[torch.Tensor] = None,
++                   index_out: Optional[torch.Tensor] = None,
++                   true_select_len: Optional[torch.Tensor] = None
++                   ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
++    return tmo.apply_topkp_v2(logits, index_in, temperature_list, minp_list, topk_list, topp_list,
++                               logits_out, sorted_logits_out, index_out, true_select_len)
++
++
 +def scaled_quantize(
 +    input: torch.Tensor,
 +    scale: Optional[torch.Tensor] = None,
@@ -815,7 +857,10 @@ index 000000000..c5f368fb1
 +                  quant_bit_size: int = 8,
 +                  alpha: float = 1.0,
 +                  beta: float = 1.0,
-+                  use_hp_active: bool = False):
++                  use_hp_active: bool = False,
++                  a_quant_bit_size: int = 8,
++                  a_calib: Optional[torch.Tensor] = None,
++                  b_calib: Optional[torch.Tensor] = None,):
 +    """
 +    Perform quantized matrix multiplication on tensor a and b.
 +
@@ -837,15 +882,20 @@ index 000000000..c5f368fb1
 +        use_hp_active (bool, optional): Describing the algorithm that used in the implementation of the activation function.
 +             When the value is true, use the high-precision algorithm, otherwise use the fastest algorithm of activation.
 +             Defaults to False.
++        a_quant_bit_size(int, optional):The data format of a. Defaults to -1.
++        a_calib (Optional[torch.Tensor]): The calibration of a, shape can be (M, 2).
++        b_calib (Optional[torch.Tensor]): The calibration of b, shape can be (M, 2).
 +
 +    Type:
-+        a: int8, half, bfloat16, float8_e4m3fn
++        a: int8, half, bfloat16, float8_e4m3fn, int4X2
 +        a_scale: float
-+        b: int8, float8_e4m3fn
-+        b_scale: float
-+        bias: same as output
-+        c: same as output
-+        output: specified by output_dtype
++        b: int8, float8_e4m3fn, int4X2
++        b_scale: float, half, bfloat16
++        bias: half, float, bfloat16
++        c: half, float, bfloat16
++        output: half, bfloat16
++        a_calib: float
++        b_calib: float
 +
 +    Returns:
 +        A tensor with the shape of (M, N).
@@ -861,7 +911,10 @@ index 000000000..c5f368fb1
 +                             quant_bit_size,
 +                             alpha,
 +                             beta,
-+                             use_hp_active)
++                             use_hp_active,
++                             a_quant_bit_size,
++                             a_calib,
++                             b_calib,)
 +
 +def fused_mla_kv(kv: torch.Tensor,
 +                 sin: torch.Tensor,
@@ -876,8 +929,15 @@ index 000000000..c5f368fb1
 +                 is_paged_cache: bool = True,
 +                 eps: float = 1e-5,
 +                 interleaved: bool = True):
-+    return tmo.fused_mla_kv(kv, sin, cos, position_id, gamma, kv_cache, kv_cache_scale, slot_mapping, cache_bs_id,
-+                            cache_seq_offset, is_paged_cache, eps, interleaved)
++    quant_mode = "static_per_channel" if kv_cache_scale is None else "dynamic_per_token"
++    return tmo.fused_mla_kv(
++        kv, sin, cos, position_id, gamma, kv_cache, kv_cache_scale, slot_mapping, cache_bs_id,
++        cache_seq_offset,
++        quant_mode=quant_mode,
++        is_paged_cache=is_paged_cache,
++        eps=eps,
++        interleaved=interleaved,
++    )
 +
 +def fused_mla_q(q: torch.Tensor,
 +                gamma: torch.Tensor,
@@ -890,9 +950,11 @@ index 000000000..c5f368fb1
 +                position_id: torch.Tensor,
 +                output: Optional[torch.Tensor] = None,
 +                eps: float = 1e-6,
-+                interleaved: bool = True) -> torch.Tensor:
++                interleaved: bool = True,
++                output_quant_mode: str = 'none',
++                output_scale: Optional[torch.Tensor] = None) -> torch.Tensor:
 +    return tmo.fused_mla_q(q, gamma, smooth_quant_scale, weight_b, weight_b_scale, weight_c, sin, cos, position_id,
-+                           output, eps, interleaved)
++                           output, eps, interleaved, output_quant_mode, output_scale)
 +
 +
 +def gather_cache(
@@ -924,7 +986,8 @@ index 000000000..c5f368fb1
 +        "All tensors must be on the same device"
 +    assert block_table.dtype == torch.int32, "block_table must be int32"
 +    assert cu_seq_lens.dtype == torch.int32, "cu_seq_lens must be int32"
-+    if kv_cache_dtype != 'int8':
++    quant_kv_cache = kv_cache_dtype != 'auto'
++    if not quant_kv_cache:
 +        assert src_cache.dtype == dst.dtype, "src_cache and dst must have the same dtype when no quantized"
 +    if seq_starts is not None:
 +        assert seq_starts.dtype == torch.int32, "seq_starts must be int32"
@@ -977,61 +1040,20 @@ index 000000000..c5f368fb1
 +
 +        # Map to src_flat indices
 +        src_indices = block_ids[block_indices] * block_size + within_block
-+        dst_indices.append(src_indices + seq_start)
++        dst_indices.append(src_indices)
 +
 +    # Concatenate all indices
 +    dst_indices = torch.cat(dst_indices)
 +
 +    # Gather data
 +    dst_flat = src_flat[dst_indices]
-+    if kv_cache_dtype == 'int8':
++    if quant_kv_cache:
 +        src_cache_scale = kv_cache[1][0]
 +        src_scale_flat = src_cache_scale.view(num_blocks * block_size)
 +        dst_scale_flat = src_scale_flat[dst_indices]
 +        dst_flat = dst_flat * dst_scale_flat.unsqueeze(-1)
 +
 +    dst_cache.view(-1, *entry_shape).copy_(dst_flat.view(tot_tokens, *entry_shape))
-+
-+
-+def extract_uncausal_lse(attn_softmax_lse: torch.Tensor, cu_seq_lens: torch.Tensor) -> torch.Tensor:
-+    """
-+    Extract valid LSE values from attn_softmax_lse using cu_seq_lens and concatenate them to shape (nheads, total_seqlen).
-+
-+    Args:
-+        attn_softmax_lse (torch.Tensor): Shape (batch_size, nheads, seqlen), LSE values from flash_attn_varlen_func.
-+        cu_seq_lens (torch.Tensor): Shape (batch_size + 1,), cumulative sequence lengths.
-+
-+    Returns:
-+        torch.Tensor: Shape (nheads, total_seqlen), concatenated valid LSE values for each head.
-+    """
-+    # Get dimensions
-+    batch_size, nheads, seqlen = attn_softmax_lse.shape
-+
-+    # Compute sequence lengths
-+    seq_lens = cu_seq_lens[1:] - cu_seq_lens[:-1]  # Shape: (batch_size,)
-+
-+    # Validate inputs
-+    assert seq_lens.max() <= seqlen, "Sequence length exceeds attn_softmax_lse seqlen dimension."
-+    assert len(cu_seq_lens) == batch_size + 1, "cu_seq_lens length must be batch_size + 1."
-+
-+    # Create a mask for valid positions: (batch_size, seqlen)
-+    mask = torch.arange(seqlen, device=attn_softmax_lse.device).unsqueeze(0) < seq_lens.unsqueeze(1)
-+
-+    # Reshape attn_softmax_lse to (batch_size * seqlen, nheads) for easier indexing
-+    lse_flat = attn_softmax_lse.permute(0, 2, 1).reshape(batch_size * seqlen, nheads)
-+
-+    # Flatten the mask to (batch_size * seqlen,)
-+    mask_flat = mask.view(batch_size * seqlen)
-+
-+    # Select valid LSE values: (total_seqlen, nheads)
-+    valid_lse = lse_flat[mask_flat]
-+
-+    # Reshape to (nheads, total_seqlen)
-+    result_lse = valid_lse.t()  # Transpose: (nheads, total_seqlen)
-+
-+    assert result_lse.shape[-1] == cu_seq_lens[-1], "total lse seq should equal query len"
-+
-+    return result_lse
 +
 +
 +def merge_attn_states(
@@ -1106,4 +1128,91 @@ index 000000000..c5f368fb1
 +
 +    # Transpose back and store in output
 +    output.copy_(out.permute(1, 0, 2))  # Shape: [num_tokens, num_query_heads, head_size]
++
++def moe_all2all_create(dispatch_token_byte: int,
++                       combine_token_byte: int,
++                       max_expert_num: int,
++                       max_token_num: int,
++                       rank: int,
++                       nrank: int) -> Tuple[int, int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
++    """
++    Create the handle of MOE All-to-All communication.
++    API call order:
++        1.Call torch_mlu_ops.moe_all2all_create(...) to obtain the CNCLEP handle and buffer tensor for All-to-All communication. Only needs to be done once.
++        2.Gather all_exchange_info by performing an All-Gather operation on exchange_info across nrank processes. Only needs to be done once.
++        3.Call torch.distributed.barrier() to ensure step 2 finish. Only needs to be done once.
++        4.Call torch_mlu_ops.moe_all2all_init(...) to configure the all_exchange_info into the handle. Only needs to be done once.
++        5.Call torch_mlu_ops.moe_all2all_dispatch(...) to route tokens to their designated experts.
++        6.Call torch_mlu_ops.moe_all2all_combine(...) to restore tokens to their original locations.
++        7.Call torch_mlu_ops.moe_all2all_destroy(...) to release the CNCLEP handle. Only needs to be done once.
++
++    Args:
++        dispatch_token_byte (int): Byte size of a single token for dispatch All-to-All operation.
++        combine_token_byte (int): Byte size of a single token for combine All-to-All operation.
++        max_expert_num (int): Maximum number of experts participating in the All-to-All operation.
++        max_token_num (int): Maximum number of tokens to be processed.
++        rank (int): Rank ID of the current process [0~nrank-1].
++        nrank (int): Total number of processes in the distributed group.
++
++    Return:
++        A tuple of (handle, exchange_info_size, exchange_info, dispatch_send, dispatch_recv, combine_send and combine_recv).
++        handle: The CNCLEP handle with type of integer.
++        exchange_info_size: The size of exchange_info.
++        exchange_info: CPU tensor, shape is [exchange_info_size], and data type is torch.int8.
++        dispatch_send: MLU tensor, shape is [max_token_num * dispatch_token_byte], and data type is torch.int8.
++        dispatch_recv: MLU tensor, shape is [nrank * max_token_num * dispatch_token_byte], and data type is torch.int8.
++        combine_send: MLU tensor, shape is [max_token_num * combine_token_byte], and data type is torch.int8.
++        combine_recv: MLU tensor, shape is [nrank * max_token_num * combine_token_byte], and data type is torch.int8.
++    """
++    return tmo.moe_all2all_create(dispatch_token_byte, combine_token_byte, max_expert_num, max_token_num, rank, nrank)
++
++def moe_all2all_init(handle: int,
++                     all_exchange_info: torch.Tensor) -> None:
++    tmo.moe_all2all_init(handle, all_exchange_info)
++
++def moe_all2all_destroy(handle: int) -> None:
++    tmo.moe_all2all_destroy(handle)
++
++def moe_all2all_dispatch(handle: int,
++                         token_byte: int,
++                         token_num: int,
++                         send_layout: torch.Tensor,                   
++                         send_token_num: torch.Tensor,                
++                         recv_layout: torch.Tensor,                   
++                         recv_token_num: torch.Tensor,                
++                         send_token: Optional[torch.Tensor] = None,   
++                         recv_token: Optional[torch.Tensor] = None,   
++        ) -> None:
++    tmo.moe_all2all_dispatch(handle, token_byte, token_num, send_layout, send_token_num, recv_layout, recv_token_num, send_token, recv_token)
++
++def moe_all2all_combine(handle: int,
++                        token_byte: int,
++                        token_num: int,
++                        send_src_layout: torch.Tensor,
++                        send_dst_layout: torch.Tensor,
++                        send_token: Optional[torch.Tensor] = None,
++                        recv_token: Optional[torch.Tensor] = None,
++        ) -> None:
++    tmo.moe_all2all_combine(handle, token_byte, token_num, send_src_layout, send_dst_layout, send_token, recv_token)
++
++def gather_split(input: torch.Tensor,
++                 gather_index: torch.Tensor,
++                 valid_token_num: torch.Tensor,
++                 output1: torch.Tensor,
++                 output2: Optional[torch.Tensor] = None) -> None:
++    tmo.gather_split(input,
++                     gather_index,
++                     valid_token_num,
++                     output1,
++                     output2)
++
++def moe_all2all_gen_send_layout(token_count: torch.Tensor,
++                                nrank: int) -> torch.Tensor:
++    return tmo.moe_all2all_gen_send_layout(token_count, nrank)
++
++def moe_all2all_gen_gather_index(token_num: torch.Tensor, pad_num: int):
++    gather_by_expert_index, gather_by_rank_index, token_count, token_sum = \
++        tmo.moe_all2all_gen_gather_index(token_num, pad_num)
++
++    return gather_by_expert_index, gather_by_rank_index, token_count, token_sum
 

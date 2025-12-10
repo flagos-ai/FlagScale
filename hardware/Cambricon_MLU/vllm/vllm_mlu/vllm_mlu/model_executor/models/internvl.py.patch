@@ -1,0 +1,51 @@
+diff --git a/vllm_mlu/vllm_mlu/model_executor/models/internvl.py b/vllm_mlu/vllm_mlu/model_executor/models/internvl.py
+new file mode 100644
+index 000000000..97152cd45
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/model_executor/models/internvl.py
+@@ -0,0 +1,44 @@
++from typing import Optional
++
++from transformers import PretrainedConfig
++
++from vllm.multimodal import MULTIMODAL_REGISTRY
++from vllm.model_executor.layers.quantization import QuantizationConfig
++from vllm.model_executor.models.intern_vit import InternVisionPatchModel
++from vllm.model_executor.models.internvl import (
++    InternVLChatModel, InternVLMultiModalProcessor, InternVLProcessingInfo,
++    InternVLDummyInputsBuilder)
++from vllm_mlu.model_executor.models.intern_vit import MLUInternVisionModel
++
++
++@MULTIMODAL_REGISTRY.register_processor(
++    InternVLMultiModalProcessor,
++    info=InternVLProcessingInfo,
++    dummy_inputs=InternVLDummyInputsBuilder)
++class MLUInternVLChatModel(InternVLChatModel):
++
++    def _init_vision_model(
++        self,
++        config: PretrainedConfig,
++        quant_config: Optional[QuantizationConfig],
++        *,
++        is_mono: bool,
++        prefix: str,
++    ):
++        if not is_mono:
++            vision_feature_layer = config.select_layer
++            if vision_feature_layer < 0:
++                num_hidden_layers = config.vision_config.num_hidden_layers \
++                    + vision_feature_layer + 1
++            else:
++                num_hidden_layers = vision_feature_layer + 1
++
++            return MLUInternVisionModel(
++                config.vision_config,
++                quant_config=quant_config,
++                num_hidden_layers_override=num_hidden_layers,
++                prefix=prefix,
++            )
++        else:
++            return InternVisionPatchModel(config.vision_config)
++
+

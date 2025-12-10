@@ -1,14 +1,15 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/layers/rotary_embedding.py b/vllm_mlu/vllm_mlu/model_executor/layers/rotary_embedding.py
 new file mode 100644
-index 000000000..938551ddb
+index 000000000..2ffb270f9
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/layers/rotary_embedding.py
-@@ -0,0 +1,738 @@
+@@ -0,0 +1,880 @@
 +from typing import Any, Dict, List, Optional, Tuple, Union
 +
 +import math
 +import torch
 +
++import vllm.envs as envs
 +from vllm.attention import AttentionMetadata
 +from vllm.model_executor.custom_op import CustomOp
 +from vllm.model_executor.layers.rotary_embedding import (
@@ -16,11 +17,22 @@ index 000000000..938551ddb
 +    LinearScalingRotaryEmbedding, DeepseekScalingRotaryEmbedding,
 +    DynamicNTKScalingRotaryEmbedding, YaRNScalingRotaryEmbedding,
 +    Phi3LongRoPEScaledRotaryEmbedding, Llama4VisionRotaryEmbedding,
++    NTKScalingRotaryEmbedding, DualChunkRotaryEmbedding,
 +    _yarn_find_correction_range, _ROPE_DICT,
 +    yarn_get_mscale, _yarn_linear_ramp_mask)
 +from vllm.model_executor.layers import rotary_embedding
-+from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +from vllm.logger import init_logger
++from vllm.config import get_current_vllm_config
++from vllm.forward_context import ForwardContext, get_forward_context
++from vllm.utils import direct_register_custom_op
++from vllm.platforms import current_platform
++
++from vllm_mlu import _mlu_ops as mlu_ops
++from vllm_mlu.v1.attention.backends.utils import (MLUCommonAttentionMetadata,
++                                                  get_common_metadata)
++from vllm_mlu.v1.attention.backends.mla.flashmla import FlashMLAMetadata
++from vllm_mlu.v1.attention.backends.mla.common import MLACommonMetadata
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
 +logger = init_logger(__name__)
 +
@@ -44,17 +56,19 @@ index 000000000..938551ddb
 +    max_model_len : int = None
 +    is_prompt : bool = False
 +    is_chunked : bool = False
-+    set_cos_sin : bool = False
-+    cos_ : torch.Tensor = None
-+    sin_ : torch.Tensor = None
 +    positions_: torch.Tensor = None
++    chunked_prefill_enabled: bool = False
++    prefill_cu_seq_lens: torch.Tensor = None
++    prefill_max_seq_len: int = None
++    decode_cu_seq_lens: torch.Tensor = None
++    decode_max_seq_len: int = None
 +
 +    def __init__(
 +        self,
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        dtype: torch.dtype,
 +    ) -> None:
@@ -65,6 +79,20 @@ index 000000000..938551ddb
 +        self.base = base
 +        self.is_neox_style = is_neox_style
 +        self.dtype = dtype
++
++        # For vlm v1
++        # 1. mlu rope run in eager mode
++        # 2. all layer use layer0's rope to inference
++        prefix = "global_rope"
++        vllm_config = get_current_vllm_config()
++        self.use_direct_call = False if envs.VLLM_USE_V1 else True
++        if not self.use_direct_call:
++            compilation_config = vllm_config.compilation_config
++            if prefix in compilation_config.static_forward_context:
++                pass
++            else:
++                compilation_config.static_forward_context[prefix] = self
++            self.layer_name = prefix
 +
 +        if MLURotaryEmbedding.max_seq_len != None \
 +                and self.max_position_embeddings < MLURotaryEmbedding.max_seq_len and \
@@ -88,7 +116,7 @@ index 000000000..938551ddb
 +        cache = cache.to(dtype)
 +        self.cos_sin_cache: torch.Tensor
 +        self.register_buffer("cos_sin_cache", cache, persistent=False)
-+
++        self.cos_, self.sin_ = self._get_cos_sin()
 +
 +    @classmethod
 +    def set_mlu_var(
@@ -121,13 +149,15 @@ index 000000000..938551ddb
 +                    attn_metadata.num_prefill_tokens + attn_metadata.num_decode_tokens))
 +            else:
 +                # input_ids is pack mode, and the decode_seq_len = 1
-+                cu_seq_lens = torch.arange(0, input_ids.shape[0] + 1, 1, dtype=torch.int32, device="mlu")
++                cu_seq_lens = torch.arange(0, input_ids.shape[0] + 1, 1, dtype=torch.int32,
++                                           device=current_platform.device_type)
 +                rope_max_seq_len = 1
 +        cls.cu_seq_lens = cu_seq_lens
 +        cls.max_seq_len = rope_max_seq_len
 +        cls.is_prompt = is_prompt
 +        cls.is_chunked = is_chunked
 +
++        cls.chunked_prefill_enabled = attn_metadata.chunked_prefill_enabled
 +        if prefill_metadata:
 +            cls.prefill_max_seq_len = prefill_metadata.max_query_len
 +            cls.prefill_cu_seq_lens = prefill_metadata.query_start_loc
@@ -139,15 +169,49 @@ index 000000000..938551ddb
 +                cls.decode_cu_seq_lens = cu_seq_lens
 +
 +    @classmethod
++    def set_mlu_var_v1(
++        cls,
++        common_metadata: MLUCommonAttentionMetadata
++    ) -> None:
++        cls.unset_mlu_var()
++        cls.cu_seq_lens = common_metadata.query_start_loc
++        cls.max_seq_len = common_metadata.max_query_len
++        cls.is_prompt = common_metadata.is_prefill_only
++        cls.is_chunked = common_metadata.is_chunked
++        
++        # for MLA
++        attn_metadata = get_forward_context().attn_metadata
++        if isinstance(attn_metadata, dict):
++            _, attn_metadata = next(iter(attn_metadata.items()))
++        if isinstance(attn_metadata, MLACommonMetadata):
++            prefill_metadata = attn_metadata.prefill
++            decode_metadata = attn_metadata.decode
++            if prefill_metadata:
++                cls.prefill_max_seq_len = prefill_metadata.max_query_len
++                cls.prefill_cu_seq_lens = prefill_metadata.query_start_loc    
++            else:
++                cls.prefill_max_seq_len = cls.max_seq_len
++                cls.prefill_cu_seq_lens = cls.cu_seq_lens
++
++            if decode_metadata:
++                cls.decode_max_seq_len = decode_metadata.max_query_len
++                cls.decode_cu_seq_lens = decode_metadata.query_start_loc
++            else:
++                cls.decode_max_seq_len = cls.max_seq_len
++                cls.decode_cu_seq_lens = cls.cu_seq_lens
++
++    @classmethod
 +    def unset_mlu_var(cls):
 +        cls.cu_seq_lens = None
 +        cls.max_seq_len = None
 +        cls.is_prompt = False
 +        cls.is_chunked = False
-+        cls.set_cos_sin = False
-+        cls.cos_ = None
-+        cls.sin_ = None
 +        cls.positions_ = None
++        cls.chunked_prefill_enabled = False
++        cls.prefill_cu_seq_lens = None
++        cls.prefill_max_seq_len = None
++        cls.decode_cu_seq_lens = None
++        cls.decode_max_seq_len = None
 +
 +    def _get_cos_sin(self) -> Tuple[torch.Tensor, torch.Tensor]:
 +        cos, sin = self.cos_sin_cache.chunk(2, dim=-1)
@@ -165,22 +229,32 @@ index 000000000..938551ddb
 +                            f"positions: {positions.numel()}, offsets: {offsets.numel()}")
 +        return (positions + offsets).to(torch.int32)
 +
-+    def forward_oot(
++    def forward_impl(
 +        self,
 +        positions: torch.Tensor,
 +        x: torch.Tensor,
 +        offsets: Optional[torch.Tensor] = None,
-+    ) -> Tuple[torch.Tensor, torch.Tensor]:
-+        from vllm_mlu import _mlu_ops as mlu_ops
-+
-+        # ops.rotary_embedding()/batched_rotary_embedding()
-+        # are in-place operations that update the query and key tensors.
-+        if MLURotaryEmbedding.set_cos_sin == False:
-+            MLURotaryEmbedding.cos_, MLURotaryEmbedding.sin_ = self._get_cos_sin()
-+            MLURotaryEmbedding.set_cos_sin = True
-+        interleaved = True
-+        if self.is_neox_style:
-+            interleaved = False
++    ) -> tuple[torch.Tensor, torch.Tensor]:
++        if envs.VLLM_USE_V1:
++            common_metadata: MLUCommonAttentionMetadata = get_common_metadata()
++            if common_metadata is None:
++                num_tokens, head_num, head_size = x.shape
++                x = mlu_ops.rotary_embedding(
++                    x.view(1, num_tokens, head_num, head_size),
++                    self.sin_,
++                    self.cos_,
++                    positions,
++                    None,
++                    not self.is_neox_style,
++                    True,
++                    False,
++                    num_tokens
++                )
++                return x
++            else:
++                cu_seq_lens_ = common_metadata.query_start_loc
++        else:
++            cu_seq_lens_ = MLURotaryEmbedding.cu_seq_lens
 +
 +        if offsets is not None:
 +            if MLURotaryEmbedding.positions_ is None:
@@ -197,16 +271,49 @@ index 000000000..938551ddb
 +
 +        x = mlu_ops.rotary_embedding(
 +            x,
-+            MLURotaryEmbedding.sin_,
-+            MLURotaryEmbedding.cos_,
++            self.sin_,
++            self.cos_,
 +            position_ids,
-+            MLURotaryEmbedding.cu_seq_lens,
-+            interleaved,
++            cu_seq_lens_,
++            not self.is_neox_style,
 +            discrete,
 +            False,
 +            MLURotaryEmbedding.max_seq_len
 +        )
 +        return x
++
++    def forward_oot(
++        self,
++        positions: torch.Tensor,
++        x: torch.Tensor,
++        offsets: Optional[torch.Tensor] = None,
++    ) -> tuple[torch.Tensor, torch.Tensor]:
++        if self.use_direct_call:
++            return self.forward_impl(positions, x, offsets)
++        else:
++            torch.ops.vllm.rope_forward(positions, x, self.layer_name, offsets)
++
++
++def rope_forward(positions: torch.Tensor, x: torch.Tensor, layer_name: str,
++                 offsets: Optional[torch.Tensor] = None) -> None:
++    forward_context: ForwardContext = get_forward_context()
++    self = forward_context.no_compile_layers[layer_name]
++
++    self.forward_impl(positions, x, offsets)
++
++
++def rope_forward_fake(positions: torch.Tensor, x: torch.Tensor, layer_name: str,
++                      offsets: Optional[torch.Tensor] = None) -> None:
++    return
++
++
++direct_register_custom_op(
++    op_name="rope_forward",
++    op_func=rope_forward,
++    mutates_args=["x"],
++    fake_impl=rope_forward_fake,
++    dispatch_key=current_platform.dispatch_key,
++)
 +
 +
 +class MLULinearScalingRotaryEmbedding(MLURotaryEmbedding, LinearScalingRotaryEmbedding):
@@ -216,49 +323,50 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
-+        scaling_factors: Union[List[float], float],
++        scaling_factors: Union[list[float], float],
 +        dtype: torch.dtype,
 +    ) -> None:
 +        if isinstance(scaling_factors, float):
 +            scaling_factors = [scaling_factors]
-+        self.scaling_factors: List[float] = scaling_factors  # noqa
++        self.scaling_factors: list[float] = scaling_factors  # noqa
 +        MLURotaryEmbedding.__init__(self, head_size, rotary_dim,
 +                                    max_position_embeddings, base,
 +                                    is_neox_style, dtype)
 +        # Lazy initialized.
-+        self._scaling_factor_to_offset: Dict[float, int]
++        self._scaling_factor_to_offset: dict[float, int]
 +
 +    def _compute_inv_freq(self, base: Union[int, float]) -> torch.Tensor:
 +        """Compute the inverse frequency."""
 +        half_dim = self.rotary_dim // 2
 +        if self.is_neox_style:
 +            inv_freq = 1.0 / (base ** ((torch.arange(
-+                0, self.rotary_dim, 1, dtype=torch.float32, device="mlu") % half_dim) * 2 / self.rotary_dim)
++                0, self.rotary_dim, 1, dtype=torch.float32, device=current_platform.device_type) %
++                half_dim) * 2 / self.rotary_dim)
 +            )
 +        else:
 +            inv_freq = 1.0 / (
 +                    base
-+                    ** ( torch.arange(0, self.rotary_dim, 1, device="mlu", dtype=torch.float32) // 2 * 2
-+                        / self.rotary_dim
++                    ** (torch.arange(0, self.rotary_dim, 1, device=current_platform.device_type,
++                        dtype=torch.float32) // 2 * 2 / self.rotary_dim
 +                    )
 +            )
 +        return inv_freq
 +
 +    def _compute_cos_sin_cache(self) -> torch.Tensor:
 +        inv_freq = self._compute_inv_freq(self.base)
-+        cache_list: List[torch.Tensor] = []
++        cache_list: list[torch.Tensor] = []
 +        # offsets to the next cache in a tensor.
 +        # Each offset corresponds to the same index in scaling_factors.
-+        offsets: List[int] = []
++        offsets: list[int] = []
 +        for scaling_factor in self.scaling_factors:
 +            # NOTE(woosuk): self.max_position_embeddings is the original
 +            # maximum length before applying the rope scaling.
 +            # Thus, the maximum length after applying the rope scaling is
 +            # self.max_position_embeddings * self.scaling_factor.
 +            max_len = self.max_position_embeddings * scaling_factor
-+            t = torch.arange(max_len, dtype=torch.float, device="mlu")
++            t = torch.arange(max_len, dtype=torch.float, device=current_platform.device_type)
 +            t = t / scaling_factor
 +
 +            freqs = torch.einsum("i,j -> ij", t, inv_freq)
@@ -288,7 +396,7 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        scaling_factor: float,
 +        dtype: torch.dtype,
@@ -306,7 +414,7 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        scaling_factor: float,
 +        dtype: torch.dtype,
@@ -334,7 +442,6 @@ index 000000000..938551ddb
 +
 +    def forward_mlu_rot(self, input, position_ids, interleaved, discrete, cu_seq_lens, max_seq_len):
 +        """only one input rotary implementation"""
-+        from vllm_mlu import _mlu_ops as mlu_ops
 +        if input is None:
 +            return None
 +        if self.rotary_dim < self.head_size:
@@ -342,8 +449,8 @@ index 000000000..938551ddb
 +        input_rot = input[..., :self.rotary_dim]
 +        input_rot = mlu_ops.rotary_embedding(
 +            input_rot,
-+            MLURotaryEmbedding.sin_,
-+            MLURotaryEmbedding.cos_,
++            self.sin_,
++            self.cos_,
 +            position_ids,
 +            cu_seq_lens,
 +            interleaved,
@@ -360,9 +467,6 @@ index 000000000..938551ddb
 +        return input
 +
 +    def get_param(self, positions):
-+        if MLURotaryEmbedding.set_cos_sin == False:
-+            MLURotaryEmbedding.cos_, MLURotaryEmbedding.sin_ = self._get_cos_sin()
-+            MLURotaryEmbedding.set_cos_sin = True
 +        interleaved = True
 +        if self.is_neox_style:
 +            interleaved = False
@@ -386,15 +490,21 @@ index 000000000..938551ddb
 +    ) -> Tuple[torch.Tensor, torch.Tensor]:
 +        """PyTorch-native implementation equivalent to forward()."""
 +        position_ids, interleaved, discrete = self.get_param(positions)
-+        if only_prefill:
-+            cu_seq_lens = MLURotaryEmbedding.prefill_cu_seq_lens
-+            max_seq_len = MLURotaryEmbedding.prefill_max_seq_len
-+        elif only_decode:
-+            cu_seq_lens = MLURotaryEmbedding.decode_cu_seq_lens
-+            max_seq_len = MLURotaryEmbedding.decode_max_seq_len
-+        else:
-+            cu_seq_lens = MLURotaryEmbedding.cu_seq_lens
-+            max_seq_len = MLURotaryEmbedding.max_seq_len
++        
++        cu_seq_lens = MLURotaryEmbedding.cu_seq_lens
++        max_seq_len = MLURotaryEmbedding.max_seq_len
++
++        # for MLA
++        attn_metadata = get_forward_context().attn_metadata
++        if isinstance(attn_metadata, dict):
++            _, attn_metadata = next(iter(attn_metadata.items()))
++        if isinstance(attn_metadata, MLACommonMetadata):
++            if only_prefill:
++                cu_seq_lens = MLURotaryEmbedding.prefill_cu_seq_lens
++                max_seq_len = MLURotaryEmbedding.prefill_max_seq_len
++            elif only_decode:
++                cu_seq_lens = MLURotaryEmbedding.decode_cu_seq_lens
++                max_seq_len = MLURotaryEmbedding.decode_max_seq_len
 +
 +        query = self.forward_mlu_rot(query, position_ids, interleaved, discrete, cu_seq_lens, max_seq_len)
 +        key = self.forward_mlu_rot(key, position_ids, interleaved, discrete, cu_seq_lens, max_seq_len)
@@ -402,20 +512,13 @@ index 000000000..938551ddb
 +        return query, key
 +
 +    def _compute_inv_freq(self, scaling_factor: float) -> torch.Tensor:
-+        '''
-+        =============================
-+        Modify by vllm_mlu
-+        =============================
-+        @brief: change device cuda to mlu
-+        '''
-+        pos_freqs = self.base**(torch.arange(
-+            0, self.rotary_dim, 2, dtype=torch.float, device="mlu") /
-+                                self.rotary_dim)
-+        '''
-+        ==================
-+        End of MLU Hijack
-+        ==================
-+        '''
++        pos_freqs = self.base**(
++            torch.arange(0,
++                         self.rotary_dim,
++                         2,
++                         dtype=torch.float,
++                         device=current_platform.device_type) /
++            self.rotary_dim)
 +        inv_freq_extrapolation = 1.0 / pos_freqs
 +        inv_freq_interpolation = 1.0 / (scaling_factor * pos_freqs)
 +
@@ -423,29 +526,18 @@ index 000000000..938551ddb
 +                                                self.rotary_dim, self.base,
 +                                                self.max_position_embeddings)
 +        # Get n-d rotational scaling corrected for extrapolation
-+        inv_freq_mask = (1 - _yarn_linear_ramp_mask(
++        inv_freq_mask = ((1 - _yarn_linear_ramp_mask(
 +            low, high, self.rotary_dim // 2,
-+            dtype=torch.float)) * self.extrapolation_factor
++            dtype=torch.float)) * self.extrapolation_factor).to(current_platform.device_type)
 +        inv_freq = inv_freq_interpolation * (
 +            1 - inv_freq_mask) + inv_freq_extrapolation * inv_freq_mask
 +        return inv_freq
 +
 +    def _compute_cos_sin_cache(self) -> torch.Tensor:
 +        inv_freq = self._compute_inv_freq(self.scaling_factor)
-+        '''
-+        =============================
-+        Modify by vllm_mlu
-+        =============================
-+        @brief: change device cuda to mlu
-+        '''
 +        t = torch.arange(self.max_position_embeddings * self.scaling_factor,
-+                         device="mlu",
++                         device=current_platform.device_type,
 +                         dtype=torch.float32)
-+        '''
-+        ==================
-+        End of MLU Hijack
-+        ==================
-+        '''
 +        freqs = torch.einsum("i,j -> ij", t, inv_freq)
 +        cos = (freqs.cos() * self.mscale)
 +        sin = (freqs.sin() * self.mscale)
@@ -453,6 +545,7 @@ index 000000000..938551ddb
 +        return cache
 +
 +    forward = MLURotaryEmbedding.forward
++    forward_native = forward_oot
 +
 +
 +class MLULlama3RotaryEmbedding(MLURotaryEmbedding):
@@ -462,7 +555,7 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        dtype: torch.dtype,
 +        scaling_factor: float,
@@ -488,7 +581,7 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        scaling_alpha: float,
 +        dtype: torch.dtype,
@@ -521,7 +614,7 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        scaling_alpha: float,
 +        dtype: torch.dtype,
@@ -540,10 +633,10 @@ index 000000000..938551ddb
 +        head_size: int,
 +        rotary_dim: int,
 +        max_position_embeddings: int,
-+        base: int,
++        base: float,
 +        is_neox_style: bool,
 +        dtype: torch.dtype,
-+        mrope_section: Optional[List[int]] = None,
++        mrope_section: Optional[list[int]] = None,
 +    ) -> None:
 +        # In Qwen2.5-VL, the maximum index value is related to the duration of
 +        # the input video. We enlarge max_position_embeddings to 4 times to get
@@ -556,15 +649,22 @@ index 000000000..938551ddb
 +        self.mrope_section = mrope_section
 +        if self.mrope_section:
 +            assert sum(self.mrope_section) == rotary_dim // 2
++        self.register_buffer("tmp_cu_seq_lens", torch.zeros(2, dtype=torch.int32), persistent=False)
++        self.mrope_cos_cache = None
++        self.mrope_sin_cache = None
++        self.mrope_cu_seq_lens = None
 +
-+    def forward_oot(
++    def precompute_sin_cos_cache(
 +        self,
-+        positions: torch.Tensor,
-+        x: torch.Tensor,
-+    ) -> Tuple[torch.Tensor, torch.Tensor]:
++        positions: torch.Tensor
++    ):
++        '''
++        call this function before forward decoder layers
++        precompute sin/cos cache for mrope
++        '''
 +        assert positions.ndim == 1 or positions.ndim == 2
-+        num_tokens = positions.shape[-1]
-+
++        if not MLURotaryEmbedding.is_prompt and not MLURotaryEmbedding.is_chunked:
++            return
 +        cos_sin = self.cos_sin_cache[positions]
 +        cos, sin = cos_sin.chunk(2, dim=-1)
 +        if positions.ndim == 2:
@@ -581,22 +681,34 @@ index 000000000..938551ddb
 +                for i, m in enumerate(sin.split(mrope_section, dim=-1))
 +            ],
 +                            dim=-1)
-+        from vllm_mlu import _mlu_ops as mlu_ops
-+        interleaved = True
-+        if self.is_neox_style:
-+            interleaved = False
-+        position_ids = None
-+        discrete = False
-+        # mlu_ops.rotary_embedding() is a in-place operation that update the query and key tensors.
++        self.mrope_cos_cache = cos
++        self.mrope_sin_cache = sin
++        self.mrope_cu_seq_lens = torch.zeros(2, dtype=torch.int32, device=positions.device)
++        num_tokens = positions.shape[-1]
++        self.mrope_cu_seq_lens[1] = num_tokens
++
++    def forward_oot(
++        self,
++        positions: torch.Tensor,
++        x: torch.Tensor,
++    ) -> tuple[torch.Tensor, torch.Tensor]:
++        self.precompute_sin_cos_cache(positions)
++        assert positions.ndim == 1 or positions.ndim == 2
++        if not MLURotaryEmbedding.is_prompt and not MLURotaryEmbedding.is_chunked:
++            return MLURotaryEmbedding.forward_oot(
++                self, positions[0] if positions.ndim == 2 else positions, x)
++        assert self.mrope_cos_cache is not None and self.mrope_sin_cache is not None,\
++            "call precompute_sin_cos_cache first!"
++        num_tokens = positions.shape[-1]
 +        x = mlu_ops.rotary_embedding(x,
-+                                     sin,
-+                                     cos,
-+                                     position_ids,
-+                                     MLURotaryEmbedding.cu_seq_lens,
-+                                     interleaved,
-+                                     discrete,
++                                     self.mrope_sin_cache,
++                                     self.mrope_cos_cache,
++                                     None,
++                                     self.mrope_cu_seq_lens,
++                                     not self.is_neox_style,
 +                                     False,
-+                                     MLURotaryEmbedding.max_seq_len)
++                                     False,
++                                     num_tokens)
 +        return x
 +
 +    forward = MLURotaryEmbedding.forward
@@ -606,11 +718,12 @@ index 000000000..938551ddb
 +    head_size: int,
 +    rotary_dim: int,
 +    max_position: int,
-+    base: int,
++    base: float,
 +    is_neox_style: bool = True,
-+    rope_scaling: Optional[Dict[str, Any]] = None,
++    rope_scaling: Optional[dict[str, Any]] = None,
 +    dtype: Optional[torch.dtype] = None,
 +    partial_rotary_factor: float = 1.0,
++    dual_chunk_attention_config: Optional[dict[str, Any]] = None,
 +) -> RotaryEmbedding:
 +    if dtype is None:
 +        dtype = torch.get_default_dtype()
@@ -623,14 +736,35 @@ index 000000000..938551ddb
 +        rope_scaling_args = tuple(rope_scaling_tuple.items())
 +    else:
 +        rope_scaling_args = None
++
++    if dual_chunk_attention_config is not None:
++        dual_chunk_attention_tuple = {
++            k: tuple(v) if isinstance(v, list) else v
++            for k, v in dual_chunk_attention_config.items()
++            if k != "sparse_attention_config"
++        }
++        dual_chunk_attention_args = tuple(dual_chunk_attention_tuple.items())
++    else:
++        dual_chunk_attention_args = None
++
 +    if partial_rotary_factor < 1.0:
 +        rotary_dim = int(rotary_dim * partial_rotary_factor)
 +    key = (head_size, rotary_dim, max_position, base, is_neox_style,
-+           rope_scaling_args, dtype)
++           rope_scaling_args, dual_chunk_attention_args, dtype)
 +    if key in _ROPE_DICT:
 +        return _ROPE_DICT[key]
 +
-+    if rope_scaling is None:
++    if dual_chunk_attention_config is not None:
++        extra_kwargs = {
++            k: v
++            for k, v in dual_chunk_attention_config.items()
++            if k in ("chunk_size", "local_size")
++        }
++        rotary_emb = DualChunkRotaryEmbedding(head_size, rotary_dim,
++                                              max_position, base,
++                                              is_neox_style, dtype,
++                                              **extra_kwargs)
++    elif not rope_scaling:
 +        rotary_emb = MLURotaryEmbedding(head_size, rotary_dim, max_position, base,
 +                                        is_neox_style, dtype)
 +    else:
@@ -678,6 +812,14 @@ index 000000000..938551ddb
 +                                                         max_position, base,
 +                                                         is_neox_style,
 +                                                         scaling_factor, dtype)
++        elif scaling_type == "ntk":
++            scaling_factor = rope_scaling["factor"]
++            mixed_b = rope_scaling.get('mixed_b', None)
++            rotary_emb = NTKScalingRotaryEmbedding(head_size, rotary_dim,
++                                                   max_position, base,
++                                                   is_neox_style,
++                                                   scaling_factor, dtype,
++                                                   mixed_b)
 +        elif scaling_type == "dynamic":
 +            if "alpha" in rope_scaling:
 +                rotary_emb = MLUDynamicNTKAlphaRotaryEmbedding(

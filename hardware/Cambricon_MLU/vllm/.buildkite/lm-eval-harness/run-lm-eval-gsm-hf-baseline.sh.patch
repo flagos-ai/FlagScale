@@ -1,0 +1,14 @@
+diff --git a/.buildkite/lm-eval-harness/run-lm-eval-gsm-hf-baseline.sh b/.buildkite/lm-eval-harness/run-lm-eval-gsm-hf-baseline.sh
+index a67fc89d5..897f84d1e 100644
+--- a/.buildkite/lm-eval-harness/run-lm-eval-gsm-hf-baseline.sh
++++ b/.buildkite/lm-eval-harness/run-lm-eval-gsm-hf-baseline.sh
+@@ -2,7 +2,7 @@
+ # We can use this script to compute baseline accuracy on GSM for transformers.
+ #
+ # Make sure you have lm-eval-harness installed:
+-#   pip install lm-eval==0.4.4
++#   pip install git+https://github.com/EleutherAI/lm-evaluation-harness.git@206b7722158f58c35b7ffcd53b035fdbdda5126d#egg=lm-eval[api]
+ 
+ usage() {
+     echo``
+

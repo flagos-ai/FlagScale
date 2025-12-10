@@ -1,23 +1,24 @@
 diff --git a/vllm_mlu/vllm_mlu/distributed/parallel_state.py b/vllm_mlu/vllm_mlu/distributed/parallel_state.py
 new file mode 100644
-index 000000000..230f1bccb
+index 000000000..ed4613e15
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/distributed/parallel_state.py
-@@ -0,0 +1,42 @@
-+import contextlib
-+import gc
+@@ -0,0 +1,194 @@
 +import torch
 +from contextlib import contextmanager
 +from typing import Optional
++from dataclasses import dataclass
 +
-+from vllm.distributed import parallel_state
 +from vllm.distributed.parallel_state import (GroupCoordinator,
-+                                             GraphCaptureContext,
-+                                             destroy_model_parallel,
-+                                             destroy_distributed_environment)
++                                             GraphCaptureContext)
++from vllm.distributed.mlu_parallel_state import(
++    get_moe_expert_parallel_world_size, get_moe_expert_parallel_rank,
++    get_moe_expert_parallel_group
++)
 +from vllm.logger import init_logger
 +
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
++from vllm_mlu import _mlu_ops as mlu_ops
 +
 +logger = init_logger(__name__)
 +
@@ -42,9 +43,159 @@ index 000000000..230f1bccb
 +    with torch.mlu.stream(stream):
 +        yield graph_capture_context
 +
++@dataclass
++class CnclEPBuffer:
++    dispatch_send_token_tensor: torch.Tensor
++    dispatch_recv_token_tensor: torch.Tensor
++    combine_send_token_tensor: torch.Tensor
++    combine_recv_token_tensor: torch.Tensor
++
++class CnclEP:
++
++    def __init__(self,
++                 dispatch_token_size: int,
++                 combine_token_size: int,
++                 max_num_tokens_per_rank: int,
++                 num_global_experts: int) -> None:
++        nranks = get_moe_expert_parallel_world_size()
++        rank = get_moe_expert_parallel_rank()
++        moe_ep_group = get_moe_expert_parallel_group()
++        self.max_num_tokens_per_rank = max_num_tokens_per_rank
++
++        (
++            handle,
++            exchange_info_size,
++            exchange_info,
++            dispatch_send_token_tensor,
++            dispatch_recv_token_tensor,
++            combine_send_token_tensor,
++            combine_recv_token_tensor
++        ) = mlu_ops.moe_all2all_create(dispatch_token_size,
++                          combine_token_size,
++                          num_global_experts,
++                          max_num_tokens_per_rank,
++                          rank,
++                          nranks)
++        self.handle = handle
++        self.buffer = CnclEPBuffer(
++            dispatch_send_token_tensor,
++            dispatch_recv_token_tensor,
++            combine_send_token_tensor,
++            combine_recv_token_tensor)
++
++        assert exchange_info.ndim == 1, "exchange_info should be 1D"
++        all_exchange_info = torch.empty((nranks, exchange_info.size(0)), 
++                                        dtype=exchange_info.dtype, 
++                                        device=exchange_info.device)
++        exchange_info = exchange_info.unsqueeze(0)
++        torch.distributed.all_gather_into_tensor(all_exchange_info,
++                                                 exchange_info,
++                                                 group=moe_ep_group.cpu_group,
++                                                 async_op=False)
++        mlu_ops.moe_all2all_init(self.handle, all_exchange_info)
++        torch.distributed.barrier(group=moe_ep_group.cpu_group)
++
++    def dispatch(self,
++                 token_byte: int,
++                 token_num: int,
++                 send_layout: torch.Tensor,                   
++                 send_token_num: torch.Tensor,                
++                 recv_layout: torch.Tensor,                   
++                 recv_token_num: torch.Tensor,                
++                 send_token: Optional[torch.Tensor] = None,   
++                 recv_token: Optional[torch.Tensor] = None,   
++    ) -> None:
++        '''
++        The returned tensors are in-placed modified, we could directly use them
++        after dispatch finishes.
++        '''
++        mlu_ops.moe_all2all_dispatch(self.handle,
++                                     token_byte,
++                                     token_num,
++                                     send_layout,                   
++                                     send_token_num,                
++                                     recv_layout,                   
++                                     recv_token_num,                
++                                     send_token,   
++                                     recv_token)   
++
++    def combine(self,
++                token_byte: int,
++                token_num: int,
++                send_src_layout: torch.Tensor,
++                send_dst_layout: torch.Tensor,
++                send_token: Optional[torch.Tensor] = None,
++                recv_token: Optional[torch.Tensor] = None,
++    ) ->None:
++        mlu_ops.moe_all2all_combine(self.handle,
++                                    token_byte,
++                                    token_num,
++                                    send_src_layout,
++                                    send_dst_layout,
++                                    send_token,
++                                    recv_token)
++
++    def destroy(self) -> None:
++        mlu_ops.moe_all2all_destroy(self.handle)
++
++_CNCLEP: CnclEP | None = None
++
++def get_cnclep() -> CnclEP:
++    assert _CNCLEP is not None, "cnclep is not initialized"
++    return _CNCLEP
++
++def init_cnclep(dispatch_token_size: int,
++                combine_token_size: int,
++                max_num_tokens_per_rank: int,
++                num_global_experts: int):
++    global _CNCLEP
++    assert _CNCLEP is None, "cnclep has been initialized"
++    _CNCLEP = CnclEP(dispatch_token_size, 
++                     combine_token_size,
++                     max_num_tokens_per_rank,
++                     num_global_experts)
++
++def cnclep_dispatch(token_byte: int,
++                    token_num: int,
++                    send_layout: torch.Tensor,                   
++                    send_token_num: torch.Tensor,                
++                    recv_layout: torch.Tensor,                   
++                    recv_token_num: torch.Tensor,                
++                    send_token: Optional[torch.Tensor] = None,   
++                    recv_token: Optional[torch.Tensor] = None,   
++):
++    _CNCLEP.dispatch(token_byte,
++                     token_num,
++                     send_layout,                   
++                     send_token_num,                
++                     recv_layout,                   
++                     recv_token_num,                
++                     send_token,   
++                     recv_token)   
++def cnclep_combine(token_byte: int,
++                   token_num: int,
++                   send_src_layout: torch.Tensor,
++                   send_dst_layout: torch.Tensor,
++                   send_token: Optional[torch.Tensor] = None,
++                   recv_token: Optional[torch.Tensor] = None,
++): 
++    _CNCLEP.combine(token_byte,
++                    token_num,
++                    send_src_layout,
++                    send_dst_layout,
++                    send_token,
++                    recv_token)
++
++def destroy_cnclep():
++    global _CNCLEP
++
++    if _CNCLEP:
++        _CNCLEP.destroy()
++    _CNCLEP = None
++
 +
 +MluHijackObject.apply_hijack(GroupCoordinator,
 +                             GroupCoordinator.graph_capture,
 +                             vllm__distributed__parallel_state__GroupCoordinator__graph_capture)
-\ No newline at end of file
++
 

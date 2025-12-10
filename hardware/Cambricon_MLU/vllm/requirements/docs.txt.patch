@@ -1,0 +1,25 @@
+diff --git a/requirements/docs.txt b/requirements/docs.txt
+index 64c70cb65..ec988d794 100644
+--- a/requirements/docs.txt
++++ b/requirements/docs.txt
+@@ -7,3 +7,19 @@ mkdocs-awesome-nav
+ python-markdown-math
+ regex
+ ruff
++
++# Required for argparse hook only
++-f https://download.pytorch.org/whl/cpu
++cachetools
++cbor2
++cloudpickle
++fastapi
++msgspec
++openai
++pillow
++psutil
++pybase64
++pydantic
++torch
++transformers
++zmq
+

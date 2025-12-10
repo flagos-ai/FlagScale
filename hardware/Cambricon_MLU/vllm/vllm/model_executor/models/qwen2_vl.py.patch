@@ -1,0 +1,20 @@
+diff --git a/vllm/model_executor/models/qwen2_vl.py b/vllm/model_executor/models/qwen2_vl.py
+index a4f8a361e..7621e7050 100644
+--- a/vllm/model_executor/models/qwen2_vl.py
++++ b/vllm/model_executor/models/qwen2_vl.py
+@@ -1015,11 +1015,13 @@ class Qwen2VLMultiModalProcessor(BaseMultiModalProcessor[Qwen2VLProcessingInfo]
+         prompt: str,
+         mm_data: Mapping[str, object],
+         mm_kwargs: Mapping[str, object],
++        tok_kwargs: Mapping[str, object],
+     ) -> BatchFeature:
++        mm_kwargs = self.info._get_image_processor_kwargs(**mm_kwargs)
+         return self.info.ctx.call_hf_processor(
+             self.info.get_hf_processor(**mm_kwargs),
+             dict(text=prompt, **mm_data),
+-            self.info._get_image_processor_kwargs(**mm_kwargs),
++            dict(**mm_kwargs, **tok_kwargs),
+         )
+ 
+     def _get_prompt_updates(
+

@@ -1,0 +1,306 @@
+diff --git a/vllm_mlu/vllm_mlu/v1/attention/backends/mla/flashmla.py b/vllm_mlu/vllm_mlu/v1/attention/backends/mla/flashmla.py
+new file mode 100644
+index 000000000..ed994617b
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/v1/attention/backends/mla/flashmla.py
+@@ -0,0 +1,298 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++from dataclasses import dataclass
++from typing import Any, Optional
++
++import torch
++
++from vllm.attention.backends.abstract import (AttentionType,
++                                              is_quantized_kv_cache)
++from vllm.attention.ops.flashmla import (flash_mla_with_kvcache,
++                                         get_mla_metadata,
++                                         is_flashmla_supported)
++from vllm.logger import init_logger
++from vllm_mlu.v1.attention.backends.mla.common import (MLACommonBackend,
++                                                   MLACommonDecodeMetadata,
++                                                   MLACommonImpl,
++                                                   MLACommonMetadata,
++                                                   MLACommonMetadataBuilder)
++from vllm.v1.kv_cache_interface import AttentionSpec
++from vllm.v1.worker.block_table import BlockTable
++from vllm_mlu.v1.attention.backends.flash_attn import FlashAttentionImpl
++from vllm_mlu import _mlu_ops as mlu_ops
++from vllm_mlu.v1.attention.backends.utils import (MLUCommonAttentionMetadata,
++                                                  get_common_metadata)
++
++logger = init_logger(__name__)
++
++
++class FlashMLABackend(MLACommonBackend):
++
++    @staticmethod
++    def get_name() -> str:
++        return "FLASHMLA_VLLM_V1"
++
++    @staticmethod
++    def get_metadata_cls() -> type["FlashMLAMetadata"]:
++        return FlashMLAMetadata
++
++    @staticmethod
++    def get_builder_cls() -> type["FlashMLAMetadataBuilder"]:
++        return FlashMLAMetadataBuilder
++
++    @staticmethod
++    def get_impl_cls() -> type["FlashMLAImpl"]:
++        return FlashMLAImpl
++    
++    @staticmethod
++    def get_kv_cache_shape(
++        num_blocks: int,
++        block_size: int,
++        num_kv_heads: int,
++        head_size: int,
++    ) -> tuple[int, ...]:
++        return (1, num_blocks, num_kv_heads, block_size, head_size)
++
++    @staticmethod
++    def get_kv_cache_scale_shape(
++        num_blocks: int,
++        block_size: int,
++        num_kv_heads: int,
++    ) -> tuple[int, ...]:
++        return (1, num_blocks, num_kv_heads, block_size)
++
++
++@dataclass
++class FlashMLADecodeMetadata(MLACommonDecodeMetadata):
++    tile_scheduler_metadata: tuple[torch.Tensor, torch.Tensor]
++    num_splits: torch.Tensor
++    
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: MLU
++    '''
++    query_start_loc: torch.Tensor # for rope
++    max_query_len: int # for rope
++    compute_dtype: Optional[torch.dtype] = torch.float32
++    max_seq_len:int = -1 # for attn forward
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++
++
++@dataclass
++class FlashMLAMetadata(MLACommonMetadata[FlashMLADecodeMetadata]):
++    pass
++
++
++class FlashMLAMetadataBuilder(MLACommonMetadataBuilder[FlashMLAMetadata]):
++
++    def __init__(self, runner, kv_cache_spec: AttentionSpec,
++                 block_table: BlockTable):
++        super().__init__(runner, kv_cache_spec, block_table)
++
++        self.num_q_heads = self.runner.model_config.get_num_attention_heads(
++            self.runner.parallel_config)
++
++    def _build_decode(self, block_table_tensor: torch.Tensor,
++                      seq_lens: torch.Tensor) -> FlashMLADecodeMetadata:
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: MLU
++        '''
++        return FlashMLADecodeMetadata(
++            block_table=block_table_tensor,
++            seq_lens=seq_lens,
++            tile_scheduler_metadata=None,
++            num_splits=None,
++            # for mlu
++            max_seq_len=self.seq_lens_cpu[:self._num_decodes].max(),
++            query_start_loc=self.query_start_loc[:self._num_decodes + 1],
++            max_query_len=self.decoder_query_len
++        )
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++
++class FlashMLAImpl(FlashAttentionImpl):
++
++    def __init__(
++        self,
++        num_heads: int,
++        head_size: int,
++        scale: float,
++        num_kv_heads: int,
++        alibi_slopes: Optional[list[float]],
++        sliding_window: Optional[int],
++        kv_cache_dtype: str,
++        blocksparse_params: Optional[dict[str, Any]] = None,
++        logits_soft_cap: Optional[float] = None,
++        attn_type: AttentionType = AttentionType.DECODER,
++        use_irope: bool = False,
++        **extra_impl_args,
++    ) -> None:
++        super().__init__(num_heads=num_heads,
++                         head_size=head_size,
++                         scale=scale,
++                         num_kv_heads=num_kv_heads,
++                         alibi_slopes=alibi_slopes,
++                         sliding_window=sliding_window,
++                         kv_cache_dtype=kv_cache_dtype,
++                         blocksparse_params=blocksparse_params,
++                         logits_soft_cap=logits_soft_cap,
++                         attn_type=attn_type,
++                         use_irope=use_irope,
++                         **extra_impl_args)
++
++    def forward(
++        self,
++        layer: torch.nn.Module,
++        query: torch.Tensor,
++        key: torch.Tensor,
++        value: torch.Tensor,
++        kv_cache: torch.Tensor,
++        attn_metadata: FlashMLAMetadata,
++        output: Optional[torch.Tensor] = None,
++        kwargs: Optional[dict[str, Any]] = {},
++    ) -> torch.Tensor:
++        assert output is not None, "Output tensor must be provided."
++
++        if attn_metadata is None:
++            # Profiling run.
++            return output
++        
++        out_lse = None
++
++        # use default common metadata if kwargs does not have common_metadata
++        common_metadata = kwargs.get("common_metadata", None)
++        if common_metadata is None:
++            common_metadata = get_common_metadata()
++
++        only_prefill = kwargs.get("only_prefill", False)
++        only_decode = kwargs.get("only_decode", False)
++        
++        assert only_prefill != only_decode, "only_prefill and only_decode cannot be True and False at the same time."
++        
++        if only_prefill:
++            cu_seqlens_q = attn_metadata.prefill.query_start_loc
++            cu_seqlens_kv = common_metadata.query_start_loc
++            seqused_k = common_metadata.seq_lens[attn_metadata.num_decodes:]
++            max_seqlen_q = attn_metadata.prefill.max_query_len
++            max_seqlen_k = attn_metadata.prefill.max_seq_len
++            block_table = attn_metadata.prefill.block_table
++            num_actual_tokens = attn_metadata.num_prefill_tokens
++        else:
++            cu_seqlens_q = None # nouse
++            cu_seqlens_kv = None # nouse
++            seqused_k = common_metadata.seq_lens[:attn_metadata.num_decodes]
++            max_seqlen_q = None # nouse
++            max_seqlen_k = attn_metadata.decode.max_seq_len
++            block_table = attn_metadata.decode.block_table
++            num_actual_tokens = attn_metadata.num_decode_tokens
++
++        skip_process_cache = ((self.use_mla
++                              and (common_metadata.is_prefill_only
++                                   or self.use_fused_mla_qkv
++                                   or only_prefill))
++                              or self.kv_sharing_target_layer_name is not None)
++        
++        kv_cache_, kv_cache_scale_ = kv_cache
++        key_cache = kv_cache_[0]
++        value_cache = None if self.use_mla else kv_cache_[1]
++        key_cache_scale, value_cache_scale = None, None
++        if kv_cache_scale_.numel() > 0:
++            key_cache_scale = kv_cache_scale_[0]
++            value_cache_scale = None if self.use_mla else kv_cache_scale_[1]
++        if not skip_process_cache:
++            if is_quantized_kv_cache(self.kv_cache_dtype):
++                mlu_ops.quant_to_paged_cache(
++                    k=key[:num_actual_tokens],
++                    v=(None if self.use_mla else value[:num_actual_tokens]),
++                    k_cache=key_cache,
++                    v_cache=value_cache,
++                    k_cache_quant_scale=key_cache_scale,
++                    v_cache_quant_scale=value_cache_scale,
++                    slot_mapping=attn_metadata.slot_mapping.flatten(),
++                )
++            else:
++                mlu_ops.reshape_paged_cache(
++                    k=key[:num_actual_tokens],
++                    v=(None if self.use_mla else value[:num_actual_tokens]),
++                    k_cache=key_cache,
++                    v_cache=value_cache,
++                    slot_mapping=attn_metadata.slot_mapping.flatten()
++                )
++
++        alibi_slopes = None if self.alibi_slopes is None else \
++                        self.alibi_slopes.repeat(seqused_k.shape[0], 1)
++
++        if common_metadata.is_prefill_only or only_prefill:
++            # prefill only
++            prefill_causal = kwargs.get("prefill_causal", True)
++            cu_seqlens_q = kwargs.get("cu_seq_lens_q", cu_seqlens_q)
++            cu_seqlens_kv = kwargs.get("cu_seq_lens_kv", cu_seqlens_kv)
++            max_seqlen_q = kwargs.get("max_seq_len_q", max_seqlen_q)
++            max_seqlen_k = kwargs.get("max_seq_len_kv", max_seqlen_k)
++            return_lse = kwargs.get("return_lse", False)
++            num_prefill_query_tokens = common_metadata.num_prefill_query_tokens
++            num_prefill_kv_tokens =  common_metadata.num_prefill_kv_tokens
++            attn_output_list = mlu_ops.flash_attention(
++                q=query[:num_prefill_query_tokens],
++                k=key[:num_prefill_kv_tokens],
++                v=value[:num_prefill_kv_tokens],
++                out=output[:num_prefill_query_tokens],
++                cu_seq_lens_q=cu_seqlens_q,
++                cu_seq_lens_kv=cu_seqlens_kv,
++                alibi_slope=alibi_slopes,
++                attn_bias=None,
++                max_seq_len_q=max_seqlen_q,
++                max_seq_len_kv=max_seqlen_k,
++                softmax_scale=self.scale,
++                is_causal=prefill_causal,
++                window_size_left=(-1 if self.sliding_window is None else self.sliding_window[0]),
++                window_size_right=(-1 if self.sliding_window is None else self.sliding_window[1]),
++                compute_dtype=attn_metadata.prefill.compute_dtype,
++                return_lse=return_lse,
++            )
++            if return_lse:
++                out_lse = attn_output_list[1]
++        else:
++            batch_size = block_table.shape[0]
++            # decode only
++            decode_query = query[:num_actual_tokens].view(batch_size, -1, self.num_heads, self.head_size)
++            head_size_v = value.shape[-1] if self.use_mla else self.head_size
++            decode_output = output[:num_actual_tokens].view(batch_size, -1, self.num_heads, head_size_v)
++            q_quant_scale = kwargs.get("q_quant_scale", None)
++            if q_quant_scale is not None:
++                q_quant_scale = q_quant_scale[:num_actual_tokens].view(batch_size, -1, self.num_heads)
++            mlu_ops.single_query_cached_kv_attn(
++                q=decode_query,
++                k_cache=key_cache,
++                v_cache=value_cache,
++                out=decode_output,
++                block_tables=block_table,
++                context_lens=seqused_k,
++                k_cache_quant_scale=key_cache_scale,
++                v_cache_quant_scale=value_cache_scale,
++                alibi_slopes=alibi_slopes,
++                max_contxt_len=max_seqlen_k,
++                windows_size_left=(-1 if self.sliding_window is None else self.sliding_window[0]),
++                windows_size_right=(-1 if self.sliding_window is None else self.sliding_window[0]),
++                softmax_scale=self.scale,
++                head_size_v=(-1 if not self.use_mla else head_size_v),
++                compute_dtype=attn_metadata.decode.compute_dtype,
++                q_quant_scale=q_quant_scale,
++                decoder_attn_dtype=self.decoder_attn_dtype,
++            )
++
++        return output if out_lse is None else (output, out_lse)
+\ No newline at end of file
+

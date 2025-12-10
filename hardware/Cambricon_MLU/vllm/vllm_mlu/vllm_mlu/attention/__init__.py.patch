@@ -1,4 +1,8 @@
 diff --git a/vllm_mlu/vllm_mlu/attention/__init__.py b/vllm_mlu/vllm_mlu/attention/__init__.py
 new file mode 100644
-index 000000000..e69de29bb
+index 000000000..8b1378917
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/attention/__init__.py
+@@ -0,0 +1 @@
++
 

@@ -1,0 +1,110 @@
+diff --git a/vllm_mlu/vllm_mlu/v1/attention/backends/utils.py b/vllm_mlu/vllm_mlu/v1/attention/backends/utils.py
+new file mode 100644
+index 000000000..6483ae118
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/v1/attention/backends/utils.py
+@@ -0,0 +1,102 @@
++import torch
++from typing import Union
++
++from dataclasses import dataclass
++from enum import Enum
++
++from vllm.forward_context import get_forward_context
++from vllm.v1.attention.backends.utils import CommonAttentionMetadata
++
++
++COMMON_METADATA_STR: str = "common_metadata"
++
++
++class MLUInferMode(Enum):
++    CHUNKED      = 1
++    PREFILL_ONLY = 2
++    DECODE_ONLY  = 3
++
++
++@dataclass
++class MLUCommonAttentionMetadata(CommonAttentionMetadata):
++    """
++    Attention metadata attributes that can be shared by layers in different KV
++    cache groups and thus having different block table.
++    """
++    seq_start_loc: torch.Tensor
++    max_query_len: int
++    num_actual_tokens: int
++    num_input_tokens: int
++    # number of query tokens in prefill phase.
++    num_prefill_query_tokens: int
++    # number of key/value tokens in prefill phase.
++    num_prefill_kv_tokens: int
++    infer_mode: MLUInferMode = None
++
++    @property
++    def is_prefill_only(self):
++        return self.infer_mode == MLUInferMode.PREFILL_ONLY
++
++    @property
++    def is_decode_only(self):
++        return self.infer_mode == MLUInferMode.DECODE_ONLY
++
++    @property
++    def is_chunked(self):
++        return self.infer_mode == MLUInferMode.CHUNKED
++
++    @classmethod
++    def build(cls, query_start_loc, seq_lens, seq_start_loc,
++              is_start_loc_match, max_query_len,
++              num_actual_tokens, num_input_tokens: int = 0,
++              num_speculative_tokens: int = 0,
++              has_prefill_reqs: bool = False):
++        """Build attention metadata for MLU inference.
++        
++        Args:
++            has_prefill_reqs: Whether there are pending prefill requests with chunked.
++        """
++        infer_mode = None
++        if is_start_loc_match:
++            infer_mode = MLUInferMode.PREFILL_ONLY
++        elif max_query_len <= (1 + num_speculative_tokens) and (not has_prefill_reqs):
++            infer_mode = MLUInferMode.DECODE_ONLY
++        else:
++            infer_mode = MLUInferMode.CHUNKED
++        num_input_tokens = (num_actual_tokens
++                            if num_input_tokens == 0 else num_input_tokens)
++        return cls(query_start_loc=query_start_loc,
++                   seq_lens=seq_lens,
++                   seq_start_loc=seq_start_loc,
++                   max_query_len=max_query_len,
++                   num_actual_tokens=num_actual_tokens,
++                   num_input_tokens=num_input_tokens,
++                   infer_mode=infer_mode,
++                   num_prefill_query_tokens=num_actual_tokens,
++                   num_prefill_kv_tokens=num_actual_tokens)
++
++
++def get_common_metadata_from_attn_metadata(
++        attn_metadata) -> Union[MLUCommonAttentionMetadata, None]:
++    """
++    Get MLUCommonAttentionMetadata for MLU-V1 inference.
++    Use outside of set_forward_context().
++    """
++    if attn_metadata is None:
++        return
++
++    assert (isinstance(attn_metadata, dict)
++            and COMMON_METADATA_STR in attn_metadata), \
++        f"MLU-V1 only support type(attn_metadata)=dict, and " + \
++        f"{COMMON_METADATA_STR} in attn_metadata. Now, type(attn_metadata)=" + \
++        f"{type(attn_metadata)}, or {COMMON_METADATA_STR} not in attn_metadata."
++    return attn_metadata[COMMON_METADATA_STR]
++
++
++def get_common_metadata() -> Union[MLUCommonAttentionMetadata, None]:
++    """
++    Get MLUCommonAttentionMetadata for MLU-V1 inference.
++    Use inside of set_forward_context().
++    """
++    attn_metadata = get_forward_context().attn_metadata
++    return get_common_metadata_from_attn_metadata(attn_metadata)
+\ No newline at end of file
+

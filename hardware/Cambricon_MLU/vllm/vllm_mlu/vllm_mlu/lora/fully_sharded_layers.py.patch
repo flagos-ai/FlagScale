@@ -1,15 +1,16 @@
 diff --git a/vllm_mlu/vllm_mlu/lora/fully_sharded_layers.py b/vllm_mlu/vllm_mlu/lora/fully_sharded_layers.py
 new file mode 100644
-index 000000000..1625900f0
+index 000000000..54166fead
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/lora/fully_sharded_layers.py
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,77 @@
 +from typing import Optional
 +
 +import torch
 +
 +from vllm.distributed import tensor_model_parallel_all_reduce
 +from vllm.lora.fully_sharded_layers import RowParallelLinearWithShardedLoRA
++from vllm.platforms import current_platform
 +
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
@@ -35,14 +36,18 @@ index 000000000..1625900f0
 +    '''
 +    x = x.view(-1, x.shape[-1])
 +    output, out_orig_shape = output.view(-1,
-+                                         output.shape[-1]), output.shape
++                                            output.shape[-1]), output.shape
 +    buffer = torch.zeros(
 +        (self.n_slices, x.shape[0], self.lora_a_stacked[0].shape[2]),
 +        dtype=torch.float32,
 +        device=x.device,
 +    )
 +
-+    self.punica_wrapper.add_shrink(buffer, x, self.lora_a_stacked, 1.0)
++    shrunk_buffer: Optional[torch.Tensor] = self.punica_wrapper.add_shrink(
++        buffer, x, self.lora_a_stacked, 1.0)
++    if not current_platform.can_update_inplace():
++        buffer = shrunk_buffer
++
 +    buffer = tensor_model_parallel_all_reduce(buffer)
 +
 +    # following S-LoRA, allows the fusing of all_gather and all_reduce
@@ -54,7 +59,7 @@ index 000000000..1625900f0
 +    # NOTE offset are based on the rank.
 +    shard_size = self.lora_b_stacked[0].shape[2]
 +    offset_start = self.tp_rank * shard_size
-+    self.punica_wrapper.add_expand(
++    lora_output: Optional[torch.Tensor] = self.punica_wrapper.add_expand(
 +        output,
 +        buffer,
 +        self.lora_b_stacked,
@@ -63,6 +68,10 @@ index 000000000..1625900f0
 +        offset_start=offset_start,
 +        add_input=True,
 +    )
++
++    if not current_platform.can_update_inplace():
++        output = lora_output
++
 +    output = output.view(*out_orig_shape)
 +    return output
 +

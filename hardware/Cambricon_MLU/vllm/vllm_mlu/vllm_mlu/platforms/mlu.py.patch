@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/platforms/mlu.py b/vllm_mlu/vllm_mlu/platforms/mlu.py
 new file mode 100644
-index 000000000..31938da64
+index 000000000..beecdea5a
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/platforms/mlu.py
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,260 @@
 +from functools import lru_cache
 +from typing import TYPE_CHECKING, Optional, Tuple
 +
@@ -11,12 +11,12 @@ index 000000000..31938da64
 +import torch
 +
 +import vllm.envs as envs
-+from vllm.logger import init_logger
++from vllm.logger import logger
 +from vllm.platforms.interface import (DeviceCapability, Platform,
 +                                      PlatformEnum)
 +
 +from vllm_mlu.model_executor.layers.quantization import (
-+    register_fake_mlu_quantization_methods
++    register_real_mlu_quantization_methods
 +)
 +
 +if TYPE_CHECKING:
@@ -27,18 +27,14 @@ index 000000000..31938da64
 +    VllmConfig = None
 +    FlexibleArgumentParser = None
 +
-+from vllm_mlu._mlu_utils import VLLM_LOGITS_USE_ALL_GATHER
-+
-+logger = init_logger(__name__)
++from vllm_mlu._mlu_utils import (VLLM_LOGITS_USE_ALL_GATHER,
++                                 VLLM_V1_USE_FULL_GRAPH)
 +
 +
 +envs.environment_variables.update({
 +    "MLU_VISIBLE_DEVICES":
 +    lambda: os.environ.get("MLU_VISIBLE_DEVICES", None)
 +})
-+
-+
-+register_fake_mlu_quantization_methods()
 +
 +
 +class MLUPlatform(Platform):
@@ -48,33 +44,37 @@ index 000000000..31938da64
 +    dispatch_key: str = "MLU"
 +    ray_device_key: str = "GPU"
 +    device_control_env_var: str = "MLU_VISIBLE_DEVICES"
-+    simple_compile_backend: str = "eager"  # Disable torch.compile()
++    simple_compile_backend: str = "eager"
 +
 +    supported_quantization: list[str] = ["weightonly", "smoothquant",
 +                                         "awq_mlu", "gptq_mlu", "fp8"]
 +    additional_env_vars: list[str] = ["VLLM_LATENCY_DEBUG",
 +                                      "VLLM_LATENCY_DEBUG_NO_DEVICE",
 +                                      "MLU_GRAPH_CAPTURE_LIST",
-+                                      "DPSK_MCC_PARALLEL_NUM",
-+                                      "VLLM_LOGITS_USE_ALL_GATHER"]
++                                      "VLLM_LOGITS_USE_ALL_GATHER",
++                                      "VLLM_V1_USE_FULL_GRAPH",
++                                      "VLLM_MTP_FIXED_ACCEPTANCE_RATE"]
 +
 +    @classmethod
 +    def pre_register_and_update(cls,
 +                                parser: Optional[FlexibleArgumentParser] = None
 +                                ) -> None:
-+        pass
++        register_real_mlu_quantization_methods()
 +
 +    @classmethod
 +    def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
 +                             kv_cache_dtype, block_size, use_v1, use_mla) -> str:
 +        if use_v1:
-+            logger.warning(
-+                f"AttentionBackend v1 is not supported on MLU now, forcing AttentionBackend to v0.")
-+        if use_mla:
-+            logger.info(f"Select MLUMLAFlashAttentionBackend.")
-+            return "vllm_mlu.attention.backends.mlu_flash_attn.MLUMLAFlashAttentionBackend"
-+        logger.info(f"Select MLUFlashAttentionBackend.")
-+        return "vllm_mlu.attention.backends.mlu_flash_attn.MLUFlashAttentionBackend"
++            if use_mla:
++                logger.info(f"Select MLU-MLA-V1 FlashAttentionBackend.")
++                return "vllm_mlu.v1.attention.backends.mla.flashmla.FlashMLABackend"
++            else:
++                logger.info(f"Select MLU-V1 FlashAttentionBackend.")
++                return "vllm_mlu.v1.attention.backends.flash_attn.FlashAttentionBackend"
++        else:
++            assert not use_mla, "Since v0.9.1, Only MLU-V1 support mla."
++            logger.info(f"Select MLU-V0 FlashAttentionBackend.")
++            return "vllm_mlu.attention.backends.flash_attn.FlashAttentionBackend"
 +
 +    @classmethod
 +    @lru_cache(maxsize=8)
@@ -118,38 +118,108 @@ index 000000000..31938da64
 +
 +    @classmethod
 +    def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
++        use_v1 = envs.VLLM_USE_V1
++        if not use_v1:
++            logger.warning(
++                "\nSince v0.9.1, MLU defaults to using the V1 mode.\n"
++                "Currently, it is in V0 mode,\n"
++                "which may potentially cause functional and performance issues...\n"
++            )
++
++        # Decode use full mlugraph
++        # 1. V0 mode
++        # 2. V1 mode + VLLM_V1_USE_FULL_GRAPH=true
++        use_full_mlugraph = (not use_v1 or VLLM_V1_USE_FULL_GRAPH)
++
++        # Check compilation config
 +        from vllm.config import CompilationLevel
 +        compilation_config = vllm_config.compilation_config
 +        if compilation_config.level != CompilationLevel.NO_COMPILATION:
-+            logger.warning(
-+                "Compilation level %s is not supported on MLU now, forcing compilation level to NO_COMPILATION",
-+                compilation_config.level)
-+            compilation_config.level = CompilationLevel.NO_COMPILATION
++            if use_full_mlugraph:
++                compilation_config.level = CompilationLevel.NO_COMPILATION
++                logger.warning(
++                    "Enable full graph capture, set compilation level to %s.",
++                    compilation_config.level)
++            else:
++                logger.warning(
++                    "Compilation level %s is experimental supported on MLU now.",
++                    compilation_config.level)
 +
++        # Dispatch worker
 +        parallel_config = vllm_config.parallel_config
 +        scheduler_config = vllm_config.scheduler_config
-+
 +        if parallel_config.worker_cls == "auto":
 +            if scheduler_config.is_multi_step:
-+                if envs.VLLM_USE_V1:
-+                    raise NotImplementedError(f"vllm v1 is not supported on mlu platform.")
++                if use_v1:
++                    raise NotImplementedError(
++                        f"v1 + multi_step is not supported on mlu platform.")
 +                else:
 +                    parallel_config.worker_cls = \
-+                        "vllm_mlu.worker.multi_step_mlu_worker.MLUMultiStepWorker"
++                        "vllm_mlu.worker.multi_step_worker.MLUMultiStepWorker"
 +            elif vllm_config.speculative_config:
-+                parallel_config.worker_cls = \
-+                        "vllm.spec_decode.spec_decode_worker.create_spec_worker"
-+                parallel_config.sd_worker_cls = \
-+                        "vllm_mlu.worker.mlu_worker.MLUWorker"
-+            else:
-+                if envs.VLLM_USE_V1:
-+                    raise NotImplementedError(f"vllm v1 is not supported on mlu platform.")
++                if use_v1:
++                    parallel_config.worker_cls = \
++                            "vllm_mlu.v1.worker.gpu_worker.MLUWorker"
 +                else:
-+                    parallel_config.worker_cls = "vllm_mlu.worker.mlu_worker.MLUWorker"
++                    parallel_config.worker_cls = \
++                            "vllm_mlu.spec_decode.spec_decode_worker.create_spec_worker"
++                    parallel_config.sd_worker_cls = \
++                            "vllm_mlu.worker.worker.MLUWorker"
++            else:
++                if use_v1:
++                    parallel_config.worker_cls = \
++                        "vllm_mlu.v1.worker.gpu_worker.MLUWorker"
++                else:
++                    parallel_config.worker_cls = \
++                        "vllm_mlu.worker.worker.MLUWorker"
 +
 +        cache_config = vllm_config.cache_config
 +        if cache_config and cache_config.block_size is None:
 +            cache_config.block_size = 16
++
++        if use_v1:
++            # Check compilation config
++            cls.simple_compile_backend = "inductor"
++            # Activate custom ops for v1.
++            compilation_config.custom_ops = ["all"]
++            compilation_config.splitting_ops.extend(["vllm.rope_forward"])
++
++            # FIXME: support cascade attention in VLLM-1710
++            model_config = vllm_config.model_config
++            if model_config:
++                model_config.disable_cascade_attn = True
++
++        # Check scheduler config
++        model_config = vllm_config.model_config
++        speculative_config = vllm_config.speculative_config
++        mlu_config = vllm_config.mlu_config
++        if (model_config and model_config.use_mla and (mlu_config.is_dpsk_mcc_enabled
++                or scheduler_config.num_scheduler_steps > 1
++                or not use_full_mlugraph)):
++            scheduler_config.enable_chunked_prefill = False
++            scheduler_config.chunked_prefill_enabled = False
++            logger.warning(
++                "Chunked prefill is disabled when dpsk mcc or mtp is enabled, or "
++                "num_scheduler_steps > 1, or not use full mlugraph, forcing "
++                "chunked prefill to be disabled.")
++
++        cache_config = vllm_config.cache_config
++        if mlu_config.is_dpsk_mcc_enabled and cache_config is not None:
++            cache_config.enable_prefix_caching = False
++            logger.info(
++                "Prefix Caching is disabled when dpsk mcc is enabled.")
++
++        if mlu_config.dispatch_shared_expert_parallel and parallel_config.data_parallel_size <= 1:
++            mlu_config.dispatch_shared_expert_parallel = False
++            logger.info(
++                "Disabling `mlu_config.dispatch_shared_expert_parallel` when data_parallel_size == 1."
++            )
++
++        # Check kv_transfer config
++        kv_transfer_config = vllm_config.kv_transfer_config
++        if kv_transfer_config:
++            # Register mlu kv_connectors
++            import vllm_mlu.distributed.kv_transfer.kv_connector.factory
 +
 +    @classmethod
 +    def get_current_memory_usage(cls,
@@ -170,13 +240,28 @@ index 000000000..31938da64
 +    def use_all_gather(cls) -> bool:
 +        from vllm.config import get_current_vllm_config
 +        parallel_config = get_current_vllm_config().parallel_config
-+        return (VLLM_LOGITS_USE_ALL_GATHER or parallel_config.distributed_executor_backend
-+                == "external_launcher")
++        return (envs.VLLM_USE_V1
++                or VLLM_LOGITS_USE_ALL_GATHER
++                or parallel_config.distributed_executor_backend == "external_launcher")
 +
 +    @classmethod
 +    def supports_v1(cls, model_config: ModelConfig) -> bool:
 +        """Returns whether the current platform can support v1 for the supplied
 +        model configuration.
 +        """
-+        return False
++        return True
++
++    @classmethod
++    def get_piecewise_backend_cls(cls) -> str:
++        return "vllm_mlu.compilation.mlu_piecewise_backend.MLUPiecewiseBackend"  # noqa
++
++    @classmethod
++    def can_update_inplace(cls) -> bool:
++        """
++        Checks if the platform allows inplace memory updates
++        """
++        return True
++    
++    def is_sleep_mode_available(self) -> bool:
++        return True
 

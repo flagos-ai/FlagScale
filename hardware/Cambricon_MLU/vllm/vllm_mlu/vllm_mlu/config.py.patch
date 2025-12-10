@@ -1,26 +1,25 @@
 diff --git a/vllm_mlu/vllm_mlu/config.py b/vllm_mlu/vllm_mlu/config.py
 new file mode 100644
-index 000000000..eac896a78
+index 000000000..5a5da805c
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/config.py
-@@ -0,0 +1,278 @@
-+from typing import Tuple
+@@ -0,0 +1,424 @@
++from typing import get_args
 +
-+import torch
++import os
 +
 +import vllm.envs as envs
 +from vllm.logger import init_logger
-+from vllm.config import (ModelConfig, CacheConfig, LoRAConfig,
-+                         VllmConfig, CompilationConfig, CompilationLevel,
-+                         _DEFAULT_MAX_NUM_BATCHED_TOKENS)
-+from vllm.utils import random_uuid
-+from vllm_mlu._mlu_utils import is_dpsk_mcc_enabled
++from vllm.config import (VllmConfig, ModelConfig, CacheConfig,
++                         LoRAConfig, SpeculativeConfig,
++                         SchedulerConfig, ParallelConfig, CacheDType,
++                         _get_and_verify_max_len, try_get_tokenizer_config)
++from vllm_mlu._mlu_utils import VLLM_V1_USE_FULL_GRAPH, VLLM_V1_BENCHMARK
 +
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
++from vllm.platforms import current_platform
 +
 +logger = init_logger(__name__)
-+
-+vllm__config__LoRAConfig__verify_with_model_config_org = LoRAConfig.verify_with_model_config
 +
 +
 +def vllm__config__CacheConfig___verify_cache_dtype(self) -> None:
@@ -28,20 +27,21 @@ index 000000000..eac896a78
 +    =============================
 +    Modify by vllm_mlu
 +    =============================
-+    @brief: add kv_cache_dtype int8 support
++    @brief: add kv_cache_dtype int8/fp8/fp8_e4m3 support
 +    '''
 +    if self.cache_dtype == "auto":
 +        pass
-+    elif self.cache_dtype in ("fp8", "fp8_e4m3", "fp8_e5m2"):
++    elif self.cache_dtype in get_args(CacheDType):
++        if self.cache_dtype.startswith("fp8"):
++            if current_platform.is_out_of_tree() and current_platform.get_device_capability().major < 6:
++                raise ValueError(f"MLU backend does not support {self.cache_dtype} kv cache for now")
++        if self.cache_dtype == "fp8_e5m2":
++            raise ValueError("MLU backend does not support fp8_e5m2 kv cache for now")
 +        logger.info(
-+            "Using fp8 data type to store kv cache. It reduces the GPU "
++            f"Using {self.cache_dtype} data type to store kv cache. It reduces the MLU "
 +            "memory footprint and boosts the performance. "
 +            "Meanwhile, it may cause accuracy drop without a proper "
 +            "scaling factor")
-+    elif self.cache_dtype == 'int8':
-+        logger.info(
-+            "Using int8 data type to store kv cache. It reduces the MLU "
-+            "memory footprint and boosts the performance. ")
 +    else:
 +        raise ValueError(f"Unknown kv cache dtype: {self.cache_dtype}")
 +    '''
@@ -84,8 +84,10 @@ index 000000000..eac896a78
 +    if self.is_attention_free:
 +        return 0
 +
-+    if hasattr(self.hf_text_config, "head_dim"):
++    # NOTE: Some configs may set head_dim=None in the config
++    if getattr(self.hf_text_config, "head_dim", None) is not None:
 +        return self.hf_text_config.head_dim
++
 +    # FIXME(woosuk): This may not be true for all models.
 +    '''
 +    =============================
@@ -106,167 +108,308 @@ index 000000000..eac896a78
 +    '''
 +
 +
-+def vllm__config__ModelConfig__set_context_mlugraph_info(
-+    self,
-+    enable_context_mlugraph: bool,
-+    batch_size: int,
-+    seq_len: int
-+) -> None:
-+    self.enable_context_mlugraph = enable_context_mlugraph
-+    self.context_batch_size_to_capture = batch_size
-+    self.context_seq_len_to_capture = seq_len
++def vllm__config__ModelConfig__get_and_verify_max_len(self, max_model_len: int) -> bool:
++    max_model_len = _get_and_verify_max_len(
++        hf_config=self.hf_text_config,
++        max_model_len=max_model_len,
++        disable_sliding_window=self.disable_sliding_window,
++        sliding_window_len=self.get_hf_config_sliding_window(),
++        spec_target_max_model_len=self.spec_target_max_model_len,
++        encoder_config=self.encoder_config)
++    tokenizer_config = try_get_tokenizer_config(
++        self.tokenizer,
++        trust_remote_code=self.trust_remote_code,
++        revision=self.tokenizer_revision)
 +
++    if tokenizer_config is None:
++        return max_model_len
 +
-+def vllm__config__ModelConfig__use_context_mlugraph(self) -> bool:
-+    return hasattr(self, "enable_context_mlugraph") and self.enable_context_mlugraph
-+
-+
-+def vllm__config__ModelConfig__get_context_mlugraph_bs_and_seq(self) -> Tuple[int, int]:
-+    return self.context_batch_size_to_capture, self.context_seq_len_to_capture
-+
-+
-+def vllm__config__ModelConfig__is_embedding_task(self) -> bool:
-+    return self.runner_type == "pooling"
-+
-+
-+def vllm__config__LoRAConfig__verify_with_model_config(self, model_config: ModelConfig):
++    model_max_length = tokenizer_config.get("model_max_length",
++                                            max_model_len)
 +    '''
 +    =============================
 +    Modify by vllm_mlu
 +    =============================
 +    @brief: do not support quantization with lora for now
 +    '''
-+    if model_config.quantization:
-+        raise ValueError("MLU backend does not support quantization with lora for now")
++    if envs.VLLM_ALLOW_LONG_MAX_MODEL_LEN:
++        logger.warning(f"skip model_max_length check in tokenizer when set ENV VLLM_ALLOW_LONG_MAX_MODEL_LEN. " \
++                       f"origin_max_model_len {max_model_len}, model_max_length in tokenizer {model_max_length}.")
++    else:
++        max_model_len = min(max_model_len, model_max_length)
 +    '''
 +    ==================
 +    End of MLU Hijack
 +    ==================
 +    '''
-+    vllm__config__LoRAConfig__verify_with_model_config_org(self, model_config)
++    return max_model_len
++
++def vllm__config__ModelConfig__is_embedding_task(self) -> bool:
++    return self.runner_type == "pooling"
 +
 +
-+class VllmConfig_Mluhijack(VllmConfig):
++def vllm__config__VllmConfig___set_cudagraph_sizes(self):
++    """
++    cudagraph batchsize padding logic:
 +
-+    def __post_init__(self):
-+        """Verify configs are valid & consistent with each other.
-+        """
-+        if self.model_config is not None:
-+            self.model_config.verify_async_output_proc(self.parallel_config,
-+                                                       self.speculative_config,
-+                                                       self.device_config)
-+            self.model_config.verify_with_parallel_config(self.parallel_config)
++    `[1, 2, 4] + [8 * i for i in range(1, 1025)]` is a list of all possible
++    batch sizes that cudagraph will capture.
 +
-+        if self.cache_config is not None:
-+            self.cache_config.verify_with_parallel_config(self.parallel_config)
++    Depending on the engine's configuration of `max_num_seqs`, the
++    candidate batch sizes to capture cudagraph will shrink to the subset
++    which just cover the range of `[1, max_num_seqs]`. In the common case,
++    `max_num_seqs` is 256, and the cudagraph batch sizes will be
++    `[1, 2, 4, 8, 16, 24, 32, 40, ..., 256]`.
 +
-+        if self.lora_config:
-+            self.lora_config.verify_with_cache_config(self.cache_config)
-+            self.lora_config.verify_with_model_config(self.model_config)
-+            self.lora_config.verify_with_scheduler_config(
-+                self.scheduler_config)
-+        if self.prompt_adapter_config:
-+            self.prompt_adapter_config.verify_with_model_config(
-+                self.model_config)
++    However, if users specify the cudagraph capture sizes through
++    compilation config, we will use the specified sizes instead.
 +
-+        if self.quant_config is None and \
-+            self.model_config is not None and self.load_config is not None:
-+            self.quant_config = VllmConfig._get_quantization_config(
-+                self.model_config, self.load_config)
++    In the end, `vllm_config.compilation_config.cudagraph_capture_sizes`
++    will be the final sizes to capture cudagraph (in descending order).
 +
-+        from vllm.platforms import current_platform
++    During runtime, if batchsize is larger than
++    `vllm_config.compilation_config.cudagraph_capture_sizes`,
++    no cudagraph will be used.
++    If the batch size is no larger than
++    `vllm_config.compilation_config.cudagraph_capture_sizes`,
++    we can quickly find the padded graph size for a given batch size by
++    looking up `vllm_config.compilation_config.bs_to_padded_graph_size`.
++    """
++
++    # calculate the default `batch_size_capture_list`
++    if not envs.VLLM_USE_V1:
++        batch_size_capture_list = []
++        max_batchsize_to_capture = 0
 +        if self.scheduler_config is not None and \
 +            self.model_config is not None and \
-+            self.scheduler_config.chunked_prefill_enabled and \
-+            self.model_config.dtype == torch.float32 and \
-+            current_platform.get_device_capability() == (7, 5):
-+            logger.warning_once(
-+                "Turing devices tensor cores do not support float32 matmul. "
-+                "To workaround this limitation, vLLM will set 'ieee' input "
-+                "precision for chunked prefill triton kernels.")
++                not self.model_config.enforce_eager:
 +
-+        if self.compilation_config is None:
-+            self.compilation_config = CompilationConfig()
-+        if envs.VLLM_USE_V1 and self.model_config is not None and \
++            possible_sizes = [1, 2, 4] + [8 * i for i in range(1, 1025)]
++            if self.parallel_config.tensor_parallel_size > 1 and \
++                self.compilation_config.pass_config.enable_sequence_parallelism:
++                possible_sizes = self.update_sizes_for_sequence_parallelism(
++                    possible_sizes)
++
++            # find the minimum size that is larger than max_num_seqs,
++            # which then becomes the max_batchsize_to_capture
++            larger_sizes = [
++                x for x in possible_sizes
++                if x >= self.scheduler_config.max_num_seqs
++            ]
++            if larger_sizes:
++                max_batchsize_to_capture = larger_sizes[0]
++            else:
++                max_batchsize_to_capture = possible_sizes[-1]
++
++            # filter out the sizes that are
++            # larger than max_batchsize_to_capture
++            batch_size_capture_list = [
++                size for size in possible_sizes
++                if size <= max_batchsize_to_capture
++            ]
++    else:
++        batch_size_capture_list = []
++        if self.model_config is not None and \
 +            not self.model_config.enforce_eager:
-+            # NOTE(woosuk): Currently, we use inductor because the piecewise
-+            # CUDA graphs do not work properly with the custom CUDA kernels.
-+            # FIXME(woosuk): Disable inductor to reduce the compilation time
-+            # and avoid any potential issues with the inductor.
-+            # FIXME(rob): Add function to set all of these.
-+            self.compilation_config.custom_ops = ["none"]
-+            self.compilation_config.use_cudagraph = True
-+            self.compilation_config.use_inductor = True
-+            self.compilation_config.cudagraph_num_of_warmups = 1
-+            self.compilation_config.pass_config.enable_fusion = False
-+            self.compilation_config.pass_config.enable_noop = False
-+            self.compilation_config.level = CompilationLevel.PIECEWISE
-+            self.compilation_config.set_splitting_ops_for_v1()
-+
-+        self._set_cudagraph_sizes()
-+
-+        if self.cache_config is not None and \
-+            self.cache_config.cpu_offload_gb > 0 and \
-+            self.compilation_config.level != CompilationLevel.NO_COMPILATION \
-+                and not envs.VLLM_USE_V1:
-+            logger.warning(
-+                "CPU offload is not supported with `torch.compile` in v0 yet."
-+                " Disabling `torch.compile`.")
-+            self.compilation_config.level = CompilationLevel.NO_COMPILATION
-+
-+        if ((not envs.VLLM_USE_V1) and self.lora_config is not None
-+                and self.compilation_config.level
-+                != CompilationLevel.NO_COMPILATION):
-+            logger.warning(
-+                "LoRA for V0 is not supported with `torch.compile` yet. "
-+                "Disabling `torch.compile`.")
-+            self.compilation_config.level = CompilationLevel.NO_COMPILATION
-+
-+        if self.model_config and self.model_config.use_mla and \
-+            not (current_platform.is_cuda() or current_platform.is_rocm()):
++            cuda_graph_sizes = self.scheduler_config.cuda_graph_sizes
++            if len(cuda_graph_sizes) == 1:
++                batch_size_capture_list = [1, 2, 4] + [
++                    i for i in range(8, cuda_graph_sizes[0] + 1, 8)
++                ]
++            elif len(cuda_graph_sizes) > 1:
++                batch_size_capture_list = sorted(cuda_graph_sizes)
++            else:
++                raise TypeError(f"Invalid value for {cuda_graph_sizes=}.")
++            if self.parallel_config.tensor_parallel_size > 1 and \
++                self.compilation_config.pass_config.enable_sequence_parallelism:
++                batch_size_capture_list = \
++                    self.update_sizes_for_sequence_parallelism(batch_size_capture_list)
++            max_num_tokens = self.scheduler_config.max_num_batched_tokens
++            max_num_seqs = self.scheduler_config.max_num_seqs
++            batch_size_capture_list = [
++                size for size in batch_size_capture_list
++                if size <= max_num_tokens and size <= max_num_seqs
++            ]
 +            '''
 +            =============================
 +            Modify by vllm_mlu
 +            =============================
-+            @brief: do not modify max_num_batched_tokens values.
-+            @brief: MLU also supports chunked prefill.
++            @brief: add max_num_seqs into batch_size_capture_list without mla,
++                    should be removed when other models support graph pad
 +            '''
-+            if not current_platform.is_out_of_tree() or is_dpsk_mcc_enabled(
-+            ) or (self.speculative_config is not None
-+                  and self.speculative_config.num_speculative_tokens
-+                  > 0) or self.scheduler_config.num_scheduler_steps > 1:
-+                self.scheduler_config.enable_chunked_prefill = False
-+                self.scheduler_config.chunked_prefill_enabled = False
-+                logger.warning(
-+                    "Chunked prefill is disabled on a non-MLU platform, or dpsk mcc or mtp is enabled,"
-+                    " or num_scheduler_steps > 1, forcing chunked prefill and prefix caching to be disabled.")
-+
-+            # self.scheduler_config.max_num_batched_tokens = max(
-+            #     self.scheduler_config.max_model_len,
-+            #     _DEFAULT_MAX_NUM_BATCHED_TOKENS)
-+
-+            if self.cache_config is not None:
-+                self.cache_config.enable_prefix_caching = False
++            if (not self.model_config.is_deepseek_mla
++                    and max_num_seqs not in batch_size_capture_list):
++                batch_size_capture_list += [max_num_seqs]
 +            '''
 +            ==================
 +            End of MLU Hijack
 +            ==================
 +            '''
-+        current_platform.check_and_update_config(self)
 +
-+        if not self.instance_id:
-+            self.instance_id = random_uuid()[:5]
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief:
++    1) check batch_size_capture_list when enable mtp because bs * (K + 1)
++      may greater than max_num_batched_tokens
++    2) capture MLUGraph by given batch list
++    '''
++    mlu_graph_capture_list = os.getenv("MLU_GRAPH_CAPTURE_LIST", None)
++    if mlu_graph_capture_list:
++        if "-" in mlu_graph_capture_list:
++            batch_info = mlu_graph_capture_list.split("-")
++            assert len(batch_info) == 3, \
++                f"Got invalid graph_capture_list={mlu_graph_capture_list}, " + \
++                f"but expected format 'min_bs-max_bs(may not include)-step'."
++            start, end, step = mlu_graph_capture_list.split("-")
++            batch_size_capture_list = [1, 2, 4] + [
++                i for i in range(int(start), int(end), int(step))
++            ]
++            batch_size_capture_list = sorted(list(set(batch_size_capture_list)))
++        else:
++            batch_size_capture_list = [int(x) for x in mlu_graph_capture_list.split(",")]
++
++    if (VLLM_V1_USE_FULL_GRAPH
++            and len(batch_size_capture_list) > 0
++            and self.speculative_config is not None
++            and self.speculative_config.num_speculative_tokens > 0):
++        K = self.speculative_config.num_speculative_tokens
++        batch_size_capture_list = [
++            size for size in batch_size_capture_list
++            if size * (K + 1) <= self.scheduler_config.max_num_batched_tokens
++        ]
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++
++    self.compilation_config.init_with_cudagraph_sizes(
++        batch_size_capture_list)
++
++
++@staticmethod
++def vllm__config__SpeculativeConfig__create_draft_parallel_config(
++    target_parallel_config: ParallelConfig,
++    speculative_draft_tensor_parallel_size: int,
++) -> ParallelConfig:
++    """Create a parallel config for use by the draft worker.
++
++    This is mostly a copy of the target parallel config, except the tp_size.
++    """
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    '''
++    draft_parallel_config = ParallelConfig(
++        pipeline_parallel_size=target_parallel_config.
++        pipeline_parallel_size,
++        tensor_parallel_size=speculative_draft_tensor_parallel_size,
++        # add draft data parallel parameters
++        data_parallel_size=target_parallel_config.data_parallel_size,
++        data_parallel_size_local=target_parallel_config.data_parallel_size_local,
++        data_parallel_master_ip=target_parallel_config.data_parallel_master_ip,
++        data_parallel_rpc_port=target_parallel_config.data_parallel_rpc_port,
++        distributed_executor_backend=target_parallel_config.
++        distributed_executor_backend,
++        max_parallel_loading_workers=target_parallel_config.
++        max_parallel_loading_workers,
++        disable_custom_all_reduce=target_parallel_config.
++        disable_custom_all_reduce,
++        tokenizer_pool_config=target_parallel_config.tokenizer_pool_config,
++        ray_workers_use_nsight=target_parallel_config.
++        ray_workers_use_nsight,
++        placement_group=target_parallel_config.placement_group,
++    )
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++
++    return draft_parallel_config
++
++
++vllm__config__SchedulerConfig___verify_args__org = SchedulerConfig._verify_args
++
++
++def vllm__config__SchedulerConfig___verify_args(self) -> None:
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: This restriction is removed when VLLM_V1_BENCHMARK is set to True
++    '''
++    if not VLLM_V1_BENCHMARK:
++        if (self.max_num_batched_tokens < self.max_model_len
++                and not self.chunked_prefill_enabled):
++            raise ValueError(
++                f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
++                f"smaller than max_model_len ({self.max_model_len}). "
++                "This effectively limits the maximum sequence length to "
++                "max_num_batched_tokens and makes vLLM reject longer "
++                "sequences. Please increase max_num_batched_tokens or "
++                "decrease max_model_len.")
++
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++    if self.max_num_batched_tokens < self.max_num_seqs:
++        raise ValueError(
++            f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
++            "be greater than or equal to max_num_seqs "
++            f"({self.max_num_seqs}).")
++
++    if self.max_num_batched_tokens > self.max_num_seqs * self.max_model_len:
++        logger.warning(
++            "max_num_batched_tokens (%d) exceeds max_num_seqs"
++            "* max_model_len (%d). This may lead to unexpected behavior.",
++            self.max_num_batched_tokens,
++            self.max_num_seqs * self.max_model_len)
++
++    if self.num_lookahead_slots < 0:
++        raise ValueError(
++            "num_lookahead_slots "
++            f"({self.num_lookahead_slots}) must be greater than or "
++            "equal to 0.")
++
++    if self.num_scheduler_steps < 1:
++        raise ValueError(
++            "num_scheduler_steps "
++            f"({self.num_scheduler_steps}) must be greater than or "
++            "equal to 1.")
++
++    if self.max_num_partial_prefills < 1:
++        raise ValueError(
++            f"max_num_partial_prefills ({self.max_num_partial_prefills}) "
++            "must be greater than or equal to 1.")
++    elif self.max_num_partial_prefills > 1:
++        if not self.chunked_prefill_enabled:
++            raise ValueError("Chunked prefill must be enabled to set "
++                             "max_num_partial_prefills > 1.")
++
++        if self.long_prefill_token_threshold > self.max_model_len:
++            raise ValueError(
++                "long_prefill_token_threshold "
++                f"({self.long_prefill_token_threshold}) cannot be greater "
++                f"than the max_model_len ({self.max_model_len}).")
++
++    if (self.max_long_partial_prefills
++            < 1) or (self.max_long_partial_prefills
++                     > self.max_num_partial_prefills):
++        raise ValueError(
++            f"max_long_partial_prefills ({self.max_long_partial_prefills}) "
++            "must be greater than or equal to 1 and less than or equal to "
++            f"max_num_partial_prefills ({self.max_num_partial_prefills}).")
 +
 +
 +MluHijackObject.apply_hijack(ModelConfig,
-+                             "set_context_mlugraph_info",
-+                             vllm__config__ModelConfig__set_context_mlugraph_info)
-+MluHijackObject.apply_hijack(ModelConfig,
-+                             "use_context_mlugraph",
-+                             vllm__config__ModelConfig__use_context_mlugraph)
-+MluHijackObject.apply_hijack(ModelConfig,
-+                             "get_context_mlugraph_bs_and_seq",
-+                             vllm__config__ModelConfig__get_context_mlugraph_bs_and_seq)
++                             "get_and_verify_max_len",
++                             vllm__config__ModelConfig__get_and_verify_max_len)
 +MluHijackObject.apply_hijack(ModelConfig,
 +                             "is_embedding_task",
 +                             vllm__config__ModelConfig__is_embedding_task)
@@ -276,10 +419,13 @@ index 000000000..eac896a78
 +MluHijackObject.apply_hijack(ModelConfig,
 +                             ModelConfig.get_head_size,
 +                             vllm__config__ModelConfig__get_head_size)
-+MluHijackObject.apply_hijack(LoRAConfig,
-+                             LoRAConfig.verify_with_model_config,
-+                             vllm__config__LoRAConfig__verify_with_model_config)
 +MluHijackObject.apply_hijack(VllmConfig,
-+                             VllmConfig.__post_init__,
-+                             VllmConfig_Mluhijack.__post_init__)
++                             VllmConfig._set_cudagraph_sizes,
++                             vllm__config__VllmConfig___set_cudagraph_sizes)
++MluHijackObject.apply_hijack(SpeculativeConfig,
++                             SpeculativeConfig.create_draft_parallel_config,
++                             vllm__config__SpeculativeConfig__create_draft_parallel_config)
++MluHijackObject.apply_hijack(SchedulerConfig,
++                             SchedulerConfig._verify_args,
++                             vllm__config__SchedulerConfig___verify_args)
 

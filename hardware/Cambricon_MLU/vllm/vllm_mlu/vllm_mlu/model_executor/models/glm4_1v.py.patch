@@ -1,0 +1,380 @@
+diff --git a/vllm_mlu/vllm_mlu/model_executor/models/glm4_1v.py b/vllm_mlu/vllm_mlu/model_executor/models/glm4_1v.py
+new file mode 100644
+index 000000000..a415a7bb3
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/model_executor/models/glm4_1v.py
+@@ -0,0 +1,373 @@
++# SPDX-License-Identifier: Apache-2.0
++
++# Adapted from
++# https://github.com/huggingface/transformers/blob/main/src/transformers/models/Glm4v/modeling_Glm4v.py
++# Copyright 2025 The vLLM team.
++# Copyright 2025 The ZhipuAI Team.
++# Copyright 2025 The HuggingFace Inc. team.
++# All rights reserved.
++#
++# This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
++# and OPT implementations in this library. It has been modified from its
++# original forms to accommodate minor architectural differences compared
++# to GPT-NeoX and OPT used by the Meta AI team that trained the model.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++"""Inference-only GLM-4V model compatible with HuggingFace weights."""
++
++import math
++from collections.abc import Iterable, Mapping, Sequence
++from functools import partial
++from typing import Any, Callable, Literal, Optional, TypedDict, Union
++
++import numpy as np
++import torch
++import torch.nn as nn
++import torch.nn.functional as F
++from einops import rearrange
++from transformers import BatchFeature
++from transformers.models.glm4v.configuration_glm4v import Glm4vVisionConfig
++from transformers.models.glm4v.image_processing_glm4v import (
++    Glm4vImageProcessor, smart_resize)
++from transformers.models.glm4v.video_processing_glm4v import (
++    Glm4vVideoProcessor)
++from transformers.video_utils import VideoMetadata
++
++from vllm.config import VllmConfig
++from vllm.distributed import parallel_state
++from vllm.distributed import utils as dist_utils
++from vllm.logger import init_logger
++from vllm.model_executor import SamplingMetadata
++from vllm.model_executor.layers.layernorm import RMSNorm
++from vllm.model_executor.layers.linear import (ColumnParallelLinear,
++                                               MergedColumnParallelLinear,
++                                               QKVParallelLinear,
++                                               RowParallelLinear)
++from vllm.model_executor.layers.quantization import QuantizationConfig
++from vllm.model_executor.layers.quantization.gptq import GPTQConfig
++from vllm.model_executor.layers.quantization.gptq_marlin import (
++    GPTQMarlinConfig)
++from vllm.model_executor.model_loader.weight_utils import default_weight_loader
++from vllm.model_executor.models.module_mapping import MultiModelKeys
++from vllm.multimodal import MULTIMODAL_REGISTRY
++from vllm.multimodal.inputs import (MultiModalDataDict, MultiModalFieldConfig,
++                                    MultiModalKwargs, VideoItem)
++from vllm.multimodal.parse import (ImageSize, MultiModalDataItems,
++                                   MultiModalDataParser)
++from vllm.multimodal.processing import (BaseMultiModalProcessor,
++                                        BaseProcessingInfo, PromptReplacement,
++                                        PromptUpdate)
++from vllm.multimodal.profiling import BaseDummyInputsBuilder
++from vllm.platforms import _Backend
++from vllm.sequence import IntermediateTensors
++from vllm.transformers_utils.config import uses_mrope
++
++from vllm.model_executor.layers.activation import SiluAndMul
++from vllm.model_executor.models.interfaces import (MultiModalEmbeddings, SupportsLoRA,
++                         SupportsMultiModal, SupportsPP)
++from vllm.model_executor.models.qwen2_vl import _qwen2vl_field_config, apply_rotary_pos_emb_vision
++from vllm.model_executor.models.utils import (AutoWeightsLoader, WeightsMapper,
++                    init_vllm_registered_model, maybe_prefix,
++                    merge_multimodal_embeddings)
++from vllm.model_executor.models.vision import get_vit_attn_backend
++
++from vllm.model_executor.models.glm4_1v import (
++    Glm4vVisionEmbeddings, 
++    Glm4vVisionTransformer, 
++    Glm4vMultiModalProcessor, 
++    Glm4vProcessingInfo,
++    Glm4vDummyInputsBuilder, 
++    Glm4vForConditionalGeneration,
++    Glm4vMoeForConditionalGeneration)
++
++from vllm.logger import init_logger
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++from vllm_mlu.model_executor.models.mlu_abstract_LM import MLUCausalLM, data_type_byte_width_map
++
++logger = init_logger(__name__)
++
++def vllm__module_executor__models__glm4_1v__Glm4vVisionEmbeddings__forward(
++        self, 
++        embeddings, 
++        lengths, 
++        image_shapes, 
++        h_coords,
++        w_coords) -> torch.Tensor:
++    pos_embed_weight = self.position_embedding.weight
++    hidden_size = pos_embed_weight.shape[1]
++    total_seq = h_coords.shape[0]
++    device = pos_embed_weight.device
++
++    # Move coordinates to correct device
++    h_coords, w_coords = h_coords.to(device), w_coords.to(device)
++
++    # Handle empty sequence case
++    if total_seq == 0:
++        adapted_pos_embed = torch.empty(0,
++                                        hidden_size,
++                                        device=device,
++                                        dtype=pos_embed_weight.dtype)
++    else:
++        # Convert inputs to tensors if needed
++        if isinstance(lengths, list):
++            lengths = torch.tensor(lengths,
++                                    device=device,
++                                    dtype=torch.long)
++        if not isinstance(image_shapes, torch.Tensor):
++            image_shapes = torch.tensor(image_shapes,
++                                        device=device,
++                                        dtype=torch.long)
++
++        # Prepare 2D position embedding
++        orig_size_sq = pos_embed_weight.shape[0]
++        orig_size = int(orig_size_sq**0.5)
++        pos_embed_2d = (pos_embed_weight.view(
++            orig_size, orig_size,
++            hidden_size).permute(2, 0,
++                                    1).unsqueeze(0).to(device=device,
++                                                    dtype=torch.float32))
++
++        # Calculate target dimensions for each patch
++        target_h = torch.cat([
++            image_shapes[i, 1].repeat(lengths[i])
++            for i in range(len(lengths))
++        ]).to(device=device, dtype=torch.float32)
++        target_w = torch.cat([
++            image_shapes[i, 2].repeat(lengths[i])
++            for i in range(len(lengths))
++        ]).to(device=device, dtype=torch.float32)
++
++        # Normalize coordinates to [-1, 1] range for grid_sample
++        h_coords = h_coords.to(device=device, dtype=torch.float32)
++        w_coords = w_coords.to(device=device, dtype=torch.float32)
++        norm_w = ((w_coords + 0.5) / target_w) * 2 - 1
++        norm_h = ((h_coords + 0.5) / target_h) * 2 - 1
++
++        # Create sampling grid
++        grid = (torch.stack((norm_w, norm_h),
++                            dim=-1).unsqueeze(0).unsqueeze(2))
++
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: 
++        '''
++        # Perform bicubic interpolation
++        interpolated_embed_fp32 = F.grid_sample(
++            pos_embed_2d,
++            grid,
++            mode="bilinear",
++            align_corners=False,
++            padding_mode="zeros",
++        )
++        '''
++        =============================
++        End of MLU Hijack
++        =============================
++        '''
++
++        # Reshape and convert back to original dtype
++        adapted_pos_embed_fp32 = (
++            interpolated_embed_fp32.squeeze(0).squeeze(-1).permute(1, 0))
++        adapted_pos_embed = adapted_pos_embed_fp32.to(
++            pos_embed_weight.dtype).to(embeddings.device)
++
++    # Add adapted position encoding to embeddings
++    embeddings = embeddings + adapted_pos_embed
++    return embeddings
++
++class MLUGlm4vMultiModalProcessor(Glm4vMultiModalProcessor):
++
++    def _call_hf_processor(
++        self,
++        prompt: str,
++        mm_data: Mapping[str, object],
++        mm_kwargs: Mapping[str, object],
++        tok_kwargs: Mapping[str, object],
++    ) -> BatchFeature:
++        mm_data = dict(mm_data)
++        processor = self.info.get_hf_processor(**mm_kwargs)
++
++        # GLM-4.1V use `image_token_id` as video placeholder, we need to
++        # replace it with `video_token_id` for video processing. So we
++        # separate video processing from image processing.
++        if ("videos" in mm_data and isinstance(mm_data["videos"], list)
++                and len(mm_data["videos"]) > 0):
++            video_grid_thw_lst = []
++            pixel_values_videos_lst = []
++            for item in mm_data.pop("videos", []):
++                video_array, metadata = item
++
++                # FIXME(Isotr0py): Activate the below logic after we can disable
++                # resampling from video loader backend.
++                # assert metadata["total_num_frames"] == len(video_array), (
++                #     f"Total frames {metadata['total_num_frames']} does not "
++                #     f"match the length of video array {len(video_array)}.")
++
++                # NOTE: Temporary workaround for resampled videos.
++                # this can cause a divergence with HF implementation if
++                # the input video is resampled in advance.
++
++                if metadata["total_num_frames"] != len(video_array):
++                    logger.warning(
++                        "Total frames in metadata "
++                        "(%s) does not match the length of "
++                        "video array %s. This can "
++                        "be because the video is resampled "
++                        "in advance. This may cause "
++                        "a divergence with HF implementation.",
++                        metadata["total_num_frames"],
++                        len(video_array),
++                    )
++                    metadata["total_num_frames"] = len(video_array)
++                '''
++                =============================
++                Modify by vllm_mlu
++                =============================
++                @brief: 
++                '''
++                metadata["frames_indices"] = list(range(
++                    metadata["total_num_frames"]))
++                metadata = VideoMetadata(**metadata)
++
++                video_mm_data = dict()
++                video_mm_data["videos"] = [[video_array]]
++                video_mm_data["video_metadata"] = [[metadata.__dict__]]
++                '''
++                =============================
++                End of MLU Hijack
++                =============================
++                '''
++
++                video_outputs = super(Glm4vMultiModalProcessor, self)._call_hf_processor(
++                    prompt="<|begin_of_video|><|video|><|end_of_video|>",
++                    mm_data=video_mm_data,
++                    mm_kwargs=mm_kwargs,
++                    tok_kwargs=tok_kwargs,
++                )
++                input_ids = video_outputs.pop("input_ids")
++                input_ids[input_ids == processor.image_token_id] = (
++                    processor.video_token_id)
++                video_placeholder = processor.tokenizer.batch_decode(
++                    input_ids)[0]
++                prompt = prompt.replace(
++                    "<|begin_of_video|><|video|><|end_of_video|>",
++                    video_placeholder,
++                )
++
++                grid_t = len(video_outputs["video_grid_thw"])
++                _, grid_h, grid_w = video_outputs["video_grid_thw"][0]
++                grid_thw = torch.tensor([[grid_t, grid_h, grid_w]])
++
++                video_grid_thw_lst.append(grid_thw)
++                pixel_values_videos_lst.append(
++                    video_outputs["pixel_values_videos"])
++            video_outputs = dict(
++                pixel_values_videos=torch.cat(pixel_values_videos_lst),
++                video_grid_thw=torch.cat(video_grid_thw_lst),
++            )
++        else:
++            video_outputs = dict()
++
++        processed_outputs = super(Glm4vMultiModalProcessor, self)._call_hf_processor(
++            prompt=prompt,
++            mm_data=mm_data,
++            mm_kwargs=mm_kwargs,
++            tok_kwargs=tok_kwargs,
++        )
++        combined_outputs = dict(
++            processed_outputs,
++            **video_outputs,
++        )
++        return BatchFeature(combined_outputs)
++
++
++@MULTIMODAL_REGISTRY.register_processor(
++    MLUGlm4vMultiModalProcessor,
++    info=Glm4vProcessingInfo,
++    dummy_inputs=Glm4vDummyInputsBuilder,
++)
++class MLUGlm4vForConditionalGeneration(Glm4vForConditionalGeneration):
++    # pylint: disable=abstract-method
++    # nothing to implement, just for hijack
++    pass
++
++
++@MULTIMODAL_REGISTRY.register_processor(
++    MLUGlm4vMultiModalProcessor,
++    info=Glm4vProcessingInfo,
++    dummy_inputs=Glm4vDummyInputsBuilder,
++)
++class MLUGlm4vMoeForConditionalGeneration(Glm4vMoeForConditionalGeneration, MLUCausalLM):
++    # inherit from MLUCausalLM to get kv_cache calculation
++    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
++        super(Glm4vMoeForConditionalGeneration, self).__init__(vllm_config=vllm_config)
++        MLUCausalLM.__init__(self, vllm_config=vllm_config)
++        
++    # hijack functions for MLUCausalLM
++    def get_num_attn_heads(self):
++        num_attention_heads = None
++        if hasattr(self.model_config.text_config, "num_attention_heads"):
++            num_attention_heads = self.model_config.text_config.num_attention_heads
++        else:
++            logger.error("The model's config.json does not contain any of the following"
++                         "keys to determine the num_attention_heads: "
++                         f"{num_attention_heads}. ")
++        return num_attention_heads
++
++    def get_layer_num(self):
++        if hasattr(self.model_config.text_config, "num_hidden_layers"):
++            num_hidden_layers = self.model_config.text_config.num_hidden_layers
++        else:
++            logger.error("The model's config.json does not contain num_hidden_layers.")
++        return num_hidden_layers
++    
++    def get_hidden_size(self):
++        if hasattr(self.model_config.text_config, "hidden_size"):
++            return self.model_config.text_config.hidden_size
++        else:
++            logger.error("The model's config.json does not contain hidden_size.")
++            return
++
++    def get_vocab_size(self):
++        return self.model_config.text_config.vocab_size
++    
++    def get_moe_inner_size(self):
++        moe_size=None
++        if getattr(self.model_config.text_config, "moe_intermediate_size", None):
++            moe_size = getattr(self.model_config.text_config, "moe_intermediate_size", None)
++        return   0 if moe_size is None else moe_size
++    
++    def get_topk_num(self):
++        if hasattr(self.model_config.text_config, "num_experts_per_tok"):
++            if self.model_config.text_config.num_experts_per_tok == None:
++                return 0
++            return self.model_config.text_config.num_experts_per_tok
++        else:
++            return 0
++
++    def get_experts_num(self):
++        if hasattr(self.model_config.text_config, "n_routed_experts"):
++            return self.model_config.text_config.n_routed_experts
++        else:
++            return 0
++    
++    def get_head_size(self):
++        return self.get_hidden_size() / self.get_num_attn_heads()
++
++
++MluHijackObject.apply_hijack(Glm4vVisionEmbeddings,
++                             Glm4vVisionEmbeddings.forward,
++                             vllm__module_executor__models__glm4_1v__Glm4vVisionEmbeddings__forward)
++
+
