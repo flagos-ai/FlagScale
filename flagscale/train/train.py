@@ -173,12 +173,14 @@ def init_fs_straggler_detector(args):
 
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+    local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    hostname = os.environ.get('HOSTNAME', 'unknown')
 
     _fs_straggler_detector = FSStragglerDetector(
         config=config,
         rank=rank,
         world_size=world_size,
-        node_name=os.environ.get('HOSTNAME', f'rank-{rank}'),
+        node_name=f"{hostname}:gpu{local_rank}",
     )
 
     return _fs_straggler_detector
@@ -216,17 +218,20 @@ def _save_straggler_report(report, log_dir, iteration):
 
     os.makedirs(log_dir, exist_ok=True)
 
-    # Save JSON report
-    json_path = os.path.join(log_dir, f'straggler_report_step_{iteration}.json')
+    # Get hostname for multi-node identification
+    hostname = os.environ.get('HOSTNAME', 'unknown')
+
+    # Save JSON report with hostname in filename to avoid conflicts in multi-node setup
+    json_path = os.path.join(log_dir, f'straggler_report_{hostname}_step_{iteration}.json')
     try:
         import json
         with open(json_path, 'w') as f:
             json.dump(report.to_dict(), f, indent=2)
     except Exception as e:
-        print_rank_0(f"Warning: Could not save straggler report: {e}")
+        print(f"[{hostname}] Warning: Could not save straggler report: {e}")
 
-    # Also print text report to stdout
-    print_rank_0(f"\n{report.to_text()}")
+    # Also print text report to stdout (use print instead of print_rank_0 for multi-node)
+    print(f"\n{report.to_text()}")
 
 stimer = StragglerDetector()
 
@@ -2879,8 +2884,9 @@ def train(
             if fs_straggler.should_report(iteration):
                 report = fs_straggler.generate_report(step=iteration)
 
-                # Save report (only on rank 0)
-                if torch.distributed.get_rank() == 0:
+                # Save report on local_rank 0 of each node (so each node has its own log)
+                local_rank = int(os.environ.get('LOCAL_RANK', 0))
+                if local_rank == 0:
                     straggler_log_dir = getattr(args, 'straggler_log_dir', None)
                     _save_straggler_report(report, straggler_log_dir, iteration)
         ########## FlagScale Straggler Detection End ##########
