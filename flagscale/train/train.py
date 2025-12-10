@@ -2731,15 +2731,18 @@ def train(
         num_floating_point_operations_since_last_log_event += num_floating_point_operations_in_batch
 
         if args.flagcx_tune and not flagcx_tuner.tuning_done():
-            flagcx_tuner.update_iter()
-            if flagcx_tuner.need_eval():
-                flagcx_tuner.eval_e2e_perf()
-            if flagcx_tuner.need_config_update():
-                flagcx_tuner.check_flagcx_done()
-                flagcx_tuner.update_config()
+            if flagcx_tuner.need_update_tune_group():
+                flagcx_tuner.update_tune_group()
+            else:
+                flagcx_tuner.update_iter()
+                if flagcx_tuner.need_eval():
+                    flagcx_tuner.eval_e2e_perf()
+                if flagcx_tuner.need_config_update():
+                    flagcx_tuner.check_flagcx_done()
+                    flagcx_tuner.update_config()
+                if flagcx_tuner.cur_group_tuning_done() and not flagcx_tuner.cur_group_best_config_used():
+                    flagcx_tuner.set_cur_group_best_config()
 
-        if args.flagcx_tune and flagcx_tuner.tuning_done() and not flagcx_tuner.best_config_used():
-            flagcx_tuner.set_best_config()
 
 
         # Logging.

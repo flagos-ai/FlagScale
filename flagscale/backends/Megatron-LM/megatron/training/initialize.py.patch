@@ -1,5 +1,5 @@
 diff --git a/megatron/training/initialize.py b/megatron/training/initialize.py
-index 85b771448..973423613 100644
+index 85b771448..fdee55b51 100644
 --- a/megatron/training/initialize.py
 +++ b/megatron/training/initialize.py
 @@ -29,9 +29,12 @@ from megatron.training import inprocess_restart
@@ -97,7 +97,7 @@ index 85b771448..973423613 100644
                  high_priority_stream_groups=args.high_priority_stream_groups,
                  sharp_enabled_group=args.sharp_enabled_group,
 +                create_dualpipev_parallel_size=args.use_dualpipev,
-+                enable_flagcx_tune=args.distributed_backend == "flagcx" and args.flagcx_tune,
++                flagcx_tune_groups=args.flagcx_tune_groups if args.flagcx_tune else None,
              )
              if args.rank == 0:
                  print(

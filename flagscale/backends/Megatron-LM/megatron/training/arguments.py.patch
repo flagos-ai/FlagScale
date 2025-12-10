@@ -1,5 +1,5 @@
 diff --git a/megatron/training/arguments.py b/megatron/training/arguments.py
-index 1120c7529..ab9806386 100644
+index 1120c7529..994602643 100644
 --- a/megatron/training/arguments.py
 +++ b/megatron/training/arguments.py
 @@ -67,6 +67,7 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
@@ -611,7 +611,7 @@ index 1120c7529..ab9806386 100644
  
      return parser
  
-@@ -3275,3 +3551,100 @@ def _add_sft_args(parser):
+@@ -3275,3 +3551,102 @@ def _add_sft_args(parser):
      group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned", 
                         help='SFT prompt format.')
      return parser
@@ -653,6 +653,8 @@ index 1120c7529..ab9806386 100644
 +
 +    group.add_argument('--flagcx-tune', action='store_true',
 +                       help='use flagcx tuner')
++
++    group.add_argument('--flagcx-tune-groups', nargs='*', type=str, default=None, help='list of process groups to be tuned by FlagCX')
 +
 +    return parser
 +

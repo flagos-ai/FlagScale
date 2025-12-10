@@ -8,17 +8,23 @@ from flagscale.train.flagcx_tuner.recorder import FlagCXTuneRecorder
 
 class FlagCXTuner:
 
-    def __init__(self):
+    def __init__(self, flagcx_tune_groups):
         self.iter = -1
         self.config_id = -1
         self.best_config_id = -1
         self.recorder = FlagCXTuneRecorder()
         self.perf_map = {}
         self.best_perf = float("inf")
-        self.finished_tuning = False
-        self.best_config_set = False
+        self.tune_groups = flagcx_tune_groups
+        self.cur_group_idx = 0
+        self.tune_group_size = len(self.tune_groups)
+        self.finished_tuning = [False for _ in range(self.tune_group_size)]
+        self.best_config_set = [False for _ in range(self.tune_group_size)]
+        self.finished_all_tuning = False
+        self.need_reset = False
         os.environ["FLAGCX_TUNER_CONFIG_ID"] = str(self.config_id)
         os.environ["FLAGCX_TUNER_BEST_CONFIG_ID"] = str(self.best_config_id)
+        os.environ["FLAGCX_TUNE_GROUP_IDX"] = str(self.cur_group_idx)
 
         # Get autotuner log directory from environment variable
         tune_file_path = os.environ.get("FLAGCX_TUNE_FILE")
@@ -28,14 +34,17 @@ class FlagCXTuner:
             os.makedirs(log_dir, exist_ok=True)
 
     def tuning_done(self):
-        return self.finished_tuning
+        return self.finished_all_tuning
+
+    def cur_group_tuning_done(self):
+        return self.finished_tuning[self.cur_group_idx]
 
     def check_flagcx_done(self):
         # os.envirion cannot read env variables set outside of python
         # so execute a shell command to read it
         result = subprocess.check_output("echo $FLAGCX_TUNER_DONE", shell=True).decode().strip()
         if result == "1":
-            self.finished_tuning = True
+            self.finished_tuning[self.cur_group_idx] = True
 
     def need_config_update(self):
         if self.iter % 5 == 0:
@@ -68,9 +77,28 @@ class FlagCXTuner:
             self.best_config_id = self.config_id
         self.recorder.reset()
 
-    def best_config_used(self):
-        return self.best_config_set
+    def cur_group_best_config_used(self):
+        return self.best_config_set[self.cur_group_idx]
 
-    def set_best_config(self):
+    def set_cur_group_best_config(self):
         os.environ["FLAGCX_TUNER_BEST_CONFIG_ID"] = str(self.best_config_id)
-        self.best_config_set = True
+        self.best_config_set[self.cur_group_idx] = True
+        self.need_update_tune_group = True
+        if self.cur_group_idx == self.tune_group_size - 1:
+            self.finished_all_tuning = True
+
+    def need_update_tune_group(self):
+        return self.need_update_tune_group
+
+    def update_tune_group(self):
+        self.iter = -1
+        self.config_id = -1
+        self.best_config_id = -1
+        self.perf_map = {}
+        self.best_perf = float("inf")
+        self.cur_group_idx += 1
+        self.need_reset = False
+        os.environ["FLAGCX_TUNER_CONFIG_ID"] = str(self.config_id)
+        os.environ["FLAGCX_TUNER_BEST_CONFIG_ID"] = str(self.best_config_id)
+        os.environ["FLAGCX_TUNE_GROUP_IDX"] = str(self.cur_group_idx)
+        os.environ["FLAGCX_TUNER_DONE"] = "0"
