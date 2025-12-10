@@ -37,7 +37,7 @@ class TestDiagnostic:
 
         expected_keys = [
             'out of memory',
-            'rendezvous',
+            'rendezvousconnectionerror',
             'traceback (most recent call last)',
             'cuda error',
             'hanging',

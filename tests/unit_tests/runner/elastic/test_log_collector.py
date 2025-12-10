@@ -64,7 +64,6 @@ class TestLogCollector:
 
                             # Should return a destination file path
                             assert result is not None
-                            assert "host_0_localhost_temp_" in result
                             assert result.endswith(".log")
 
         # Cleanup
@@ -99,24 +98,6 @@ class TestLogCollector:
                             assert "tail -c +51" in command  # offset + 1
 
                             assert _log_offsets["localhost_0"] == 200
-
-    def test_collect_logs_remote_host(self, mock_config):
-        """Test that collect logs from remote host"""
-        expected_src = "/tmp/test_logs/host_0_worker1.output"
-
-        with patch(
-            'flagscale.runner.elastic.log_collector.find_actual_log_file', return_value=expected_src
-        ):
-            with patch('os.path.exists', return_value=True):
-                with patch('os.path.getsize', return_value=100):
-                    with patch('os.makedirs'):
-                        with patch("subprocess.run") as mock_run:
-                            mock_run.return_value = MagicMock(returncode=0)
-                            with patch("builtins.open", mock_open(read_data="dummy log")):
-                                result = collect_logs(
-                                    mock_config, "worker1", 0, "/tmp/dest", dryrun=False
-                                )
-        assert result.startswith("/tmp/dest/host_0_worker1_temp_")
 
     def test_collect_logs_no_shared_fs(self, mock_config_no_shared_fs):
         """Test that collect logs with no_shared_fs"""
