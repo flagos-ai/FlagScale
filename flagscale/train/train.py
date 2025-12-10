@@ -12,7 +12,7 @@ import math
 import os
 import sys
 from typing import List, Optional
-
+import socket
 import torch.distributed
 
 from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
@@ -174,7 +174,7 @@ def init_fs_straggler_detector(args):
     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
     local_rank = int(os.environ.get('LOCAL_RANK', 0))
-    hostname = os.environ.get('HOSTNAME', 'unknown')
+    hostname = socket.gethostname()
 
     _fs_straggler_detector = FSStragglerDetector(
         config=config,
@@ -218,17 +218,14 @@ def _save_straggler_report(report, log_dir, iteration):
 
     os.makedirs(log_dir, exist_ok=True)
 
-    # Get hostname for multi-node identification
-    hostname = os.environ.get('HOSTNAME', 'unknown')
-
-    # Save JSON report with hostname in filename to avoid conflicts in multi-node setup
-    json_path = os.path.join(log_dir, f'straggler_report_{hostname}_step_{iteration}.json')
+    # Save JSON report
+    json_path = os.path.join(log_dir, f'straggler_report_step_{iteration}.json')
     try:
         import json
         with open(json_path, 'w') as f:
             json.dump(report.to_dict(), f, indent=2)
     except Exception as e:
-        print(f"[{hostname}] Warning: Could not save straggler report: {e}")
+         print(f"[{hostname}] Warning: Could not save straggler report: {e}")
 
     # Also print text report to stdout (use print instead of print_rank_0 for multi-node)
     print(f"\n{report.to_text()}")
