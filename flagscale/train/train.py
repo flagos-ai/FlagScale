@@ -2738,7 +2738,7 @@ def train(
                 flagcx_tuner.check_flagcx_done()
                 flagcx_tuner.update_config()
 
-        if args.flagcx_tune and flagcx_tuner.tuning_done() and not flagcx_tuner.best_config_set():
+        if args.flagcx_tune and flagcx_tuner.tuning_done() and not flagcx_tuner.best_config_used():
             flagcx_tuner.set_best_config()
 
 

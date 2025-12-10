@@ -68,7 +68,7 @@ class FlagCXTuner:
             self.best_config_id = self.config_id
         self.recorder.reset()
 
-    def best_config_set(self):
+    def best_config_used(self):
         return self.best_config_set
 
     def set_best_config(self):
