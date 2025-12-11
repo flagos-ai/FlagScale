@@ -7,7 +7,7 @@ from megatron.core.datasets.blended_megatron_dataset_builder import BlendedMegat
 from megatron.core.datasets.gpt_dataset import GPTDataset, GPTDatasetConfig, MockGPTDataset
 from megatron.core.datasets.utils import get_blend_from_list
 from megatron.core.rerun_state_machine import RerunDataIterator
-from megatron.legacy.data.data_samplers import build_pretraining_data_loader
+from megatron.training.datasets.data_samplers import build_pretraining_data_loader
 from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.global_vars import get_tensorboard_writer, get_wandb_writer
 from megatron.training.utils import is_last_rank, print_rank_last
