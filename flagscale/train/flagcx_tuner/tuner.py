@@ -2,8 +2,19 @@ import os
 import subprocess
 
 import torch
+import torch.distributed as dist
+
+from megatron.core import mpu
 
 from flagscale.train.flagcx_tuner.recorder import FlagCXTuneRecorder
+
+pg_map = {
+    "cp": mpu.get_context_parallel_group,
+    "mp": mpu.get_model_parallel_group,
+    "tp": mpu.get_tensor_model_parallel_group,
+    "pp": mpu.get_pipeline_model_parallel_group,
+    "ep": mpu.get_expert_model_parallel_group,
+}
 
 
 class FlagCXTuner:
@@ -71,7 +82,13 @@ class FlagCXTuner:
         records = self.recorder.get_records()
         assert len(records) >= 5
         # calculate the average time of last 4 iters
-        self.perf_map[self.config_id] = sum(records[-4:]) / 4.0
+        perf_tensor = torch.tensor(sum(records[-4:]) / 4.0)
+        # synchronize perf across all ranks
+        group = pg_map[self.tune_groups[self.cur_group_idx]]()
+        size = dist.get_world_size(group=group)
+        dist.all_reduce(perf_tensor, op=dist.ReduceOp.SUM, group=group)
+        perf = perf_tensor.item() / size
+        self.perf_map[self.config_id] = perf
         if self.perf_map[self.config_id] < self.best_perf:
             self.best_perf = self.perf_map[self.config_id]
             self.best_config_id = self.config_id
