@@ -3,7 +3,8 @@ train_megatron:
   set_environment:
     - source /root/miniconda3/etc/profile.d/conda.sh
     - conda activate flagscale-train
-    - python tools/patch/unpatch.py --backend Megatron-LM
+    # - python tools/patch/unpatch.py --backend Megatron-LM
+    - git submodule update --init third_party/Megatron-LM
     - cd third_party/Megatron-LM
     - export PYTHONPATH=../..:$PYTHONPATH
     - export NVTE_FLASH_ATTN=0
@@ -145,7 +146,8 @@ train_flagscale:
   set_environment:
     - source /root/miniconda3/etc/profile.d/conda.sh
     - conda activate flagscale-train
-    - python tools/patch/unpatch.py --backend Megatron-LM
+    # - python tools/patch/unpatch.py --backend Megatron-LM
+    git submodule update --init third_party/Megatron-LM
     - export PYTHONPATH=./third_party/Megatron-LM:$PYTHONPATH
     - export NVTE_FLASH_ATTN=0
     - export NVTE_FUSED_ATTN=0
