@@ -1,6 +1,6 @@
 [submodule "third_party/Megatron-LM"]
 	path = third_party/Megatron-LM
-	url = https://gitee.com/lxdcumt/Megatron-LM-FL.git
+	url = https://github.com/lxd-cumt/Megatron-LM-FL.git
 	branch = fl_init
 [submodule "third_party/vllm"]
 	path = third_party/vllm
