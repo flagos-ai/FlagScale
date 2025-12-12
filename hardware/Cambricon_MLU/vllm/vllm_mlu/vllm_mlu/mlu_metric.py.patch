@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/mlu_metric.py b/vllm_mlu/vllm_mlu/mlu_metric.py
 new file mode 100644
-index 000000000..466391a9d
+index 000000000..9e9c5dae1
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/mlu_metric.py
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,451 @@
 +import torch
 +import time
 +import statistics
@@ -12,12 +12,15 @@ index 000000000..466391a9d
 +import json
 +import os
 +from datetime import datetime
++
++import vllm.envs as envs
 +from vllm.logger import init_logger
-+from vllm_mlu._mlu_utils import VLLM_LATENCY_DEBUG_WITH_DEVICE_EN
++from vllm_mlu._mlu_utils import VLLM_LATENCY_DEBUG_WITH_DEVICE_EN, VLLM_DUMP_MLU_INFO_EN
 +from vllm.model_executor.layers.quantization import get_quantization_config
 +
 +logger = init_logger(__name__)
 +
++millisecond2second_unit = 1000
 +
 +class LLMMetric:
 +    def __init__(self)->None:
@@ -26,6 +29,7 @@ index 000000000..466391a9d
 +        self.e2e_latency_list = []
 +        self.per_token_latency_list = [ [] ]
 +        self.per_token_latency_device_list = [ [] ]
++        self.mm_encoder_latency_device_list = [ [] ]
 +        self.peak_memory = 0
 +        self.block_memory = 0
 +        self.num_total_gpu_blocks = 0
@@ -34,6 +38,9 @@ index 000000000..466391a9d
 +        self.num_free_cpu_blocks_list = [ [] ]
 +        self.num_spec_tokens = 0
 +        self.draft_acceptance_rate = 0.0
++        self.context_latency_device = 0.0
++        self.generate_latency_device = 0.0
++        self.mm_encoder_latency_device = 0.0
 +
 +    def reset_metric(self):
 +        self.batch_size_list = []
@@ -41,14 +48,16 @@ index 000000000..466391a9d
 +        self.e2e_latency_list = []
 +        self.per_token_latency_list = [ [] ]
 +        self.per_token_latency_device_list = [ [] ]
++        self.mm_encoder_latency_device_list = [ [] ]
 +        self.num_free_gpu_blocks_list = [ [] ]
 +        self.num_free_cpu_blocks_list = [ [] ]
 +        self.num_spec_tokens = 0
 +        self.draft_acceptance_rate = 0.0
 +
-+    def get_mlu_cost_time(self):
++    @classmethod
++    def get_mlu_cost_time(cls):
 +        torch.mlu.synchronize()
-+        return time.time()
++        return time.perf_counter()
 +
 +    def is_prefill_stage(self):
 +        return len(self.per_token_latency_list[-1]) == 0
@@ -64,10 +73,25 @@ index 000000000..466391a9d
 +        self.num_free_cpu_blocks_list[-1].append(num_free_cpu_blocks)
 +
 +    def update_step_latency(self, step_latency):
-+        self.per_token_latency_list[-1].append(step_latency)
++        if isinstance(step_latency, list):
++            self.per_token_latency_list[-1].extend(step_latency)
++        else:
++            self.per_token_latency_list[-1].append(step_latency)
 +
 +    def update_step_latency_device(self, step_latency):
-+        self.per_token_latency_device_list[-1].append(step_latency)
++        if isinstance(step_latency, list):
++            self.per_token_latency_device_list[-1].extend(step_latency)
++        else:
++            self.per_token_latency_device_list[-1].append(step_latency)
++
++    def update_mm_encoder_latency_device(self, step_latency):
++        if isinstance(step_latency, list):
++            if len(step_latency) == 0:
++                return
++            assert len(step_latency) == 1, f"Not supported! Model with multi mm encoder steps. {len(step_latency)} {step_latency}"
++            self.mm_encoder_latency_device_list[-1].extend(step_latency)
++        else:
++            self.mm_encoder_latency_device_list[-1].append(step_latency)
 +
 +    def update_spec_decode_metrics(self, spec_decode_metrics):
 +        self.num_spec_tokens = spec_decode_metrics.num_spec_tokens
@@ -78,6 +102,7 @@ index 000000000..466391a9d
 +        self.e2e_latency_list.append(e2e_latency)
 +        self.per_token_latency_list.append([]) # new iter
 +        self.per_token_latency_device_list.append([])
++        self.mm_encoder_latency_device_list.append([])
 +        self.num_free_gpu_blocks_list.append([])
 +        self.num_free_cpu_blocks_list.append([])
 +
@@ -132,20 +157,34 @@ index 000000000..466391a9d
 +        data = data + [self.mm_kwargs[k] for k in self.mm_kwargs.keys()]
 +        data = data + [self.input_len, self.output_len, self.tp,
 +                       df_mean[self.context_latency_name], df_mean[self.per_token_latency_name]]
++        if self.num_spec_tokens > 0:
++            header += [self.per_step_latency_name]
++            data   += [df_mean[self.per_step_latency_name]]
 +        if VLLM_LATENCY_DEBUG_WITH_DEVICE_EN:
++            if self.is_v1_multimodal:
++                header += [self.mm_encoder_latency_device_name,]
++                data += [df_mean[self.mm_encoder_latency_device_name],]
 +            header += [self.context_latency_device_name, self.per_token_latency_device_name]
 +            data += [df_mean[self.context_latency_device_name], df_mean[self.per_token_latency_device_name]]
-+        header += [self.e2e_latency_name, self.e2e_throughput_name, self.decoder_throughput_name,
-+                   self.k_name, self.acceptance_rate_name, self.decode_times_name,
-+                   self.peak_memory_name, self.block_memory_name, self.max_kv_memory_name, self.mean_kv_memory_name,
-+                   self.max_kv_usage_name, self.mean_kv_usage_name]
++        header += [self.e2e_latency_name, self.e2e_throughput_name, self.decoder_throughput_name,]
++        if self.num_spec_tokens > 0:
++            header += [self.k_name, self.acceptance_rate_name]
++        header += [self.decode_times_name,
++                   self.peak_memory_name, self.block_memory_name]
++        if not envs.VLLM_USE_V1:
++            header += [self.max_kv_memory_name, self.mean_kv_memory_name,
++                       self.max_kv_usage_name, self.mean_kv_usage_name]
 +        data += [
 +            df_mean[self.e2e_latency_name], df_mean[self.e2e_throughput_name], df_mean[self.decoder_throughput_name],
-+            self.num_spec_tokens, df_mean[self.acceptance_rate_name], df_mean[self.decode_times_name],
-+            memory_df_mean[self.peak_memory_name], memory_df_mean[self.block_memory_name],
-+            memory_df_mean[self.max_kv_memory_name], memory_df_mean[self.mean_kv_memory_name],
-+            memory_df_mean[self.max_kv_usage_name], memory_df_mean[self.mean_kv_usage_name]
 +        ]
++        if self.num_spec_tokens > 0:
++            data += [self.num_spec_tokens, df_mean[self.acceptance_rate_name],]
++        data += [df_mean[self.decode_times_name], memory_df_mean[self.peak_memory_name], memory_df_mean[self.block_memory_name],]
++        if not envs.VLLM_USE_V1:
++            data += [
++                memory_df_mean[self.max_kv_memory_name], memory_df_mean[self.mean_kv_memory_name],
++                memory_df_mean[self.max_kv_usage_name], memory_df_mean[self.mean_kv_usage_name]
++            ]
 +        if VLLM_LATENCY_DEBUG_WITH_DEVICE_EN and self.save_hfu_info:
 +            header += [self.context_hfu_name, self.decoder_hfu_name, self.decoder_io_efficiency_name]
 +            data += [
@@ -169,10 +208,9 @@ index 000000000..466391a9d
 +            logger.info(f"Metric written to {filename}")
 +
 +    def calc_metric(self, model, model_dtype, metrics_idx_start, only_average,
-+                    input_len, output_len, tp_nums, quantization, dump_info=None,
-+                    show_per_iter=False, is_embedding_task=False, mm_kwargs={},
-+                    total_prefill_steps=1
-+    ) -> None:
++                    input_len, output_len, tp_nums, quantization,
++                    show_per_iter=False, is_embedding_task=False, mm_kwargs=None,
++                    total_prefill_steps=1, num_spec_tokens=0, dp_size=1, hfu_info=None, io_efficiency=0.0) -> None:
 +        keep_digits = 2
 +
 +        def round_fn(data):
@@ -180,18 +218,24 @@ index 000000000..466391a9d
 +
 +        metrics_idx_end = len(self.per_token_latency_list) - 1 # without last []
 +        idx_range = range(metrics_idx_start, metrics_idx_end)
-+
 +        # specify entries to write to csv
-+        self.mm_kwargs = mm_kwargs # multimodal args
++        self.is_v1_multimodal = envs.VLLM_USE_V1 and mm_kwargs
++        self.mm_kwargs = mm_kwargs if mm_kwargs else {} # multimodal args
 +        self.batch_size_name = "batch size"
 +        self.input_len = input_len
 +        self.output_len = output_len
 +        self.tp = tp_nums
++        self.dp = dp_size
 +        self.model = model
 +        self.context_latency_name = "context latency(ms)"
-+        self.per_token_latency_name = "per token latency(ms)"
++        self.mm_encoder_latency_device_name = "multimodal encoder latency device(ms)"
 +        self.context_latency_device_name = "context latency device(ms)"
-+        self.per_token_latency_device_name = "per token latency device(ms)"
++        if num_spec_tokens > 0:
++            self.per_step_latency_name = "per step latency(ms)"
++            self.per_token_latency_device_name = "per step latency device(ms)"
++        else:
++            self.per_token_latency_device_name = "per token latency device(ms)"
++        self.per_token_latency_name = "per token latency(ms)"
 +        self.e2e_latency_name = "e2e latency(ms)"
 +        self.e2e_throughput_name = "e2e throughput(tokens/s)"
 +        self.decoder_throughput_name = "decoder throughput(tokens/s)"
@@ -199,41 +243,52 @@ index 000000000..466391a9d
 +        self.acceptance_rate_name = "acceptance rate"
 +        self.decode_times_name = "decode times"
 +        self.weight_dtype_str = self.get_weight_dtype_str(model, model_dtype, quantization)
-+
++        self.num_spec_tokens = num_spec_tokens
++        rate_list=[]
++        rate=0
++        if num_spec_tokens > 0:
++            for i in range(metrics_idx_end):
++                if len(self.per_token_latency_list[i]) - total_prefill_steps == 0:
++                    logger.warning("For now output_len is 0, no need mtp info, if you need mtp info, please increase output_len.")
++                    rate_list.append(0.0)
++                else:
++                    rate_list.append(((self.output_len - 1) / (float)(len(self.per_token_latency_list[i]) - total_prefill_steps) - 1) / num_spec_tokens)
++            rate = statistics.fmean(rate_list[metrics_idx_start: metrics_idx_end])
 +        metrics_data = [
 +            (
-+                self.batch_size_name, [int(self.batch_size_list[i]) for i in idx_range]
++                self.batch_size_name, [self.dp * int(self.batch_size_list[i]) for i in idx_range]
 +            ),
 +            (
-+                self.context_latency_name, [round_fn(1000 * sum(self.per_token_latency_list[i][:total_prefill_steps])) for i in idx_range]
++                self.context_latency_name, [round_fn(millisecond2second_unit * sum(self.per_token_latency_list[i][:total_prefill_steps])) for i in idx_range]
 +            ),
 +            (
 +                self.per_token_latency_name, [
 +                    0.0 if len(self.per_token_latency_list[i]) <= total_prefill_steps else \
-+                    round_fn(statistics.fmean(self.per_token_latency_list[i][total_prefill_steps:]) * 1000) for i in idx_range
++                    round_fn(statistics.fmean(self.per_token_latency_list[i][total_prefill_steps:]) * (len(self.per_token_latency_list[i]) - total_prefill_steps) / (self.output_len - 1) * millisecond2second_unit) for i in idx_range
 +                ]
 +            ),
++        ]
++        if num_spec_tokens > 0:
++            metrics_data += [(self.per_step_latency_name, [
++                    0.0 if len(self.per_token_latency_list[i]) <= total_prefill_steps else \
++                    round_fn(statistics.fmean(self.per_token_latency_list[i][total_prefill_steps:]) * millisecond2second_unit) for i in idx_range
++                ])]
++        metrics_data += [
 +            (
-+                self.e2e_latency_name, [round_fn(1000 * self.e2e_latency_list[i]) for i in idx_range]
++                self.e2e_latency_name, [round_fn(millisecond2second_unit * self.e2e_latency_list[i]) for i in idx_range]
 +            ),
 +            (
 +                self.e2e_throughput_name, [
-+                    round_fn(((output_len + total_prefill_steps) / self.e2e_latency_list[i]) * self.batch_size_list[i]) \
++                    round_fn(self.dp * (output_len / self.e2e_latency_list[i]) * self.batch_size_list[i]) \
 +                        for i in idx_range
 +                ]
 +            ),
 +            (
 +                self.decoder_throughput_name, [
 +                    0.0 if len(self.per_token_latency_list[i]) <= total_prefill_steps else \
-+                    round_fn((output_len / sum(self.per_token_latency_list[i][total_prefill_steps:])) * self.batch_size_list[i]) \
++                    round_fn(self.dp * ((output_len-1) / sum(self.per_token_latency_list[i][total_prefill_steps:])) * self.batch_size_list[i]) \
 +                        for i in idx_range
 +                ]
-+            ),
-+            (
-+                self.k_name, self.num_spec_tokens
-+            ),
-+            (
-+                self.acceptance_rate_name, float(self.draft_acceptance_rate)
 +            ),
 +            (
 +                self.decode_times_name, [
@@ -242,14 +297,22 @@ index 000000000..466391a9d
 +                ]
 +            ),
 +        ]
++        if num_spec_tokens > 0:
++            metrics_data.append((self.k_name, num_spec_tokens))
++            metrics_data.append((self.acceptance_rate_name, [rate_list[i] for i in idx_range]))
 +
 +        insert_latency_device = VLLM_LATENCY_DEBUG_WITH_DEVICE_EN
 +        if insert_latency_device:
++            device_item_idx = 3
++            if self.is_v1_multimodal:
++                mm_encoder_latency_device = [round_fn(sum(self.mm_encoder_latency_device_list[i])) for i in idx_range]
++                metrics_data.insert(device_item_idx, (self.mm_encoder_latency_device_name, mm_encoder_latency_device))
++                device_item_idx = device_item_idx + 1
 +            context_latency_device = [round_fn(sum(self.per_token_latency_device_list[i][:total_prefill_steps])) for i in idx_range]
 +            per_token_latency_device = [0.0 if len(self.per_token_latency_device_list[i]) <= total_prefill_steps else \
 +                                        round_fn(statistics.fmean(self.per_token_latency_device_list[i][total_prefill_steps:])) for i in idx_range]
-+            metrics_data.insert(3, (self.context_latency_device_name, context_latency_device))
-+            metrics_data.insert(4, (self.per_token_latency_device_name, per_token_latency_device))
++            metrics_data.insert(device_item_idx, (self.context_latency_device_name, context_latency_device))
++            metrics_data.insert(device_item_idx + 1, (self.per_token_latency_device_name, per_token_latency_device))
 +
 +        self.metrics_data = dict(metrics_data)
 +
@@ -264,14 +327,11 @@ index 000000000..466391a9d
 +
 +        df.index.name = 'iter index'
 +        df[self.batch_size_name] = df[self.batch_size_name].astype(int)
-+        df[self.k_name] = df[self.k_name].astype(int)
++        if num_spec_tokens > 0:
++            df[self.k_name] = df[self.k_name].astype(int)
 +
 +        self.peak_memory_name = "profile memory(GB)"
 +        self.block_memory_name = "total cache memory(GB)"
-+        self.max_kv_memory_name = "max cache used(GB)"
-+        self.mean_kv_memory_name = "mean cache used(GB)"
-+        self.max_kv_usage_name = "max cache usage(%)"
-+        self.mean_kv_usage_name = "mean cache usage(%)"
 +        memory_metrics_data = [
 +            (
 +                self.peak_memory_name, [round_fn(self.peak_memory / 1024 / 1024 / 1024) for i in idx_range]
@@ -279,33 +339,40 @@ index 000000000..466391a9d
 +            (
 +                self.block_memory_name, [round_fn(self.block_memory / 1024 / 1024 / 1024) for i in idx_range]
 +            ),
-+            (
-+                self.max_kv_memory_name, [
-+                    0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
-+                    round_fn((1.0 - min(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) \
-+                                                     * self.block_memory / 1024 / 1024 / 1024) \
-+                        for i in idx_range]
-+            ),
-+            (
-+                self.mean_kv_memory_name, [
-+                    0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
-+                    round_fn((1.0 - statistics.fmean(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) \
-+                                                     * self.block_memory / 1024 / 1024 / 1024) \
-+                        for i in idx_range]
-+            ),
-+            (
-+                self.max_kv_usage_name, [
-+                    0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
-+                    round_fn((1.0 - min(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) * 100.0) \
-+                        for i in idx_range]
-+            ),
-+            (
-+                self.mean_kv_usage_name, [
-+                    0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
-+                    round_fn((1.0 - statistics.fmean(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) * 100.0) \
-+                        for i in idx_range]
-+            )
 +        ]
++        if not envs.VLLM_USE_V1:
++            self.max_kv_memory_name = "max cache used(GB)"
++            self.mean_kv_memory_name = "mean cache used(GB)"
++            self.max_kv_usage_name = "max cache usage(%)"
++            self.mean_kv_usage_name = "mean cache usage(%)"
++            memory_metrics_data.extend([
++                (
++                    self.max_kv_memory_name, [
++                        0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
++                        round_fn((1.0 - min(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) \
++                                                        * self.block_memory / 1024 / 1024 / 1024) \
++                            for i in idx_range]
++                ),
++                (
++                    self.mean_kv_memory_name, [
++                        0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
++                        round_fn((1.0 - statistics.fmean(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) \
++                                                        * self.block_memory / 1024 / 1024 / 1024) \
++                            for i in idx_range]
++                ),
++                (
++                    self.max_kv_usage_name, [
++                        0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
++                        round_fn((1.0 - min(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) * 100.0) \
++                            for i in idx_range]
++                ),
++                (
++                    self.mean_kv_usage_name, [
++                        0.0 if len(self.num_free_gpu_blocks_list[i]) == 1 else \
++                        round_fn((1.0 - statistics.fmean(self.num_free_gpu_blocks_list[i]) / self.num_total_gpu_blocks) * 100.0) \
++                            for i in idx_range]
++                )
++            ])
 +
 +        self.memory_metrics_data = dict(memory_metrics_data)
 +
@@ -327,13 +394,10 @@ index 000000000..466391a9d
 +        mm_params_text = " ".join(f"{key}:{value}" for key, value in self.mm_kwargs.items())
 +        print("Generation Config {} input len:{} output len:{} tp_nums:{} quantization:{}".format(
 +            mm_params_text, input_len,output_len,tp_nums,quantization))
-+
-+        if dump_info and insert_latency_device:
-+            dump_info.init_param(batch_size=self.metrics_data['batch size'][0],
-+                                 input_len=input_len, output_len=output_len,
-+                                 context_latency_device=np.mean(self.metrics_data['context latency device(ms)']),
-+                                 generate_latency_device=np.mean(self.metrics_data['per token latency device(ms)']))
-+            dump_info.dump()
++        self.context_latency_device = np.mean(self.metrics_data['context latency device(ms)'])
++        self.generate_latency_device = np.mean(self.metrics_data[self.per_token_latency_device_name])
++        if self.is_v1_multimodal:
++            self.mm_encoder_latency_device = np.mean(self.metrics_data[self.mm_encoder_latency_device_name])
 +
 +        print("*************************Performance Info******************************")
 +        print(f"Total prefill steps: {total_prefill_steps}")
@@ -343,48 +407,52 @@ index 000000000..466391a9d
 +            print(memory_df.to_string())
 +        if insert_latency_device :
 +            context_latency = np.mean(self.metrics_data['context latency device(ms)'])
-+            generate_latency = np.mean(self.metrics_data['per token latency device(ms)'])
++            generate_latency = np.mean(self.metrics_data[self.per_token_latency_device_name])
++            if num_spec_tokens > 0:
++                print("MTP token accept rate: {:.2f}%".format(rate*100))
++            self.dump_performance_info(hfu_info, io_efficiency)
 +
-+            millisecond2second_unit = 1000
-+            if dump_info and dump_info.has_information_dump():
-+                dump_info.dump_performance_info()
-+            elif dump_info:
-+                context_tflops_per_second = 0
-+                decoder_tflops_per_second = 0
-+                flops2Tflops = 1000 * 1000 * 1000 * 1000
-+                context_tflops = dump_info.flops_info["context_flops"] / flops2Tflops
-+                decoder_tflops = dump_info.flops_info["decoder_flops"] / flops2Tflops
-+                if not context_latency:
-+                    logger.warning("context_latency is 0, context_tflops_per_second unable to output correctly")
-+                else:
-+                    context_tflops_per_second = context_tflops / (context_latency / millisecond2second_unit)
-+
-+                if not generate_latency:
-+                    # embedding task does not have generate process
-+                    if not is_embedding_task:
-+                        logger.warning("generate_latency is 0, decoder_tflops_per_second unable to output correctly")
-+                else:
-+                    decoder_tflops_per_second = decoder_tflops / (generate_latency / millisecond2second_unit)
-+                print("Context tflops:  {} Tflops".format(context_tflops))
-+                print("Generate tflops: {} Tflops".format(decoder_tflops))
-+                print("Context tflops_per_second:  {} Tflops/s".format(context_tflops_per_second))
-+                print("Generate tflops_per_second: {} Tflops/s".format(decoder_tflops_per_second))
-+                df["context_tflops"] = context_tflops
-+                df["decoder_tflops"] = decoder_tflops
-+                df["context_tflops_per_second"] = context_tflops_per_second
-+                df["decoder_tflops_per_second"] = decoder_tflops_per_second
-+                if (not context_tflops) or (not decoder_tflops):
-+                    logger.warning("the flops is 0, Please check if the model file is correctly parsed!!!!!!!!!")
++        avg_latency_e2e = sum(sum(self.per_token_latency_list[i]) for i in idx_range) / len(idx_range)
++        print("Avg latency without host time is :", avg_latency_e2e)
 +        print("***********************************************************************")
 +        # collect context_hfu and
 +        self.save_hfu_info = False
-+        if insert_latency_device and dump_info and dump_info.has_information_dump():
-+            self.save_hfu_info = True
++        if insert_latency_device:
++            if VLLM_DUMP_MLU_INFO_EN:
++                try:
++                    import device_info
++                    self.save_hfu_info = True
++                except:
++                    logger.info(f"try import device_info failed. try pip install device_info.")
 +            self.context_hfu_name = "Context HFU"
-+            self.decoder_hfu_name = "Decoder  HFU"
++            self.decoder_hfu_name = "Decoder HFU"
 +            self.decoder_io_efficiency_name = "Decoder IO Efficiency"
-+            self.metrics_data[self.context_hfu_name] = dump_info.hfu_info["context_hfu"] * 100
-+            self.metrics_data[self.decoder_hfu_name] = dump_info.hfu_info["decoder_hfu"] * 100
-+            self.metrics_data[self.decoder_io_efficiency_name] = dump_info.io_efficiency * 100
-+        self.to_csv(os.getenv("OUTPUT_CSV_PATH", "output.csv"), show_per_iter=show_per_iter)
++            if self.save_hfu_info:
++                self.metrics_data[self.context_hfu_name] = hfu_info["context_hfu"] * 100
++                self.metrics_data[self.decoder_hfu_name] = hfu_info["decoder_hfu"] * 100
++                self.metrics_data[self.decoder_io_efficiency_name] = io_efficiency * 100
++        if csv_path := os.getenv("OUTPUT_CSV_PATH"):
++            try:
++                if dir_path := os.path.dirname(csv_path):
++                    os.makedirs(dir_path, exist_ok=True)
++                self.to_csv(csv_path, show_per_iter=show_per_iter)
++            except Exception as e:
++                logger.error(f"Invalid OUTPUT_CSV_PATH: {csv_path} to dump metrics, Error: {e}")
++
++    def dump_performance_info(self, hfu_info, io_efficiency):
++        try:
++            if VLLM_DUMP_MLU_INFO_EN and hfu_info != None:
++                hfu_info["context_hfu"] = hfu_info["context_hfu"] / (self.context_latency_device / millisecond2second_unit)
++                hfu_info["decoder_hfu"] = hfu_info["decoder_hfu"] / (self.generate_latency_device / millisecond2second_unit)
++                io_efficiency = io_efficiency / self.generate_latency_device
++                print(f"Context HFU-visible:   {hfu_info['context_hfu']:.3%}")
++                print(f"Decoder HFU-visible:   {hfu_info['decoder_hfu']:.3%}")
++                print(f"Decoder IO Efficiency: {io_efficiency:.3%}")
++            elif hfu_info != None:
++                print(f"Context FLOPS-visible:   {hfu_info['context_flops']}")
++                print(f"Decoder FLOPS-visible:   {hfu_info['decoder_flops']}")
++            else:
++                logger.info("Unsupport dump performance information")
++        except Exception as e:
++            logger.error(f"Failed to dump performance information: {str(e)}")
 

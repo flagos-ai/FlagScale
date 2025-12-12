@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/lora/layers.py b/vllm_mlu/vllm_mlu/lora/layers.py
 new file mode 100644
-index 000000000..acb820316
+index 000000000..6289fe996
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/lora/layers.py
-@@ -0,0 +1,218 @@
+@@ -0,0 +1,248 @@
 +from typing import List, Optional, Union
 +
 +import torch
@@ -16,6 +16,7 @@ index 000000000..acb820316
 +from vllm.lora.layers import (ColumnParallelLinearWithLoRA,
 +                              RowParallelLinearWithLoRA,
 +                              LinearScalingRotaryEmbeddingWithLoRA)
++from vllm.platforms import current_platform
 +
 +from vllm_mlu.model_executor.layers.rotary_embedding import (
 +    MLURotaryEmbedding, MLULinearScalingRotaryEmbedding)
@@ -29,13 +30,15 @@ index 000000000..acb820316
 +=============================
 +Modify by vllm_mlu
 +=============================
-+@brief: add smooth_quant_scale parameter.
++@brief: add smooth_quant_scale and use_tp_weight parameters.
 +'''
 +def vllm__lora__layers__ColumnParallelLinearWithLoRA__forward(
 +    self,
 +    input_,
-+    smooth_quant_scale: Optional[torch.Tensor] = None
++    smooth_quant_scale: Optional[torch.Tensor] = None,
++    use_tp_weight: bool = False,
 +) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[torch.Tensor]]]:
++    assert not use_tp_weight, "LoRa does not support use_tp_weight yet."
 +    assert smooth_quant_scale is None, "LoRA does not support smooth quant yet."
 +    return vllm__lora__layers__ColumnParallelLinearWithLoRA__forward_org(self, input_)
 +'''
@@ -64,10 +67,20 @@ index 000000000..acb820316
 +    End of MLU Hijack
 +    ==================
 +    '''
-+    self.punica_wrapper.add_lora_linear(output, x, self.lora_a_stacked,
-+                                        self.lora_b_stacked,
-+                                        self.lora_bias_stacked, 1.0,
-+                                        self.output_slices)
++    # In transformers backend, x and output have extra batch dimension like
++    # (1, seq_len, hidden_dim), while punica expects (seq_len, hidden_dim),
++    # therefore we need to flatten the batch dimensions.
++    if x.ndim == 3 and output.ndim == 3:
++        output = output.flatten(0, 1)
++        x = x.flatten(0, 1)
++
++    lora_output: Optional[
++        torch.Tensor] = self.punica_wrapper.add_lora_linear(
++            output, x, self.lora_a_stacked, self.lora_b_stacked,
++            self.lora_bias_stacked, 1.0, self.output_slices)
++    if not current_platform.can_update_inplace():
++        output = lora_output
++
 +    return output
 +
 +
@@ -75,8 +88,25 @@ index 000000000..acb820316
 +    self,
 +    input_: torch.Tensor,
 +    residual: Optional[torch.Tensor] = None,
-+    smooth_quant_scale: Optional[torch.Tensor] = None
++    smooth_quant_scale: Optional[torch.Tensor] = None,
++    use_tp_weight: bool = False,
++    output: Optional[torch.Tensor] = None,
 +) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[torch.Tensor]]]:
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: Add two parameters `use_tp_weight` and `output` to keep parameter
++    consistent with RowParallelLinear.forward.
++    '''
++    assert (not use_tp_weight) and output is None, (
++        f"RowParallelLinearWithLoRA.forward does not support use_tp_wight=True"
++        f" or pass output parameters.")
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
 +    # Set up backprop all-reduce.
 +    if self.base_layer.input_is_parallel:
 +        input_parallel = input_

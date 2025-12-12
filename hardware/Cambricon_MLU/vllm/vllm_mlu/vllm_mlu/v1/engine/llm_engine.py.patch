@@ -1,0 +1,91 @@
+diff --git a/vllm_mlu/vllm_mlu/v1/engine/llm_engine.py b/vllm_mlu/vllm_mlu/v1/engine/llm_engine.py
+new file mode 100644
+index 000000000..409470b54
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/v1/engine/llm_engine.py
+@@ -0,0 +1,84 @@
++# SPDX-License-Identifier: Apache-2.0
++
++from vllm.outputs import RequestOutput
++from vllm.v1.engine.llm_engine import LLMEngine
++from vllm.v1.metrics.stats import IterationStats
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++
++
++def vllm__engine__llm_engine__LLMEngine__get_hfu_info(self, batch, input_len, output_len):
++    return self.engine_core.get_hfu_info(batch, input_len, output_len)
++
++
++def vllm__engine__llm_engine__LLMEngine__get_latency(self):
++    return self.engine_core.get_latency()
++
++
++def vllm__engine__llm_engine__LLMEngine__get_memory_usage(self):
++    return self.engine_core.get_memory_usage()
++
++
++def vllm__engine__llm_engine__LLMEngine__start_scheduler_profile(self):
++    self.engine_core.start_scheduler_profile()
++
++
++def vllm__engine__llm_engine__LLMEngine__stop_scheduler_profile(self):
++    self.engine_core.stop_scheduler_profile()
++
++
++def vllm__engine__llm_engine__LLMEngine__step(self) -> list[RequestOutput]:
++    if self.should_execute_dummy_batch:
++        self.should_execute_dummy_batch = False
++        self.engine_core.execute_dummy_batch()
++        return []
++
++    # 1) Get EngineCoreOutput from the EngineCore.
++    outputs = self.engine_core.get_output()
++
++    # 2) Process EngineCoreOutputs.
++    iteration_stats = IterationStats() if self.log_stats else None
++    processed_outputs = self.output_processor.process_outputs(
++        outputs.outputs,
++        engine_core_timestamp=outputs.timestamp,
++        iteration_stats=iteration_stats)
++
++    # 3) Abort any reqs that finished due to stop strings.
++    self.engine_core.abort_requests(processed_outputs.reqs_to_abort)
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: allow output to be empty.
++    '''
++    # 4) Record stats
++    if self.stat_logger is not None and outputs.scheduler_stats is not None:
++        self.stat_logger.record(scheduler_stats=outputs.scheduler_stats,
++                                iteration_stats=iteration_stats)
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++
++    return processed_outputs.request_outputs
++
++
++MluHijackObject.apply_hijack(LLMEngine,
++                             "get_hfu_info",
++                             vllm__engine__llm_engine__LLMEngine__get_hfu_info)
++MluHijackObject.apply_hijack(LLMEngine,
++                             "get_latency",
++                             vllm__engine__llm_engine__LLMEngine__get_latency)
++MluHijackObject.apply_hijack(LLMEngine,
++                             "get_memory_usage",
++                             vllm__engine__llm_engine__LLMEngine__get_memory_usage)
++MluHijackObject.apply_hijack(LLMEngine,
++                             "start_scheduler_profile",
++                             vllm__engine__llm_engine__LLMEngine__start_scheduler_profile)
++MluHijackObject.apply_hijack(LLMEngine,
++                             "stop_scheduler_profile",
++                             vllm__engine__llm_engine__LLMEngine__stop_scheduler_profile)
++MluHijackObject.apply_hijack(LLMEngine,
++                             LLMEngine.step,
++                             vllm__engine__llm_engine__LLMEngine__step)
+

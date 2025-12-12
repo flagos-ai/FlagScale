@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/models/layer_utils.py b/vllm_mlu/vllm_mlu/model_executor/models/layer_utils.py
 new file mode 100755
-index 000000000..f6bfb9b6b
+index 000000000..a52713ce6
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/models/layer_utils.py
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,242 @@
 +import torch
 +from typing import Callable, Optional, List, Union, Tuple
 +
@@ -14,25 +14,6 @@ index 000000000..f6bfb9b6b
 +from vllm.model_executor.layers.layernorm import RMSNorm
 +from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 +from transformers import PretrainedConfig
-+from vllm_mlu._mlu_utils import check_context_comm_cmpt_parallel
-+
-+
-+def intern_vision_encoder_layer_base(
-+    hidden_states: torch.Tensor,
-+    self_attn: Callable,
-+    norm1: Callable,
-+    norm2: Callable,
-+    ls1: Callable,
-+    ls2: Callable,
-+    mlp: Callable
-+) -> torch.Tensor:
-+    hidden_states = hidden_states + self_attn(
-+                        norm1(hidden_states).reshape(hidden_states.shape)
-+                    ) * ls1
-+    hidden_states = hidden_states + mlp(
-+                        norm2(hidden_states).reshape(hidden_states.shape)
-+                    ).reshape(hidden_states.shape) * ls2
-+    return hidden_states
 +
 +
 +def hunyuan_decoder_layer_forward_base(
@@ -52,6 +33,7 @@ index 000000000..f6bfb9b6b
 +        layernorm_output, smooth_quant_scale = input_layernorm(hidden_states)
 +    else:
 +        layernorm_output = input_layernorm(hidden_states)
++        smooth_quant_scale = None
 +    if apply_residual_connection_post_layernorm:
 +        residual = layernorm_output
 +    else:
@@ -89,11 +71,11 @@ index 000000000..f6bfb9b6b
 +    input_norm_fuse_en: bool = False,
 +    post_norm_fuse_en: bool = False,
 +) -> torch.Tensor:
-+    smooth_quant_scale = None
 +    if input_norm_fuse_en:
 +        layernorm_output, smooth_quant_scale = input_layernorm(hidden_states)
 +    else:
 +        layernorm_output = input_layernorm(hidden_states)
++        smooth_quant_scale = None
 +
 +    if apply_residual_connection_post_layernorm:
 +        residual = layernorm_output
@@ -108,11 +90,11 @@ index 000000000..f6bfb9b6b
 +        smooth_quant_scale=smooth_quant_scale,
 +    )
 +
-+    smooth_quant_scale = None
 +    if post_norm_fuse_en:
 +        layernorm_output, smooth_quant_scale = post_layernorm(attention_output)
 +    else:
 +        layernorm_output = post_layernorm(attention_output)
++        smooth_quant_scale = None
 +
 +    if apply_residual_connection_post_layernorm:
 +        residual = layernorm_output
@@ -230,59 +212,39 @@ index 000000000..f6bfb9b6b
 +            and quant_config.get_name() == "SmoothQuant")
 +
 +
-+def is_per_tensor_smoothquant(quant_config: QuantizationConfig) -> bool:
-+    return (is_smoothquant(quant_config)
-+            and quant_config.input_quant_method == "per_tensor")
-+
-+
 +def is_per_token_smoothquant(quant_config: QuantizationConfig) -> bool:
-+    if check_context_comm_cmpt_parallel():
-+        return False
 +    return (is_smoothquant(quant_config)
 +            and quant_config.input_quant_method == "per_token")
 +
++def compute_in_loop(func: Callable,
++                    input: torch.Tensor,
++                    chunk_size: int,
++                    feature_size: Optional[int] = None,
++                    **kwargs):
++    """
++    divides input into chunks in the leading dimension (dimension 0), and
++    compute the chunks in a loop, instead of in a batch at once.
 +
-+def quant_fusion_with_layernorm(
-+    op: torch.nn.LayerNorm,
-+    quant_scale: torch.Tensor,
-+    dynamic_quant: bool = False,
-+) -> Callable:
-+    bias = None
-+    if op.bias is not None:
-+        bias = op.bias.data
++    arg:
++    feature_size: size of output feature dimension. Provide it when the
++                  the output's feature dimension would differ from the input's
++                  feature dimension.
++    """
 +
-+    def func(x: torch.Tensor) -> torch.Tensor:
-+        return mlu_ops.fused_layer_norm(
-+            x,
-+            None,
-+            op.weight.data,
-+            bias,
-+            None,
-+            op.eps,
-+            False,
-+            quant_scale,
-+            dynamic_quant)
++    total = input.shape[0]
++    # directly compute if there is only one chunk
++    if chunk_size >= total:
++        return func(input, **kwargs)
 +
-+    return func
++    feature_size = feature_size or input.shape[1]
++    output = input.new_empty(total, feature_size)
++    num_chunks = (total + chunk_size - 1) // chunk_size
 +
++    for i in range(num_chunks):
++        start = i * chunk_size
++        end = min((i + 1) * chunk_size, total)
++        output[start : end] = func(input[start : end], **kwargs)
 +
-+def quant_fusion_with_rmsnorm(
-+    op: RMSNorm,
-+    quant_scale: torch.Tensor,
-+    dynamic_quant: bool = False,
-+) -> Callable:
-+
-+    def func(x: torch.Tensor) -> torch.Tensor:
-+        return mlu_ops.fused_rms_norm(
-+            x,
-+            None,
-+            op.weight.data,
-+            None,
-+            None,
-+            op.variance_epsilon,
-+            False,
-+            quant_scale,
-+            dynamic_quant)
-+
-+    return func
++    return output
+\ No newline at end of file
 

@@ -1,8 +1,8 @@
 diff --git a/setup.py b/setup.py
-index b0cc2f481..2a2728e83 100755
+index ea7cd0169..3be60328a 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -13,11 +13,26 @@ from shutil import which
+@@ -14,11 +14,27 @@ from shutil import which
  
  import torch
  from packaging.version import Version, parse
@@ -16,6 +16,7 @@ index b0cc2f481..2a2728e83 100755
 +class InstallWithMlu(install):
 +    def run(self):
 +        # 执行原始的install命令安装vllm
++
 +        super().run()
 +
 +        # 安装vllm_mlu
@@ -30,7 +31,7 @@ index b0cc2f481..2a2728e83 100755
  
  def load_module_from_path(module_name, path):
      spec = importlib.util.spec_from_file_location(module_name, path)
-@@ -30,6 +45,8 @@ def load_module_from_path(module_name, path):
+@@ -31,6 +47,8 @@ def load_module_from_path(module_name, path):
  ROOT_DIR = Path(__file__).parent
  logger = logging.getLogger(__name__)
  
@@ -39,17 +40,17 @@ index b0cc2f481..2a2728e83 100755
  # cannot import envs directly because it depends on vllm,
  #  which is not installed yet
  envs = load_module_from_path('envs', os.path.join(ROOT_DIR, 'vllm', 'envs.py'))
-@@ -538,7 +555,8 @@ def get_gaudi_sw_version():
+@@ -546,7 +564,8 @@ def get_gaudi_sw_version():
  
  
  def get_vllm_version() -> str:
 -    version = get_version(write_to="vllm/_version.py")
-+    # version = get_version(write_to="vllm/_version.py")
-+    version = "0.8.3"
++    #version = get_version(write_to="vllm/_version.py")
++    version = "0.9.1"
      sep = "+" if "+" not in version else "."  # dev versions might contain +
  
      if _no_device():
-@@ -655,11 +673,13 @@ if _is_cuda():
+@@ -663,11 +682,13 @@ if _is_cuda():
  if _build_custom_ops():
      ext_modules.append(CMakeExtension(name="vllm._C"))
  
@@ -63,7 +64,7 @@ index b0cc2f481..2a2728e83 100755
      ]
  }
  
-@@ -667,7 +687,7 @@ if _no_device():
+@@ -675,7 +696,7 @@ if _no_device():
      ext_modules = []
  
  if not ext_modules:
@@ -72,7 +73,15 @@ index b0cc2f481..2a2728e83 100755
  else:
      cmdclass = {
          "build_ext":
-@@ -686,6 +706,12 @@ setup(
+@@ -684,6 +705,7 @@ else:
+ 
+ setup(
+     # static metadata should rather go in pyproject.toml
++    name = "vllm",
+     version=get_vllm_version(),
+     ext_modules=ext_modules,
+     install_requires=get_requirements(),
+@@ -695,6 +717,12 @@ setup(
          "audio": ["librosa", "soundfile"],  # Required for audio processing
          "video": []  # Kept for backwards compatibility
      },

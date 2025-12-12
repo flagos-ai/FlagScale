@@ -1,0 +1,20 @@
+diff --git a/.markdownlint.yaml b/.markdownlint.yaml
+new file mode 100644
+index 000000000..c86fed955
+--- /dev/null
++++ b/.markdownlint.yaml
+@@ -0,0 +1,13 @@
++MD007:
++  indent: 4
++MD013: false
++MD024:
++  siblings_only: true
++MD033: false
++MD042: false
++MD045: false
++MD046: false
++MD051: false
++MD052: false
++MD053: false
++MD059: false
+

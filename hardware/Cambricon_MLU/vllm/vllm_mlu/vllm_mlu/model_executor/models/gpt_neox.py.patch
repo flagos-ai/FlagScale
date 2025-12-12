@@ -1,247 +1,283 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/models/gpt_neox.py b/vllm_mlu/vllm_mlu/model_executor/models/gpt_neox.py
 new file mode 100644
-index 000000000..8ed1a15e2
+index 000000000..0812b64fa
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/models/gpt_neox.py
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,275 @@
 +import torch
 +from torch import nn
++from torch.nn import Module
 +from typing import Optional
 +from transformers import GPTNeoXConfig
 +
 +from vllm.attention import Attention
-+from vllm.config import CacheConfig
++from vllm.compilation.decorators import support_torch_compile
++from vllm.config import CacheConfig, VllmConfig
 +from vllm.distributed import (get_tensor_model_parallel_world_size,
 +                              get_tensor_model_parallel_rank,
 +                              tensor_model_parallel_all_reduce)
 +from vllm.model_executor.layers.linear import (QKVParallelLinear,
 +                                               RowParallelLinear)
++from vllm.model_executor.layers.logits_processor import LogitsProcessor
 +from vllm.model_executor.layers.rotary_embedding import get_rope
++from vllm.model_executor.layers.vocab_parallel_embedding import (
++    ParallelLMHead, VocabParallelEmbedding)
 +from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
-+from vllm.model_executor.models.gpt_neox import GPTNeoXAttention, GPTNeoXLayer
++from vllm.model_executor.models.gpt_neox import GPTNeoXModel, GPTNeoXForCausalLM
++from vllm.model_executor.models.interfaces import SupportsPP
++from vllm.model_executor.models.utils import (
++    make_empty_intermediate_tensors_factory, make_layers, maybe_prefix)
 +from vllm.logger import init_logger
 +
 +from vllm_mlu.model_executor.layers.feed_forward import FeedForward
-+from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
 +
 +logger = init_logger(__name__)
 +
 +
-+def vllm__module_executor__models__gpt_neox__GPTNeoXAttention__init__(
-+    self,
-+    config: GPTNeoXConfig,
-+    cache_config: Optional[CacheConfig] = None,
-+    quant_config: Optional[QuantizationConfig] = None,
-+    prefix: str = "",
-+):
-+    super(GPTNeoXAttention, self).__init__()
-+    self.total_num_heads = config.num_attention_heads
-+    self.hidden_size = config.hidden_size
-+    self.head_size = self.hidden_size // self.total_num_heads
-+    self.bias = getattr(config, "attention_bias", True)
++class MLUGPTNeoXAttention(nn.Module):
 +
-+    tensor_model_parallel_world_size = (
-+        get_tensor_model_parallel_world_size())
-+    assert self.total_num_heads % tensor_model_parallel_world_size == 0
-+    self.num_heads = (self.total_num_heads //
-+                      tensor_model_parallel_world_size)
++    def __init__(
++        self,
++        config: GPTNeoXConfig,
++        cache_config: Optional[CacheConfig] = None,
++        quant_config: Optional[QuantizationConfig] = None,
++        prefix: str = "",
++    ):
++        super().__init__()
++        self.total_num_heads = config.num_attention_heads
++        self.hidden_size = config.hidden_size
++        self.head_size = self.hidden_size // self.total_num_heads
++        self.bias = getattr(config, "attention_bias", True)
 +
-+    self.query_key_value = QKVParallelLinear(
-+        config.hidden_size,
-+        self.head_size,
-+        self.total_num_heads,
-+        bias=self.bias,
-+        quant_config=quant_config,
-+    )
++        tensor_model_parallel_world_size = (
++            get_tensor_model_parallel_world_size())
++        assert self.total_num_heads % tensor_model_parallel_world_size == 0
++        self.num_heads = (self.total_num_heads //
++                          tensor_model_parallel_world_size)
 +
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: do not do allreduce in linear and skip bias add when use_parallel_residual
-+    '''
-+    if config.use_parallel_residual:
-+        reduce_results = False
-+        skip_bias_add = True
-+    else:
-+        reduce_results = True
-+        skip_bias_add = False
-+
-+    self.dense = RowParallelLinear(
-+        config.hidden_size,
-+        config.hidden_size,
-+        bias=self.bias,
-+        quant_config=quant_config,
-+        reduce_results=reduce_results,
-+        skip_bias_add=skip_bias_add,
-+    )
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+
-+    scaling = self.head_size**-0.5
-+    rotary_dim = int(self.head_size * config.rotary_pct)
-+    assert rotary_dim % 2 == 0
-+    rope_theta = getattr(config, "rope_theta", 10000)
-+    max_position_embeddings = getattr(config, "max_position_embeddings",
-+                                      8192)
-+    self.rotary_emb = get_rope(
-+        self.head_size,
-+        rotary_dim=rotary_dim,
-+        max_position=max_position_embeddings,
-+        base=rope_theta,
-+    )
-+    self.attn = Attention(self.num_heads,
-+                          self.head_size,
-+                          scaling,
-+                          cache_config=cache_config,
-+                          quant_config=quant_config,
-+                          prefix=f"{prefix}.attn")
-+
-+
-+def vllm__module_executor__models__gpt_neox__GPTNeoXAttention__forward(
-+    self,
-+    position_ids: torch.Tensor,
-+    hidden_states: torch.Tensor,
-+) -> torch.Tensor:
-+    qkv, _ = self.query_key_value(hidden_states)
-+    q, k, v = qkv.chunk(chunks=3, dim=-1)
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: pack q & k to fit tmo.apply_rotary
-+    '''
-+    qk, _ = qkv.split([self.num_heads * self.head_size * 2, self.num_heads * self.head_size], dim=-1)
-+    self.rotary_emb(position_ids, qk.view(-1, self.num_heads + self.num_heads, self.head_size))
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+    attn_output = self.attn(q, k, v)
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: add bias for rank 0 when use_parallel_residual
-+    '''
-+    output, bias = self.dense(attn_output)
-+    if self.dense.skip_bias_add and get_tensor_model_parallel_rank() == 0:
-+        output += bias
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+    return output
-+
-+
-+def vllm__module_executor__models__gpt_neox__GPTNeoXLayer__init__(
-+    self,
-+    config: GPTNeoXConfig,
-+    cache_config: Optional[CacheConfig] = None,
-+    quant_config: Optional[QuantizationConfig] = None,
-+    prefix: str = "",
-+):
-+    super(GPTNeoXLayer, self).__init__()
-+    self.use_parallel_residual = config.use_parallel_residual
-+    self.input_layernorm = nn.LayerNorm(config.hidden_size,
-+                                        eps=config.layer_norm_eps)
-+    self.post_attention_layernorm = nn.LayerNorm(config.hidden_size,
-+                                                 eps=config.layer_norm_eps)
-+    self.attention = GPTNeoXAttention(config,
-+                                      cache_config,
-+                                      quant_config,
-+                                      prefix=f"{prefix}.attention")
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: 1) use FeedForward instead of MLP
-+            2) do not do allreduce in row linear and skip bias add in it
-+    '''
-+    if self.use_parallel_residual:
-+        reduce_results = False
-+        skip_bias_add = True
-+    else:
-+        reduce_results = True
-+        skip_bias_add = False
-+
-+    self.mlp = FeedForward(hidden_size=config.hidden_size,
-+                           intermediate_size=config.intermediate_size,
-+                           hidden_act='gelu',
-+                           up_proj_name='dense_h_to_4h',
-+                           is_gated=False,
-+                           down_proj_name='dense_4h_to_h',
-+                           bias=True,
-+                           quant_config=quant_config,
-+                           skip_bias_add=skip_bias_add,
-+                           reduce_results=reduce_results)
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+
-+
-+def vllm__module_executor__models__gpt_neox__GPTNeoXLayer__forward(
-+    self,
-+    position_ids: torch.Tensor,
-+    hidden_states: torch.Tensor,
-+) -> torch.Tensor:
-+    attn_input = self.input_layernorm(hidden_states)
-+    attn_output = self.attention(
-+        position_ids=position_ids,
-+        hidden_states=attn_input,
-+    )
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: only do one allreduce when use_parallel_residual
-+    '''
-+    if self.use_parallel_residual:
-+        # pseudocode:
-+        # x = x + attn(ln1(x)) + mlp(ln2(x))
-+        mlp_input = self.post_attention_layernorm(hidden_states)
-+        mlp_output, mlp_bias = self.mlp(mlp_input)
-+        if get_tensor_model_parallel_rank() == 0:
-+            mlp_output += mlp_bias
-+            hidden_states = mlp_output + attn_output + hidden_states
++        self.query_key_value = QKVParallelLinear(
++            config.hidden_size,
++            self.head_size,
++            self.total_num_heads,
++            bias=self.bias,
++            quant_config=quant_config,
++        )
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: do not do allreduce in linear and skip bias add when use_parallel_residual
++        '''
++        if config.use_parallel_residual:
++            reduce_results = False
++            skip_bias_add = True
 +        else:
++            reduce_results = True
++            skip_bias_add = False
++
++        self.dense = RowParallelLinear(
++            config.hidden_size,
++            config.hidden_size,
++            bias=self.bias,
++            quant_config=quant_config,
++            reduce_results=reduce_results,
++            skip_bias_add=skip_bias_add,
++        )
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++        scaling = self.head_size**-0.5
++        rotary_dim = int(self.head_size * config.rotary_pct)
++        assert rotary_dim % 2 == 0
++        rope_theta = getattr(config, "rope_theta", 10000)
++        max_position_embeddings = getattr(config, "max_position_embeddings",
++                                          8192)
++        self.rotary_emb = get_rope(
++            self.head_size,
++            rotary_dim=rotary_dim,
++            max_position=max_position_embeddings,
++            base=rope_theta,
++        )
++        self.attn = Attention(self.num_heads,
++                              self.head_size,
++                              scaling,
++                              cache_config=cache_config,
++                              quant_config=quant_config,
++                              prefix=f"{prefix}.attn")
++
++    def forward(
++        self,
++        position_ids: torch.Tensor,
++        hidden_states: torch.Tensor,
++    ) -> torch.Tensor:
++        qkv, _ = self.query_key_value(hidden_states)
++        q, k, v = qkv.chunk(chunks=3, dim=-1)
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: pack q & k to fit tmo.apply_rotary
++        @brief: add bias for rank 0 when use_parallel_residual
++        ''' 
++        qk, _ = qkv.split([self.num_heads * self.head_size * 2,
++                           self.num_heads * self.head_size], dim=-1)
++        self.rotary_emb(position_ids, qk.view(
++            -1, self.num_heads + self.num_heads, self.head_size))
++        attn_output = self.attn(q, k, v)
++        output, bias = self.dense(attn_output)
++        if self.dense.skip_bias_add and get_tensor_model_parallel_rank() == 0:
++            output += bias
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++        return output
++
++
++class MLUGPTNeoXLayer(nn.Module):
++
++    def __init__(
++        self,
++        config: GPTNeoXConfig,
++        cache_config: Optional[CacheConfig] = None,
++        quant_config: Optional[QuantizationConfig] = None,
++        prefix: str = "",
++    ):
++        super().__init__()
++        self.use_parallel_residual = config.use_parallel_residual
++        self.input_layernorm = nn.LayerNorm(config.hidden_size,
++                                            eps=config.layer_norm_eps)
++        self.post_attention_layernorm = nn.LayerNorm(config.hidden_size,
++                                                     eps=config.layer_norm_eps)
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: 1) use MLUGPTNeoXAttention and FeedForward
++                2) do not do allreduce in row linear and skip bias add in it
++        '''
++        self.attention = MLUGPTNeoXAttention(config,
++                                            cache_config,
++                                            quant_config,
++                                            prefix=f"{prefix}.attention")
++        if self.use_parallel_residual:
++            reduce_results = False
++            skip_bias_add = True
++        else:
++            reduce_results = True
++            skip_bias_add = False
++        self.mlp = FeedForward(hidden_size=config.hidden_size,
++                                intermediate_size=config.intermediate_size,
++                                hidden_act='gelu',
++                                up_proj_name='dense_h_to_4h',
++                                is_gated=False,
++                                down_proj_name='dense_4h_to_h',
++                                bias=True,
++                                quant_config=quant_config,
++                                skip_bias_add=skip_bias_add,
++                                reduce_results=reduce_results)
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++    def forward(
++        self,
++        position_ids: torch.Tensor,
++        hidden_states: torch.Tensor,
++    ) -> torch.Tensor:
++        attn_input = self.input_layernorm(hidden_states)
++        attn_output = self.attention(
++            position_ids=position_ids,
++            hidden_states=attn_input,
++        )
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: only do one allreduce when use_parallel_residual
++        '''
++        if self.use_parallel_residual:
++            # pseudocode:
++            # x = x + attn(ln1(x)) + mlp(ln2(x))
++            mlp_input = self.post_attention_layernorm(hidden_states)
++            mlp_output, mlp_bias = self.mlp(mlp_input)
++            if get_tensor_model_parallel_rank() == 0:
++                mlp_output += mlp_bias
++                hidden_states = mlp_output + attn_output + hidden_states
++            else:
++                hidden_states = mlp_output + attn_output
++            hidden_states = tensor_model_parallel_all_reduce(hidden_states)
++        else:
++            # pseudocode:
++            # x = x + attn(ln1(x))
++            # x = x + mlp(ln2(x))
++            attn_output = attn_output + hidden_states
++            mlp_input = self.post_attention_layernorm(attn_output)
++            mlp_output = self.mlp(mlp_input)
 +            hidden_states = mlp_output + attn_output
-+        hidden_states = tensor_model_parallel_all_reduce(hidden_states)
-+    else:
-+        # pseudocode:
-+        # x = x + attn(ln1(x))
-+        # x = x + mlp(ln2(x))
-+        attn_output = attn_output + hidden_states
-+        mlp_input = self.post_attention_layernorm(attn_output)
-+        mlp_output = self.mlp(mlp_input)
-+        hidden_states = mlp_output + attn_output
-+    return hidden_states
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
++        return hidden_states
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
 +
 +
-+MluHijackObject.apply_hijack(GPTNeoXAttention,
-+                             GPTNeoXAttention.__init__,
-+                             vllm__module_executor__models__gpt_neox__GPTNeoXAttention__init__)
-+MluHijackObject.apply_hijack(GPTNeoXAttention,
-+                             GPTNeoXAttention.forward,
-+                             vllm__module_executor__models__gpt_neox__GPTNeoXAttention__forward)
-+MluHijackObject.apply_hijack(GPTNeoXLayer,
-+                             GPTNeoXLayer.__init__,
-+                             vllm__module_executor__models__gpt_neox__GPTNeoXLayer__init__)
-+MluHijackObject.apply_hijack(GPTNeoXLayer,
-+                             GPTNeoXLayer.forward,
-+                             vllm__module_executor__models__gpt_neox__GPTNeoXLayer__forward)
++@support_torch_compile
++class MLUGPTNeoXModel(GPTNeoXModel):
++
++    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
++        Module.__init__(self)
++
++        config = vllm_config.model_config.hf_config
++        cache_config = vllm_config.cache_config
++        quant_config = vllm_config.quant_config
++
++        self.config = config
++
++        self.embed_in = VocabParallelEmbedding(
++            config.vocab_size,
++            config.hidden_size,
++        )
++        self.start_layer, self.end_layer, self.layers = make_layers(
++            config.num_hidden_layers,
++            lambda prefix: MLUGPTNeoXLayer(
++                config, cache_config, quant_config, prefix=prefix),
++            prefix=f"{prefix}.layers",
++        )
++        self.final_layer_norm = nn.LayerNorm(config.hidden_size,
++                                             eps=config.layer_norm_eps)
++        self.make_empty_intermediate_tensors = (
++            make_empty_intermediate_tensors_factory(["hidden_states"],
++                                                    config.hidden_size))
++
++
++class MLUGPTNeoXForCausalLM(GPTNeoXForCausalLM):
++
++    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
++        Module.__init__(self)
++        SupportsPP.__init__(self)
++        config = vllm_config.model_config.hf_config
++        quant_config = vllm_config.quant_config
++        self.config = config
++        self.quant_config = quant_config
++        self.gpt_neox = MLUGPTNeoXModel(vllm_config=vllm_config,
++                                        prefix=maybe_prefix(prefix, "gpt_neox"))
++        self.embed_out = ParallelLMHead(
++            config.vocab_size,
++            config.hidden_size,
++            quant_config=quant_config,
++        )
++        if self.config.tie_word_embeddings:
++            self.embed_out.weight = self.gpt_neox.embed_in.weight
++        self.logits_processor = LogitsProcessor(config.vocab_size)
++        self.make_empty_intermediate_tensors = (
++            self.gpt_neox.make_empty_intermediate_tensors)
 \ No newline at end of file
 

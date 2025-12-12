@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/layers/fused_moe/fused_moe.py b/vllm_mlu/vllm_mlu/model_executor/layers/fused_moe/fused_moe.py
 new file mode 100644
-index 000000000..91b9c3d8c
+index 000000000..afb4b686a
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/layers/fused_moe/fused_moe.py
-@@ -0,0 +1,634 @@
+@@ -0,0 +1,643 @@
 +# SPDX-License-Identifier: Apache-2.0
 +"""Fused MoE kernel."""
 +import functools
@@ -263,18 +263,13 @@ index 000000000..91b9c3d8c
 +                == B_scale.shape[-2])
 +        assert (block_shape is None or triton.cdiv(B.shape[-1], block_shape[1])
 +                == B_scale.shape[-1])
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: Only support fp8_w8a8
-+    '''
-+    assert use_fp8_w8a8, "use_fp8_w8a8 must be True"
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
++    elif use_int8_w8a16 or use_int4_w4a16:
++        assert B_scale is not None
++        assert block_shape is None or block_shape[0] == 0
++    else:
++        assert A_scale is None
++        assert B_scale is None
++
 +    M = A.shape[0]
 +    num_tokens = M * top_k
 +
@@ -302,8 +297,9 @@ index 000000000..91b9c3d8c
 +    End of MLU Hijack
 +    ==================
 +    '''
++    use_fused_moe_kernel = not (use_int8_w8a16 or use_int4_w4a16)
 +
-+    if use_fp8_w8a8:
++    if use_fused_moe_kernel:
 +        config = config.copy()
 +        BLOCK_SIZE_K = config.pop("BLOCK_SIZE_K")
 +        if block_shape is not None:
@@ -544,6 +540,14 @@ index 000000000..91b9c3d8c
 +        if tokens_in_chunk == 0:
 +            break
 +
++        if tokens_in_chunk < CHUNK_SIZE and chunk > 0:
++            # Adjust the intermediate cache size and config for the last
++            # chunk. Note that in most cases we only have one chunk
++            # so the cache size and config are already set correctly and
++            # do not need to be adjusted.
++            intermediate_cache1 = intermediate_cache1[:tokens_in_chunk]
++            intermediate_cache3 = intermediate_cache3[:tokens_in_chunk]
++
 +        curr_topk_ids = topk_ids[begin_chunk_idx:end_chunk_idx]
 +        curr_topk_weights = topk_weights[begin_chunk_idx:end_chunk_idx]
 +
@@ -552,6 +556,8 @@ index 000000000..91b9c3d8c
 +        if use_fp8_w8a8:
 +            qcurr_hidden_states, a1q_scale = _fp8_quantize(
 +                curr_hidden_states, a1_scale, block_shape)
++        else:
++            qcurr_hidden_states = curr_hidden_states
 +        sorted_token_ids, expert_ids, num_tokens_post_padded = (
 +            moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
 +                                 global_num_experts, expert_map))
@@ -594,6 +600,8 @@ index 000000000..91b9c3d8c
 +        if use_fp8_w8a8:
 +            qintermediate_cache2, a2q_scale = _fp8_quantize(
 +                intermediate_cache2, a2_scale, block_shape)
++        else:
++            qintermediate_cache2 = intermediate_cache2
 +        invoke_fused_moe_kernel(qintermediate_cache2,
 +                                w2,
 +                                intermediate_cache3 if topk_ids.shape[1] > 1 else out_hidden_states[begin_chunk_idx:end_chunk_idx],
@@ -638,4 +646,5 @@ index 000000000..91b9c3d8c
 +        ==================
 +        '''
 +    return out_hidden_states
++
 

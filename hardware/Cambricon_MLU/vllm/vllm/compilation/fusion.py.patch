@@ -1,8 +1,8 @@
 diff --git a/vllm/compilation/fusion.py b/vllm/compilation/fusion.py
-index b46f5f522..7925e8ee4 100644
+index 7e2c5b4fe..3d1bc49db 100644
 --- a/vllm/compilation/fusion.py
 +++ b/vllm/compilation/fusion.py
-@@ -29,8 +29,21 @@ def empty_fp32(*args, **kwargs):
+@@ -30,8 +30,21 @@ def empty_fp32(*args, **kwargs):
      return torch.empty(*args, **kwargs, dtype=torch.float32, device="cuda")
  
  
@@ -26,18 +26,17 @@ index b46f5f522..7925e8ee4 100644
  
  
  class QuantKey(NamedTuple):
-@@ -57,13 +70,25 @@ kFp8StaticTensorSym = QuantKey(FP8_DTYPE, True, True, True)
+@@ -58,13 +71,24 @@ kFp8StaticTensorSym = QuantKey(FP8_DTYPE, True, True, True)
  kFp8DynamicTensorSym = QuantKey(FP8_DTYPE, False, True, True)
  kFp8DynamicTokenSym = QuantKey(FP8_DTYPE, False, False, True)
  
-+
 +'''
 +=============================
 +Modify by vllm_mlu
 +=============================
 +@brief: skip fp8 quant op implemention
 +'''
- QUANT_OPS: Dict[QuantKey, OpOverload] = {
+ QUANT_OPS: dict[QuantKey, OpOverload] = {
 -    kFp8StaticTensorSym: torch.ops._C.static_scaled_fp8_quant.default,  # noqa
 -    kFp8DynamicTensorSym:
 -    torch.ops._C.dynamic_scaled_fp8_quant.default,  # noqa
@@ -57,17 +56,18 @@ index b46f5f522..7925e8ee4 100644
  
  
  class FusedRMSQuantKey(NamedTuple):
-@@ -80,16 +105,27 @@ class FusedRMSQuantKey(NamedTuple):
+@@ -80,17 +104,27 @@ class FusedRMSQuantKey(NamedTuple):
+         return (f"FusedQuantKey({self.quant}, with"
                  f"{'' if self.fused_add else 'out'} residual)")
  
- 
+-
 +'''
 +=============================
 +Modify by vllm_mlu
 +=============================
 +@brief: skip fp8 quant op implemention
 +'''
- FUSED_OPS: Dict[FusedRMSQuantKey, OpOverload] = {
+ FUSED_OPS: dict[FusedRMSQuantKey, OpOverload] = {
 -    FusedRMSQuantKey(kFp8StaticTensorSym, False):
 -    torch.ops._C.rms_norm_static_fp8_quant.default,  # noqa
 -    FusedRMSQuantKey(kFp8StaticTensorSym, True):

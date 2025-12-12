@@ -1,0 +1,16 @@
+diff --git a/vllm/_custom_ops.py b/vllm/_custom_ops.py
+index 92de1f5ef..a8e4638ef 100644
+--- a/vllm/_custom_ops.py
++++ b/vllm/_custom_ops.py
+@@ -15,7 +15,9 @@ from vllm.scalar_type import ScalarType
+ 
+ logger = init_logger(__name__)
+ 
+-if not current_platform.is_tpu() and not current_platform.is_hpu():
++if (not current_platform.is_tpu()
++        and not current_platform.is_hpu()
++        and not current_platform.is_out_of_tree()):
+     try:
+         import vllm._C
+     except ImportError as e:
+

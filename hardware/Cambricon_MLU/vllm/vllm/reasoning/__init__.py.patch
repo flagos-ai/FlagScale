@@ -1,0 +1,24 @@
+diff --git a/vllm/reasoning/__init__.py b/vllm/reasoning/__init__.py
+index e8cd56551..879a6b4f4 100644
+--- a/vllm/reasoning/__init__.py
++++ b/vllm/reasoning/__init__.py
+@@ -3,8 +3,10 @@
+ 
+ from .abs_reasoning_parsers import ReasoningParser, ReasoningParserManager
+ from .deepseek_r1_reasoning_parser import DeepSeekR1ReasoningParser
++from .glm4_moe_reasoning_parser import Glm4MoeModelReasoningParser
+ from .granite_reasoning_parser import GraniteReasoningParser
+ from .qwen3_reasoning_parser import Qwen3ReasoningParser
++from .step3_reasoning_parser import Step3ReasoningParser
+ 
+ __all__ = [
+     "ReasoningParser",
+@@ -12,4 +14,7 @@ __all__ = [
+     "DeepSeekR1ReasoningParser",
+     "GraniteReasoningParser",
+     "Qwen3ReasoningParser",
++    "Glm4MoeModelReasoningParser",
++    "MistralReasoningParser",
++    "Step3ReasoningParser",
+ ]
+

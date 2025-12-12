@@ -1,9 +1,0 @@
-diff --git a/vllm_mlu/vllm_mlu/model_executor/custom_model/__init__.py b/vllm_mlu/vllm_mlu/model_executor/custom_model/__init__.py
-new file mode 100644
-index 000000000..6d4e14061
---- /dev/null
-+++ b/vllm_mlu/vllm_mlu/model_executor/custom_model/__init__.py
-@@ -0,0 +1 @@
-+import vllm_mlu.model_executor.custom_model.custom
-\ No newline at end of file
-

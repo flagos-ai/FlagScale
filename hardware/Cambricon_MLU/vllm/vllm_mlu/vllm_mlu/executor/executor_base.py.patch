@@ -1,32 +1,37 @@
 diff --git a/vllm_mlu/vllm_mlu/executor/executor_base.py b/vllm_mlu/vllm_mlu/executor/executor_base.py
 new file mode 100644
-index 000000000..0cf55e36c
+index 000000000..21858ad85
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/executor/executor_base.py
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,48 @@
 +from vllm.utils import run_method
 +from vllm.executor.executor_base import ExecutorBase
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
 +
-+def vllm__executor__executor_base__ExecutorBase__get_latency(self) -> float:
-+    '''
++def vllm__executor__executor_base__ExecutorBase__get_hfu_info(self, batch, input_len, output_len):
++    """
 +    requires that torch.mlu.synchronize() be executed before this function
 +    for getting an accurate reading
-+    '''
++    """
++    latency = run_method(self.driver_worker,
++            "get_hfu_info", args=[batch, input_len, output_len], kwargs={})
++    return latency
++def vllm__executor__executor_base__ExecutorBase__get_latency(self) -> float:
++    """
++    requires that torch.mlu.synchronize() be executed before this function
++    for getting an accurate reading
++    """
 +    latency = run_method(self.driver_worker,
 +                         "get_latency", args=[], kwargs={})
 +    return latency
 +
 +
 +def vllm__executor__executor_base__ExecutorBase__recapture_model(
-+    self,
-+    enable_context_mlugraph,
-+    context_batch_size_to_capture,
-+    context_seq_len_to_capture
++    self, prefill_enable_mlugraph: bool, batch_size: int, input_len: int
 +) -> None:
-+    return self.collective_rpc("recapture_model", args=(
-+        enable_context_mlugraph, context_batch_size_to_capture, context_seq_len_to_capture))
++    return self.collective_rpc("recapture_model",
++                               args=(prefill_enable_mlugraph, batch_size, input_len))
 +
 +
 +def vllm__executor__executor_base__ExecutorBase__get_memory_usage(self):
@@ -36,6 +41,9 @@ index 000000000..0cf55e36c
 +
 +
 +MluHijackObject.apply_hijack(ExecutorBase,
++                             "get_hfu_info",
++                             vllm__executor__executor_base__ExecutorBase__get_hfu_info)
++MluHijackObject.apply_hijack(ExecutorBase,
 +                             "get_latency",
 +                             vllm__executor__executor_base__ExecutorBase__get_latency)
 +MluHijackObject.apply_hijack(ExecutorBase,
@@ -44,5 +52,4 @@ index 000000000..0cf55e36c
 +MluHijackObject.apply_hijack(ExecutorBase,
 +                             "get_memory_usage",
 +                             vllm__executor__executor_base__ExecutorBase__get_memory_usage)
-\ No newline at end of file
 

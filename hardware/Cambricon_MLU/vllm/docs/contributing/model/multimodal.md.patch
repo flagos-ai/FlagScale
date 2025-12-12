@@ -1,0 +1,42 @@
+diff --git a/docs/contributing/model/multimodal.md b/docs/contributing/model/multimodal.md
+index 892ab9098..4c6ac3e43 100644
+--- a/docs/contributing/model/multimodal.md
++++ b/docs/contributing/model/multimodal.md
+@@ -518,10 +518,20 @@ return a schema of the tensors outputted by the HF processor that are related to
+             mm_kwargs=mm_kwargs,
+         )
+ 
+-        image_patches = processed_outputs.get("image_patches")
+-        if image_patches is not None:
+-            images = mm_data["images"]
+-            assert isinstance(images, list)
++        ```python
++        def _call_hf_processor(
++            self,
++            prompt: str,
++            mm_data: Mapping[str, object],
++            mm_kwargs: Mapping[str, object],
++            tok_kwargs: Mapping[str, object],
++        ) -> BatchFeature:
++            processed_outputs = super()._call_hf_processor(
++                prompt=prompt,
++                mm_data=mm_data,
++                mm_kwargs=mm_kwargs,
++                tok_kwargs=tok_kwargs,
++            )
+ 
+             # Original output: (1, num_images, Pn, Px * Py * C)
+             # New output: (num_images, Pn, Px * Py * C)
+@@ -539,6 +549,11 @@ return a schema of the tensors outputted by the HF processor that are related to
+         Our [actual code](gh-file:vllm/model_executor/models/fuyu.py) has special handling
+         for text-only inputs to prevent unnecessary warnings from HF processor.
+ 
++    !!! note
++        The `_call_hf_processor` method specifies both `mm_kwargs` and `tok_kwargs` for
++        processing. `mm_kwargs` is used to both initialize and call the huggingface
++        processor, whereas `tok_kwargs` is only used to call the huggingface processor.
++
+     This lets us override [_get_mm_fields_config][vllm.multimodal.processing.BaseMultiModalProcessor._get_mm_fields_config] as follows:
+ 
+     ```python
+

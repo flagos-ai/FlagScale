@@ -1,16 +1,20 @@
 diff --git a/vllm_mlu/vllm_mlu/attention/layer.py b/vllm_mlu/vllm_mlu/attention/layer.py
 new file mode 100644
-index 000000000..9221d75ea
+index 000000000..70337ca71
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/attention/layer.py
-@@ -0,0 +1,277 @@
+@@ -0,0 +1,357 @@
 +from typing import Any, Dict, List, Optional
 +
 +import torch
 +
 +import vllm.envs as envs
 +from vllm.attention import AttentionType
-+from vllm.attention.layer import Attention
++from vllm.attention.layer import (
++    Attention,
++    maybe_save_kv_layer_to_connector,
++    wait_for_kv_layer_from_connector,
++)
 +from vllm.attention.selector import backend_name_to_enum, get_attn_backend
 +from vllm.forward_context import ForwardContext, get_forward_context
 +from vllm.config import CacheConfig, get_current_vllm_config
@@ -19,9 +23,51 @@ index 000000000..9221d75ea
 +    QuantizationConfig)
 +from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 +from vllm.platforms import current_platform
++from vllm.v1.attention.backends.utils import validate_kv_sharing_target
 +
 +from vllm_mlu.mlu_hijack_utils import MluHijackObject
 +
++
++def unified_attention_with_output(
++    query: torch.Tensor,
++    key: torch.Tensor,
++    value: torch.Tensor,
++    output: torch.Tensor,
++    layer_name: str,
++    kwargs: Optional[dict[str, Any]] = {},
++) -> None:
++    wait_for_kv_layer_from_connector(layer_name)
++    forward_context: ForwardContext = get_forward_context()
++    attn_metadata = forward_context.attn_metadata
++    if isinstance(attn_metadata, dict):
++        attn_metadata = attn_metadata[layer_name]
++    self = forward_context.no_compile_layers[layer_name]
++    kv_cache = self.kv_cache[forward_context.virtual_engine]
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: add return for self.impl.forward and it's param kwargs
++    '''
++    output = self.impl.forward(
++        self,
++        query,
++        key,
++        value,
++        kv_cache,
++        attn_metadata,
++        output=output,
++        kwargs=kwargs,
++    )
++    '''
++    ==================
++    End of MLU Hijack
++    ==================
++    '''
++    maybe_save_kv_layer_to_connector(layer_name, kv_cache)
++
++    return output
 +
 +class Attention_MluHjack(Attention):
 +
@@ -40,6 +86,7 @@ index 000000000..9221d75ea
 +        use_mla: bool = False,
 +        prefix: str = "",
 +        attn_type: str = AttentionType.DECODER,
++        kv_sharing_target_layer_name: Optional[str] = None,
 +        **extra_impl_args,
 +    ) -> None:
 +        """
@@ -81,6 +128,7 @@ index 000000000..9221d75ea
 +        # FlashAttn doesn't support quantizing the kv-cache only
 +        # but requires q to be quantized as well.
 +        self._q_scale = torch.tensor(1.0, dtype=torch.float32)
++        self._prob_scale = torch.tensor(1.0, dtype=torch.float32)
 +
 +        # We also keep the float32 versions of k/v_scale for attention
 +        # backends that don't support tensors (Flashinfer)
@@ -120,6 +168,11 @@ index 000000000..9221d75ea
 +            self.v_head_dim = extra_impl_args['v_head_dim']
 +        else:
 +            self.v_head_dim = head_size
++        self.decoder_attn_dtype = None
++        decoder_attn_dtype = get_current_vllm_config().mlu_config.decoder_attn_dtype
++        if decoder_attn_dtype in ["int8", "fp8_e4m3", "fp8"]:
++            self.decoder_attn_dtype = torch.int8 if decoder_attn_dtype == "int8" else torch.float8_e4m3fn
++            extra_impl_args['decoder_attn_dtype'] = self.decoder_attn_dtype
 +        '''
 +        ==================
 +        End of MLU Hijack
@@ -139,7 +192,7 @@ index 000000000..9221d75ea
 +        self.impl = impl_cls(num_heads, head_size, scale, num_kv_heads,
 +                             alibi_slopes, sliding_window, kv_cache_dtype,
 +                             blocksparse_params, logits_soft_cap, attn_type,
-+                             **extra_impl_args)
++                             kv_sharing_target_layer_name, **extra_impl_args)
 +        self.backend = backend_name_to_enum(attn_backend.get_name())
 +        self.dtype = dtype
 +
@@ -150,6 +203,9 @@ index 000000000..9221d75ea
 +        self.use_direct_call = not current_platform.is_cuda_alike(
 +        ) and not current_platform.is_cpu()
 +
++        if current_platform.is_out_of_tree() and envs.VLLM_USE_V1:
++            self.use_direct_call = False
++
 +        self.use_output = attn_backend.accept_output_buffer
 +        compilation_config = get_current_vllm_config().compilation_config
 +        if prefix in compilation_config.static_forward_context:
@@ -157,6 +213,19 @@ index 000000000..9221d75ea
 +        compilation_config.static_forward_context[prefix] = self
 +        self.layer_name = prefix
 +        self.attn_type = attn_type
++
++        if kv_sharing_target_layer_name is not None:
++            if not envs.VLLM_USE_V1:
++                raise NotImplementedError(
++                    "Cross-layer KV sharing is not supported in V0.")
++
++            validate_kv_sharing_target(
++                prefix,
++                kv_sharing_target_layer_name,
++                compilation_config.static_forward_context,
++            )
++        self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
++
 +        # use a placeholder kv cache tensor during init, which will be replaced
 +        # by bind_kv_cache
 +        # this variable will not be accessed if use_direct_call is True
@@ -206,19 +275,22 @@ index 000000000..9221d75ea
 +            attn_metadata = get_forward_context().attn_metadata
 +            if attn_metadata.enable_kv_scales_calculation:
 +                self.calc_kv_scales(query, key, value)
++
 +        if self.use_output:
 +            '''
 +            =============================
 +            Modify by vllm_mlu
 +            =============================
 +            @brief: use v_head_dim when is_mla=True
++            @brief: use output lse used by mla chunked prefill
 +            '''
++            output_lse = None
 +            output_shape = (output_shape
 +                            if output_shape is not None else query.shape)
 +            if self.use_mla:
 +                output_shape = [output_shape[0], self.num_heads * self.v_head_dim]
 +            output = torch.empty(output_shape,
-+                                 dtype=query.dtype,
++                                 dtype=self.dtype if query.dtype == torch.int8 else query.dtype,
 +                                 device=query.device)
 +            hidden_size = output_shape[-1]
 +            # Reshape the query, key, and value tensors.
@@ -230,15 +302,11 @@ index 000000000..9221d75ea
 +                key = key.view(-1, self.num_kv_heads, self.head_size)
 +            if value is not None:
 +                value = value.view(-1, self.num_kv_heads, self.v_head_dim)
-+            '''
-+            ==================
-+            End of MLU Hijack
-+            ==================
-+            '''
-+            output_lse = None
 +            if self.use_direct_call:
 +                forward_context: ForwardContext = get_forward_context()
 +                attn_metadata = forward_context.attn_metadata
++                if isinstance(attn_metadata, dict):
++                    attn_metadata = attn_metadata[self.layer_name]
 +                self_kv_cache = self.kv_cache[forward_context.virtual_engine]
 +                attn_output_list = self.impl.forward(self,
 +                                                     query,
@@ -248,19 +316,31 @@ index 000000000..9221d75ea
 +                                                     attn_metadata,
 +                                                     output=output,
 +                                                     kwargs=kwargs)
-+                if len(attn_output_list) > 1:
-+                    output_lse = attn_output_list[1]
 +            else:
-+                torch.ops.vllm.unified_attention_with_output(
-+                    query, key, value, output, self.layer_name)
++                if not kwargs:
++                    torch.ops.vllm.unified_attention_with_output(query, key, value, output,
++                                                                 self.layer_name)
++                    attn_output_list = output
++                else:
++                    attn_output_list = unified_attention_with_output(
++                        query, key, value, output, self.layer_name, kwargs=kwargs)
++            if isinstance(attn_output_list, (list, tuple)) and len(attn_output_list) > 1:
++                output_lse = attn_output_list[1]
 +            if output_lse is not None:
 +                return output.view(-1, hidden_size), output_lse
 +            else:
 +                return output.view(-1, hidden_size)
++            '''
++            ==================
++            End of MLU Hijack
++            ==================
++            '''
 +        else:
 +            if self.use_direct_call:
 +                forward_context = get_forward_context()
 +                attn_metadata = forward_context.attn_metadata
++                if isinstance(attn_metadata, dict):
++                    attn_metadata = attn_metadata[self.layer_name]
 +                self_kv_cache = self.kv_cache[forward_context.virtual_engine]
 +                return self.impl.forward(self,
 +                                         query,

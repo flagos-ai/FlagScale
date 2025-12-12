@@ -1,0 +1,19 @@
+diff --git a/vllm/model_executor/models/aya_vision.py b/vllm/model_executor/models/aya_vision.py
+index 7e15e57a4..76660c41c 100644
+--- a/vllm/model_executor/models/aya_vision.py
++++ b/vllm/model_executor/models/aya_vision.py
+@@ -184,11 +184,13 @@ class AyaVisionMultiModalProcessor(
+         prompt: str,
+         mm_data: Mapping[str, object],
+         mm_kwargs: Mapping[str, object],
++        tok_kwargs: Mapping[str, object],
+     ) -> BatchFeature:
+         processed_outputs = super()._call_hf_processor(
+             prompt,
+             mm_data,
+             mm_kwargs,
++            tok_kwargs,
+         )
+         hf_processor = self.info.get_hf_processor(**mm_kwargs)
+         image_processor = hf_processor.image_processor
+

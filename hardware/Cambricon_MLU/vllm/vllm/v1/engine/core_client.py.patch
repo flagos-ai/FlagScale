@@ -1,55 +1,111 @@
 diff --git a/vllm/v1/engine/core_client.py b/vllm/v1/engine/core_client.py
-index e948e59b8..048caca8d 100644
+index 7eff377b7..95b100ba1 100644
 --- a/vllm/v1/engine/core_client.py
 +++ b/vllm/v1/engine/core_client.py
-@@ -388,7 +388,7 @@ class MPClient(EngineCoreClient):
-         # Paths and sockets for IPC.
-         self.output_path = get_open_zmq_ipc_path()
+@@ -155,6 +155,11 @@ class EngineCoreClient(ABC):
+                        kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+         raise NotImplementedError
  
--        new_core_engine = lambda index, local_dp_rank=None: CoreEngine(
-+        new_core_engine = lambda index, local_dp_rank: CoreEngine(
-             vllm_config, executor_class, log_stats, self.ctx, self.output_path,
-             index, local_dp_rank)
++    def dp_engines_running(self) -> bool:
++        """Returns True id data parallel engines are collectively in a
++        running state."""
++        raise NotImplementedError
++
+     async def get_output_async(self) -> EngineCoreOutputs:
+         raise NotImplementedError
  
-@@ -411,9 +411,8 @@ class MPClient(EngineCoreClient):
+@@ -256,6 +261,9 @@ class InprocClient(EngineCoreClient):
  
-         # Default case - single core engine.
-         dp_rank = vllm_config.parallel_config.data_parallel_rank
--        local_dp_rank = vllm_config.parallel_config.data_parallel_rank_local
-         core_engine = new_core_engine(
--            dp_rank, local_dp_rank if local_dp_rank is not None else dp_rank)
-+            dp_rank, dp_rank)
-         core_engines.append(core_engine)
-         self.core_engine = core_engine
+     def execute_dummy_batch(self) -> None:
+         self.engine_core.execute_dummy_batch()
++        
++    def response_remote_alloc_once(self) -> None:
++        self.engine_core.response_remote_alloc_once()
  
-@@ -765,11 +764,12 @@ class DPAsyncMPClient(AsyncMPClient):
-         else:
-             # Send request to chosen engine and dp start loop
-             # control message to all other engines.
--            self.num_engines_running += len(self.core_engines)
-+            engines = [engine for engine in self.core_engines if engine is chosen_engine or not engine.num_reqs_in_flight]
-+            self.num_engines_running += len(engines)
-             await asyncio.gather(*[
-                 engine.send_multipart(msg if engine is
-                                       chosen_engine else self.start_dp_msg)
--                for engine in self.core_engines
-+                for engine in engines
-             ])
+     def add_lora(self, lora_request: LoRARequest) -> bool:
+         return self.engine_core.add_lora(lora_request)
+@@ -282,6 +290,9 @@ class InprocClient(EngineCoreClient):
+                        kwargs: Optional[dict[str, Any]] = None) -> list[_R]:
+         return self.engine_core.collective_rpc(method, timeout, args, kwargs)
  
-         self._ensure_output_queue_task()
-@@ -792,11 +792,11 @@ class DPAsyncMPClient(AsyncMPClient):
-                 # If there are requests in flight here, they must have
-                 # been sent after the engines paused. We must make
-                 # sure to start the other engines:
--                self.num_engines_running = len(self.core_engines)
-+                engines = [engine for engine in self.core_engines if not engine.num_reqs_in_flight]
-+                self.num_engines_running += len(engines)
-                 coros = [
-                     engine.send_multipart(self.start_dp_msg)
--                    for engine in self.core_engines
--                    if not engine.num_reqs_in_flight
-+                    for engine in engines
-                 ]
-                 if coros:
-                     await asyncio.gather(*coros)
++    def dp_engines_running(self) -> bool:
++        return False
++
+ 
+ @dataclass
+ class BackgroundResources:
+@@ -384,6 +395,9 @@ class MPClient(EngineCoreClient):
+             dp_size = parallel_config.data_parallel_size
+             dp_rank = parallel_config.data_parallel_rank
+ 
++            # State used for data parallel.
++            self.engines_running = False
++
+             # SPMD mode is where there is an LLM instance per DP rank and
+             # one core engine per LLM, see
+             # examples/offline_inference/data_parallel.py.
+@@ -539,6 +553,9 @@ class MPClient(EngineCoreClient):
+         while self.pending_messages and self.pending_messages[-1][0].done:
+             self.pending_messages.pop()
+ 
++    def dp_engines_running(self) -> bool:
++        return self.engines_running
++
+ 
+ def _process_utility_output(output: UtilityOutput,
+                             utility_results: dict[int, AnyFuture]):
+@@ -562,6 +579,7 @@ class SyncMPClient(MPClient):
+             log_stats=log_stats,
+         )
+ 
++        self.is_dp = self.vllm_config.parallel_config.data_parallel_size > 1
+         self.outputs_queue = queue.Queue[Union[EngineCoreOutputs, Exception]]()
+ 
+         # Ensure that the outputs socket processing thread does not have
+@@ -623,6 +641,8 @@ class SyncMPClient(MPClient):
+         outputs = self.outputs_queue.get()
+         if isinstance(outputs, Exception):
+             raise self._format_exception(outputs) from None
++        if outputs.wave_complete is not None:
++            self.engines_running = False
+         return outputs
+ 
+     def _send_input(self, request_type: EngineCoreRequestType, request: Any):
+@@ -650,6 +670,8 @@ class SyncMPClient(MPClient):
+         return future.result()
+ 
+     def add_request(self, request: EngineCoreRequest) -> None:
++        if self.is_dp:
++            self.engines_running = True
+         self._send_input(EngineCoreRequestType.ADD, request)
+ 
+     def abort_requests(self, request_ids: list[str]) -> None:
+@@ -688,6 +710,9 @@ class SyncMPClient(MPClient):
+ 
+     def execute_dummy_batch(self) -> None:
+         self.call_utility("execute_dummy_batch")
++        
++    def response_remote_alloc_once(self) -> None:
++        self.call_utility("response_remote_alloc_once")
+ 
+     def collective_rpc(self,
+                        method: Union[str, Callable[..., _R]],
+@@ -871,6 +896,9 @@ class AsyncMPClient(MPClient):
+ 
+     async def execute_dummy_batch_async(self) -> None:
+         await self.call_utility_async("execute_dummy_batch")
++        
++    async def response_remote_alloc_once(self) -> None:
++        await self.call_utility_async("response_remote_alloc_once")
+ 
+     async def add_lora_async(self, lora_request: LoRARequest) -> bool:
+         return await self.call_utility_async("add_lora", lora_request)
+@@ -912,7 +940,6 @@ class DPAsyncMPClient(AsyncMPClient):
+                  client_addresses: Optional[dict[str, str]] = None,
+                  client_index: int = 0):
+         self.current_wave = 0
+-        self.engines_running = False
+         # To route aborts to the correct engine.
+         self.reqs_in_flight: dict[str, CoreEngine] = {}
+ 
 

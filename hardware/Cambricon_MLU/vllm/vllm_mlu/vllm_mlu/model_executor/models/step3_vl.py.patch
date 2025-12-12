@@ -1,0 +1,86 @@
+diff --git a/vllm_mlu/vllm_mlu/model_executor/models/step3_vl.py b/vllm_mlu/vllm_mlu/model_executor/models/step3_vl.py
+new file mode 100644
+index 000000000..bc348f40e
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/model_executor/models/step3_vl.py
+@@ -0,0 +1,78 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++from collections.abc import Iterable
++
++import torch
++import torch.nn as nn
++
++from vllm.config import VllmConfig
++from vllm.multimodal import MULTIMODAL_REGISTRY
++from vllm.model_executor.models.interfaces import SupportsMultiModal, SupportsPP
++from vllm.model_executor.models.utils import AutoWeightsLoader
++
++from vllm_mlu.model_executor.layers.sparse_moe_mlp import MoeGroupInfo
++from vllm_mlu.model_executor.models.mlu_abstract_LM import MLUCausalLM
++
++from vllm.model_executor.models.step3_vl import (Step3VLForConditionalGeneration,
++                                                 Step3VLProcessingInfo,
++                                                 Step3VLDummyInputsBuilder,
++                                                 Step3VLMultiModalProcessor)
++
++
++@MULTIMODAL_REGISTRY.register_processor(Step3VLMultiModalProcessor,
++                                        info=Step3VLProcessingInfo,
++                                        dummy_inputs=Step3VLDummyInputsBuilder)
++class MLUStep3VLForConditionalGeneration(Step3VLForConditionalGeneration, MLUCausalLM):
++    
++    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
++        Step3VLForConditionalGeneration.__init__(self, vllm_config=vllm_config)
++        MLUCausalLM.__init__(self, vllm_config=vllm_config)
++
++    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: split the weights into vision and language 
++            apart when use ep
++        '''
++        moe_group_info = MoeGroupInfo()
++        use_ep = (self.language_model.vllm_config.parallel_config.enable_expert_parallel
++                and moe_group_info.tp_size * moe_group_info.dp_size > 1)
++
++        if use_ep:
++            loader = AutoWeightsLoader(self)
++            mapper = self.hf_to_vllm_mapper
++            if mapper is not None:
++                weights = mapper.apply(weights)
++            # filter out weights with first-prefix/substr to skip in name
++            weights = ((name, weight) for name, weight in weights
++                    if not loader._can_skip(name))
++            all_weights = list(weights)
++                
++            language_weights = [
++                (name_l, weight_l) for name_l, weight_l in all_weights
++                if ("language_model.model" in name_l) or 
++                ("language_model.lm_head" in name_l)
++            ]
++            vision_weights = [
++                (name_v, weight_v) for name_v, weight_v in all_weights
++                if ("vision_model.embeddings" in name_v) or 
++                ("vision_model.transformer" in name_v) or 
++                ("vit_downsampler" in name_v) or 
++                ("vit_downsampler2" in name_v) or 
++                ("vit_large_projector" in name_v)
++            ]
++
++            loaded_weights = set(self.language_model.load_weights(language_weights))
++            loaded_weights |= (set(loader._load_module("", loader.module, vision_weights)))
++        else:
++            loader = AutoWeightsLoader(self)
++            loaded_weights = loader.load_weights(weights,
++                                             mapper=self.hf_to_vllm_mapper)
++        '''
++        =============================
++        End of MLU Hijack
++        =============================
++        '''
++        return loaded_weights
+\ No newline at end of file
+
