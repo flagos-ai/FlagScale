@@ -1,7 +1,7 @@
 [submodule "third_party/Megatron-LM"]
 	path = third_party/Megatron-LM
-	url = https://github.com/NVIDIA/Megatron-LM.git
-	branch = main
+	url = https://gitee.com/lxdcumt/Megatron-LM-FL.git
+	branch = fl_init
 [submodule "third_party/vllm"]
 	path = third_party/vllm
 	url = https://github.com/vllm-project/vllm.git
