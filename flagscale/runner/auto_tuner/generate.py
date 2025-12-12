@@ -45,10 +45,13 @@ class Generator:
     def _set_flagcx_tuning_params(self, config):
         if config.experiment.auto_tuner.flagcx_tune:
             config.train.system.flagcx_tune = True
-            # set a large number so that training won't stop before flagcx tuning ends 
+            config.train.system.flagcx_tune_groups = config.experiment.auto_tuner.flagcx_tune_groups
+            # set a large number so that training won't stop before flagcx tuning ends
             config.experiment.envs["FLAGCX_USE_TUNER"] = 1
             config.experiment.envs["TUNING_WITH_FLAGSCALE"] = 1
-            config.experiment.envs["FLAGCX_TUNE_FILE"] = os.path.abspath(os.path.join(config.experiment.exp_dir, "flagcx_tune", "tune_objects.json"))
+            config.experiment.envs["FLAGCX_TUNE_FILE"] = os.path.abspath(
+                os.path.join(config.experiment.exp_dir, "flagcx_tune", "tune_objects.json")
+            )
 
     def gen(self, strategy):
         config = copy.deepcopy(self.config)
