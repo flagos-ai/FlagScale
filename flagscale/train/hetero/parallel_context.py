@@ -1640,12 +1640,27 @@ class ParallelContext:
             return ddp_config
 
         def _build_optimzer_config(args):
-            from megatron.core.optimizer import OptimizerConfig
-            kwargs = {}
-            for f in dataclasses.fields(OptimizerConfig):
-                if hasattr(args, f.name):
-                    kwargs[f.name] = getattr(args, f.name)
-            return OptimizerConfig(**kwargs)
+            from megatron.core.optimizer import OptimizerConfig, AdamOptimizerConfig, SGDOptimizerConfig
+            # Use specific optimizer config class based on optimizer type, matching Megatron-LM-FL behavior
+            if args.optimizer == 'adam':
+                kwargs = {}
+                for f in dataclasses.fields(AdamOptimizerConfig):
+                    if hasattr(args, f.name):
+                        kwargs[f.name] = getattr(args, f.name)
+                return AdamOptimizerConfig(**kwargs)
+            elif args.optimizer == 'sgd':
+                kwargs = {}
+                for f in dataclasses.fields(SGDOptimizerConfig):
+                    if hasattr(args, f.name):
+                        kwargs[f.name] = getattr(args, f.name)
+                return SGDOptimizerConfig(**kwargs)
+            else:
+                # Fallback to base OptimizerConfig for other optimizer types
+                kwargs = {}
+                for f in dataclasses.fields(OptimizerConfig):
+                    if hasattr(args, f.name):
+                        kwargs[f.name] = getattr(args, f.name)
+                return OptimizerConfig(**kwargs)
 
         def _build_dataset_config(args):
             from megatron.core.datasets.gpt_dataset import GPTDatasetConfig
