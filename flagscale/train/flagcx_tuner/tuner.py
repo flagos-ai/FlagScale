@@ -82,7 +82,7 @@ class FlagCXTuner:
         records = self.recorder.get_records()
         assert len(records) >= 5
         # calculate the average time of last 4 iters
-        perf_tensor = torch.tensor(sum(records[-4:]) / 4.0)
+        perf_tensor = torch.tensor(sum(records[-4:]) / 4.0).cuda()
         # synchronize perf across all ranks
         group = pg_map[self.tune_groups[self.cur_group_idx]]()
         size = dist.get_world_size(group=group)
@@ -100,12 +100,12 @@ class FlagCXTuner:
     def set_cur_group_best_config(self):
         os.environ["FLAGCX_TUNER_BEST_CONFIG_ID"] = str(self.best_config_id)
         self.best_config_set[self.cur_group_idx] = True
-        self.need_update_tune_group = True
+        self.need_reset = True
         if self.cur_group_idx == self.tune_group_size - 1:
             self.finished_all_tuning = True
 
     def need_update_tune_group(self):
-        return self.need_update_tune_group
+        return self.need_reset
 
     def update_tune_group(self):
         self.iter = -1

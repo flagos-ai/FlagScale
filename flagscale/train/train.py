@@ -2567,7 +2567,7 @@ def train(
         else:
             flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
     if args.flagcx_tune:
-        flagcx_tuner = FlagCXTuner()
+        flagcx_tuner = FlagCXTuner(args.flagcx_tune_groups)
 
     # Run training iterations till done.
     buffered_rollouts = None
