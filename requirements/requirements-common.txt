@@ -9,7 +9,6 @@ scikit-build
 scikit-build-core
 sentencepiece
 tensorboard
-transformers
 ray
 pybase64
 orjson

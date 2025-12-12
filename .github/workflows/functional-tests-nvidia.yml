@@ -59,7 +59,7 @@ jobs:
           trap 'echo "Cleaning up temporary directory..."; rm -rf "$TMP_DIR"' EXIT
 
           if [ "${{ inputs.type }}" = "train" ] || [ "${{ inputs.type }}" = "hetero_train" ]; then
-            PYTHONPATH=./:$PYTHONPATH pip install . --no-build-isolation --verbose --config-settings=device="gpu" --config-settings=backend="Megatron-LM"
+            python tools/patch/unpatch.py --backend Megatron-LM
             if [ "${{ inputs.task }}" = "llava_onevision" ]; then
               python tools/patch/unpatch.py --backend Megatron-Energon
               # PYTHONPATH=./:$PYTHONPATH pip install . --no-build-isolation --verbose --config-settings=device="gpu" --config-settings=backend="Megatron-Energon"

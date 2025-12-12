@@ -2,7 +2,7 @@
 [<img width="4750" height="958" alt="github+banner__2025-11-11+13_27_10" src="https://github.com/user-attachments/assets/e63014d8-ac72-4b82-98f7-aeed9833672a" />](https://www.flagopen.ac.cn/)
 
 
-## Latest News
+## 🔥 Latest News
 
 - **[2025/09]** Released [v0.9.0](https://github.com/FlagOpen/FlagScale/tree/release/v0.9.0):
   - Training & Finetuning: Added LoRA for efficient finetuning, improved the autotuner for cross-chip heterogeneous training, and enabled distributed RWKV training.
@@ -28,7 +28,7 @@
 - **[2023/11]** Released [v0.2](https://github.com/FlagOpen/FlagScale/tree/v0.2): Introduced training support for Aquila2-70B-Expr, enabling heterogeneous training across chips with the same or compatible architectures.
 - **[2023/10]** Released [v0.1](https://github.com/FlagOpen/FlagScale/tree/v0.1): Supported Aquila models with optimized training schemes for Aquila2-7B and Aquila2-34B, including parallel strategies, optimizations, and hyper-parameter settings.
 
-## About
+## 🔗 About
 
 [FlagScale](https://github.com/FlagOpen/FlagScale.git) is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI). It builds on the strengths of several prominent open-source projects, including [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) and [vllm](https://github.com/vllm-project/vllm), to provide a robust, end-to-end solution for managing and scaling large models.
 
@@ -41,7 +41,55 @@ FlagScale is also a part of [FlagAI-Open](https://flagopen.baai.ac.cn/), an open
 <img width="204" height="180" alt="开源小助手" src="https://github.com/user-attachments/assets/566bd17d-c43f-4af7-9a29-7a6c7e610ffa" />
 </p>
 
-## Quick Start
+## ✏️ Support List
+### Platform
+| Vendors | vllm | megatron |
+| ------- | ---- | -------- |
+| BI V150 | ✅ | ✅ |
+| Cambricon MLU | ✅ | ✅ |
+| Huawei Atlas800 TA3 (Ascend) | ✅ | ✅ |
+| Hygon BW1000 | ✅ | ✅ |
+| Kunlunxin R310p | ✅ | ✅ |
+| Metax C550 | ✅ | ✅ |
+| MUSA S5000 | ✅ | ✅ |
+| Tsing Micro | ✅ | ✅ |
+| NVIDIA+Cambricon MLU | | ✅ |
+
+
+### Model
+#### Training
+| Model                                                    | Example config File                        |
+| -------------------------------------------------------- | ------------------------------------------------|
+| [DeepSeek-V3](https://huggingface.co/deepseek-ai)  | [16b_a3b.yaml](examples/deepseek_v3/conf/train/16b_a3b.yaml)  |
+| [Qwen2/2.5/3](https://huggingface.co/Qwen)             | [235b_a22b.yaml](examples/qwen3/conf/train/235b_a22b.yaml)  |
+| [Qwen2.5-VL](https://huggingface.co/Qwen)             | [7b.yaml](examples/qwen2_5_vl/conf/train/7b.yaml)  |
+| [QwQ](https://huggingface.co/Qwen)             | [32b.yaml](examples/qwq/conf/train/32b.yaml)  |
+| [LLaMA2](https://huggingface.co/meta-llama)             | [7b.yaml](examples/llama2/conf/train/7b.yaml)  |
+| [LLaMA3/3.1](https://huggingface.co/meta-llama)             | [70b.yaml](examples/llama3/conf/train/70b.yaml)  |
+| [LLaVA-OneVision](https://huggingface.co/lmms-lab)             | [7b.yaml](examples/llava_onevision/conf/train/7b.yaml)  |
+| [LLaVA1.5](https://huggingface.co/llava-hf)             | [7b.yaml](examples/llava1_5/conf/train/7b.yaml)  |
+| [Mixtral](https://huggingface.co/mistralai)             | [8x7b.yaml](examples/mixtral/conf/train/8x7b.yaml)  |
+| [RWKV](https://huggingface.co/RWKV)             | [7b.yaml](examples/rwkv/conf/train/7b.yaml)  |
+| [Aquila](https://huggingface.co/BAAI)             | [7b.yaml](examples/aquila/conf/train/7b.yaml)  |
+| ... | ... |
+
+
+#### Serve/Inference
+| Model                                                    | Example config File                        |
+| -------------------------------------------------------- | ------------------------------------------------|
+| [DeepSeek-V3](https://huggingface.co/deepseek-ai)  | [671b.yaml](examples/deepseek_v3/conf/serve/671b.yaml)  |
+| [DeepSeek-R1](https://huggingface.co/deepseek-ai)  | [671b.yaml](examples/deepseek_r1/conf/serve/671b.yaml)  |
+| [Qwen2.5](https://huggingface.co/Qwen)             | [72b.yaml](examples/qwen2_5/conf/serve/72b.yaml)  |
+| [Qwen3](https://huggingface.co/Qwen)             | [8b.yaml](examples/qwen3/conf/serve/8b.yaml)  |
+| [Qwen2.5-VL](https://huggingface.co/Qwen)             | [32b_instruct.yaml](examples/qwen2_5_vl/conf/serve/32b_instruct.yaml)  |
+| [Qwen3-Omni](https://huggingface.co/Qwen)             | [30b.yaml](examples/qwen3_o/conf/serve/30b.yaml)  |
+| [QwQ](https://huggingface.co/Qwen)             | [32b.yaml](examples/qwq/conf/serve/32b.yaml)  |
+| [Grok2](https://huggingface.co/xai-org)             | [270b.yaml](examples/grok2/conf/serve/270b.yaml)  |
+| [Kimi-K2](https://huggingface.co/MoonshotAI)             | [1t.yaml](examples/kimi_k2/conf/serve/1t.yaml)  |
+| ... | ... |
+
+
+## 🚀 Quick Start
 
 FlagScale leverages [Hydra](https://github.com/facebookresearch/hydra) for configuration management. The configurations are organized into two levels: an outer experiment-level YAML file and an inner task-level YAML file.
 
@@ -50,7 +98,7 @@ FlagScale leverages [Hydra](https://github.com/facebookresearch/hydra) for confi
 
 All valid configurations in the task-level YAML file correspond to the arguments used in backend engines such as Megatron-LM and vllm, with hyphens (-) replaced by underscores (_). For a complete list of available configurations, please refer to the backend engine documentation. Simply copy and modify the existing YAML files in the [examples](./examples) folder to get started.
 
-### Setup
+### 🔧 Setup
 We recommend using the latest release of [NGC's PyTorch container](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch) for setup.
 
 1. Clone the repository:
@@ -59,96 +107,143 @@ We recommend using the latest release of [NGC's PyTorch container](https://catal
     ```
 
 2. Install the requirements:
-    ```sh
-    cd FlagScale
-    ./install/install-requirements.sh --env train
-    ./install/install-requirements.sh --env inference
-    ```
-    The above instructions create two conda environments: `flagscale-train` and `flagscale-inference`, which contain the dependency environments for training and inference, respectively.
 
-    The llama.cpp backend (CPU by default) is alternative, for example:
-    ```sh
-    ./install/install-requirements.sh --env inference --llama-cpp-backend cuda
-    ```
-
-    **Note**: To customize the environment according to your specific needs, follow the methods below:  
-    1. To install apt packages or basic drivers, add them to the platform-specific `Dockerfile` in the `docker` directory.
-    2. To include cross-platform Python packages, declare them in the corresponding files in the `requirements` directory.
-    3. To include platform-specific Python packages, configure them in the corresponding files in the `install` directory.
-
-3. Unpatch the backend code adaptation of FlagScale as needed
-    ```
-    cd FlagScale
-    python tools/patch/unpatch.py --backend Megatron-LM
-    python tools/patch/unpatch.py --backend vllm
-    ```
-
-4. Install the packages with customized extensions:
-    ```sh
-    cd FlagScale/third_party/vllm
-    pip install .
-
-    cd FlagScale
-    python tools/patch/unpatch.py --backend Megatron-Energon
-    cd third_party/Megatron-Energon
-    pip install -e .
-    cd FlagScale
-    cp -r third_party/Megatron-Energon/src/megatron/energon third_party/Megatron-LM/megatron
-    ```
-    And we currently support two one-click installation methods: source installation and whl installation. Usage is as follows:
-
+    We offer two installation methods:
     - Source Installation
         ```sh
         PYTHONPATH=./:$PYTHONPATH pip install . --no-build-isolation --verbose \
         --config-settings=device=<device> \
         --config-settings=backend=<backend>
+
+        # For vllm:
+        --config-settings=device=gpu
+        --config-settings=backend=vllm
+        # For megatron:
+        --config-settings=device=gpu
+        --config-settings=backend=Megatron-LM
+        # Or specify both:
+        --config-settings=device=gpu
+        --config-settings=backend=vllm,Megatron-LM
         ```
 
-    - Whl Installation
+    - Whl Installation 
         ```sh
-        PYTHONPATH=./:$PYTHONPATH pip install . --no-build-isolation --verbose
-        flagscale install <backend> --device=<device>
+        # For vllm backend:
+        PYTHONPATH=./:$PYTHONPATH pip install .[vllm-gpu] --no-build-isolation --verbose
+        flagscale install --backend=vllm --device=gpu
+        # For megatron backend:
+        PYTHONPATH=./:$PYTHONPATH pip install .[megatron-gpu] --no-build-isolation --verbose
+        flagscale install --backend=megatron --device=gpu
         ```
 
-    More backends and chips will be supported in the future.
+    The installation methods vary greatly in different chip environments, and the above installation methods currently only support GPU. More backends and chips will be supported in the future.
 
-5. Patch the modifications to the specified third_party backend for PR.
-    ```
-    cd FlagScale
-    python tools/patch/patch.py --backend Megatron-LM
-    python tools/patch/patch.py --backend vllm
-    ```
-
-### Run a Task
+### 🎈 Run a Task
 
 FlagScale provides a unified runner for various tasks, including training，inference and serve. Simply specify the configuration file to run the task with a single command. The runner will automatically load the configurations and execute the task. The following example demonstrates how to run a distributed training task.
 
 #### Train
 
-1. Start the distributed training job:
+Require megatron env. See details in [Setup](#-setup)
+
+1. Prepare dataset demo:
+
+    We provide a small processed data ([bin](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin) and [idx](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx)) from the [Pile](https://pile.eleuther.ai/) dataset.
+    ```
+    mkdir -p /path/to/data && cd /path/to/data
+    wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx
+    wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin
+    ```
+2. Edit config:
+
+    Modify the data path in ./examples/aquila/conf/train/7b.yaml
+    ```yaml
+    data:
+        data_path: ${data_path:??}  # modify data path here
+        split: 1
+        tokenizer:
+            legacy_tokenizer: true
+            tokenizer_type: AquilaTokenizerFS
+            vocab_file: ./examples/aquila/tokenizer/vocab.json
+            merge_file: ./examples/aquila/tokenizer/merges.txt
+            special_tokens_file: ./examples/aquila/tokenizer/special_tokens.txt
+            vocab_size: 100008
+    ```
+
+
+
+3. Start the distributed training job:
     ```sh
     python run.py --config-path ./examples/aquila/conf --config-name train action=run
     ```
-    The `data_path` in the demo is the path of the training datasets following the [Megatron-LM format](./megatron/README.md#data-preprocessing). For quickly running the pretraining process, we also provide a small processed data ([bin](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin) and [idx](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx)) from the [Pile](https://pile.eleuther.ai/) dataset.
 
-2. Stop the distributed training job:
+
+4. Stop the distributed training job:
     ```sh
     python run.py --config-path ./examples/aquila/conf --config-name train action=stop
     ```
 
+#### Inference
+
+Require vllm env. See details in [Setup](#-setup)
+
+1. Prepare model
+    ```sh
+    modelscope download --model BAAI/Aquila-7B README.md --local_dir ./
+    ```
+2. Edit config
+
+    FlagScale/examples/aquila/conf/inference/7b.yaml
+    ```yaml
+    llm:
+        model: /workspace/models/BAAI/Aquila-7B         # modify path here
+        tokenizer: /workspace/models/BAAI/Aquila-7B     # modify path here
+        trust_remote_code: true
+        tensor_parallel_size: 1
+        pipeline_parallel_size: 1
+        gpu_memory_utilization: 0.5
+        seed: 1234
+
+    ```
+
+3. Start inference:
+    ```sh
+    python run.py --config-path ./examples/aquila/conf --config-name inference action=run
+    ```
+    
 #### Serve
-
-1. Start the server:
-    ```sh
-    python run.py --config-path ./examples/qwen/conf --config-name serve action=run
+1. Setup env
     ```
-2. Stop the server:
-    ```sh
-    python run.py --config-path ./examples/qwen/conf --config-name serve action=stop
+    PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=domain=robotics --config-settings=device=gpu  --verbose --no-build-isolation
     ```
-For more details, please refer to [Quick Start](./flagscale/serve/README.md).
+2. Download Tokenizer
+    ```sh
+    mkdir -p /models/physical-intelligence/
+    cd /models/physical-intelligence/
+    git lfs install
+    git clone https://huggingface.co/physical-intelligence/fast
+    ```
 
-### DeepSeek-R1 Serving <a name="deepseek-r1-serving"></a>
+3. Edit Config
+
+    ./examples/robobrain_x0/conf/serve/robobrain_x0.yaml
+
+    Change 3 fields:
+    - engine_args.model_sub_task -> /models/BAAI/RoboBrain-X0-Preview
+    - engine_args.port -> A port available in your env, for example: 5001
+    - engine_args.tokenizer_path ->/models/physical-intelligence/fast
+
+4. Start the server:
+    ```sh
+    python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=run
+    ```
+5. Stop the server:
+    ```sh
+    python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=stop
+    ```
+
+
+### 🧱 DeepSeek-R1 Serving <a name="deepseek-r1-serving"></a>
 
 We support the model serving of DeepSeek R1 and have implemented the `flagscale serve` command for one-click deployment. By configuring just two YAML files, you can easily serve the model using the `flagscale serve` command.
 
@@ -183,6 +278,15 @@ We support the model serving of DeepSeek R1 and have implemented the `flagscale 
 
 The configuration files allow you to specify the necessary parameters and settings for your deployment, ensuring a smooth and efficient serving process.
 
-## License
+## 🎨 Contributing
+Patch the modifications to the specified third_party backend for PR.
+```
+cd FlagScale
+python tools/patch/patch.py --backend Megatron-LM
+python tools/patch/patch.py --backend vllm
+```
+
+
+## 📄 License
 
 This project is licensed under the [Apache License (Version 2.0)](https://github.com/FlagOpen/FlagScale/blob/main/LICENSE). This project also contains other third-party components under other open-source licenses. See the [LICENSE](https://github.com/FlagOpen/FlagScale/blob/main/LICENSE) file for more information.

@@ -1,26 +1,32 @@
 #  Install FlagScale
 
-Clone FlagScale code from github.
+1. Clone FlagScale code from github.
+    ```sh
+    git clone https://github.com/FlagOpen/FlagScale.git
+    cd FlagScale/
+    ```
 
-```sh
-git clone https://github.com/FlagOpen/FlagScale.git
-cd FlagScale/
-```
+    If you don't have access to the international internet, import FlagScale project on [gitee](https://gitee.com/), then clone from gitee.
 
-If you don't have access to the international internet, import FlagScale project on [gitee](https://gitee.com/), then clone from gitee.
+    ```sh
+    git clone https://gitee.com/flagopen/FlagScale.git
+    cd FlagScale/
+    ```
+2. Install Requirements
 
-```sh
-git clone https://gitee.com/flagopen/FlagScale.git
-cd FlagScale/
-```
+    We provide two installation methods: source code installation and whl package installation.
+    - Source Installation
+        ```sh
+        cd FlagScale
+        PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=domain=robotics --config-settings=device=gpu  --verbose --no-build-isolation
+        ```
+    - Whl Installation
+        ```sh
+        pip install flag-scale[robotics-gpu]
+        flagscale install --domain=robotics --device=gpu
+        ```
+    > **⚠️ Attention**: The robo environment depends on transformers (v4.53.0). Higher version will cause problem on image pre-processing.
 
-Install train and inference env according to [README](https://github.com/FlagOpen/FlagScale/blob/main/README.md) 
-
-Install transformers(v4.53.0). Higher version will cause problem on image pre-processing.
-
-```sh
-pip install transformers==4.53.0
-```
 
 # Download Model
 
