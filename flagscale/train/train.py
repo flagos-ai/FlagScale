@@ -1436,9 +1436,9 @@ def setup_model_and_optimizer(
             config = OptimizerConfig(**kwargs)
     ########## FlagScale End ##########
     config.timers = timers
-    
+
     # Convert old interface parameters to new config_overrides format
-    # Note: New version of get_megatron_optimizer no longer supports 
+    # Note: New version of get_megatron_optimizer no longer supports
     # no_wd_decay_cond, scale_lr_cond, lr_mult, default_skip_embedding_weight_decay
     # These need to be converted to config_overrides if needed
     config_overrides = None
@@ -1453,7 +1453,7 @@ def setup_model_and_optimizer(
             "in the new interface. They will be ignored. Please use config_overrides instead.",
             UserWarning
         )
-    
+
     optimizer = get_megatron_optimizer(
         config,
         model,
