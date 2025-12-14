@@ -2,10 +2,11 @@ backends_commit:
   vllm: a5dd03c1ebc5e4f56f3c9d3dc0436e9c582c978f
 backends_version:
   vllm: v0.9.2
-commit: 947305ba5187f44944c2a202f990ffd65b554409
+commit: 7b64f0f8dbe438a12645784b3a14f395434d1203
 contact: lingfeng.qiu@mthreads.com
 device_type: MUSA_S5000
 models:
+- Qwen2.5VL-32B
 - Qwen3-8B
 task:
 - inference
