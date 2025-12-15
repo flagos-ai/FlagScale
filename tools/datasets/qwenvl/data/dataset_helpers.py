@@ -28,7 +28,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import PIL
 import torch
+import transformers
 
+from packaging.version import Version as PkgVersion
 from PIL import Image
 from torchvision import transforms as T
 
@@ -143,6 +145,8 @@ class TaskEncoder(
 
         self.vision_root = self.args.vision_root
         assert self.vision_root is not None, "Please give the vision root."
+        # NOTE: Qwen3-VL don't use system prompt by default
+        self.use_system_prompt = getattr(self.args, "use_system_prompt", True)
 
     def encode_sample(self, sample: Union[VQASample, ChatMLSample]):
         if isinstance(sample, VQASample):
@@ -260,8 +264,12 @@ class TaskEncoder(
                     image = PIL.Image.open(img_path)
                     image = self._preprocess_image(
                         image=image,
-                        image_max_pixels=self.args.image_max_pixels,
-                        image_min_pixels=self.args.image_min_pixels,
+                        image_max_pixels=getattr(
+                            self.tokenizer.processor, "image_max_pixels", self.args.image_max_pixels
+                        ),
+                        image_min_pixels=getattr(
+                            self.tokenizer.processor, "image_min_pixels", self.args.image_min_pixels
+                        ),
                     )
                     imgs.append(image)
                 except Exception as e:
@@ -271,9 +279,14 @@ class TaskEncoder(
                     # raise InternalWarning(
                     #     f"Failed to open image: {img_path}. Error: {e} of smaple[{sample.__key__}]"
                     # )
-            imgs_info = self.tokenizer.processor.image_processor(imgs, return_tensors="np")
-            flattened_imgs = imgs_info["pixel_values"]
-            image_thw_grids = imgs_info["image_grid_thw"]
+            if PkgVersion(transformers.__version__) < PkgVersion("4.57.0"):
+                imgs_info = self.tokenizer.processor.image_processor(imgs, return_tensors="np")
+                flattened_imgs = imgs_info["pixel_values"]
+                image_thw_grids = imgs_info["image_grid_thw"]
+            else:
+                imgs_info = self.tokenizer.processor.image_processor(imgs, return_tensors="pt")
+                flattened_imgs = imgs_info["pixel_values"].cpu().numpy()
+                image_thw_grids = imgs_info["image_grid_thw"].cpu().numpy()
         else:
             flattened_imgs = []
             image_thw_grids = []
@@ -286,11 +299,18 @@ class TaskEncoder(
             # NOTE: make n_frames even foreach video
             for i, video in enumerate(videos):
                 videos[i] = video[: len(video) // 2 * 2]
-            videos_info = self.tokenizer.processor.image_processor(
-                images=None, videos=videos, return_tensors="pt"
-            )
-            flattened_videos = videos_info["pixel_values_videos"]
-            video_thw_grids = videos_info["video_grid_thw"]
+            if PkgVersion(transformers.__version__) < PkgVersion("4.57.0"):
+                videos_info = self.tokenizer.processor.image_processor(
+                    images=None, videos=videos, return_tensors="np"
+                )
+                flattened_videos = videos_info["pixel_values_videos"]
+                video_thw_grids = videos_info["video_grid_thw"]
+            else:
+                videos_info = self.tokenizer.processor.image_processor(
+                    images=None, videos=videos, return_tensors="pt"
+                )
+                flattened_videos = videos_info["pixel_values_videos"].cpu().numpy()
+                video_thw_grids = videos_info["video_grid_thw"].cpu().numpy()
         else:
             flattened_videos = []
             video_thw_grids = []
@@ -317,9 +337,10 @@ class TaskEncoder(
         converted_conversation = []
         if len(conversation) % 2 == 0:
             # Default Prompt
-            converted_conversation.append(
-                {"role": "system", "content": "You are a helpful assistant."}
-            )
+            if self.use_system_prompt:
+                converted_conversation.append(
+                    {"role": "system", "content": "You are a helpful assistant."}
+                )
         else:
             dataset_logger.warning(
                 f"The sample [{sample.__key__}] has odd number of conversation turns, and we will use the first turn as system prompt. BUT this may be wrong. Pelase check the sample."
@@ -358,23 +379,30 @@ class TaskEncoder(
         )[0]
         target = input_ids.copy()
 
-        system_prompt_prefix = len(
-            self.tokenizer.apply_chat_template([conversation[0]], tokenize=True)
-        )
+        conversation_start_idx = 0
+        if self.use_system_prompt:
+            system_prompt_prefix = len(
+                self.tokenizer.apply_chat_template([conversation[0]], tokenize=True)
+            )
+            conversation_start_idx = 1
+        else:
+            system_prompt_prefix = 0
         assistant_generation_prefix = 3  # <im_start>assistant\n
         # pad_token_id = self.tokenizer.pad_token_id
         # NOTE(lizhiyu): Align to llama-f
         pad_token_id = IGNORE_IDX
-        target[:system_prompt_prefix] = pad_token_id
+        target[0:system_prompt_prefix] = pad_token_id
         offset = system_prompt_prefix
-        for turn_idx, turn in enumerate(conversation[1:]):
+        for turn_idx, turn in enumerate(conversation[conversation_start_idx:]):
             turn_tokens = self.tokenizer.apply_chat_template(
                 [turn], tokenize=True, return_tensors="np"
             )[0]
             turn_content = turn_tokens[system_prompt_prefix:]
             n_tokens = len(turn_content)
             if (target[offset : offset + n_tokens] != turn_content).any():
-                raise InternalWarning("Encode Error")
+                raise InternalWarning(
+                    f"Encode Error: sample id [{sample.__key__}], converd conversation: {conversation}, turn idx: {turn_idx}, turn: {turn}"
+                )
 
             if turn["role"] == "user":
                 target[offset : offset + n_tokens] = pad_token_id
@@ -412,7 +440,7 @@ class TaskEncoder(
         if target_length > self.seq_len:
             # raise InternalWarning(f"Long sequence with length {target_length} found, dropped...")
             dataset_logger.warning(
-                f"Samle id [{sample.__key__}] has long sequence with length {target_length}, cutoff to max [self.seq_len+64={self.seq_len}] in batch function..."
+                f"Samle id [{sample.__key__}] has long sequence with length {target_length}, cutoff to max [self.seq_len={self.seq_len}] in batch function..."
             )
         final_input_ids = np.zeros(target_length, dtype=input_ids.dtype)
         final_input_masks = final_input_ids.copy()
@@ -576,7 +604,9 @@ class TaskEncoder(
         image_thw_grids = [thw_grids for s in samples for thw_grids in s.image_thw_grids]
         if len(image_thw_grids) > 0:
             image_thw_grids = torch.from_numpy(np.array(image_thw_grids)).long()
-            assert image_thw_grids.prod(dim=-1).sum() == imgs.shape[0]
+            assert (
+                image_thw_grids.prod(dim=-1).sum() == imgs.shape[0]
+            ), f"{image_thw_grids.prod(dim=-1).sum()} vs {imgs.shape[0]}"
         else:
             image_thw_grids = torch.empty([0, 3], dtype=torch.long)
 

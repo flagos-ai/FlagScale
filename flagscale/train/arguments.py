@@ -94,6 +94,12 @@ class FSTrainArguments:
         hetero_process_meshes_dp = self.args.hetero_process_meshes[3::5]
         hetero_process_meshes_pp = self.args.hetero_process_meshes[4::5]
 
+        # Check if tensor parallel sizes are inconsistent across meshes
+        # NOTE: If TP degrees differ, sequence parallelism must be enabled
+        if len(set(hetero_process_meshes_tp)) > 1:
+            assert (
+                self.args.sequence_parallel
+            ), f"Sequence parallelism must be enabled (`sequence_parallel=True`) when tensor parallelism degrees differ across heterogeneous meshes. Found TP degrees: {hetero_process_meshes_tp}"
         # Expert tensor parallel size
         if self.expert_tensor_parallel_size_per_process_mesh is not None:
             assert len(self.expert_tensor_parallel_size_per_process_mesh) == len(
