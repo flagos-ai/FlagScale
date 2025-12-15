@@ -1,0 +1,12 @@
+diff --git a/vllm-ascend/packages.txt b/vllm-ascend/packages.txt
+new file mode 100644
+index 000000000..f23d3bee3
+--- /dev/null
++++ b/vllm-ascend/packages.txt
+@@ -0,0 +1,5 @@
++git
++vim
++wget
++jq
++curl
+

@@ -1,0 +1,17 @@
+diff --git a/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_bgmv_expand_bfloat16_t.h b/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_bgmv_expand_bfloat16_t.h
+new file mode 100644
+index 000000000..1483107ac
+--- /dev/null
++++ b/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_bgmv_expand_bfloat16_t.h
+@@ -0,0 +1,10 @@
++#ifndef HEADER_ACLRTLAUNCH_BGMV_EXPAND_BFLOAT16_T_H
++#define HEADER_ACLRTLAUNCH_BGMV_EXPAND_BFLOAT16_T_H
++#include "acl/acl_base.h"
++
++#ifndef ACLRT_LAUNCH_KERNEL
++#define ACLRT_LAUNCH_KERNEL(kernel_func) aclrtlaunch_##kernel_func
++#endif
++
++extern "C" uint32_t aclrtlaunch_bgmv_expand_bfloat16_t(uint32_t blockDim, aclrtStream stream, void* x, void* weight, void* indices, uint32_t indicesSize, void* yIn, void* yOut, uint32_t batchSize, uint32_t numTokensPerCore, uint32_t maxLoRARank, uint32_t outputHiddenDim, uint32_t sliceOffset, uint32_t outputFullDim);
++#endif
+

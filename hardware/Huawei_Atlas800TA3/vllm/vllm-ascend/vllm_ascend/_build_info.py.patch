@@ -1,0 +1,10 @@
+diff --git a/vllm-ascend/vllm_ascend/_build_info.py b/vllm-ascend/vllm_ascend/_build_info.py
+new file mode 100644
+index 000000000..003722930
+--- /dev/null
++++ b/vllm-ascend/vllm_ascend/_build_info.py
+@@ -0,0 +1,3 @@
++# Auto-generated file
++__soc_version__ = 'ASCEND910B1'
++__sleep_mode_enabled__ = True
+

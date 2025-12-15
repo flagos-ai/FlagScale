@@ -1,0 +1,20 @@
+diff --git a/vllm-ascend/vllm_ascend/patch/platform/patch_sched_yield.py b/vllm-ascend/vllm_ascend/patch/platform/patch_sched_yield.py
+new file mode 100644
+index 000000000..694b95770
+--- /dev/null
++++ b/vllm-ascend/vllm_ascend/patch/platform/patch_sched_yield.py
+@@ -0,0 +1,13 @@
++import sys
++
++import vllm.distributed.utils
++from vllm.platforms import CpuArchEnum, Platform
++
++is_arm = (Platform.get_cpu_architecture() == CpuArchEnum.ARM)
++
++USE_SCHED_YIELD = (
++    ((sys.version_info[:3] >= (3, 11, 1)) or
++     (sys.version_info[:2] == (3, 10) and sys.version_info[2] >= 8))
++    and not is_arm)
++
++vllm.distributed.utils.USE_SCHED_YIELD = USE_SCHED_YIELD
+

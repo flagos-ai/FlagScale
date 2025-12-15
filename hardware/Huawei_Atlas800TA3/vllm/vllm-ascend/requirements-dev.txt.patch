@@ -1,0 +1,28 @@
+diff --git a/vllm-ascend/requirements-dev.txt b/vllm-ascend/requirements-dev.txt
+new file mode 100644
+index 000000000..8db787fb0
+--- /dev/null
++++ b/vllm-ascend/requirements-dev.txt
+@@ -0,0 +1,20 @@
++-r requirements-lint.txt
++-r requirements.txt
++modelscope
++openai
++pytest >= 6.0,<9.0.0
++pytest-asyncio
++pytest-mock
++lm-eval[api] @ git+https://github.com/EleutherAI/lm-evaluation-harness.git@206b7722158f58c35b7ffcd53b035fdbdda5126d 
++types-jsonschema
++xgrammar
++zmq
++types-psutil
++pytest-cov
++regex
++sentence_transformers
++ray>=2.47.1
++protobuf>3.20.0
++librosa 
++soundfile
++pytest_mock
+\ No newline at end of file
+

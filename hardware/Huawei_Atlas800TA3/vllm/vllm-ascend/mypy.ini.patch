@@ -1,0 +1,24 @@
+diff --git a/vllm-ascend/mypy.ini b/vllm-ascend/mypy.ini
+new file mode 100644
+index 000000000..6fe8e6c29
+--- /dev/null
++++ b/vllm-ascend/mypy.ini
+@@ -0,0 +1,16 @@
++[mypy]
++; warn_return_any = True
++warn_unused_configs = True
++
++; Suppress all missing import errors from torch_npu for mypy.
++[mypy-torch_npu.*]
++ignore_missing_imports = True
++
++[mypy-torchair.*]
++ignore_missing_imports = True
++
++[mypy-transformers.*]
++ignore_missing_imports = True
++
++[mypy-lm_eval.*]
++ignore_missing_imports = True
+\ No newline at end of file
+

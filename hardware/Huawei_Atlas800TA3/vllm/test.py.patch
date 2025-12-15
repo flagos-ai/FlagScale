@@ -1,0 +1,83 @@
+diff --git a/test.py b/test.py
+new file mode 100644
+index 000000000..3d5213b96
+--- /dev/null
++++ b/test.py
+@@ -0,0 +1,76 @@
++"""
++pytest test_offline_infer.py -sv
++
++## flagos vllm吞吐测试方法
++
++```bash
++USE_FLAGGEMS=0 vllm bench throughput \
++    --model /data/shared/weights/Qwen3-8B/ \
++    --input-len 1 --output-len 512 --num-prompts 256 \
++    2>&1 | tee throughput.log
++
++USE_FLAGGEMS=1 vllm bench throughput \
++    --model /data/shared/weights/Qwen3-8B/ \
++    --input-len 1 --output-len 512 --num-prompts 256 \
++    2>&1 | tee throughput_gems.log
++```
++"""
++
++import os
++
++os.environ["VLLM_CONFIGURE_LOGGING"] = f"{0}"
++os.environ["TOKENIZERS_PARALLELISM"] = "false"
++
++import pytest
++from vllm import LLM, SamplingParams
++
++prompts = [
++    "Hello, my name is",
++    "The future of AI is",
++]
++demo_image_urls = ["https://vcg01.cfp.cn/creative/vcg/800/new/VCG211541741316.jpg"]
++
++# sampling_params = SamplingParams(temperature=0.8, top_p=0.95)
++
++
++@pytest.mark.parametrize(
++    "model_path,tp",
++    [
++        # ("/data/shared/weights/Qwen3-4B", 1),
++        #("/data/shared/weights/MiniCPM-V-4/", 1),
++        #("/data/shared/weights/Seed-OSS-36B-Instruct", 4),
++        ("/data/shared/weights/Hunyuan-A13B-Instruct", 4),
++        #("/data/shared/weights/MiniMax-M2/", 1),
++    ],
++)
++@pytest.mark.parametrize(
++    "use_gems",
++    [
++        (True),
++        #(False),
++    ],
++)
++def test_offline_infer(model_path: str, tp: int, use_gems: bool):
++    os.environ["USE_FLAGGEMS"] = f"{use_gems}"
++    llm = LLM(
++        model=model_path,
++        tensor_parallel_size=tp,
++        trust_remote_code=True,
++        max_num_seqs=16,
++        max_model_len=17450,
++        max_num_batched_tokens=17450,
++        enforce_eager=False,
++    )
++
++    outputs = llm.generate(
++        prompts,
++        # sampling_params,
++    )
++
++    for output in outputs:
++        prompt = output.prompt
++        generated_text = output.outputs[0].text
++        print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
++
++    assert len(outputs) == len(prompts)
++
+

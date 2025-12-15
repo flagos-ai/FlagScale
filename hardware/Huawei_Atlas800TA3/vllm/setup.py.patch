@@ -1,0 +1,50 @@
+diff --git a/setup.py b/setup.py
+index 6434bada6..124831309 100644
+--- a/setup.py
++++ b/setup.py
+@@ -7,6 +7,7 @@ import json
+ import logging
+ import os
+ import re
++import shlex
+ import shutil
+ import subprocess
+ import sys
+@@ -17,6 +18,7 @@ import torch
+ from packaging.version import Version, parse
+ from setuptools import Extension, setup
+ from setuptools.command.build_ext import build_ext
++from setuptools.command.install import install
+ from setuptools_scm import get_version
+ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
+ 
+@@ -407,6 +409,19 @@ class precompiled_wheel_utils:
+             return "nightly"
+ 
+ 
++class InstallWithAscend(install):
++    def run(self) -> None:
++        super().run()
++
++        vllm_ascend_path = Path(__file__).parent / "vllm-ascend"
++        if vllm_ascend_path.exists():
++            print("Installing vllm-ascend after install vllm")
++            cmd =  shlex.split(f'{sys.executable} -m pip install --no-build-isolation -e .')
++            subprocess.check_call(cmd, cwd=vllm_ascend_path)
++        else:
++            print(f"vllm-ascend: {vllm_ascend_path} not found, skip install")
++
++
+ def _no_device() -> bool:
+     return VLLM_TARGET_DEVICE == "empty"
+ 
+@@ -642,7 +657,7 @@ if _no_device():
+     ext_modules = []
+ 
+ if not ext_modules:
+-    cmdclass = {}
++    cmdclass = {"install": InstallWithAscend}
+ else:
+     cmdclass = {
+         "build_ext":
+

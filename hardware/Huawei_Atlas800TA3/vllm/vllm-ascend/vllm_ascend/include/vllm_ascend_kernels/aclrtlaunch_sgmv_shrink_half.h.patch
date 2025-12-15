@@ -1,0 +1,17 @@
+diff --git a/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_sgmv_shrink_half.h b/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_sgmv_shrink_half.h
+new file mode 100644
+index 000000000..1957a19ca
+--- /dev/null
++++ b/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_sgmv_shrink_half.h
+@@ -0,0 +1,10 @@
++#ifndef HEADER_ACLRTLAUNCH_SGMV_SHRINK_HALF_H
++#define HEADER_ACLRTLAUNCH_SGMV_SHRINK_HALF_H
++#include "acl/acl_base.h"
++
++#ifndef ACLRT_LAUNCH_KERNEL
++#define ACLRT_LAUNCH_KERNEL(kernel_func) aclrtlaunch_##kernel_func
++#endif
++
++extern "C" uint32_t aclrtlaunch_sgmv_shrink_half(uint32_t blockDim, aclrtStream stream, void* x, void* weight, void* loraIndices, uint32_t loraIndicesSize, void* seqLen, uint32_t seqLenSize, void* y, uint32_t batchSize, uint32_t numTokensPerCore, uint32_t inputHiddenDim, uint32_t maxLoRARank, float scale);
++#endif
+

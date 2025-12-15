@@ -1,0 +1,43 @@
+diff --git a/vllm-ascend/pyproject.toml b/vllm-ascend/pyproject.toml
+new file mode 100644
+index 000000000..916b98458
+--- /dev/null
++++ b/vllm-ascend/pyproject.toml
+@@ -0,0 +1,36 @@
++[build-system]
++# Should be mirrored in requirements.txt
++requires = [
++    "cmake>=3.26",
++    "decorator",
++    "einops",
++    "numpy<2.0.0",
++    "packaging",
++    "pip",
++    "pybind11",
++    "pyyaml",
++    "scipy",
++    "setuptools>=64",
++    "setuptools-scm>=8",
++    "transformers<=4.57.1",
++    "torch-npu==2.7.1",
++    "torch==2.7.1",
++    "torchvision",
++    "wheel",
++    "msgpack",
++    "quart",
++    "numba",
++    "opencv-python-headless<=4.11.0.86", # Required to avoid numpy version conflict with vllm
++]
++build-backend = "setuptools.build_meta"
++
++[tool.pymarkdown]
++plugins.md004.style = "sublist" # ul-style
++plugins.md007.indent = 4 # ul-indent
++plugins.md007.start_indented = true # ul-indent
++plugins.md013.enabled = false # line-length
++plugins.md041.enabled = false # first-line-h1
++plugins.md033.enabled = false # inline-html
++plugins.md046.enabled = false # code-block-style
++plugins.md024.allow_different_nesting = true # no-duplicate-headers
++plugins.md029.enabled = false # ol-prefix
+

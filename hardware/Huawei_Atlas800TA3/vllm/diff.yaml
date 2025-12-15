@@ -1,13 +1,13 @@
 backends_commit:
-  vllm: b6553be1bc75f046b00046a4ad7576364d03c835
+  vllm: b8b302cde434df8c9289a2b465406b47ebab1c2d
 backends_version:
-  FlagScale: main
-  vllm: 0.9.1
-commit: cc386578b9c4d33ecd8e8d22f266e1b5dba579b1
-contact: 1131595527@qq.com
+  vllm: 0.11.0
+commit: 66a37a7391987705624d7be1221c147f65236d71
+contact: ''
 device_type: Huawei_Atlas800TA3
 models:
-- kimi_k2
-- qwen3
+- MiniCPM-V-4
+- Seed-OSS-36B-Instruct
+- Hunyuan-A13B-Instruct
 task:
 - inference

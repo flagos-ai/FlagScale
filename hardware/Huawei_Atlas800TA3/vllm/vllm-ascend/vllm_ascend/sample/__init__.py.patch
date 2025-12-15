@@ -1,0 +1,4 @@
+diff --git a/vllm-ascend/vllm_ascend/sample/__init__.py b/vllm-ascend/vllm_ascend/sample/__init__.py
+new file mode 100644
+index 000000000..e69de29bb
+

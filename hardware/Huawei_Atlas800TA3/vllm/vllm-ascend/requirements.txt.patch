@@ -1,0 +1,37 @@
+diff --git a/vllm-ascend/requirements.txt b/vllm-ascend/requirements.txt
+new file mode 100644
+index 000000000..999d2ce7c
+--- /dev/null
++++ b/vllm-ascend/requirements.txt
+@@ -0,0 +1,30 @@
++# Should be mirrored in pyporject.toml
++cmake>=3.26
++decorator
++einops
++numpy<2.0.0
++packaging
++pip
++pybind11
++pyyaml
++scipy
++setuptools>=64
++setuptools-scm>=8
++torch==2.7.1
++torchvision
++wheel
++opencv-python-headless<=4.11.0.86 # Required to avoid numpy version conflict with vllm
++
++# requirements for disaggregated prefill
++msgpack
++quart
++
++# Required for N-gram speculative decoding
++numba
++
++# Install torch_npu
++#--pre
++#--extra-index-url https://mirrors.huaweicloud.com/ascend/repos/pypi
++torch-npu==2.7.1
++
++transformers<=4.57.1
+

@@ -1,0 +1,16 @@
+diff --git a/vllm-ascend/requirements-lint.txt b/vllm-ascend/requirements-lint.txt
+new file mode 100644
+index 000000000..8a575e5a2
+--- /dev/null
++++ b/vllm-ascend/requirements-lint.txt
+@@ -0,0 +1,9 @@
++# formatting
++pre-commit==4.0.1
++
++# type checking
++mypy==1.11.1
++types-PyYAML
++types-regex
++types-requests
++types-setuptools
+

@@ -1,0 +1,17 @@
+diff --git a/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_mla_preprocess.h b/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_mla_preprocess.h
+new file mode 100644
+index 000000000..217eea3d0
+--- /dev/null
++++ b/vllm-ascend/vllm_ascend/include/vllm_ascend_kernels/aclrtlaunch_mla_preprocess.h
+@@ -0,0 +1,10 @@
++#ifndef HEADER_ACLRTLAUNCH_MLA_PREPROCESS_H
++#define HEADER_ACLRTLAUNCH_MLA_PREPROCESS_H
++#include "acl/acl_base.h"
++
++#ifndef ACLRT_LAUNCH_KERNEL
++#define ACLRT_LAUNCH_KERNEL(kernel_func) aclrtlaunch_##kernel_func
++#endif
++
++extern "C" uint32_t aclrtlaunch_mla_preprocess(uint32_t blockDim, aclrtStream stream, void* hiddenState, void* quantScale1, void* quantOffset1, void* wdqkv, void* bias1, void* gamma2, void* beta2, void* quantScale2, void* quantOffset2, void* gamma3, void* sin1, void* cos1, void* sin2, void* cos2, void* keycache, void* slotMapping, void* wuq, void* bias2, void* wuk, void* descale1, void* descale2, void* ctkvScale, void* qnopeScale, void* q, void* keycacheOut, void* q2, void* keycacheOut2, void* workspace, void* tiling);
++#endif
+
