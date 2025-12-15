@@ -363,7 +363,7 @@ def _get_install_requires():
 
     install_requires.extend(_read_requirements_file('requirements/requirements-base.txt'))
     install_requires.extend(_read_requirements_file('requirements/requirements-common.txt'))
-    core_deps = ["setuptools>=77.0.0", "packaging>=24.2", "importlib_metadata>=8.5.0"]
+    core_deps = ["setuptools==79.0.1", "packaging>=24.2", "importlib_metadata>=8.5.0"]
 
     all_deps = install_requires + core_deps
     result = deduplicate_dependencies(all_deps)
