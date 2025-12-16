@@ -59,6 +59,7 @@ jobs:
           trap 'echo "Cleaning up temporary directory..."; rm -rf "$TMP_DIR"' EXIT
 
           if [ "${{ inputs.type }}" = "train" ] || [ "${{ inputs.type }}" = "hetero_train" ]; then
+            source /root/miniconda3/bin/activate flagscale-train
             python tools/patch/unpatch.py --backend Megatron-LM
             if [ "${{ inputs.task }}" = "llava_onevision" ]; then
               python tools/patch/unpatch.py --backend Megatron-Energon
@@ -151,7 +152,6 @@ jobs:
             echo "End time: ${FORMATTED_END}"
             echo "Total time taken: ${ELAPSED_MINUTES} minutes ${REMAINING_SECONDS} seconds"
             echo "================================"
-            conda deactivate
           elif [ "${{ inputs.type }}" = "rl" ]; then
             python tools/patch/unpatch.py --backend verl
             cd third_party/verl
