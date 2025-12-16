@@ -153,6 +153,7 @@ jobs:
             echo "Total time taken: ${ELAPSED_MINUTES} minutes ${REMAINING_SECONDS} seconds"
             echo "================================"
           elif [ "${{ inputs.type }}" = "rl" ]; then
+            source /root/miniconda3/bin/activate flagscale-RL
             python tools/patch/unpatch.py --backend verl
             cd third_party/verl
             pip install --no-deps -e .
