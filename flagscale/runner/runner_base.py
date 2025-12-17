@@ -43,7 +43,7 @@ class Runner(ABC):
         ], f"Unsupported launcher type: {self.launcher_type}"
 
         self.backend = RunnerFactory.get_backend(self.backend_type)(self.config)
-        self.launcher = RunnerFactory.get_launcher(self.launcher)(self.config, self.backend)
+        self.launcher = RunnerFactory.get_launcher(self.launcher_type)(self.config, self.backend)
 
     def run(self, *args, **kwargs):
         return self.launcher.run(*args, **kwargs)
