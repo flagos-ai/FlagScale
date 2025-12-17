@@ -1,9 +1,9 @@
 diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/p2p/flagcx_p2p_nccl_engine.py b/vllm/distributed/kv_transfer/kv_connector/v1/p2p/flagcx_p2p_nccl_engine.py
 new file mode 100644
-index 000000000..09b0dfb9c
+index 000000000..3ef773873
 --- /dev/null
 +++ b/vllm/distributed/kv_transfer/kv_connector/v1/p2p/flagcx_p2p_nccl_engine.py
-@@ -0,0 +1,595 @@
+@@ -0,0 +1,596 @@
 +# Mainly adopted from vllm/distributed/kv_transfer/kv_connector/v1/p2p/p2p_nccl_engine.py
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
@@ -30,7 +30,7 @@ index 000000000..09b0dfb9c
 +from plugin.interservice.flagcx_wrapper import (
 +    FLAGCXLibrary,
 +    buffer_type,
-+    cudaStream_t,
++    flagcxStream_t,
 +    flagcxComm_t,
 +    flagcxDataTypeEnum,
 +)
@@ -594,8 +594,9 @@ index 000000000..09b0dfb9c
 +        """
 +        if is_mla:
 +            num_pages, page_size = layer.shape[0], layer.shape[1]
-+            return layer.reshape(num_pages * page_size, -1)[slot_mapping, ...]
++            other_dims = layer.shape[2:]
++            return layer.reshape(num_pages * page_size, *other_dims)[slot_mapping, ...]
 +
 +        num_pages, page_size = layer.shape[1], layer.shape[2]
-+        return layer.reshape(2, num_pages * page_size, -1)[:, slot_mapping,
-+                                                           ...]
++        other_dims = layer.shape[3:]
++        return layer.reshape(2, num_pages * page_size, *other_dims)[:, slot_mapping, ...]
