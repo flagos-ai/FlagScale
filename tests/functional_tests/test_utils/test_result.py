@@ -16,7 +16,7 @@ def find_directory(start_path, target_dir_name):
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
-def test_train_equal(test_path, test_type, test_task, test_case):
+def test_train_equal(test_path, test_type, test_task, test_case, request):
     # Construct the test_result_path using the provided fixtures
     test_result_path = os.path.join(test_path, test_type, test_task, "results_test", test_case)
     start_path = os.path.join(test_result_path, "logs/details/host_0_localhost")
@@ -27,6 +27,12 @@ def test_train_equal(test_path, test_type, test_task, test_case):
     results_path = os.listdir(attempt_path)
     results_path.sort()
     result_path = os.path.join(attempt_path, results_path[-1], "stdout.log")
+
+    # Store result_path and test information to request.node for hook usage
+    request.node.result_path = result_path
+    request.node.test_type = test_type
+    request.node.test_task = test_task
+    request.node.test_case = test_case
 
     print("result_path:", result_path)
 
@@ -67,10 +73,16 @@ def test_train_equal(test_path, test_type, test_task, test_case):
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
-def test_inference_equal(test_path, test_type, test_task, test_case):
+def test_inference_equal(test_path, test_type, test_task, test_case, request):
     # Construct the test_result_path using the provided fixtures
     test_result_path = os.path.join(test_path, test_type, test_task, "results_test", test_case)
     result_path = os.path.join(test_result_path, "inference_logs/host_0_localhost.output")
+
+    # Store result_path and test information to request.node for hook usage
+    request.node.result_path = result_path
+    request.node.test_type = test_type
+    request.node.test_task = test_task
+    request.node.test_case = test_case
 
     print("result_path:", result_path)
 
@@ -119,10 +131,16 @@ def test_inference_equal(test_path, test_type, test_task, test_case):
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
-def test_inference_pipeline(test_path, test_type, test_task, test_case):
+def test_inference_pipeline(test_path, test_type, test_task, test_case, request):
     # Construct the test_result_path using the provided fixtures
     test_result_path = os.path.join(test_path, test_type, test_task, "results_test", test_case)
     result_path = os.path.join(test_result_path, "inference_logs/host_0_localhost.output")
+
+    # Store result_path and test information to request.node for hook usage
+    request.node.result_path = result_path
+    request.node.test_type = test_type
+    request.node.test_task = test_task
+    request.node.test_case = test_case
 
     print("result_path:", result_path)
 
@@ -209,10 +227,16 @@ def test_inference_pipeline(test_path, test_type, test_task, test_case):
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
-def test_rl_equal(test_path, test_type, test_task, test_case):
+def test_rl_equal(test_path, test_type, test_task, test_case, request):
     # Construct the test_result_path using the provided fixtures
     test_result_path = os.path.join(test_path, test_type, test_task, "results_test", test_case)
     result_path = os.path.join(test_result_path, "logs/host_0_localhost.output")
+
+    # Store result_path and test information to request.node for hook usage
+    request.node.result_path = result_path
+    request.node.test_type = test_type
+    request.node.test_task = test_task
+    request.node.test_case = test_case
 
     print("result_path:", result_path)
 

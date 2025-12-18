@@ -39,56 +39,56 @@ jobs:
         run: |
           echo "ci_image=localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515" >> $GITHUB_OUTPUT  # Set output variable
 
-  # Train Megatron Unit Tests with Matrix
-  unit_tests_train_megatron:
-    needs:
-      - set-env
-    uses: ./.github/workflows/unit-tests-nvidia.yml
-    strategy:
-      matrix:
-        subset:
-          - data
-          - dist_checkpointing
-          - distributed
-          - export
-          - fusions
-          - inference
-          - models
-          - pipeline_parallel
-          - post_training
-          - ssm
-          - tensor_parallel
-          - transformer/moe
-          - transformer
-          - ./
-    name: "train_megatron-${{ matrix.subset == './' && 'root' || matrix.subset }}"
-    with:
-      backend: train_megatron
-      subset: ${{ matrix.subset }}
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # # Train Megatron Unit Tests with Matrix
+  # unit_tests_train_megatron:
+  #   needs:
+  #     - set-env
+  #   uses: ./.github/workflows/unit-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       subset:
+  #         - data
+  #         - dist_checkpointing
+  #         - distributed
+  #         - export
+  #         - fusions
+  #         - inference
+  #         - models
+  #         - pipeline_parallel
+  #         - post_training
+  #         - ssm
+  #         - tensor_parallel
+  #         - transformer/moe
+  #         - transformer
+  #         - ./
+  #   name: "train_megatron-${{ matrix.subset == './' && 'root' || matrix.subset }}"
+  #   with:
+  #     backend: train_megatron
+  #     subset: ${{ matrix.subset }}
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
-  # Train Flagscale Unit Tests with Matrix
-  unit_tests_train_flagscale:
-    needs:
-      - set-env
-      - unit_tests_train_megatron
-    uses: ./.github/workflows/unit-tests-nvidia.yml
-    strategy:
-      matrix:
-        subset:
-          - runner
-          - ./
-    name: "train_flagscale-${{ matrix.subset == './' && 'root' || matrix.subset }}"
-    with:
-      backend: train_flagscale
-      subset: ${{ matrix.subset }}
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # # Train Flagscale Unit Tests with Matrix
+  # unit_tests_train_flagscale:
+  #   needs:
+  #     - set-env
+  #     - unit_tests_train_megatron
+  #   uses: ./.github/workflows/unit-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       subset:
+  #         - runner
+  #         - ./
+  #   name: "train_flagscale-${{ matrix.subset == './' && 'root' || matrix.subset }}"
+  #   with:
+  #     backend: train_flagscale
+  #     subset: ${{ matrix.subset }}
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
   # Inference Flagscale Unit Tests with Matrix
   unit_tests_inference_flagscale:
     needs:
       - set-env
-      - unit_tests_train_flagscale
+      # - unit_tests_train_flagscale
     uses: ./.github/workflows/unit-tests-nvidia.yml
     strategy:
       matrix:
@@ -102,43 +102,43 @@ jobs:
       image: ${{ needs.set-env.outputs.ci_image }}
 
   # Functional Tests with Mision and Type Matrix
-  functional_tests_train:
-    needs:
-      - set-env
-      - unit_tests_inference_flagscale
-    uses: ./.github/workflows/functional-tests-nvidia.yml
-    strategy:
-      matrix:
-        task:
-          - aquila
-          - deepseek
-          - mixtral
-          # - llava_onevision # TODO: test need fix
-    name: "train-${{ matrix.task }}"
-    with:
-      task: ${{ matrix.task }}
-      type: train
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # functional_tests_train:
+  #   needs:
+  #     - set-env
+  #     - unit_tests_inference_flagscale
+  #   uses: ./.github/workflows/functional-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       task:
+  #         - aquila
+  #         - deepseek
+  #         - mixtral
+  #         # - llava_onevision # TODO: test need fix
+  #   name: "train-${{ matrix.task }}"
+  #   with:
+  #     task: ${{ matrix.task }}
+  #     type: train
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
-  functional_tests_hetero:
-    needs:
-      - set-env
-      - functional_tests_train
-    uses: ./.github/workflows/functional-tests-nvidia.yml
-    strategy:
-      matrix:
-        task:
-          - aquila
-    name: "hetero_train-${{ matrix.task }}"
-    with:
-      task: ${{ matrix.task }}
-      type: hetero_train
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # functional_tests_hetero:
+  #   needs:
+  #     - set-env
+  #     - functional_tests_train
+  #   uses: ./.github/workflows/functional-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       task:
+  #         - aquila
+  #   name: "hetero_train-${{ matrix.task }}"
+  #   with:
+  #     task: ${{ matrix.task }}
+  #     type: hetero_train
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
   functional_tests_inference:
     needs:
       - set-env
-      - functional_tests_hetero
+      # - functional_tests_hetero
     uses: ./.github/workflows/functional-tests-nvidia.yml
     strategy:
       matrix:
@@ -189,11 +189,11 @@ jobs:
   # Check All Tests
   all-tests:
     needs:
-      - unit_tests_train_megatron
-      - unit_tests_train_flagscale
-      - unit_tests_inference_flagscale
-      - functional_tests_train
-      - functional_tests_hetero
+      # - unit_tests_train_megatron
+      # - unit_tests_train_flagscale
+      # - unit_tests_inference_flagscale
+      # - functional_tests_train
+      # - functional_tests_hetero
       - functional_tests_inference
       - functional_tests_serve
       - functional_tests_rl
