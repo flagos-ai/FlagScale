@@ -1,8 +1,9 @@
-import pytest
 import os
 import shutil
+
 from datetime import datetime
 
+import pytest
 
 REPORT_DIR = "/workspace/report"
 
@@ -28,7 +29,7 @@ def pytest_addoption(parser):
 def save_failed_log_to_report(result_path, test_name, test_type, test_task, test_case):
     """
     Save the log file from result_path to /workspace/report directory when test fails
-    
+
     Args:
         result_path: Original log file path (corresponds to result_path at four locations in test_result.py)
         test_name: Test function name
@@ -44,17 +45,19 @@ def save_failed_log_to_report(result_path, test_name, test_type, test_task, test
     log_filename = os.path.basename(result_path)
     safe_test_name = test_name.replace("test_", "")
     safe_test_case = test_case.replace("/", "_").replace("\\", "_")
-    saved_filename = f"{safe_test_name}_{test_type}_{test_task}_{safe_test_case}_{timestamp}_{log_filename}"
+    saved_filename = (
+        f"{safe_test_name}_{test_type}_{test_task}_{safe_test_case}_{timestamp}_{log_filename}"
+    )
     saved_path = os.path.join(REPORT_DIR, saved_filename)
-    
+
     try:
         if not os.path.exists(REPORT_DIR):
             os.makedirs(REPORT_DIR)
         # Copy log file to report directory
         shutil.copy2(result_path, saved_path)
-        
+
         # Print marker information to easily locate corresponding log
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print(f"[FAILED LOG SAVED] Test failed, log file saved to {REPORT_DIR}")
         print(f"  Original log path: {result_path}")
         print(f"  Saved path: {saved_path}")
@@ -90,7 +93,7 @@ def pytest_runtest_makereport(item, call):
     # Execute test and get result
     outcome = yield
     rep = outcome.get_result()
-    
+
     # Only execute when test fails
     if rep.when == "call" and rep.failed:
         # Get stored result_path and test information from item.node
@@ -98,7 +101,7 @@ def pytest_runtest_makereport(item, call):
         test_type = getattr(item, "test_type", None)
         test_task = getattr(item, "test_task", None)
         test_case = getattr(item, "test_case", None)
-        
+
         if result_path:
             try:
                 test_name = item.name
@@ -107,12 +110,13 @@ def pytest_runtest_makereport(item, call):
                     test_name=test_name,
                     test_type=test_type or "unknown",
                     test_task=test_task or "unknown",
-                    test_case=test_case or "unknown"
+                    test_case=test_case or "unknown",
                 )
             except Exception as e:
                 # If import or save fails, at least print error message
                 print(f"\n[ERROR] Error occurred while saving failed log: {e}\n")
                 import traceback
+
                 traceback.print_exc()
         else:
             print(f"\n[WARNING] result_path is None, skipping log save for test: {item.name}\n")
