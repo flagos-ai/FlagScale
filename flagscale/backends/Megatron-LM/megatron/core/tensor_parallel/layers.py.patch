@@ -1,5 +1,5 @@
 diff --git a/megatron/core/tensor_parallel/layers.py b/megatron/core/tensor_parallel/layers.py
-index 5c6f34b70..5c943759a 100644
+index 5c6f34b70..c4f77ea61 100644
 --- a/megatron/core/tensor_parallel/layers.py
 +++ b/megatron/core/tensor_parallel/layers.py
 @@ -448,6 +448,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
@@ -56,13 +56,13 @@ index 5c6f34b70..5c943759a 100644
              # Need to return None's as gradient has to flow for all the input arguments
              # provided during forward
 -            return (sub_grad_input, grad_weight, grad_bias, None, None, None, None, None, None)
-+            return (sub_grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None)
++            return (sub_grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None)
  
          if ctx.allreduce_dgrad:
              handle.wait()
  
 -        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
-+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
++        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
  
  
  def linear_with_grad_accumulation_and_async_allreduce(
