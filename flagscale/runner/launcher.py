@@ -1,9 +1,10 @@
+import os
 import shlex
 
 from abc import ABC, abstractmethod
 from enum import Enum
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.utils import (
     get_free_port,
@@ -15,6 +16,34 @@ from flagscale.runner.utils import (
     run_scp_command,
     run_ssh_command,
 )
+
+
+def _get_args_vllm(config: DictConfig):
+    # step1: yaml -> dict
+    assert config.experiment.task.backend in ["vllm"], "This function only supports vllm backend."
+    config_dict = OmegaConf.to_container(config, resolve=True)
+
+    # step2: restructuring the config
+    config_dict = config_dict["inference"]
+    config_dict["logging"].pop("log_dir")
+    config_dict["logging"].pop("scripts_dir")
+    config_dict["logging"].pop("pids_dir")
+    if not config_dict.get("logging"):
+        config_dict.pop("logging")
+
+    # step3: dict -> yaml
+    logging_config = config.inference.logging
+    new_config = OmegaConf.create(config_dict)
+    new_conf_file = os.path.join(logging_config.scripts_dir, f"inference.yaml")
+
+    # step4: write the new yaml file to `outputs_dir/inference_logs/scripts/inference.yaml`
+    with open(new_conf_file, "w") as f:
+        OmegaConf.save(config=new_config, f=f.name, resolve=True)
+
+    args = []
+    args.append(f"--config-path={new_conf_file}")
+
+    return args
 
 
 class LauncherBase(ABC):
@@ -30,6 +59,10 @@ class LauncherBase(ABC):
 class SshLauncher(LauncherBase):
     def __init__(self, config, backend):
         self.config = config
+        # import pdb; pdb.set_trace()
+        self.user_args = _get_args_vllm(self.config)
+        self.user_envs = self.config.experiment.get("envs", {})
+        self.user_script = self.config.experiment.task.entrypoint
         hostfile = self.config.experiment.runner.get("hostfile", None)
         self.resources = parse_hostfile(hostfile) if hostfile else None
         self.backend = backend

@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.runner_base import RunnerBase
+# from flagscale.runner.runner_base import RunnerBase
 from flagscale.runner.utils import (
     get_free_port,
     get_nnodes,
@@ -100,7 +100,9 @@ class TorchrunBackend(BackendBase):
 
 class VllmBackend(BackendBase):
     def __init__(self, config: DictConfig):
-        super().__init__(config)
+        # super().__init__(config)
+        super().__init__()
+        self.config = config
         self.task_type = getattr(self.config.experiment.task, "type", None)
         assert self.task_type == "inference", f"Unsupported task type: {self.task_type}"
         self._prepare()
@@ -209,7 +211,8 @@ class SglangBackend(BackendBase):
         pass
 
 
-class LlamallamaCppBackend(BackendBase):
+class llamaCppBackend(BackendBase):
+    # class LlamallamaCppBackend(BackendBase):
     def generate_run_script(self, *args, **kwargs):
         pass
 
