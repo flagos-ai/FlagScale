@@ -279,7 +279,7 @@ class LlamaCppBackend(BackendBase):
         pass
 
 
-class CompressCustomBackend(BackendBase):
+class CompressNativeBackend(BackendBase):
     def __init__(self, config: DictConfig):
         super().__init__(config)
         self.task_type = getattr(self.config.experiment.task, "type", None)
@@ -392,7 +392,15 @@ class CompressCustomBackend(BackendBase):
         return host_stop_script_file
 
 
-class ServeCustomBackend(BackendBase):
+class ServeNativeBackend(BackendBase):
+    def generate_run_script(self, *args, **kwargs):
+        pass
+
+    def generate_stop_script(self, *args, **kwargs):
+        pass
+
+
+class VerlBackend(BackendBase):
     def generate_run_script(self, *args, **kwargs):
         pass
 

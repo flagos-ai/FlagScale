@@ -16,8 +16,8 @@ class JobStatus(Enum):
 TASK_TO_BACKEND_MAP = {
     "train": ["megatron", "torchrun"],
     "inference": ["vllm"],
-    "compress": ["compress_custom"],
-    "serve": ["vllm", "sglang", "llama_cpp", "serve_custom"],
+    "compress": ["compress_native"],
+    "serve": ["vllm", "sglang", "llama_cpp", "serve_native"],
     "rl": ["verl"],
 }
 
@@ -41,7 +41,7 @@ class Runner(ABC):
             self.backend_type = backend_attr
         else:
             # backend is optional for compress / serve
-            self.backend_type = backend_attr or f"{self.task_type}_custom"
+            self.backend_type = backend_attr or f"{self.task_type}_native"
 
         # validate task_type and backend_type compatibility
         allowed_backends = TASK_TO_BACKEND_MAP[self.task_type]
