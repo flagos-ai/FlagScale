@@ -33,6 +33,7 @@ class SshLauncher(LauncherBase):
         self.config = config
         hostfile = self.config.experiment.runner.get("hostfile", None)
         self.resources = parse_hostfile(hostfile) if hostfile else None
+        self.task_type = getattr(self.config.experiment.task, "type", None)
         self.backend = backend
         self.user_args = self.backend.user_args
         self.user_envs = self.backend.user_envs
@@ -54,8 +55,11 @@ class SshLauncher(LauncherBase):
             export_cmd += [f"{k}={v}"]
 
         cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
-
-        logging_config = self.config.inference.logging
+        if self.task_type == "inference":
+            logging_config = self.config.inference.logging
+        elif self.task_type == "compress":
+            logging_config = self.config.compress.system.logging
+        # todo: unify logging configs of all tasks
         host_run_script_file = self.backend.generate_run_script(
             self.config, host, node_rank, cmd, background=True, with_test=with_test
         )
