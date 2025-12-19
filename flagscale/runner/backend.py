@@ -90,7 +90,7 @@ class MegatronBackend(BackendBase):
         pass
 
 
-class TorchrunBackend(BackendBase):
+class TorchBackend(BackendBase):
     def generate_run_script(self, *args, **kwargs):
         pass
 
@@ -211,7 +211,7 @@ class SglangBackend(BackendBase):
         pass
 
 
-class llamaCppBackend(BackendBase):
+class LlamaCppBackend(BackendBase):
     # class LlamallamaCppBackend(BackendBase):
     def generate_run_script(self, *args, **kwargs):
         pass
@@ -220,7 +220,15 @@ class llamaCppBackend(BackendBase):
         pass
 
 
-class CustomBackend(BackendBase):
+class CompressCustomBackend(BackendBase):
+    def generate_run_script(self, *args, **kwargs):
+        pass
+
+    def generate_stop_script(self, *args, **kwargs):
+        pass
+
+
+class ServeCustomBackend(BackendBase):
     def generate_run_script(self, *args, **kwargs):
         pass
 

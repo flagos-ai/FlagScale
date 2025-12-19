@@ -13,34 +13,42 @@ class JobStatus(Enum):
     COMPLETED_OR_IDLE = "Completed or Not Started"
 
 
+TASK_TO_BACKEND_MAP = {
+    "train": ["megatron", "torchrun"],
+    "inference": ["vllm"],
+    "compress": ["compress_custom"],
+    "serve": ["vllm", "sglang", "llama_cpp", "serve_custom"],
+    "rl": ["verl"],
+}
+
+
 class Runner(ABC):
     def __init__(self, config: DictConfig):
         self.config = config
         hostfile = self.config.experiment.runner.get("hostfile", None)
         self.resources = parse_hostfile(hostfile) if hostfile else None
         self.task_type = getattr(self.config.experiment.task, "type", None)
-        assert self.task_type in [
-            "train",
-            "inference",
-            "compress",
-            "serve",
-            "rl",
-        ], f"Unsupported task type: {self.task_type}"
-        self.backend_type = getattr(self.config.experiment.task, "backend", "custom")
-        # TODO(cz): trans engine type into backend type
-        assert self.backend_type in [
-            "megatron",
-            "torchrun",
-            "vllm",
-            "sglang",
-            "llama_cpp",
-            "custom",
-        ], f"Unsupported backend type: {self.backend_type}"
-        self.launcher_type = getattr(self.config.experiment.task, "backend_type", "ssh")
-        assert self.launcher_type in [
-            "ssh",
-            "cloud",
-        ], f"Unsupported launcher type: {self.launcher_type}"
+        assert self.task_type in TASK_TO_BACKEND_MAP, f"Unsupported task type: {self.task_type}"
+
+        backend_attr = getattr(self.config.experiment.task, "backend", None)
+
+        # backend is required for train and inference
+        if self.task_type in ("train", "inference", "rl"):
+            assert backend_attr is not None, (
+                f"backend_type is required for task_type='{self.task_type}'. "
+                f"Allowed backends: {TASK_TO_BACKEND_MAP[self.task_type]}"
+            )
+            self.backend_type = backend_attr
+        else:
+            # backend is optional for compress / serve
+            self.backend_type = backend_attr or f"{self.task_type}_custom"
+
+        # validate task_type and backend_type compatibility
+        allowed_backends = TASK_TO_BACKEND_MAP[self.task_type]
+        assert self.backend_type in allowed_backends, (
+            f"Unsupported backend type '{self.backend_type}' for task_type='{self.task_type}'. "
+            f"Allowed backends: {allowed_backends}"
+        )
 
         self.backend = RunnerFactory.get_backend(self.backend_type)(self.config)
         self.launcher = RunnerFactory.get_launcher(self.launcher_type)(self.config, self.backend)
