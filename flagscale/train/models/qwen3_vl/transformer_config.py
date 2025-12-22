@@ -95,6 +95,12 @@ def get_vision_model_config(args, config):
     config.spatial_merge_size = 2
     config.num_position_embeddings = 2304
 
+    # disable pipeline parallelism in vision model
+    config.pipeline_model_parallel_size = 1
+    config.first_pipeline_num_layers = None
+    config.num_layers_in_first_pipeline_stage = None
+    config.num_layers_in_last_pipeline_stage = None
+
     # Reset recompute settings for vision encoder, otherwise it may use the language's settings.
     if args.vision_recompute_activations:
         config.recompute_granularity = 'full'

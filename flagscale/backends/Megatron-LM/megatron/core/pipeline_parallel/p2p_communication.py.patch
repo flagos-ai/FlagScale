@@ -1,5 +1,5 @@
 diff --git a/megatron/core/pipeline_parallel/p2p_communication.py b/megatron/core/pipeline_parallel/p2p_communication.py
-index 63ee9d1f5..910f8cc9a 100644
+index 63ee9d1f5..feade8ef0 100644
 --- a/megatron/core/pipeline_parallel/p2p_communication.py
 +++ b/megatron/core/pipeline_parallel/p2p_communication.py
 @@ -2,6 +2,7 @@
@@ -152,7 +152,7 @@ index 63ee9d1f5..910f8cc9a 100644
 +            self.warm_up_comm_group_hetero()
 +            return
 +        # NOTE(lizhiyu): For enbale config.variable_seq_lengths and pp_size > 2
-+        if not self.config.variable_seq_lengths or self.pp_group().size() <= 2:
++        if not self.config.variable_seq_lengths or self.pp_group.size() <= 2:
 +            return
 +        self.config.variable_seq_lengths=False
 +        rank = torch.distributed.get_rank()
@@ -263,4 +263,3 @@ index 63ee9d1f5..910f8cc9a 100644
 +                    group=pp_g,
 +                )
 +    ########## FlagScale Begin ##########
-\ No newline at end of file

@@ -2,7 +2,7 @@ backends_commit:
   vllm: a5dd03c1ebc5e4f56f3c9d3dc0436e9c582c978f
 backends_version:
   vllm: v0.9.2
-commit: 7b64f0f8dbe438a12645784b3a14f395434d1203
+commit: 249e41c4c22d2171ab9897d42ca67b185ac084d3
 contact: lingfeng.qiu@mthreads.com
 device_type: MUSA_S5000
 models:
