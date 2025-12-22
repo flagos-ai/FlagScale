@@ -4,6 +4,8 @@ Unless explicitly stated otherwise, all files developed by BAAI are subject to t
 Copyright (c) 2023 BAAI. All rights reserved.
 These files are licensed under the Apache License, Version 2.0.
 
-Please note that compliance with the licenses of the incorporated open-source projects is mandatory. Specifically, these include:
+Please note that compliance with the licenses of the incorporated open-source projects is mandatory.
+Specifically, these include:
+
 1. The LICENSE from Megatron-LM, located in the megatron folder.
 2. The LICENSE from vllm, located in the vllm folder.
