@@ -49,7 +49,13 @@ def main(config: DictConfig) -> None:
 
             if config.action == "run":
                 enable_monitoring = config.experiment.runner.get("enable_monitoring", False)
-                runner.run(enable_monitoring=enable_monitoring)
+                enable_gpu_health_check = config.experiment.runner.get(
+                    "enable_gpu_health_check", False
+                )
+                runner.run(
+                    enable_monitoring=enable_monitoring,
+                    enable_gpu_health_check=enable_gpu_health_check,
+                )
                 from flagscale.logger import logger
 
                 if enable_monitoring:

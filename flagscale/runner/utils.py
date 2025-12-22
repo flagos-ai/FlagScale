@@ -186,11 +186,18 @@ def run_local_command(cmd, dryrun=False, query=False):
             sys.exit(result.returncode)
 
 
-def run_ssh_command(host, cmd, port=None, dryrun=False, query=False):
-    if port:
-        ssh_cmd = f"ssh -f -n -p {port} {host} '{cmd}'"
+def run_ssh_command(host, cmd, port=None, dryrun=False, query=False, background=True):
+    if background:
+        # Background mode: SSH goes to background before command execution
+        if port:
+            ssh_cmd = f"ssh -f -n -p {port} {host} '{cmd}'"
+        else:
+            ssh_cmd = f"ssh -f -n {host} '{cmd}'"
     else:
-        ssh_cmd = f"ssh -f -n {host} '{cmd}'"
+        if port:
+            ssh_cmd = f"ssh -f -n -p {port} {host} '{cmd}'"
+        else:
+            ssh_cmd = f"ssh -f -n {host} '{cmd}'"
     if not query:
         logger.info(f"Running the ssh command: {ssh_cmd}")
     if dryrun:
@@ -198,13 +205,13 @@ def run_ssh_command(host, cmd, port=None, dryrun=False, query=False):
     result = subprocess.run(
         ssh_cmd,
         shell=True,
-        check=True,
+        check=False,  # Don't raise exception, let caller handle returncode
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
-    if result.returncode != 0:
+    if result.returncode != 0 and not query:
         print(f"SSH command {ssh_cmd} failed with return code {result.returncode}.")
         print(f"Output: {result.stdout}")
         print(f"Error: {result.stderr}")
@@ -395,6 +402,24 @@ def update_nodes_envs(env_config, ip_addr, resource_info):
     if nodes_envs is not None:
         cur_node_config.update(nodes_envs.get(ip_addr, {}))
 
+    return cur_node_config
+
+
+def add_decive_extra_config(config, device_type):
+    if device_type is None:
+        return OmegaConf.to_container(config, resolve=True)
+    cur_node_config = {}
+    temp_dict = {}
+    if isinstance(config, DictConfig):
+        temp_dict = OmegaConf.to_container(config, resolve=True)
+    else:
+        temp_dict = config
+    for key, value in temp_dict.items():
+        if isinstance(value, dict):
+            if key == device_type:
+                cur_node_config.update(value)
+            else:
+                cur_node_config[key] = value
     return cur_node_config
 
 
