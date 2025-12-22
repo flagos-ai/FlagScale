@@ -6,14 +6,14 @@ system:
   logging:
     log_interval: 1
     tensorboard_log_interval: 1
-    wandb_project: "compress-robobrain2"
-    wandb_exp_name: "compress-robobrain2"
-  save_dir: RoboBrain2_Compressed
+    wandb_project: "compress-robobrain"
+    wandb_exp_name: "compress-robobrain"
+  save_dir: RoboBrain_Compressed
 
 
 model:
   model_cls: AutoModelForPreTraining
-  model_path: /models/RoboBrain2.0-3B
+  model_path: BAAI/RoboBrain
   device_map: cuda:0
   low_cpu_mem_usage: true
   torch_dtype: float16
