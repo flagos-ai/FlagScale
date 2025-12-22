@@ -297,9 +297,7 @@ class CompressNativeBackend(BackendBase):
         logger.info("\n************** configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 
-    def generate_run_script_compress(
-        self, config, host, node_rank, cmd, background=True, with_test=False
-    ):
+    def generate_run_script(self, config, host, node_rank, cmd, background=True, with_test=False):
         system_config = config.compress.system
         logging_config = config.compress.system.logging
 

@@ -51,7 +51,9 @@ class Runner(ABC):
         )
 
         self.backend = RunnerFactory.get_backend(self.backend_type)(self.config)
-        self.launcher = RunnerFactory.get_launcher(self.launcher_type)(self.config, self.backend)
+        self.launcher = RunnerFactory.get_launcher("ssh")(
+            self.config, self.backend
+        )  # TODO add cloud launcher_type
 
     def run(self, *args, **kwargs):
         return self.launcher.run(*args, **kwargs)
