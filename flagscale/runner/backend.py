@@ -439,9 +439,6 @@ class SglangBackend(BackendBase):
             )
             f.write(f"{envs_str}\n")
 
-            import pdb
-
-            pdb.set_trace()
             if nodes:
                 f.write(f"ray_path=$(realpath $(which ray))\n")
 

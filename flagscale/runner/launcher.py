@@ -54,9 +54,6 @@ class SshLauncher(LauncherBase):
         for k, v in self.user_envs.items():
             export_cmd += [f"{k}={v}"]
 
-        import pdb
-
-        pdb.set_trace()
         cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
         if self.task_type == "inference":
             logging_config = self.config.inference.logging
@@ -149,8 +146,12 @@ class SshLauncher(LauncherBase):
             )
 
     def _stop_each(self, host, node_rank):
-        host_stop_script_file = self.backend.generate_stop_script(self.config, host, node_rank)
-        logging_config = self.config.logging
+        if self.backend.task_type == "serve":
+            host_stop_script_file = self.backend.generate_stop_script(self.config, host, node_rank)
+            logging_config = self.config.logging
+        elif self.backend.task_type == "inference":
+            host_stop_script_file = self.backend.generate_stop_script(host, node_rank)
+            logging_config = self.config.inference.logging
 
         if host != "localhost":
             ssh_port = self.config.experiment.runner.get("ssh_port", 22)
