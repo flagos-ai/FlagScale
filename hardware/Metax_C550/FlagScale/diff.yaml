@@ -1,14 +1,12 @@
 backends_commit:
-  vllm: b6553be1bc75f046b00046a4ad7576364d03c835
+  Megatron-LM: 8479eb35fbca9631acb846c3ad5d868e02214227
 backends_version:
-  FlagScale: 0.8.0
-  vllm: 0.9.1
-commit: 13cc9f5cb8dec63471df2b8ed872703c0f44f127
+  FlagScale: 0.9.0
+  Megatron-LM: 0.15.0rc5
+commit: 5d325155df29e0dd94250651f9c0d7529fdca69e
 contact: ''
 device_type: Metax_C550
 models:
-- deepseek_r1
-- deepseek_r1_w8a8
-- qwen3
+- OpenSeek-10B
 task:
-- inference
+- train
