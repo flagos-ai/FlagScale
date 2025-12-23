@@ -89,7 +89,7 @@ def main(config: DictConfig) -> None:
             tuner.tune()
         else:
             if config.experiment.runner.get("type", "ssh") == "ssh":
-                runner = SSHServeRunner(config)
+                runner = Runner(config)  # bak SSHServeRunner
             elif config.experiment.runner.get("type", "ssh") == "cloud":
                 runner = CloudServeRunner(config)
             else:

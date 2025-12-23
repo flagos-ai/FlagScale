@@ -30,10 +30,13 @@ class Runner(ABC):
         self.task_type = getattr(self.config.experiment.task, "type", None)
         assert self.task_type in TASK_TO_BACKEND_MAP, f"Unsupported task type: {self.task_type}"
 
-        backend_attr = getattr(self.config.experiment.task, "backend", None)
+        if self.task_type == "serve":
+            backend_attr = self.config.serve[0]["engine"]
+        else:
+            backend_attr = getattr(self.config.experiment.task, "backend", None)
 
         # backend is required for train and inference
-        if self.task_type in ("train", "inference", "rl"):
+        if self.task_type in ("train", "inference", "rl", "serve"):
             assert backend_attr is not None, (
                 f"backend_type is required for task_type='{self.task_type}'. "
                 f"Allowed backends: {TASK_TO_BACKEND_MAP[self.task_type]}"
