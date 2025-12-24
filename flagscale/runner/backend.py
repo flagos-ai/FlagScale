@@ -435,7 +435,8 @@ class SglangBackend(BackendBase):
         else:
             before_start_cmd = ""
 
-        logger.info(f"in generate_run_script (SGLang), original cmd input: {cmd}")
+        cmd += f" --log-dir={logging_config.log_dir}"
+        logger.info(f"in _generate_run_script_serve, cmd: {cmd}")
 
         try:
             import sglang
@@ -467,8 +468,6 @@ class SglangBackend(BackendBase):
             f.write(f"{envs_str}\n")
 
             if nodes:
-                f.write(f"ray_path=$(realpath $(which ray))\n")
-
                 master_ip = nodes[0][0]
                 target_port = nodes[0][1].get("port")
                 master_port = target_port if target_port else get_free_port()
@@ -513,24 +512,29 @@ class SglangBackend(BackendBase):
                         )
 
                     if not node.get("type", None):
-                        raise ValueError(f"Node type must be specified for node {node}.")
+                        raise ValueError(
+                            f"Node type must be specified for node {node}. Available types are 'cpu', 'gpu', or a custom resource name."
+                        )
                     if not node.get("slots", None):
-                        raise ValueError(f"Number of slots must be specified for node {node}.")
+                        raise ValueError(
+                            f"Number of slots must be specified for node {node}. This can be done by setting the 'slots' attribute."
+                        )
 
                     if index == 0:
                         if per_node_cmd:
                             f.write(f"{per_node_cmd}\n")
 
                     if index != 0:
-                        logger.info(f"generate run script args for worker {ip}")
-
+                        logger.info(f"generate run script args, config: {config}")
                         args = None
                         for item in config.get("serve", []):
                             if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
                                 args = item
                                 break
                         if args is None:
-                            raise ValueError("No 'sglang_model' configuration found in task config")
+                            raise ValueError(
+                                "No 'sglang_model' configuration found in task config."
+                            )
 
                         common_args = copy.deepcopy(args.get("engine_args", {}))
                         sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
@@ -548,6 +552,7 @@ class SglangBackend(BackendBase):
                         command = ["nohup", "python", "-m", "sglang.launch_server"]
 
                         if common_args.get("model", None):
+                            # if node specific args
                             if (
                                 node_args.get(ip, None) is not None
                                 and node_args[ip].get("engine_args", None) is not None
@@ -606,7 +611,7 @@ class SglangBackend(BackendBase):
                         if docker_name:
                             ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
 
-                        logger.info(f"SGLang worker ssh_cmd: {ssh_cmd}")
+                        logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
                         f.write(f"{ssh_cmd}\n")
                     continue
 
@@ -630,7 +635,7 @@ class SglangBackend(BackendBase):
                 if node_cmd:
                     f.write(f"{node_cmd}\n")
 
-            logger.info(f"in generate_run_script, finished writing commands.")
+            logger.info(f"in generate_run_script_serve_sglang, write cmd: {cmd}")
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
             f.write(f"\n")
@@ -638,21 +643,18 @@ class SglangBackend(BackendBase):
             f.write(f"\n")
             f.write(f'cmd="{cmd}"\n')
             f.write(f"\n")
-
-            f.write(f"# SGLang Startup Script Generated\n")
+            # TODO: need a option to control whether to append or overwrite the output file
+            # Now, it always appends to the output file
             f.write(f"echo '=========== launch task ==========='\n")
-
             if background:
                 f.write(
                     f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
                 f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
-
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
-
         os.chmod(host_run_script_file, 0o755)
         return host_run_script_file
 
@@ -669,20 +671,44 @@ class SglangBackend(BackendBase):
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
         cmds_config = config.experiment.get("cmds", None)
-        ssh_port = config.experiment.runner.get("ssh_port", 22)
-        nodes = config.get("nodes", None)
-        after_stop = cmds_config.get("after_stop", "") if cmds_config else ""
+        if cmds_config:
+            after_stop = cmds_config.get("after_stop", "")
+        else:
+            after_stop = ""
 
+        nodes = config.get("nodes", None)
+
+        ssh_port = config.experiment.runner.get("ssh_port", 22)
+        docker_name = config.experiment.runner.get("docker", None)
+        if cmds_config:
+            before_start_cmd = cmds_config.get("before_start", "")
+        else:
+            before_start_cmd = ""
+
+        deploy_config = config.experiment.get("runner", {}).get("deploy", {})
+        envs = config.experiment.get("envs", {})
         with open(host_stop_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             f.write("set -x\n")
+            f.write(f"\n")
+            f.write(f"{before_start_cmd}\n")
+            f.write(f"\n")
+            envs_str = " && ".join(f"export {key}={value}" for key, value in envs.items())
+            f.write(f"{envs_str}\n")
 
             if nodes:
-                f.write(f"# Stop Cluster\n")
+                f.write(f"# clean nodes\n")
                 if len(nodes) > 1:
                     for ip, node in nodes[1:]:
                         node_cmd = "pkill -f 'sglang.launch_server' && pkill -f python"
+                        if before_start_cmd:
+                            node_cmd = f"{before_start_cmd} && " + node_cmd
+                        if envs_str:
+                            node_cmd = f"{envs_str} && " + node_cmd
+
                         ssh_cmd = f'ssh -n -p {ssh_port} {ip} "{node_cmd}"'
+                        if docker_name:
+                            ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
                         f.write(f"{ssh_cmd}\n")
 
             f.write("pkill -f 'sglang.launch_server'\n")
