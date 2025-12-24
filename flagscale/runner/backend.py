@@ -161,7 +161,34 @@ def _update_config_inference(config: DictConfig):
     OmegaConf.set_struct(config, True)
 
 
+def _reset_serve_port(config):
+    model_port = None
+    deploy_port = config.experiment.get("runner", {}).get("deploy", {}).get("port", None)
+    cli_args_port = config.experiment.get("runner", {}).get("cli_args", {}).get("port", None)
+
+    OmegaConf.set_struct(config, False)
+
+    if cli_args_port:
+        deploy_port = cli_args_port
+        config.experiment.runner.deploy.port = cli_args_port
+
+    for item in config.serve:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            if deploy_port:
+                model_port = deploy_port
+                item.engine_args["port"] = deploy_port
+            else:
+                model_port = item.engine_args.get("port", 8000)
+            break
+    OmegaConf.set_struct(config, True)
+    if not model_port:
+        logger.warning(f"No 'model_port' configuration found in task config: {config}")
+    return model_port
+
+
 def _update_config_serve(config: DictConfig):
+    _reset_serve_port(config)
+
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
     exp_dir = os.path.abspath(config.experiment.exp_dir)
 
@@ -411,11 +438,11 @@ class SglangBackend(BackendBase):
         logger.info(f"in generate_run_script (SGLang), original cmd input: {cmd}")
 
         try:
-            import vllm
+            import sglang
 
-            vllm_path = os.path.dirname(vllm.__path__[0])
+            sglang_path = os.path.dirname(sglang.__path__[0])
         except Exception:
-            vllm_path = f"{root_dir}/vllm"
+            sglang_path = f"{root_dir}/sglang"
 
         deploy_config = config.experiment.get("runner", {}).get("deploy", {})
         envs = config.experiment.get("envs", {})
@@ -428,9 +455,9 @@ class SglangBackend(BackendBase):
             f.write(f"\n")
 
             f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
-            f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
+            f.write(f"    export PYTHONPATH={sglang_path}:{root_dir}\n")
             f.write(f"else\n")
-            f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
+            f.write(f'    export PYTHONPATH="$PYTHONPATH:{sglang_path}:{root_dir}"\n')
             f.write(f"fi\n")
             f.write(f"\n")
 
@@ -497,81 +524,73 @@ class SglangBackend(BackendBase):
                     if index != 0:
                         logger.info(f"generate run script args for worker {ip}")
 
-                    args = None
-                    for item in config.get("serve", []):
-                        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
-                            args = item
-                            break
-                    if args is None:
-                        raise ValueError("No 'sglang_model' configuration found in task config")
+                        args = None
+                        for item in config.get("serve", []):
+                            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+                                args = item
+                                break
+                        if args is None:
+                            raise ValueError("No 'sglang_model' configuration found in task config")
 
-                    common_args = copy.deepcopy(args.get("engine_args", {}))
-                    sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
+                        common_args = copy.deepcopy(args.get("engine_args", {}))
+                        sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
 
-                    if sglang_args.get("dist-init-addr", None):
-                        logger.warning(
-                            f"sglang dist-init-addr:{ sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
-                        )
-                        was_struct = OmegaConf.is_struct(sglang_args)
-                        OmegaConf.set_struct(sglang_args, False)
-                        sglang_args.pop("dist-init-addr")
-                        if was_struct:
-                            OmegaConf.set_struct(sglang_args, True)
+                        if sglang_args.get("dist-init-addr", None):
+                            logger.warning(
+                                f"sglang dist-init-addr:{ sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
+                            )
+                            was_struct = OmegaConf.is_struct(sglang_args)
+                            OmegaConf.set_struct(sglang_args, False)
+                            sglang_args.pop("dist-init-addr")
+                            if was_struct:
+                                OmegaConf.set_struct(sglang_args, True)
 
-                    command = ["nohup", "python", "-m", "sglang.launch_server"]
+                        command = ["nohup", "python", "-m", "sglang.launch_server"]
 
-                    if common_args.get("model", None):
-                        if (
-                            node_args.get(ip, None) is not None
-                            and node_args[ip].get("engine_args", None) is not None
-                        ):
-                            for key, value in node_args[ip]["engine_args"].items():
-                                common_args[key] = value
-                                logger.info(
-                                    f"node_args[{ip}] overwrite engine_args {key} = {value}"
-                                )
+                        if common_args.get("model", None):
+                            if (
+                                node_args.get(ip, None) is not None
+                                and node_args[ip].get("engine_args", None) is not None
+                            ):
+                                for key, value in node_args[ip]["engine_args"].items():
+                                    common_args[key] = value
+                                    logger.info(
+                                        f"node_args[{ip}] overwrite engine_args {key} = {value}"
+                                    )
 
-                        if ARGS_CONVERTER:
-                            converted_args = ARGS_CONVERTER.convert("sglang", common_args)
+                            if ARGS_CONVERTER:
+                                converted_args = ARGS_CONVERTER.convert("sglang", common_args)
+                            else:
+                                converted_args = common_args
+
+                            common_args_flatten = flatten_dict_to_args(converted_args, ["model"])
+                            command.extend(common_args_flatten)
+
+                            sglang_args_flatten = flatten_dict_to_args(sglang_args, ["model"])
+                            command.extend(sglang_args_flatten)
                         else:
-                            converted_args = common_args
+                            raise ValueError("Either model should be specified in sglang_model.")
 
-                        common_args_flatten = flatten_dict_to_args(converted_args, ["model"])
-                        command.extend(common_args_flatten)
+                        command.extend(["--node-rank", str(index)])
 
-                        sglang_args_flatten = flatten_dict_to_args(sglang_args, ["model"])
-                        command.extend(sglang_args_flatten)
-                    else:
-                        raise ValueError("Either model should be specified in sglang_model.")
+                        runner_config = config.experiment.runner
+                        nnodes_conf = runner_config.get("nnodes", None)
+                        addr_conf = runner_config.get("master_addr", None)
+                        port_conf = runner_config.get("master_port", None)
 
-                    command.extend(["--node-rank", str(index)])
+                        if nnodes_conf is None or addr_conf is None or port_conf is None:
+                            raise ValueError(
+                                f"nnodes, master_addr, master_port must be specified in runner when engine is sglang with multi-nodes mode."
+                            )
 
-                    runner_config = config.experiment.runner
-                    nnodes_conf = runner_config.get("nnodes", None)
-                    addr_conf = runner_config.get("master_addr", None)
-                    port_conf = runner_config.get("master_port", None)
-
-                    if nnodes_conf is None or addr_conf is None or port_conf is None:
-                        raise ValueError(
-                            f"nnodes, master_addr, master_port must be specified in runner when engine is sglang with multi-nodes mode."
-                        )
-
-                    command.extend(["--nnodes", str(nnodes_conf)])
-                    command.extend(["--dist-init-addr", str(addr_conf) + ":" + str(port_conf)])
-
-                    if index == 0:
-                        command.append(f">> {logging_config.log_dir}/master.log 2>&1 &")
-                        node_cmd = ' '.join(command)
-                        if before_start_cmd:
-                            node_cmd = f"{before_start_cmd} && " + node_cmd
-                        f.write(f"{node_cmd}\n")
-                    else:
+                        command.extend(["--nnodes", str(nnodes_conf)])
+                        command.extend(["--dist-init-addr", str(addr_conf) + ":" + str(port_conf)])
                         command.append("> /dev/null 2>&1 &")
 
                         if docker_name:
                             node_cmd = ' '.join(command)
                         else:
-                            # remote bash execution wrap
+                            # Directly connecting to a remote Docker environment requires processing the command
                             command.insert(0, "(")
                             command.append(") && disown")
                             node_cmd = ' '.join(command)
@@ -589,6 +608,7 @@ class SglangBackend(BackendBase):
 
                         logger.info(f"SGLang worker ssh_cmd: {ssh_cmd}")
                         f.write(f"{ssh_cmd}\n")
+                    continue
 
             else:
                 # Note: config key device_type is specified for single node serving in neither gpu or cpu.
