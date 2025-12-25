@@ -5,7 +5,7 @@ import hydra
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.auto_tuner import AutoTuner, ServeAutoTunner
+from flagscale.runner.autotuner_factory import AutotunerFactory
 from flagscale.runner.runner_base_new import Runner
 from flagscale.runner.runner_compress import SSHCompressRunner
 from flagscale.runner.runner_inference import SSHInferenceRunner
@@ -82,14 +82,15 @@ def get_runner(config: DictConfig, task_type: str):
 
 
 def handle_auto_tune(config: DictConfig, task_type: str) -> None:
-    if task_type == "serve":
-        ServeAutoTunner(config).tune()
-    elif task_type == "train":
-        # Only one autotuner process for MPI-based runs
-        if is_master(config):
-            AutoTuner(config).tune()
-    else:
+    if task_type not in {"serve", "train"}:
         raise NotImplementedError(f"Auto tune is not implemented for task type '{task_type}'")
+
+    # Only one autotuner process for MPI-based runs
+    if task_type == "train" and not is_master(config):
+        return
+
+    AutoTuner = AutotunerFactory.get_autotuner(task_type)
+    AutoTuner(config).tune()
 
 
 def execute_action(runner, action: str, task_type: str, config: DictConfig) -> None:

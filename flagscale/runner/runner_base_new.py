@@ -3,7 +3,7 @@ from enum import Enum
 
 from omegaconf import DictConfig
 
-from flagscale.runner.factory import RunnerFactory
+from flagscale.runner.runner_factory import RunnerFactory
 from flagscale.runner.utils import parse_hostfile
 
 TASK_TO_BACKEND_MAP = {
