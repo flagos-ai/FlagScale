@@ -5,7 +5,7 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.auto_tuner import AutoTuner, ServeAutoTunner
-from flagscale.runner.runner_base import Runner
+from flagscale.runner.runner_base_new import Runner
 from flagscale.runner.runner_compress import SSHCompressRunner
 from flagscale.runner.runner_inference import SSHInferenceRunner
 from flagscale.runner.runner_rl import SSHRLRunner
@@ -42,7 +42,7 @@ def main(config: DictConfig) -> None:
                 tuner.tune()
         else:
             if config.experiment.runner.get("type", "ssh") == "ssh":
-                runner = SSHTrainRunner(config)
+                runner = Runner(config)  # bak SSHTrainRunner(config)
             elif config.experiment.runner.get("type") == "cloud":
                 runner = CloudTrainRunner(config)
             else:
