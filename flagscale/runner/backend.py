@@ -965,13 +965,6 @@ class LlamaCppBackend(BackendBase):
 
         cmd += f" --log-dir={logging_config.log_dir}"
 
-        try:
-            import vllm
-
-            vllm_path = os.path.dirname(vllm.__path__[0])
-        except Exception:
-            vllm_path = f"{root_dir}/vllm"
-
         envs = config.experiment.get("envs", {})
 
         with open(host_run_script_file, "w") as f:
@@ -982,9 +975,9 @@ class LlamaCppBackend(BackendBase):
             f.write(f"\n")
 
             f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
-            f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
+            f.write(f"    export PYTHONPATH={root_dir}\n")
             f.write(f"else\n")
-            f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
+            f.write(f'    export PYTHONPATH="$PYTHONPATH:{root_dir}"\n')
             f.write(f"fi\n")
             f.write(f"\n")
 
