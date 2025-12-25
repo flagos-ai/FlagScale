@@ -1,3 +1,4 @@
+import os
 import warnings
 
 import hydra
@@ -17,6 +18,28 @@ from flagscale.runner.utils import is_master
 # we have placed the import statements inside the function body rather than at the beginning of the file.
 
 
+FLAGSCALE_USE_V1 = os.environ.get("FLAGSCALE_USE_V1", "1").lower() in ("1", "true")
+
+VALID_TASKS = {"train", "inference", "compress", "serve", "rl"}
+
+LEGACY_RUNNER_MAP = {
+    "train": SSHTrainRunner,
+    "inference": SSHInferenceRunner,
+    "compress": SSHCompressRunner,
+    "serve": SSHServeRunner,
+    "rl": SSHRLRunner,
+}
+
+# task_type -> allowed actions
+TASK_ACTIONS = {
+    "train": {"run", "dryrun", "test", "stop", "query", "auto_tune"},
+    "inference": {"run", "dryrun", "test", "stop"},
+    "serve": {"run", "test", "stop", "auto_tune"},
+    "compress": {"run", "dryrun", "stop"},
+    "rl": {"run", "dryrun", "test", "stop"},
+}
+
+
 def check_and_reset_deploy_config(config: DictConfig) -> None:
     if config.experiment.get("deploy", {}):
         OmegaConf.set_struct(config.experiment.runner, False)
@@ -29,103 +52,86 @@ def check_and_reset_deploy_config(config: DictConfig) -> None:
         OmegaConf.set_struct(config.experiment.runner, True)
 
 
+def validate_task(task_type: str, action: str) -> None:
+    if task_type not in VALID_TASKS:
+        raise ValueError(f"Invalid task_type '{task_type}', must be one of {sorted(VALID_TASKS)}")
+
+    allowed_actions = TASK_ACTIONS[task_type]
+    if action not in allowed_actions:
+        raise ValueError(
+            f"Action '{action}' is not allowed for task_type '{task_type}'. "
+            f"Allowed actions: {sorted(allowed_actions)}"
+        )
+
+
+def get_runner(config: DictConfig, task_type: str):
+    runner_type = config.experiment.runner.get("type", "ssh")
+
+    if runner_type == "cloud":
+        if task_type == "train":
+            return CloudTrainRunner(config)
+        elif task_type == "serve":
+            return CloudServeRunner(config)
+        else:
+            raise NotImplementedError(f"Task type '{task_type}' is not supported by cloud runner")
+
+    if FLAGSCALE_USE_V1:
+        return Runner(config)
+
+    return LEGACY_RUNNER_MAP[task_type](config)
+
+
+def handle_auto_tune(config: DictConfig, task_type: str) -> None:
+    if task_type == "serve":
+        ServeAutoTunner(config).tune()
+    elif task_type == "train":
+        # Only one autotuner process for MPI-based runs
+        if is_master(config):
+            AutoTuner(config).tune()
+    else:
+        raise NotImplementedError(f"Auto tune is not implemented for task type '{task_type}'")
+
+
+def execute_action(runner, action: str, task_type: str, config: DictConfig) -> None:
+    if action == "run":
+        if task_type == "train":
+            enable_monitoring = config.experiment.runner.get("enable_monitoring", False)
+            runner.run(enable_monitoring=enable_monitoring)
+
+            if enable_monitoring:
+                from flagscale.logger import logger
+
+                logger.info("Monitor service will be started automatically when training begins.")
+        else:
+            runner.run()
+    elif action == "dryrun":
+        runner.run(dryrun=True)
+    elif action == "test":
+        runner.run(with_test=True)
+    elif action == "stop":
+        runner.stop()
+    elif action == "query":
+        runner.query()
+    else:
+        raise ValueError(f"Unknown action '{action}'")
+
+
 @hydra.main(version_base=None, config_name="config")
 def main(config: DictConfig) -> None:
     check_and_reset_deploy_config(config)
-    task_type = config.experiment.task.get("type", "train")
-    if task_type == "train":
-        if config.action == "auto_tune":
-            # For MPIRUN scene, just one autotuner process.
-            # NOTE: This is a temporary solution and will be updated with cloud runner.
-            if is_master(config):
-                tuner = AutoTuner(config)
-                tuner.tune()
-        else:
-            if config.experiment.runner.get("type", "ssh") == "ssh":
-                runner = Runner(config)  # bak SSHTrainRunner(config)
-            elif config.experiment.runner.get("type") == "cloud":
-                runner = CloudTrainRunner(config)
-            else:
-                raise ValueError(f"Unknown runner type {config.runner.type}")
 
-            if config.action == "run":
-                enable_monitoring = config.experiment.runner.get("enable_monitoring", False)
-                runner.run(enable_monitoring=enable_monitoring)
-                from flagscale.logger import logger
+    task_type = config.experiment.task.get("type", None)
+    action = config.action
+    validate_task(task_type, action)
 
-                if enable_monitoring:
-                    logger.info(
-                        "Monitor service will be started automatically when training begins."
-                    )
-                else:
-                    logger.info("Monitoring is disabled. No monitor service will be started.")
-            elif config.action == "dryrun":
-                runner.run(dryrun=True)
-            elif config.action == "test":
-                runner.run(with_test=True)
-            elif config.action == "stop":
-                runner.stop()
-            elif config.action == "query":
-                runner.query()
-            else:
-                raise ValueError(f"Unknown action {config.action}")
-    elif task_type == "inference":
-        runner = Runner(config)  # bak SSHInferenceRunner
-        if config.action == "run":
-            runner.run()
-        elif config.action == "dryrun":
-            runner.run(dryrun=True)
-        elif config.action == "test":
-            runner.run(with_test=True)
-        elif config.action == "stop":
-            runner.stop()
-        else:
-            raise ValueError(f"Unknown action {config.action}")
-    elif task_type == "serve":
-        if config.action == "auto_tune":
-            # For MPIRUN scene, just one autotuner process.
-            # NOTE: This is a temporary solution and will be updated with cloud runner.
-            tuner = ServeAutoTunner(config)
-            tuner.tune()
-        else:
-            if config.experiment.runner.get("type", "ssh") == "ssh":
-                runner = Runner(config)  # bak SSHServeRunner
-            elif config.experiment.runner.get("type", "ssh") == "cloud":
-                runner = CloudServeRunner(config)
-            else:
-                raise ValueError(f"Unknown runner type {config.runner.type}")
-            if config.action == "run":
-                runner.run()
-            elif config.action == "test":
-                runner.run(with_test=True)
-            elif config.action == "stop":
-                runner.stop()
-            else:
-                raise ValueError(f"Unknown action {config.action}")
-    elif task_type == "compress":
-        runner = Runner(config)  # SSHCompressRunner
-        if config.action == "run":
-            runner.run()
-        elif config.action == "dryrun":
-            runner.run(dryrun=True)
-        elif config.action == "stop":
-            runner.stop()
-        else:
-            raise ValueError(f"Unknown action {config.action}")
-    elif task_type == "rl":
-        runner = SSHRLRunner(config)
-        if config.action == "run":
-            runner.run()
-        elif config.action == "dryrun":
-            runner.run(dryrun=True)
-        elif config.action == "test":
-            runner.run(with_test=True)
-        elif config.action == "stop":
-            runner.stop()
-        else:
-            raise ValueError(f"Unknown action {config.action}")
-    else:
-        raise ValueError(f"Unknown task type {task_type}")
+    # auto_tune invokes the runner internally
+    if action == "auto_tune":
+        handle_auto_tune(config, task_type)
+        return
+
+    runner = get_runner(config, task_type)
+    execute_action(runner, action, task_type, config)
+    return
 
 
 if __name__ == "__main__":
