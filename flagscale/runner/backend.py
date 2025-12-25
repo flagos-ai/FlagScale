@@ -90,6 +90,34 @@ def _get_args_sglang(config: DictConfig):
     return args
 
 
+def _get_args_llamacpp(config: DictConfig):
+    # see the following link for more details
+    # https://github.com/facebookresearch/hydra/discussions/2750
+    config_dict = OmegaConf.to_container(config, resolve=True)
+
+    # step2: restructuring the config
+    # config_dict = config_dict["serve"]
+    config_dict["logging"].pop("log_dir")
+    config_dict["logging"].pop("scripts_dir")
+    config_dict["logging"].pop("pids_dir")
+    if not config_dict.get("logging"):
+        config_dict.pop("logging")
+
+    # step3: dict -> yaml
+    logging_config = config.logging
+    new_config = OmegaConf.create(config_dict)
+    new_conf_file = os.path.join(logging_config.scripts_dir, f"serve.yaml")
+
+    # step4: write the new yaml file to `outputs_dir/serve_logs/scripts/serve.yaml`
+    with open(new_conf_file, "w") as f:
+        OmegaConf.save(config=new_config, f=f.name, resolve=True)
+
+    args = []
+    args.append(f"--config-path={new_conf_file}")
+
+    return args
+
+
 def _get_args_llmcompressor(config: DictConfig):
     # see the following link for more details
     # https://github.com/facebookresearch/hydra/discussions/2750
@@ -875,11 +903,153 @@ class SglangBackend(BackendBase):
 
 class LlamaCppBackend(BackendBase):
     # class LlamallamaCppBackend(BackendBase):
-    def generate_run_script(self, *args, **kwargs):
-        pass
+    def __init__(self, config: DictConfig):
+        super().__init__(config)
+        self.task_type = getattr(self.config.experiment.task, "type", None)
+        assert self.task_type == "serve", f"Unsupported task type: {self.task_type}"
+        self.user_script = "flagscale/serve/run_inference_engine.py"
+        self._prepare()
 
-    def generate_stop_script(self, *args, **kwargs):
-        pass
+    def _prepare(self):
+        _update_config_serve(self.config)
+        self.user_envs = self.config.experiment.get("envs", {})
+        self.user_args = _get_args_llamacpp(self.config)
+
+        hostfile_path = self.config.experiment.runner.get("hostfile", None)
+        self.resources = None
+        if hostfile_path:
+            if not os.path.isabs(hostfile_path):
+                hostfile_path = os.path.join(os.getcwd(), hostfile_path)
+            if os.path.exists(hostfile_path):
+                self.resources = parse_hostfile(hostfile_path)
+                for key, value in self.resources.items():
+                    if not value.get("type", None):
+                        logger.warning(
+                            f"The hostfile key type is not set for host {key}, using gpu by default"
+                        )
+                        self.resources[key]["type"] = "gpu"
+
+                OmegaConf.set_struct(self.config, False)
+                self.config["nodes"] = list(self.resources.items())
+                OmegaConf.set_struct(self.config, True)
+            else:
+                raise ValueError(f"The hostfile {hostfile_path} does not exist")
+
+        logger.info("\n************** LlamaCpp Configuration **************")
+        logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
+
+    def generate_run_script(self, config, host, node_rank, cmd, background=True, with_test=False):
+        logging_config = config.logging
+
+        no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
+        if no_shared_fs:
+            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+        else:
+            host_output_file = os.path.join(
+                logging_config.log_dir, f"host_{node_rank}_{host}.output"
+            )
+
+        host_run_script_file = os.path.join(
+            logging_config.scripts_dir, f"host_{node_rank}_{host}_run.sh"
+        )
+        host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
+
+        os.makedirs(logging_config.scripts_dir, exist_ok=True)
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        cmds_config = config.experiment.get("cmds", None)
+        if cmds_config:
+            before_start_cmd = cmds_config.get("before_start", "")
+        else:
+            before_start_cmd = ""
+
+        cmd += f" --log-dir={logging_config.log_dir}"
+
+        envs = config.experiment.get("envs", {})
+
+        with open(host_run_script_file, "w") as f:
+            f.write("#!/bin/bash\n\n")
+            f.write("set -x\n")
+            f.write(f"\n")
+            f.write(f"{before_start_cmd}\n")
+            f.write(f"\n")
+
+            f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
+            f.write(f"    export PYTHONPATH={root_dir}\n")
+            f.write(f"else\n")
+            f.write(f'    export PYTHONPATH="$PYTHONPATH:{root_dir}"\n')
+            f.write(f"fi\n")
+            f.write(f"\n")
+
+            envs_str = " && ".join(
+                f"export {key}={value}" for key, value in envs.items() if key != 'nodes_envs'
+            )
+            f.write(f"{envs_str}\n")
+
+            f.write(f"mkdir -p {logging_config.log_dir}\n")
+            f.write(f"mkdir -p {logging_config.pids_dir}\n")
+            f.write(f"\n")
+            f.write(f"cd {root_dir}\n")
+            f.write(f"\n")
+            f.write(f'cmd="{cmd}"\n')
+            f.write(f"\n")
+            f.write("echo '=========== launch task (LlamaCpp) ==========='\n")
+
+            if with_test:
+                f.write(f'bash -c "$cmd; sync" >> {host_output_file} \n')
+            else:
+                if background:
+                    f.write(
+                        f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                    )
+                else:
+                    f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.chmod(host_run_script_file, 0o755)
+        return host_run_script_file
+
+    def generate_stop_script(self, config, host, node_rank):
+        """
+        Refactored generic stop logic from old.txt.
+        """
+        logging_config = config.logging
+        host_stop_script_file = os.path.join(
+            logging_config.scripts_dir, f"host_{node_rank}_{host}_stop.sh"
+        )
+        host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
+
+        os.makedirs(logging_config.scripts_dir, exist_ok=True)
+
+        cmds_config = config.experiment.get("cmds", None)
+        after_stop = cmds_config.get("after_stop", "") if cmds_config else ""
+        before_start_cmd = cmds_config.get("before_start", "") if cmds_config else ""
+
+        with open(host_stop_script_file, "w") as f:
+            f.write("#!/bin/bash\n\n")
+            f.write("set -x\n")
+            f.write(f"{before_start_cmd}\n\n")
+
+            f.write("if [ -f " + host_pid_file + " ]; then\n")
+            f.write("    pid=$(cat " + host_pid_file + ")\n")
+            f.write("    pkill -P $pid\n")
+            f.write("    kill $pid\n")
+            f.write("fi\n")
+
+            f.write("pkill -f 'llama-server'\n")
+
+            if after_stop:
+                f.write(f"{after_stop}\n")
+
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.chmod(host_stop_script_file, 0o755)
+        return host_stop_script_file
 
 
 class CompressNativeBackend(BackendBase):
