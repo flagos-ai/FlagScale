@@ -1,6 +1,7 @@
 import multiprocessing
 import os
 import shlex
+import subprocess
 import time
 
 from abc import ABC, abstractmethod
@@ -104,7 +105,8 @@ class SshLauncher(LauncherBase):
     ):
         export_cmd = []
         for k, v in self.user_envs.items():
-            export_cmd += [f"{k}={v}"]
+            if k != 'nodes_envs':
+                export_cmd += [f"{k}={v}"]
         if self.task_type == "train":
             runner_cmd = _get_runner_cmd_train(
                 host, master_addr, master_port, nnodes, node_rank, nproc_per_node, self.config
@@ -136,6 +138,8 @@ class SshLauncher(LauncherBase):
             logging_config = self.config.inference.logging
         elif self.task_type == "compress":
             logging_config = self.config.compress.system.logging
+        elif self.task_type == "serve":
+            logging_config = self.config.logging
         elif self.task_type == "train":
             logging_config = self.config.train.system.logging
         # todo: unify logging configs of all tasks
@@ -155,22 +159,25 @@ class SshLauncher(LauncherBase):
                 self.config, host, node_rank, cmd, background=True, with_test=with_test
             )
 
-        if host != "localhost":
-            ssh_port = self.config.experiment.runner.get("ssh_port", 22)
-            # Step 1: make sure the scripts_dir exists on the remote host
-            run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port, dryrun)
-
-            # Step 2: copy the host_run_script_file to the remote host
-            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
-            if no_shared_fs:
-                run_scp_command(
-                    host, host_run_script_file, logging_config.scripts_dir, ssh_port, dryrun
-                )
-
-            # Step 3: run the host_run_script_file on the remote host
-            run_ssh_command(host, f"bash {host_run_script_file}", ssh_port, dryrun)
-        else:
+        if self.task_type == "serve":
             run_local_command(f"bash {host_run_script_file}", dryrun)
+        else:
+            if host != "localhost":
+                ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+                # Step 1: make sure the scripts_dir exists on the remote host
+                run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port, dryrun)
+
+                # Step 2: copy the host_run_script_file to the remote host
+                no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+                if no_shared_fs:
+                    run_scp_command(
+                        host, host_run_script_file, logging_config.scripts_dir, ssh_port, dryrun
+                    )
+
+                # Step 3: run the host_run_script_file on the remote host
+                run_ssh_command(host, f"bash {host_run_script_file}", ssh_port, dryrun)
+            else:
+                run_local_command(f"bash {host_run_script_file}", dryrun)
 
     def run(
         self,
@@ -190,7 +197,7 @@ class SshLauncher(LauncherBase):
 
         runner_config = self.config.experiment.runner
         # If hostfile is provided, use the resources from the hostfile
-        if self.resources is not None:
+        if self.resources is not None and self.task_type != "serve":
             nnodes_from_hostfile = len(self.resources.keys())
             nnodes_from_args = runner_config.get("nnodes", None)
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
@@ -288,27 +295,41 @@ class SshLauncher(LauncherBase):
         return None
 
     def _stop_each(self, host, node_rank):
-        host_stop_script_file = self.backend.generate_stop_script(host, node_rank)
-        if self.task_type == "train":
-            logging_config = self.config.train.system.logging
-        else:
+        if self.task_type == "serve":
+            host_stop_script_file = self.backend.generate_stop_script(self.config, host, node_rank)
+            logging_config = self.config.logging
+        elif self.task_type == "inference":
+            host_stop_script_file = self.backend.generate_stop_script(host, node_rank)
             logging_config = self.config.inference.logging
+        elif self.task_type == "train":
+            host_stop_script_file = self.backend.generate_stop_script(host, node_rank)
+            logging_config = self.config.train.system.logging
 
-        if host != "localhost":
-            ssh_port = self.config.experiment.runner.get("ssh_port", 22)
-            # Step 1: make sure the scripts_dir exists on the remote host
-            run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port)
-            # Step 2: copy the host_run_script_file to the remote host
-            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
-            if no_shared_fs:
-                run_scp_command(host, host_stop_script_file, logging_config.scripts_dir, ssh_port)
-            # Step 3: run the host_run_script_file on the remote host
-            run_ssh_command(host, f"bash {host_stop_script_file}", ssh_port)
+        if self.task_type == "serve":
+            logging_config = self.config.logging
+            cmd = f"bash {host_stop_script_file}"
+            logger.info(f"Run the local command: {cmd}")
+            subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
         else:
-            run_local_command(f"bash {host_stop_script_file}")
+            if host != "localhost":
+                ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+                # Step 1: make sure the scripts_dir exists on the remote host
+                run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port)
+                # Step 2: copy the host_run_script_file to the remote host
+                no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+                if no_shared_fs:
+                    run_scp_command(
+                        host, host_stop_script_file, logging_config.scripts_dir, ssh_port
+                    )
+                # Step 3: run the host_run_script_file on the remote host
+                run_ssh_command(host, f"bash {host_stop_script_file}", ssh_port)
+            else:
+                run_local_command(f"bash {host_stop_script_file}")
 
     def stop(self):
-        if self.resources is None:
+        if self.resources is None or self.task_type == "serve":
             self._stop_each("localhost", 0)
             return
 
