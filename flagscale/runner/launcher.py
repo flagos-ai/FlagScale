@@ -107,7 +107,7 @@ class SshLauncher(LauncherBase):
         runner_config = self.config.experiment.runner
 
         # If hostfile is provided, use the resources from the hostfile
-        if self.resources is not None:
+        if self.resources is not None and self.task_type != "serve":
             nnodes_from_hostfile = len(self.resources.keys())
             nnodes_from_args = runner_config.get("nnodes", None)
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
@@ -182,7 +182,7 @@ class SshLauncher(LauncherBase):
                 run_local_command(f"bash {host_stop_script_file}")
 
     def stop(self):
-        if self.resources is None:
+        if self.resources is None or self.task_type == "serve":
             self._stop_each("localhost", 0)
             return
 
