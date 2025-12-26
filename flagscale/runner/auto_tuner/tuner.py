@@ -342,7 +342,10 @@ class TrainAutoTuner(AutoTunerBase):
                 break
             # If the task is completed or idle, stop monitoring
             try:
-                status = self.runner.launcher._query_status()
+                if FLAGSCALE_USE_V1:
+                    status = self.runner.launcher._query_status()
+                else:
+                    status = self.runner._query_status()
                 self.logger.info(f"task_{self.cur_strategy['idx']} status: {status.name}")
                 if status == JobStatus.COMPLETED_OR_IDLE:
                     break
@@ -354,7 +357,10 @@ class TrainAutoTuner(AutoTunerBase):
                         break
 
                 # Add sub process monitor
-                sub_process = self.runner.launcher._query_sub_process_status()
+                if FLAGSCALE_USE_V1:
+                    sub_process = self.runner.launcher._query_sub_process_status()
+                else:
+                    sub_process = self.runner._query_sub_process_status()
                 if sub_process:
                     sub_process_running = True
 
