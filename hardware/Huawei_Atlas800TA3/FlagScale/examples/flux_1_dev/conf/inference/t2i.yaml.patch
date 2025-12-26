@@ -1,0 +1,14 @@
+diff --git a/examples/flux_1_dev/conf/inference/t2i.yaml b/examples/flux_1_dev/conf/inference/t2i.yaml
+index 9fc5fe3d..346204ad 100644
+--- a/examples/flux_1_dev/conf/inference/t2i.yaml
++++ b/examples/flux_1_dev/conf/inference/t2i.yaml
+@@ -10,7 +10,7 @@ engine:
+   output_format: "image"
+ 
+ generate:
+-  prompts: "A cat holding a sign that says hello world"
++  prompt: "A cat holding a sign that says hello world"
+   height: 1024
+   width: 1024
+   guidance_scale: 3.5
+

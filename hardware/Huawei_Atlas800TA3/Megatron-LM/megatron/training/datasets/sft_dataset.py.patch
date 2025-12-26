@@ -1,0 +1,38 @@
+diff --git a/megatron/training/datasets/sft_dataset.py b/megatron/training/datasets/sft_dataset.py
+index e4d8a6faf..44547d5f4 100644
+--- a/megatron/training/datasets/sft_dataset.py
++++ b/megatron/training/datasets/sft_dataset.py
+@@ -78,20 +78,23 @@ class SFTDataset(MegatronDataset):
+             conversation_list, return_target=True, add_generation_prompt=False
+         )
+ 
+-        force_eod_length = int(tokenizer.force_eod)
+-
+-        if len(tokens) > max_seq_len - force_eod_length:
+-            tokens = tokens[: max_seq_len - force_eod_length]
+-            target = target[: max_seq_len - force_eod_length]
++        # minus one to insert eos token
++        if len(tokens) > max_seq_len - 1:
++            if True:  # TODO: when too long to fit in context, truncate left to right
++                tokens = tokens[: max_seq_len - 1]
++                target = target[: max_seq_len - 1]
++            else:  # right to left
++                tokens = tokens[-(max_seq_len - 1) :]
++                target = target[-(max_seq_len - 1) :]
+ 
+         # padding
+-        num_tokens = len(tokens) + force_eod_length
++        num_tokens = len(tokens) + 1
+         padding_len = max_seq_len - num_tokens
+         assert padding_len >= 0
+-        filler = [tokenizer.eod] * force_eod_length + [tokenizer.pad] * (padding_len + 1)
++        filler = [tokenizer.pad] * (padding_len + 1)
+ 
+-        tokens = np.array(tokens.tolist() + filler, dtype=np.int64)
+-        target = np.array(target.tolist() + filler, dtype=np.int64)
++        tokens = np.array(tokens.tolist() + [tokenizer.eod] + filler, dtype=np.int64)
++        target = np.array(target.tolist() + [tokenizer.eod] + filler, dtype=np.int64)
+ 
+         tokens = torch.tensor(tokens)
+         target = torch.tensor(target)
+

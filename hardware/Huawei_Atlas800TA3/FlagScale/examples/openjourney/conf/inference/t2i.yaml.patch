@@ -1,0 +1,14 @@
+diff --git a/examples/openjourney/conf/inference/t2i.yaml b/examples/openjourney/conf/inference/t2i.yaml
+index 40dd92bf..89d2d74e 100644
+--- a/examples/openjourney/conf/inference/t2i.yaml
++++ b/examples/openjourney/conf/inference/t2i.yaml
+@@ -12,7 +12,7 @@ engine:
+       {}
+ 
+ generate:
+-  prompts: "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
++  prompt: "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
+   width: 512
+   height: 512
+   num_inference_steps: 50
+

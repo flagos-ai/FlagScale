@@ -1,0 +1,13 @@
+diff --git a/tests/test_utils/recipes/multimodal-llava.yaml b/tests/test_utils/recipes/multimodal-llava.yaml
+index d95fa1861..253376fc8 100644
+--- a/tests/test_utils/recipes/multimodal-llava.yaml
++++ b/tests/test_utils/recipes/multimodal-llava.yaml
+@@ -14,7 +14,6 @@ spec:
+   test_case:
+   scope:
+   script_setup: |
+-    unset https_proxy
+     echo "machine gitlab-master.nvidia.com login okoenig password $RO_API_TOKEN" | tee -a /root/.netrc
+ 
+     # Checkout latest
+

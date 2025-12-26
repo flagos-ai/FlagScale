@@ -1,0 +1,20 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_mla_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_mla_dgx_a100_1N8G/model_config.yaml
+index 8fa925d71..69a2c413a 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_mla_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_mla_dgx_a100_1N8G/model_config.yaml
+@@ -39,7 +39,7 @@ MODEL_ARGS:
+   --clip-grad: 1.0
+   --lr-warmup-fraction: .01
+   --log-interval: 1
+-  --save-interval: 25
++  --save-interval: 10000
+   --eval-interval: 1000
+   --eval-iters: 10
+   --transformer-impl: transformer_engine
+@@ -56,4 +56,4 @@ MODEL_ARGS:
+   --bf16: true
+   --attention-backend: unfused
+   --log-memory-to-tensorboard: true
+-TEST_TYPE: ckpt-resume
++TEST_TYPE: regular
+

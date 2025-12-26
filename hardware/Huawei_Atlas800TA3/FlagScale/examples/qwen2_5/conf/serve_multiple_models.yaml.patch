@@ -1,0 +1,18 @@
+diff --git a/examples/qwen2_5/conf/serve_multiple_models.yaml b/examples/qwen2_5/conf/serve_multiple_models.yaml
+index b1fe0376..a70108f8 100644
+--- a/examples/qwen2_5/conf/serve_multiple_models.yaml
++++ b/examples/qwen2_5/conf/serve_multiple_models.yaml
+@@ -16,8 +16,10 @@ experiment:
+       enable_composition: true
+       name: /generate
+       request:
+-        - arg: prompt
+-          type: str
++        args:
++          - prompt
++        types:
++          - str
+   cmds:
+     before_start: export RAY_DEDUP_LOGS=0
+ 
+

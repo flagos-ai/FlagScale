@@ -1,0 +1,21 @@
+diff --git a/examples/multimodal/energon_util.py b/examples/multimodal/energon_util.py
+index 360f97a6a..661e691c5 100644
+--- a/examples/multimodal/energon_util.py
++++ b/examples/multimodal/energon_util.py
+@@ -12,7 +12,7 @@ from megatron.energon.flavors.webdataset import DefaultDecoderWebdatasetFactory
+ @dataclass
+ class SampleListSample(Sample):
+     """Sample type for a list of samples of any type which needs to be packed together.
+-
++    
+     This is useful for datasets which are packed offline.
+     """
+ 
+@@ -46,6 +46,3 @@ class OfflineTargetAspectRatioSample(Sample):
+     #: The texts of the sequence
+     texts: List[str]
+     target_aspect_ratio: List[List]
+-
+-    if not hasattr(Sample, "__subflavor__"):
+-        __subflavor__: str
+

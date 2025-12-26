@@ -1,0 +1,12 @@
+diff --git a/docs/source/user-guide/index.rst b/docs/source/user-guide/index.rst
+index a1edf4271..aab745736 100644
+--- a/docs/source/user-guide/index.rst
++++ b/docs/source/user-guide/index.rst
+@@ -2,5 +2,4 @@ User Guide
+ ============
+ 
+ .. mdinclude:: ../../../megatron/core/QuickStart.md
+-.. mdinclude:: ../../../megatron/core/Installation_Guide.md
+ .. mdinclude:: ../../../megatron/core/MSC_Integration.md
+\ No newline at end of file
+

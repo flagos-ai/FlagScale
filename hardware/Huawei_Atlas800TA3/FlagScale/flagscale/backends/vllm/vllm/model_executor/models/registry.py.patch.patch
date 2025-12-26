@@ -1,0 +1,21 @@
+diff --git a/flagscale/backends/vllm/vllm/model_executor/models/registry.py.patch b/flagscale/backends/vllm/vllm/model_executor/models/registry.py.patch
+index 99b7a823..b052788b 100644
+--- a/flagscale/backends/vllm/vllm/model_executor/models/registry.py.patch
++++ b/flagscale/backends/vllm/vllm/model_executor/models/registry.py.patch
+@@ -1,12 +1,12 @@
+ diff --git a/vllm/model_executor/models/registry.py b/vllm/model_executor/models/registry.py
+-index e1fc7e11a..6b8718b88 100644
++index 2aaac7798..c54a7a26e 100644
+ --- a/vllm/model_executor/models/registry.py
+ +++ b/vllm/model_executor/models/registry.py
+-@@ -215,6 +215,7 @@ _CROSS_ENCODER_MODELS = {
++@@ -189,6 +189,7 @@ _CROSS_ENCODER_MODELS = {
+  
+  _MULTIMODAL_MODELS = {
+      # [Decoder-only]
+-+    "Emu3ForCausalLM": ("emu3_5", "Emu3_5ForCausalLM"),
+++    "Emu3ForCausalLM": ("llama", "LlamaForCausalLM"), # --- FLAGSCALE MODIFICATION ---
+      "AriaForConditionalGeneration": ("aria", "AriaForConditionalGeneration"),
+      "AyaVisionForConditionalGeneration": ("aya_vision", "AyaVisionForConditionalGeneration"),  # noqa: E501
+      "Blip2ForConditionalGeneration": ("blip2", "Blip2ForConditionalGeneration"),
+

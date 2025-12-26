@@ -1,0 +1,13 @@
+diff --git a/examples/aquila/conf/train/7b.yaml b/examples/aquila/conf/train/7b.yaml
+index 8d9942cc..a534b9e1 100644
+--- a/examples/aquila/conf/train/7b.yaml
++++ b/examples/aquila/conf/train/7b.yaml
+@@ -57,7 +57,6 @@ data:
+   data_path: ${data_path:??}
+   split: 1
+   tokenizer:
+-    legacy_tokenizer: true
+     tokenizer_type: AquilaTokenizerFS
+     vocab_file: ./examples/aquila/tokenizer/vocab.json
+     merge_file: ./examples/aquila/tokenizer/merges.txt
+

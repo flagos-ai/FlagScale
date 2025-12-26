@@ -1,0 +1,13 @@
+diff --git a/megatron/core/inference/contexts/__init__.py b/megatron/core/inference/contexts/__init__.py
+index 37eb7895f..1b1324db7 100644
+--- a/megatron/core/inference/contexts/__init__.py
++++ b/megatron/core/inference/contexts/__init__.py
+@@ -14,7 +14,6 @@ warnings.warn(
+     DeprecationWarning,
+ )
+ from .dynamic_context import (
+-    ActiveRequestCountOverflowError,
+     ChunkOverflowError,
+     ContextOverflowError,
+     DynamicInferenceContext,
+

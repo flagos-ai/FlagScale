@@ -1,0 +1,5 @@
+diff --git a/tools/linter.py b/tools.bak/linter.py
+similarity index 100%
+rename from tools/linter.py
+rename to tools.bak/linter.py
+

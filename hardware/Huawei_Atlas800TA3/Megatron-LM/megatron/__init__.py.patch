@@ -1,4 +1,5 @@
-diff --git a/megatron/__init__.py b/megatron/__init__.py
-new file mode 100644
-index 000000000..e69de29bb
+diff --git a/examples/rl/environments/__init__.py b/megatron/__init__.py
+similarity index 100%
+rename from examples/rl/environments/__init__.py
+rename to megatron/__init__.py
 

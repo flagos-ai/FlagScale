@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_etp4_dp_last_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_etp4_dp_last_dgx_a100_1N8G/model_config.yaml
+index 683a855ab..1367caa74 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_etp4_dp_last_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_etp4_dp_last_dgx_a100_1N8G/model_config.yaml
+@@ -45,7 +45,6 @@ MODEL_ARGS:
+   --attention-softmax-in-fp32: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
+-  --dist-ckpt-save-pre-mcore-014: true
+   --dist-ckpt-strictness: log_all  # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+

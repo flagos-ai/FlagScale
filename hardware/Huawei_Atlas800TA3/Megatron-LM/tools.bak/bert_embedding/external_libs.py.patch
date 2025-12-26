@@ -1,0 +1,5 @@
+diff --git a/tools/bert_embedding/external_libs.py b/tools.bak/bert_embedding/external_libs.py
+similarity index 100%
+rename from tools/bert_embedding/external_libs.py
+rename to tools.bak/bert_embedding/external_libs.py
+

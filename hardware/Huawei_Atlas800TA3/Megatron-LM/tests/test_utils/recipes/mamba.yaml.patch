@@ -1,0 +1,13 @@
+diff --git a/tests/test_utils/recipes/mamba.yaml b/tests/test_utils/recipes/mamba.yaml
+index f4dea805e..d32ff1bb3 100644
+--- a/tests/test_utils/recipes/mamba.yaml
++++ b/tests/test_utils/recipes/mamba.yaml
+@@ -13,7 +13,6 @@ spec:
+   artifacts:
+     /workspace/data/gpt3_data: text/the_pile/shard00
+   script_setup: |
+-    unset https_proxy
+     echo "machine gitlab-master.nvidia.com login okoenig password $RO_API_TOKEN" | tee -a /root/.netrc
+ 
+     # Checkout latest
+

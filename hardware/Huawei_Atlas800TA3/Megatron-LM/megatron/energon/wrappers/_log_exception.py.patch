@@ -1,0 +1,24 @@
+diff --git a/megatron/energon/wrappers/_log_exception.py b/megatron/energon/wrappers/_log_exception.py
+new file mode 100644
+index 000000000..7dc9d7532
+--- /dev/null
++++ b/megatron/energon/wrappers/_log_exception.py
+@@ -0,0 +1,17 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++import traceback
++
++
++def log_exception(_e: Exception, sample, /):
++    traceback.print_exc()
++    print("-" * 10)
++
++    sample_str = str(sample)
++    if len(sample_str) > 400:
++        sample_str = sample_str[:200] + "..." + sample_str[-200:]
++
++    print(sample_str)
++
++    print("-" * 10)
+

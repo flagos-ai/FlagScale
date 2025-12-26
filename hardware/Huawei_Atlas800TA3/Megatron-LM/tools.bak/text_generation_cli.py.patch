@@ -1,0 +1,5 @@
+diff --git a/tools/text_generation_cli.py b/tools.bak/text_generation_cli.py
+similarity index 100%
+rename from tools/text_generation_cli.py
+rename to tools.bak/text_generation_cli.py
+

@@ -1,0 +1,12 @@
+diff --git a/megatron/rl/inference/__init__.py b/megatron/rl/inference/__init__.py
+deleted file mode 100644
+index 8e42578e4..000000000
+--- a/megatron/rl/inference/__init__.py
++++ /dev/null
+@@ -1,5 +0,0 @@
+-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+-# ruff: noqa: F403
+-
+-from .api import *
+-from .inference_interface import *
+

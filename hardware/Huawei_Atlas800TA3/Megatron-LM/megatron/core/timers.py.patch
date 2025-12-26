@@ -1,8 +1,25 @@
 diff --git a/megatron/core/timers.py b/megatron/core/timers.py
-index a34b66349..46876a5e7 100644
+index 75387c33d..46876a5e7 100644
 --- a/megatron/core/timers.py
 +++ b/megatron/core/timers.py
-@@ -283,6 +283,8 @@ class Timers:
+@@ -8,16 +8,6 @@ from typing import List
+ 
+ import torch
+ 
+-try:
+-    import wandb
+-except ImportError:
+-    wandb = None
+-
+-try:
+-    from torch.utils.tensorboard import SummaryWriter
+-except ImportError:
+-    SummaryWriter = None
+-
+ from megatron.core.utils import is_torch_min_version
+ 
+ try:
+@@ -293,6 +283,8 @@ class Timers:
                  # groups inside their class.
                  rank_name_to_time[rank, i] = self._timers[name].elapsed(reset=reset)
  
@@ -11,4 +28,13 @@ index a34b66349..46876a5e7 100644
          # See the note above for why we are not using gather.
          dist_all_gather_func(rank_name_to_time.view(-1), rank_name_to_time[rank, :].view(-1))
  
+@@ -459,7 +451,4 @@ class Timers:
+         if writer is not None:
+             for name in name_to_min_max_time:
+                 _, max_time = name_to_min_max_time[name]
+-                if isinstance(writer, SummaryWriter) and SummaryWriter is not None:
+-                    writer.add_scalar(name + '-time', max_time, iteration)
+-                elif writer == wandb and wandb is not None:
+-                    writer.log({name + '-time': max_time}, iteration)
++                writer.add_scalar(name + '-time', max_time, iteration)
 

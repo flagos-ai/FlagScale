@@ -1,0 +1,61 @@
+diff --git a/flagscale/runner/elastic/simulated_fault.py b/flagscale/runner/elastic/simulated_fault.py
+index c821ec3f..ab36a269 100644
+--- a/flagscale/runner/elastic/simulated_fault.py
++++ b/flagscale/runner/elastic/simulated_fault.py
+@@ -5,43 +5,19 @@ import time
+ from datetime import datetime
+ 
+ error_keys_list = [
+-    # Success indicators
+     "completed",
+-    # Memory errors
+-    "out of memory",
+-    "outofmemoryerror",
+-    "cuda out of memory",
+-    # Connection and network errors
+-    "rendezvousconnectionerror",
+-    "connection refused",
+-    "connection timeout",
+-    # Import and code errors
+-    "importerror",
+-    "modulenotfounderror",
+-    "traceback (most recent call last)",
+-    "fatal error",
+-    "exception",
+-    # Process errors
+-    "process killed",
+-    "killed by signal",
+-    "terminated by signal",
+-    "keyboardinterrupt",
+-    "sigint",
+-    "sigterm",
+-    "segmentation fault",
+-    "core dumped",
+-    # CUDA errors
+-    "cuda error",
+-    "cudnn error",
+-    "gpu error",
+-    # File and storage errors
+-    "no such file or directory",
+-    "permission denied",
+-    "no space left on device",
+-    # Timeout errors
+-    "operation timed out",
+-    "connection timeout",
+-    "hanging",
++    "codeerror",
++    "OutOfMemoryError",
++    "evaluatoroom",
++    "workererror",
++    "evaluatorerror",
++    "nodecheckfailed",
++    "hangerror",
++    "rdzvtimeout",
++    "pendingtimeout",
++    "uncompletedtimeout",
++    "storageerror",
++    "signalException",
+ ]
+ 
+ 
+

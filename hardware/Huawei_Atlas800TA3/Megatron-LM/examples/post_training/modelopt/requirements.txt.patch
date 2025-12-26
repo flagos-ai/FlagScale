@@ -1,0 +1,13 @@
+diff --git a/examples/post_training/modelopt/requirements.txt b/examples/post_training/modelopt/requirements.txt
+index dd1f47ef6..1d70ebcc7 100644
+--- a/examples/post_training/modelopt/requirements.txt
++++ b/examples/post_training/modelopt/requirements.txt
+@@ -1,5 +1,7 @@
+ datasets
+ jsonlines
++mamba-ssm
++causal-conv1d
+ nvidia-modelopt
+ omegaconf
+ pulp
+

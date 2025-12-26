@@ -1,0 +1,28 @@
+diff --git a/flagscale/train/arguments.py b/flagscale/train/arguments.py
+index 98e31497..3ef28d28 100644
+--- a/flagscale/train/arguments.py
++++ b/flagscale/train/arguments.py
+@@ -94,12 +94,6 @@ class FSTrainArguments:
+         hetero_process_meshes_dp = self.args.hetero_process_meshes[3::5]
+         hetero_process_meshes_pp = self.args.hetero_process_meshes[4::5]
+ 
+-        # Check if tensor parallel sizes are inconsistent across meshes
+-        # NOTE: If TP degrees differ, sequence parallelism must be enabled
+-        if len(set(hetero_process_meshes_tp)) > 1:
+-            assert (
+-                self.args.sequence_parallel
+-            ), f"Sequence parallelism must be enabled (`sequence_parallel=True`) when tensor parallelism degrees differ across heterogeneous meshes. Found TP degrees: {hetero_process_meshes_tp}"
+         # Expert tensor parallel size
+         if self.expert_tensor_parallel_size_per_process_mesh is not None:
+             assert len(self.expert_tensor_parallel_size_per_process_mesh) == len(
+@@ -130,6 +124,9 @@ class FSTrainArguments:
+         assert (
+             self.args.standalone_embedding_stage == False
+         ), "standalone not supported with process_meshes set!"
++        assert (
++            self.args.pipeline_model_parallel_split_rank == None
++        ), "pipeline_model_parallel_split_rank not supported with process_meshes set!"
+         self.args.transformer_pipeline_model_parallel_size = self.args.pipeline_model_parallel_size
+ 
+         # if untie_embeddings_and_output_weights is False, the first and last stage should have the same tp degree
+

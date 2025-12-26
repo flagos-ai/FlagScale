@@ -1,0 +1,11 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp1_fp8_no_model_parallel/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp1_fp8_no_model_parallel/model_config.yaml
+index 8211c7f40..e068c0742 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp1_fp8_no_model_parallel/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp1_fp8_no_model_parallel/model_config.yaml
+@@ -51,5 +51,4 @@ MODEL_ARGS:
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+   --log-memory-to-tensorboard: true
+-  --legacy-tokenizer: true
+ TEST_TYPE: regular
+

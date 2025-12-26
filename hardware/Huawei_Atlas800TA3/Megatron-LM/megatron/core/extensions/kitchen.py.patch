@@ -1,0 +1,13 @@
+diff --git a/megatron/core/extensions/kitchen.py b/megatron/core/extensions/kitchen.py
+index 7f2f1fac9..c095d121e 100644
+--- a/megatron/core/extensions/kitchen.py
++++ b/megatron/core/extensions/kitchen.py
+@@ -1086,7 +1086,3 @@ class KitchenSpecProvider(BackendSpecProvider):
+             return SequentialMLP, MLPSubmodules(
+                 linear_fc1=KitchenColumnParallelLinear, linear_fc2=KitchenRowParallelLinear
+             )
+-
+-    def activation_func(self) -> type:
+-        """Which module to use for activation function"""
+-        return None
+

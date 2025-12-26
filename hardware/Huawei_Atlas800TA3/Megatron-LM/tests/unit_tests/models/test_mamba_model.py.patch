@@ -1,0 +1,48 @@
+diff --git a/tests/unit_tests/models/test_mamba_model.py b/tests/unit_tests/models/test_mamba_model.py
+index ca42ae496..813362ec5 100644
+--- a/tests/unit_tests/models/test_mamba_model.py
++++ b/tests/unit_tests/models/test_mamba_model.py
+@@ -1,11 +1,8 @@
+ # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ 
+-from datetime import timedelta
+-
+ import pytest
+ import torch
+ 
+-from megatron.core import parallel_state
+ from megatron.core.hyper_comm_grid import HyperCommGrid
+ from megatron.core.inference.contexts import BaseInferenceContext, StaticInferenceContext
+ from megatron.core.models.mamba.mamba_layer_specs import mamba_stack_spec
+@@ -162,19 +159,11 @@ class TestMambaModel:
+         pp_group = grid.create_pg("pp")
+         cp_group = grid.create_pg("cp")
+         tp_group = grid.create_pg("tp")
+-        embd_group_ranks = parallel_state.default_embedding_ranks(
+-            torch.distributed.get_process_group_ranks(pp_group)
+-        )
+-        embd_group = torch.distributed.new_group(
+-            ranks=embd_group_ranks, timeout=timedelta(minutes=30)
+-        )
+ 
+         # Create model with custom process groups
+-        from megatron.core.process_groups_config import ProcessGroupCollection
++        from megatron.core.process_groups_config import ModelCommProcessGroups
+ 
+-        pg_collection = ProcessGroupCollection(
+-            tp=tp_group, cp=cp_group, pp=pp_group, embd=embd_group
+-        )
++        model_comm_pgs = ModelCommProcessGroups(tp=tp_group, cp=cp_group, pp=pp_group)
+ 
+         # Configure model with appropriate sizes for parallelism
+         model_config = TransformerConfig(
+@@ -195,7 +184,7 @@ class TestMambaModel:
+             max_sequence_length=4,
+             hybrid_attention_ratio=0.3,
+             hybrid_mlp_ratio=0.3,
+-            pg_collection=pg_collection,
++            model_comm_pgs=model_comm_pgs,
+         )
+ 
+         # Basic forward test
+

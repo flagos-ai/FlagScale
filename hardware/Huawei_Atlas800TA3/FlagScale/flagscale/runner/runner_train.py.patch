@@ -1,0 +1,170 @@
+diff --git a/flagscale/runner/runner_train.py b/flagscale/runner/runner_train.py
+index 7da50a56..dd188497 100644
+--- a/flagscale/runner/runner_train.py
++++ b/flagscale/runner/runner_train.py
+@@ -66,8 +66,10 @@ def _get_args_robotics(config: DictConfig):
+     return args
+ 
+ 
+-def _get_args_pi0(config: DictConfig):
+-    assert config.experiment.task.backend == "pi0", "This function only supports lerobot backend."
++def _get_args_lerobot(config: DictConfig):
++    assert (
++        config.experiment.task.backend == "lerobot"
++    ), "This function only supports lerobot backend."
+ 
+     # Convert the DictConfig to a regular dictionary
+     config_dict = OmegaConf.to_container(config, resolve=True)
+@@ -90,7 +92,7 @@ def _get_args_pi0(config: DictConfig):
+         "wandb_save_dir",
+     ]
+     # Flatten the dictionary to a list of arguments
+-    args = flatten_dict_to_args(new_config_dict, ignore_keys=ignore_keys)
++    args = flatten_dict_to_args(new_config_dict, ignore_keys=ignore_keys, do_dash_replace=False)
+     return args
+ 
+ 
+@@ -269,7 +271,7 @@ def _generate_run_script_train(
+         f.write(f"\n")
+         f.write(f"cd {root_dir}\n")
+         f.write(f"\n")
+-        f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
++        f.write(f"export PYTHONPATH={megatron_dir}:{root_dir}:${{PYTHONPATH}}\n")
+         f.write(f"\n")
+         f.write(f'cmd="{cmd}"\n')
+         f.write(f"\n")
+@@ -282,15 +284,13 @@ def _generate_run_script_train(
+             f.write(f'python {monitor_launcher_path} \\\n')
+             f.write(f'  --log-dir "{logging_config.log_dir}" \\\n')
+             f.write(f'  --pid-file "{host_pid_file}" \\\n')
+-            f.write(f'  --host "{host}" \\\n')
+-            f.write(f'  --node-rank {node_rank} \\\n')
+             f.write(f'  {"--no-shared-fs" if no_shared_fs else ""} \\\n')
+             f.write(f'  --ssh-port {ssh_port} \\\n')
+             f.write(f'  --interval 5 \\\n')
+             f.write(f'  --enable-log-collection \\\n')
+             f.write(f'  --enable-diagnostic \\\n')
+             f.write(f'  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n')
+-            f.write(f'echo "Monitor service started in background for {host} (node {node_rank})"\n')
++            f.write(f'echo "Monitor service started in background"\n')
+         f.write(f'\n')
+ 
+         if with_test:
+@@ -360,6 +360,7 @@ def run_node(
+     available_port,
+     with_test,
+     dryrun,
++    enable_monitoring=True,
+ ):
+     cur_envs = update_nodes_envs(user_envs, host, resource_info)
+     # Get the number of visible devices from the environment variable, e.g. CUDA_VISIBLE_DEVICES, MLU_VISIBLE_DEVICES
+@@ -400,8 +401,8 @@ class SSHTrainRunner(RunnerBase):
+             self.user_args = _get_args_megatron(self.config)
+         elif self.config.experiment.task.backend == "robotics":
+             self.user_args = _get_args_robotics(self.config)
+-        elif self.config.experiment.task.backend == "pi0":
+-            self.user_args = _get_args_pi0(self.config)
++        elif self.config.experiment.task.backend == "lerobot":
++            self.user_args = _get_args_lerobot(self.config)
+         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+         self.user_envs = self.config.experiment.get("envs", {})
+         self.user_script = self.config.experiment.task.entrypoint
+@@ -481,11 +482,15 @@ class SSHTrainRunner(RunnerBase):
+             run_local_command(f"bash {host_run_script_file}", dryrun)
+ 
+     def run(
+-        self, with_test=False, dryrun=False, monitor=False, interval=10, enable_monitoring=None
++        self,
++        with_test=False,
++        dryrun=False,
++        monitor=False,
++        interval=10,
++        enable_log_collection=True,
++        enable_diagnostic=True,
++        enable_monitoring=False,
+     ):
+-        # Read from config if not explicitly provided
+-        if enable_monitoring is None:
+-            enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
+ 
+         num_visible_devices = None
+         runner_config = self.config.experiment.runner
+@@ -515,6 +520,7 @@ class SSHTrainRunner(RunnerBase):
+                         available_port,
+                         with_test,
+                         dryrun,
++                        enable_monitoring,
+                     )
+                     tasks.append(args)
+                 pool.starmap(run_node, tasks)
+@@ -555,6 +561,18 @@ class SSHTrainRunner(RunnerBase):
+             except Exception as e:
+                 logger.info(e)
+ 
++        if enable_monitoring:
++            logger.info("Starting monitoring service...")
++            monitor_service = MonitorService(self.config, self, interval)
++            monitor_service.start_monitoring(
++                enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
++            )
++            logger.info("Monitoring service started in background")
++            logger.info("Training job will continue running, monitor logs will be saved")
++
++            # Return the monitor_service instance for external control.
++            return monitor_service
++
+         return None
+ 
+     def _stop_each(self, host, node_rank):
+@@ -760,18 +778,24 @@ class SSHTrainRunner(RunnerBase):
+         """
+         return self._query_status()
+ 
+-    def start_monitoring_service(self, interval=10):
++    def start_monitoring_service(
++        self, interval=10, enable_log_collection=True, enable_diagnostic=True
++    ):
+         """
+         Start independent monitoring service (non-blocking).
+ 
+         Args:
+             interval (int): Monitor interval in seconds
++            enable_log_collection (bool): Enable log collection
++            enable_diagnostic (bool): Enable diagnostic report generation
+ 
+         Returns:
+             MonitorService: Monitor service instance
+         """
+         monitor_service = MonitorService(self.config, self, interval)
+-        monitor_service.start_monitoring()
++        monitor_service.start_monitoring(
++            enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
++        )
+         logger.info(f"Independent monitoring service started with interval={interval}s")
+         return monitor_service
+ 
+@@ -833,6 +857,8 @@ class CloudTrainRunner(RunnerBase):
+             self.user_args = _get_args_megatron(self.config)
+         elif self.config.experiment.task.backend == "robotics":
+             self.user_args = _get_args_robotics(self.config)
++        elif self.config.experiment.task.backend == "lerobot":
++            self.user_args = _get_args_lerobot(self.config)
+         logger.info("\n************** configuration ***********")
+         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
+ 
+@@ -858,7 +884,13 @@ class CloudTrainRunner(RunnerBase):
+         cmd = shlex.join(export_cmd + runner_cmd + [self.user_script] + self.user_args)
+ 
+         host_run_script_file = _generate_run_script_train(
+-            self.config, host, node_rank, cmd, background=False, with_test=with_test
++            self.config,
++            host,
++            node_rank,
++            cmd,
++            background=False,
++            with_test=with_test,
++            enable_monitoring=enable_monitoring,
+         )
+ 
+         run_local_command(f"bash {host_run_script_file}", dryrun)
+

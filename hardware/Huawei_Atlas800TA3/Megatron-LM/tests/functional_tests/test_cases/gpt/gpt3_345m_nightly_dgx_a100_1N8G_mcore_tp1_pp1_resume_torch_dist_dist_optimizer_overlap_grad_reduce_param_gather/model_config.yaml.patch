@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_345m_nightly_dgx_a100_1N8G_mcore_tp1_pp1_resume_torch_dist_dist_optimizer_overlap_grad_reduce_param_gather/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_345m_nightly_dgx_a100_1N8G_mcore_tp1_pp1_resume_torch_dist_dist_optimizer_overlap_grad_reduce_param_gather/model_config.yaml
+index 4c7132e2d..3cb6315c4 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_345m_nightly_dgx_a100_1N8G_mcore_tp1_pp1_resume_torch_dist_dist_optimizer_overlap_grad_reduce_param_gather/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_345m_nightly_dgx_a100_1N8G_mcore_tp1_pp1_resume_torch_dist_dist_optimizer_overlap_grad_reduce_param_gather/model_config.yaml
+@@ -47,7 +47,6 @@ MODEL_ARGS:
+   --use-checkpoint-opt_param-scheduler: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
+-  --dist-ckpt-optim-fully-reshardable: true
+   --dist-ckpt-strictness: log_all  # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --fp16: true
+

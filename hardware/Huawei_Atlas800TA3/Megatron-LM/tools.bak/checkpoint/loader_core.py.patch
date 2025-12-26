@@ -1,0 +1,27 @@
+diff --git a/tools/checkpoint/loader_core.py b/tools.bak/checkpoint/loader_core.py
+similarity index 93%
+rename from tools/checkpoint/loader_core.py
+rename to tools.bak/checkpoint/loader_core.py
+index 7576401dc..f5085b24c 100644
+--- a/tools/checkpoint/loader_core.py
++++ b/tools.bak/checkpoint/loader_core.py
+@@ -5,7 +5,6 @@ import os
+ import sys
+ import torch
+ import types
+-from functools import partial
+ 
+ from schema_core import get_model_schema
+ from loader_base import MegatronCheckpointLoaderBase
+@@ -55,9 +54,7 @@ class MegatronCheckpointLoaderLLM(MegatronCheckpointLoaderBase):
+     def import_model_provider(self):
+         """Return the correct model_provider function depending on GPT vs. BERT."""
+         if self.args.model_type == 'GPT':
+-            from model_provider import model_provider
+-            from gpt_builders import gpt_builder
+-            self.model_provider = partial(model_provider, gpt_builder)
++            from pretrain_gpt import model_provider
+             return model_provider
+         elif self.args.model_type == 'BERT':
+             from pretrain_bert import model_provider
+

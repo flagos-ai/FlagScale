@@ -1,0 +1,5 @@
+diff --git a/tools/wait_daemon.sh b/tools.bak/wait_daemon.sh
+similarity index 100%
+rename from tools/wait_daemon.sh
+rename to tools.bak/wait_daemon.sh
+

@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_resume_torch_dist_persistent_disable_bias_linear_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_resume_torch_dist_persistent_disable_bias_linear_dgx_a100_1N8G/model_config.yaml
+index 58554cc11..4aae410cf 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_resume_torch_dist_persistent_disable_bias_linear_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_resume_torch_dist_persistent_disable_bias_linear_dgx_a100_1N8G/model_config.yaml
+@@ -48,7 +48,6 @@ MODEL_ARGS:
+   --use-checkpoint-opt_param-scheduler: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
+-  --dist-ckpt-optim-fully-reshardable: true
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+   --log-memory-to-tensorboard: true
+

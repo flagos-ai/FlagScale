@@ -1,0 +1,50 @@
+diff --git a/examples/pi0/conf/serve/pi0.yaml b/examples/pi0/conf/serve/pi0.yaml
+index 37ca0a98..fcef21e0 100644
+--- a/examples/pi0/conf/serve/pi0.yaml
++++ b/examples/pi0/conf/serve/pi0.yaml
+@@ -1,32 +1,13 @@
+-engine:
+-  host: 0.0.0.0
+-  uvicorn_log_level: warning
+-  port: 5000
+-  model: /models/lerobot/pi0
+-  tokenizer: /models/google/paligemma-3b-pt-224
+-  stat_path: /models/lerobot/aloha_mobile_cabinet/meta/stats.json
+-  loader: pi0
+-  results_path: ${experiment.exp_dir}/results
+-  device: "cuda"
+-  output_format: image
+-  torch_dtype: float32
+-  transformations:
+-    LogIOTransformation:
+-      log_level: "info"
+-    StateScopeTransformation:
+-      {}
++- serve_id: vllm_model
++  engine_args:
++    model: /models/lerobot/pi0
++    tokenizer_path: /models/google/paligemma-3b-pt-224
++    dataset_repo_id: lerobot/aloha_mobile_cabinet
++    host: 0.0.0.0
++    uvicorn_log_level: warning
++    port: 5000
++    compile_model: false
++    episodes: [0, 10, 11, 23]
++    video_backend: pyav
++    dtype: torch.float32
+ 
+-generate:
+-  images_keys:
+-    - observation.images.camera0
+-    - observation.images.camera1
+-    - observation.images.camera2
+-  images_shape: [3, 480, 640]
+-  batch_size: 2
+-  action_dim: 14
+-  action_horizon: 10
+-  state_key: observation.state
+-  instruction:
+-    task:
+-      - "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
+-      - "retro serie of different cars with different colors and shapes"
+

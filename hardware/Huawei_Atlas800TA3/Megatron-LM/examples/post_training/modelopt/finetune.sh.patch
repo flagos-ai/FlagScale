@@ -1,0 +1,53 @@
+diff --git a/examples/post_training/modelopt/finetune.sh b/examples/post_training/modelopt/finetune.sh
+index 27ab8537e..8ad50bc86 100755
+--- a/examples/post_training/modelopt/finetune.sh
++++ b/examples/post_training/modelopt/finetune.sh
+@@ -5,10 +5,6 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+ # Common arguments and base model specific arguments
+ source "${SCRIPT_DIR}/conf/arguments.sh"
+ 
+-
+-# Set up cache dir for HF to avoid out of space error
+-export HF_DATASETS_CACHE="/tmp/hf_datasets_cache"
+-
+ # Extra arguments of this script
+ MLM_DEFAULT_ARGS=" \
+     --distributed-timeout-minutes 30 \
+@@ -29,16 +25,18 @@ if [ -z ${MLM_DATA_ARGS} ]; then
+         --lr-decay-samples 128000 \
+         --lr-warmup-samples 0 \
+         --split 100,0,0 \
+-        --finetune-hf-dataset Magpie-Align/Magpie-Llama-3.1-Pro-MT-300K-Filtered \
++        --finetune-hf-dataset nvidia/Daring-Anteater \
+     "
+ fi
+ 
+ if [ -z ${MLM_TRAIN_ARGS} ]; then
+     MLM_TRAIN_ARGS=" \
++        --recompute-activations \
+         --no-gradient-accumulation-fusion \
+         --reset-position-ids \
+         --reset-attention-mask \
+         --eod-mask-loss \
++        --global-batch-size 128 \
+         --micro-batch-size 1 \
+         --attention-dropout 0.0 \
+         --hidden-dropout 0.0 \
+@@ -48,7 +46,7 @@ fi
+ 
+ if [ -z ${MLM_OPTIM_ARGS} ]; then
+     MLM_OPTIM_ARGS=" \
+-        --lr 5.0e-5 \
++        --lr 1.0e-5 \
+         --min-lr 1.0e-7 \
+         --lr-decay-style cosine \
+         --clip-grad 1.0 \
+@@ -71,7 +69,6 @@ fi
+ ${LAUNCH_SCRIPT} ${SCRIPT_DIR}/finetune.py \
+     ${MODEL_ARGS} \
+     --tensor-model-parallel-size ${TP} \
+-    --expert-tensor-parallel-size ${ETP} \
+     --expert-model-parallel-size ${EP} \
+     --pipeline-model-parallel-size ${PP} \
+     --tokenizer-model ${TOKENIZER_MODEL} \
+

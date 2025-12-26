@@ -1,0 +1,14 @@
+diff --git a/flagscale/runner/auto_tuner/tuner.py b/flagscale/runner/auto_tuner/tuner.py
+index 0158303b..406296d7 100644
+--- a/flagscale/runner/auto_tuner/tuner.py
++++ b/flagscale/runner/auto_tuner/tuner.py
+@@ -400,7 +400,7 @@ class ServeAutoTunner(AutoTuner):
+ 
+         if not deploy_config.get("use_fs_serve", True) and deploy_config.get("port", None):
+             for item in config.serve:
+-                if item.get("serve_id") in ("vllm_model", "sglang_model"):
++                if item.get("serve_id") == "vllm_model":
+                     item.engine_args["port"] = (
+                         config.experiment.get("runner", {}).get("deploy", {}).get("port", None)
+                     )
+

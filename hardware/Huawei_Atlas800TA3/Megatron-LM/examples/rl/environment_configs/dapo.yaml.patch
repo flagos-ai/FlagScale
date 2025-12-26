@@ -1,0 +1,16 @@
+diff --git a/examples/rl/environment_configs/dapo.yaml b/examples/rl/environment_configs/dapo.yaml
+deleted file mode 100644
+index c501f4a19..000000000
+--- a/examples/rl/environment_configs/dapo.yaml
++++ /dev/null
+@@ -1,9 +0,0 @@
+-- agent_type: examples.rl.environments.math.dapo_agent.DAPOAgent
+-  agent_args:
+-    format_reward: 0.0
+-  weight: 1.0
+-- agent_type: examples.rl.environments.math.aime_agent.AIMEAgent
+-  agent_args:
+-    format_reward: 0.0
+-  weight: 0.0
+-  evaluation_only: true
+

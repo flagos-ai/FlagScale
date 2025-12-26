@@ -1,0 +1,15 @@
+diff --git a/megatron/core/tokenizers/text/libraries/__init__.py b/megatron/core/tokenizers/text/libraries/__init__.py
+deleted file mode 100644
+index e9141b81b..000000000
+--- a/megatron/core/tokenizers/text/libraries/__init__.py
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+-
+-from megatron.core.tokenizers.text.libraries.bytelevel_tokenizer import ByteLevelTokenizer
+-from megatron.core.tokenizers.text.libraries.huggingface_tokenizer import HuggingFaceTokenizer
+-from megatron.core.tokenizers.text.libraries.megatron_hf_tokenizer import MegatronHFTokenizer
+-from megatron.core.tokenizers.text.libraries.null_tokenizer import NullTokenizer
+-from megatron.core.tokenizers.text.libraries.sentencepiece_tokenizer import SentencePieceTokenizer
+-from megatron.core.tokenizers.text.libraries.tiktoken_tokenizer import TikTokenTokenizer
+

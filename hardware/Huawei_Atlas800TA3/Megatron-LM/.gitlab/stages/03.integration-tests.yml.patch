@@ -1,0 +1,15 @@
+diff --git a/.gitlab/stages/03.integration-tests.yml b/.gitlab/stages/03.integration-tests.yml
+index df4d84234..56a65da27 100644
+--- a/.gitlab/stages/03.integration-tests.yml
++++ b/.gitlab/stages/03.integration-tests.yml
+@@ -98,8 +98,7 @@ integration:configure:
+   needs:
+     - integration:configure
+     - test:build_image
+-    - job: wait_for_resources
+-      optional: true
++    - wait_for_resources
+   extends: [.integration_tests_rules]
+   trigger:
+     include:
+

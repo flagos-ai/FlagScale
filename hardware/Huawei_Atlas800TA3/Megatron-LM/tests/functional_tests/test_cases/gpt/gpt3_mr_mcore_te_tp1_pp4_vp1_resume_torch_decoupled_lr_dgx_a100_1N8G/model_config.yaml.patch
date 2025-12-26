@@ -1,0 +1,24 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_resume_torch_decoupled_lr_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_resume_torch_decoupled_lr_dgx_a100_1N8G/model_config.yaml
+index e64e70ae0..7b6a9ebfc 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_resume_torch_decoupled_lr_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_resume_torch_decoupled_lr_dgx_a100_1N8G/model_config.yaml
+@@ -3,7 +3,6 @@ ENV_VARS:
+   NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+   NCCL_ALGO: Ring
+   CUBLAS_WORKSPACE_CONFIG: :4096:8
+-  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+ MODEL_ARGS:
+   --num-layers: 12
+   --hidden-size: 512
+@@ -47,8 +46,8 @@ MODEL_ARGS:
+   --attention-softmax-in-fp32: true
+   --use-checkpoint-opt_param-scheduler: true
+   --ckpt-format: torch
+-  --dist-ckpt-strictness: log_all # backward compatibility for TE changes
++  --dist-ckpt-strictness: log_all  # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+   --log-memory-to-tensorboard: true
+-TEST_TYPE: regular # Usually ckpt-resume, but as a WAR to #513 set to regular
++TEST_TYPE: ckpt-resume
+

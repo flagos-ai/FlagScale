@@ -1,0 +1,32 @@
+diff --git a/examples/emu3/conf/README.md b/examples/emu3/conf/README.md
+index f63b2f91..bac51e2a 100644
+--- a/examples/emu3/conf/README.md
++++ b/examples/emu3/conf/README.md
+@@ -2,4 +2,25 @@
+ 
+ vLLM implementation of https://github.com/baaivision/Emu3
+ 
+-# Upgrading... Coming soon.
++## Setup
++
++[Install vLLM](../../../README.md#setup)
++
++
++## Run Emu3 Tasks
++
++### Run text-to-image task
++```
++cd FlagScale
++python run.py -cp examples/emu3/conf/ -cn gen.yaml
++```
++- [demo image download](https://github.com/baaivision/Emu3/blob/main/assets/demo.png)
++
++
++### Run understanding task
++```
++cd FlagScale
++python run.py -cp examples/emu3/conf/ -cn chat.yaml
++```
++
++## Performance
+

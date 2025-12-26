@@ -1,0 +1,13 @@
+diff --git a/examples/post_training/modelopt/conf/qwen/Qwen3-30B-A3B.sh b/examples/post_training/modelopt/conf/qwen/Qwen3-30B-A3B.sh
+index 425cf0c24..cd2751be4 100644
+--- a/examples/post_training/modelopt/conf/qwen/Qwen3-30B-A3B.sh
++++ b/examples/post_training/modelopt/conf/qwen/Qwen3-30B-A3B.sh
+@@ -33,6 +33,7 @@ MODEL_ARGS=" \
+     --moe-aux-loss-coeff 1e-3 \
+     --moe-token-dispatcher-type alltoall \
+     --moe-router-load-balancing-type aux_loss \
++    --moe-layer-recompute \
+     --seq-length 4096 \
+     --max-position-embeddings 40960 \
+     --tokenizer-type HuggingFaceTokenizer \
+

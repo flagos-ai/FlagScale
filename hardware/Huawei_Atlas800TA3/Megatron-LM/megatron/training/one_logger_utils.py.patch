@@ -1,0 +1,14 @@
+diff --git a/megatron/training/one_logger_utils.py b/megatron/training/one_logger_utils.py
+index ea41ba18a..ffb2474b8 100644
+--- a/megatron/training/one_logger_utils.py
++++ b/megatron/training/one_logger_utils.py
+@@ -3,7 +3,7 @@ import time, os
+ 
+ from .global_vars import get_one_logger, get_args
+ 
+-_one_logger_utils_version = "1.2.0-mlm"
++_one_logger_utils_version = "1.1.0-mlm"
+ 
+ 
+ def get_timestamp_in_ms():
+

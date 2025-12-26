@@ -1,0 +1,8 @@
+diff --git a/megatron/rl/agent/__init__.py b/megatron/rl/agent/__init__.py
+deleted file mode 100644
+index e76ed7485..000000000
+--- a/megatron/rl/agent/__init__.py
++++ /dev/null
+@@ -1 +0,0 @@
+-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+

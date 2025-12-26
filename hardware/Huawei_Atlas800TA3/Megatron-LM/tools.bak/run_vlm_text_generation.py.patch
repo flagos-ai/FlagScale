@@ -1,0 +1,5 @@
+diff --git a/tools/run_vlm_text_generation.py b/tools.bak/run_vlm_text_generation.py
+similarity index 100%
+rename from tools/run_vlm_text_generation.py
+rename to tools.bak/run_vlm_text_generation.py
+

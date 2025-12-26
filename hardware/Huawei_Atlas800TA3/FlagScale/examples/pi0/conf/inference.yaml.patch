@@ -1,0 +1,30 @@
+diff --git a/examples/pi0/conf/inference.yaml b/examples/pi0/conf/inference.yaml
+index a0ff5f76..118d551d 100644
+--- a/examples/pi0/conf/inference.yaml
++++ b/examples/pi0/conf/inference.yaml
+@@ -4,20 +4,18 @@ defaults:
+ 
+ experiment:
+   exp_name: pi0
+-  exp_dir: outputs/${experiment.exp_name}
+-  model: /models/lerobot/pi0
++  exp_dir: ./outputs/${experiment.exp_name}
+   task:
+     type: inference
+-    backend: vllm # TODO: Remove this restriction
+-    entrypoint: flagscale/inference/embodied_entrypoint.py
++    backend: lerobot
++    entrypoint: flagscale/inference/inference_pi0.py
+   runner:
+     hostfile: null
+   cmds:
+-    before_start: source /root/miniconda3/bin/activate flagscale-inference
++    before_start: conda activate flagscale-inference
+   envs:
+     CUDA_VISIBLE_DEVICES: 0
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+-    # Optionally, set HF_HOME and HF_ENDPOINT
+ 
+ action: run
+ 
+

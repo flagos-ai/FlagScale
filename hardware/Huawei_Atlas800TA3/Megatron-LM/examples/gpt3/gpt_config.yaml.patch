@@ -1,0 +1,13 @@
+diff --git a/examples/gpt3/gpt_config.yaml b/examples/gpt3/gpt_config.yaml
+index 2fd40e621..8ef4f41e9 100644
+--- a/examples/gpt3/gpt_config.yaml
++++ b/examples/gpt3/gpt_config.yaml
+@@ -121,6 +121,7 @@ model_parallel:
+   no_sync_func: null
+   grad_sync_func: null
+   param_sync_func: null
++  pipeline_model_parallel_split_rank: null
+ 
+   # CPU Offloading
+   cpu_offloading: False
+

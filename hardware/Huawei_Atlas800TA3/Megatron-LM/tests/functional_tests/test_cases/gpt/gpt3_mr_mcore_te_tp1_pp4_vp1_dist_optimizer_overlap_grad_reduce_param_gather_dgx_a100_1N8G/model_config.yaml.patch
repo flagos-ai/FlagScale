@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_dist_optimizer_overlap_grad_reduce_param_gather_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_dist_optimizer_overlap_grad_reduce_param_gather_dgx_a100_1N8G/model_config.yaml
+index b0fd77bb7..8a12a6833 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_dist_optimizer_overlap_grad_reduce_param_gather_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp1_pp4_vp1_dist_optimizer_overlap_grad_reduce_param_gather_dgx_a100_1N8G/model_config.yaml
+@@ -51,7 +51,6 @@ MODEL_ARGS:
+   --attention-softmax-in-fp32: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
+-  --dist-ckpt-optim-fully-reshardable: true
+   --dist-ckpt-strictness: log_all  # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+

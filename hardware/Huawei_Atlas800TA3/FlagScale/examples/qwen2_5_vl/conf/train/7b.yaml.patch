@@ -1,5 +1,5 @@
 diff --git a/examples/qwen2_5_vl/conf/train/7b.yaml b/examples/qwen2_5_vl/conf/train/7b.yaml
-index 62b2e072..2145e40a 100644
+index 62b2e072..9451768e 100644
 --- a/examples/qwen2_5_vl/conf/train/7b.yaml
 +++ b/examples/qwen2_5_vl/conf/train/7b.yaml
 @@ -13,11 +13,11 @@ system:
@@ -19,7 +19,15 @@ index 62b2e072..2145e40a 100644
    precision:
      bf16: True
      attention_softmax_in_fp32: True
-@@ -38,7 +38,7 @@ system:
+@@ -31,14 +31,14 @@ system:
+     log_num_zeros_in_grad: True
+   checkpoint:
+     save_interval: 1000
+-    pretrained_checkpoint: xxxx
++    # pretrained_checkpoint: xxxx
+     dataloader_save: ${experiment.exp_dir}/checkpoints/dataloader
+     use_dist_ckpt: False
+     ckpt_format: torch
      async_save: False
  
  model:
@@ -33,7 +41,7 @@ index 62b2e072..2145e40a 100644
    hidden_dropout: 0.0
    clip_grad: 1.0
 -  train_iters: 62
-+  train_iters: 5000
++  train_iters: 1
    eval_iters: 0 # no valid
    micro_batch_size: 1
 -  global_batch_size: 16
@@ -41,13 +49,26 @@ index 62b2e072..2145e40a 100644
    allow_missing_vision_projection_checkpoint: False
    apply_layernorm_1p: False
    group_query_attention: True
-@@ -91,7 +91,7 @@ model:
+@@ -91,17 +91,17 @@ model:
        lr: 1.0e-5
        min_lr: 1.0e-6
        # lr_warmup_fraction: .03
 -      lr_warmup_iters: 10
-+      lr_warmup_iters: 500
++      lr_warmup_iters: 0
        lr_decay_style: cosine
  
  data:
+-  data_path: xxxx
+-  vision_root: xxxx
++  data_path: /data/FlagScale_shared/lizhiyu/data/llava/LlavaDatasets/wds-1
++  vision_root: /data/FlagScale_shared/lizhiyu/data/llava/LlavaDatasets/
+   dataloader_type: external
+   split: 100,0,0
+   tokenizer:
+     tokenizer_type: Qwen2VLTokenizer
+-    tokenizer_path: xxxx
++    tokenizer_path: /data/FlagScale_shared/lizhiyu/data/Qwen2.5-VL-7B-Instruct/
+     vocab_size: 152064 # 7b
+     extra_vocab_size: 421
+     make_vocab_size_divisible_by: 64
 

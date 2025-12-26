@@ -1,0 +1,19 @@
+diff --git a/megatron/core/tokenizers/text/models/t5_tokenizer.py b/megatron/core/tokenizers/text/models/t5_tokenizer.py
+deleted file mode 100644
+index 013f41d22..000000000
+--- a/megatron/core/tokenizers/text/models/t5_tokenizer.py
++++ /dev/null
+@@ -1,12 +0,0 @@
+-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+-
+-from megatron.core.tokenizers.text.text_tokenizer import MegatronTokenizerText
+-
+-
+-class T5Tokenizer(MegatronTokenizerText):
+-    """Base class for Megatron T5 tokenizer."""
+-
+-    def __init__(self, path: str = None, config: dict = None, **kwargs) -> None:
+-        config['class_name'] = self.__class__.__name__
+-        config['class_path'] = self.__class__.__module__
+-        super().__init__(path, config, **kwargs)
+

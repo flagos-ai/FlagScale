@@ -1,0 +1,81 @@
+diff --git a/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py b/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py
+index 3ba04864..e573e708 100644
+--- a/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py
++++ b/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py
+@@ -7,7 +7,6 @@ from contextlib import nullcontext
+ from typing import List, Optional, Union
+ 
+ import torch
+-
+ from torch import Tensor
+ 
+ from megatron.core import parallel_state, tensor_parallel
+@@ -16,14 +15,17 @@ from megatron.core.fp8_utils import get_fp8_context
+ from megatron.core.fusions.fused_layer_norm import FusedLayerNorm
+ from megatron.core.inference.contexts import BaseInferenceContext
+ from megatron.core.packed_seq_params import PackedSeqParams
+-from megatron.core.process_groups_config import ProcessGroupCollection
++from megatron.core.process_groups_config import ModelCommProcessGroups
+ from megatron.core.transformer.spec_utils import ModuleSpec
+-from megatron.core.transformer.transformer_block import TransformerBlock, TransformerBlockSubmodules
+ from megatron.core.transformer.transformer_config import TransformerConfig
++from megatron.core.transformer.transformer_block import TransformerBlock, TransformerBlockSubmodules
+ from megatron.core.utils import WrappedTensor, deprecate_inference_params, make_viewless_tensor
+ 
+ try:
+-    from megatron.core.extensions.transformer_engine import TENorm, te_checkpoint
++    from megatron.core.extensions.transformer_engine import (
++        TENorm,
++        te_checkpoint,
++    )
+ 
+     HAVE_TE = True
+     LayerNormImpl = TENorm
+@@ -52,16 +54,11 @@ class VisionTransformerBlock(TransformerBlock):
+         post_layer_norm: bool = True,
+         pre_process: bool = True,
+         post_process: bool = True,
+-        pg_collection: ProcessGroupCollection = None,
++        model_comm_pgs: ModelCommProcessGroups = None,
+     ):
+-        super().__init__(
+-            config=config,
+-            spec=spec,
+-            post_layer_norm=post_layer_norm,
+-            pre_process=pre_process,
+-            post_process=post_process,
+-            pg_collection=pg_collection,
+-        )
++        super().__init__(config=config, spec=spec, post_layer_norm=post_layer_norm,
++                         pre_process=pre_process, post_process=post_process,
++                         model_comm_pgs=model_comm_pgs)
+ 
+     def _checkpointed_forward(
+         self,
+@@ -163,6 +160,7 @@ class VisionTransformerBlock(TransformerBlock):
+ 
+         return hidden_states
+ 
++
+     def forward(
+         self,
+         hidden_states: Union[Tensor, WrappedTensor],
+@@ -179,7 +177,7 @@ class VisionTransformerBlock(TransformerBlock):
+         *,
+         inference_params: Optional[BaseInferenceContext] = None,
+         packed_seq_params_full: Optional[PackedSeqParams] = None,
+-        fullatt_block_indexes=None,
++        fullatt_block_indexes = None,
+     ):
+         """
+         Perform the forward pass through the transformer block.
+@@ -267,7 +265,7 @@ class VisionTransformerBlock(TransformerBlock):
+                     attention_bias=attention_bias,
+                     packed_seq_params=packed_seq_params,
+                     packed_seq_params_full=packed_seq_params_full,
+-                    fullatt_block_indexes=fullatt_block_indexes,
++                    fullatt_block_indexes=fullatt_block_indexes
+                 )
+             else:
+                 for l_no, layer in enumerate(self.layers):
+

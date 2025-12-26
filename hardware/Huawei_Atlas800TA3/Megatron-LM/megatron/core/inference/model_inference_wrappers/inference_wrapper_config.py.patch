@@ -1,0 +1,24 @@
+diff --git a/megatron/core/inference/model_inference_wrappers/inference_wrapper_config.py b/megatron/core/inference/model_inference_wrappers/inference_wrapper_config.py
+index 0769b1b70..2276549c0 100644
+--- a/megatron/core/inference/model_inference_wrappers/inference_wrapper_config.py
++++ b/megatron/core/inference/model_inference_wrappers/inference_wrapper_config.py
+@@ -1,6 +1,5 @@
+ # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ from dataclasses import dataclass
+-from typing import Optional
+ 
+ import torch
+ 
+@@ -39,11 +38,6 @@ class InferenceWrapperConfig:
+     """When using symmetric all reduce kernels we keep the default all reduces for nccl. 
+     This can be more effecient for large prefill sizes"""
+ 
+-    fp8: Optional[str] = None
+-    """If set, enables the use of FP8 precision through Transformer Engine. There are 2 predefined
+-    choices (1) 'e4m3' uniformly uses e4m3 for all FP8 tensors, (2) 'hybrid' uses e4m3 for all FP8
+-    activation and weight tensors and e5m2 for all FP8 output activation gradient tensors."""
+-
+     def add_attributes(self, attribute_value_pair: dict):
+         """Utility to add more attributes to inference params
+ 
+

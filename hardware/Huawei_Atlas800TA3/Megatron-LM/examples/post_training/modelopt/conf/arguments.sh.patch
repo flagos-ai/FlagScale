@@ -1,0 +1,35 @@
+diff --git a/examples/post_training/modelopt/conf/arguments.sh b/examples/post_training/modelopt/conf/arguments.sh
+index e39474965..19d2d945f 100644
+--- a/examples/post_training/modelopt/conf/arguments.sh
++++ b/examples/post_training/modelopt/conf/arguments.sh
+@@ -34,7 +34,7 @@ else
+     source ${MLM_ENV_SETUP}
+ fi
+ 
+-if [[ -z ${MLM_EXTRA_ARGS} ]]; then
++if [ -z ${MLM_EXTRA_ARGS} ]; then
+     printf "${MLM_WARNING} Use ${PURPLE}MLM_EXTRA_ARGS${WHITE} to provide additional arguments!\n"
+ fi
+ 
+@@ -48,11 +48,6 @@ if [ -z ${TP} ]; then
+     printf "${MLM_WARNING} Variable ${PURPLE}TP${WHITE} not set! (default: ${TP})\n"
+ fi
+ 
+-if [ -z ${ETP} ]; then
+-    ETP=${TP}
+-    printf "${MLM_WARNING} Variable ${PURPLE}ETP${WHITE} not set! (default: ${ETP})\n"
+-fi
+-
+ if [ -z ${EP} ]; then
+     EP=1
+     printf "${MLM_WARNING} Variable ${PURPLE}EP${WHITE} not set! (default: ${EP})\n"
+@@ -70,7 +65,7 @@ fi
+ 
+ 
+ if [ -z ${LAUNCH_SCRIPT} ]; then
+-    LAUNCH_SCRIPT="torchrun --nproc_per_node=$((ETP * EP * PP * DP))"
++    LAUNCH_SCRIPT="torchrun --nproc_per_node=$((TP * EP * PP * DP))"
+ fi
+ 
+ # Install TensorRT Model Optimizer if haven't.
+

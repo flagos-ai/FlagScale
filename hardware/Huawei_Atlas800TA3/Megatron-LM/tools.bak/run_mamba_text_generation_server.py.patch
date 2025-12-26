@@ -1,0 +1,14 @@
+diff --git a/tools/run_mamba_text_generation_server.py b/tools.bak/run_mamba_text_generation_server.py
+similarity index 88%
+rename from tools/run_mamba_text_generation_server.py
+rename to tools.bak/run_mamba_text_generation_server.py
+index 33465f1bb..458923240 100644
+--- a/tools/run_mamba_text_generation_server.py
++++ b/tools.bak/run_mamba_text_generation_server.py
+@@ -8,4 +8,4 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
+ from run_text_generation_server import main
+ 
+ if __name__ == "__main__":
+-    main(model_type="mamba")
++    main(model_provider="mamba")
+

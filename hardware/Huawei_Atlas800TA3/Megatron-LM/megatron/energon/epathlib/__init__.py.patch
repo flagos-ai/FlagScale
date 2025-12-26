@@ -1,0 +1,13 @@
+diff --git a/megatron/energon/epathlib/__init__.py b/megatron/energon/epathlib/__init__.py
+new file mode 100644
+index 000000000..5c0880d25
+--- /dev/null
++++ b/megatron/energon/epathlib/__init__.py
+@@ -0,0 +1,6 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++from megatron.energon.epathlib.epath import EPath
++
++__all__ = ["EPath"]
+

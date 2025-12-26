@@ -1,0 +1,5 @@
+diff --git a/tools/merge_datasets.py b/tools.bak/merge_datasets.py
+similarity index 100%
+rename from tools/merge_datasets.py
+rename to tools.bak/merge_datasets.py
+

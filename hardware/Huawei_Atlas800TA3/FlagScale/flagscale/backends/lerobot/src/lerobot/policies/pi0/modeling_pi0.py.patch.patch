@@ -1,0 +1,21 @@
+diff --git a/flagscale/backends/lerobot/src/lerobot/policies/pi0/modeling_pi0.py.patch b/flagscale/backends/lerobot/src/lerobot/policies/pi0/modeling_pi0.py.patch
+new file mode 100644
+index 00000000..a210b2ed
+--- /dev/null
++++ b/flagscale/backends/lerobot/src/lerobot/policies/pi0/modeling_pi0.py.patch
+@@ -0,0 +1,14 @@
++diff --git a/src/lerobot/policies/pi0/modeling_pi0.py b/src/lerobot/policies/pi0/modeling_pi0.py
++index e56946ac..98c4fb3a 100644
++--- a/src/lerobot/policies/pi0/modeling_pi0.py
+++++ b/src/lerobot/policies/pi0/modeling_pi0.py
++@@ -244,7 +244,8 @@ class PI0Policy(PreTrainedPolicy):
++             config.output_features, config.normalization_mapping, dataset_stats
++         )
++ 
++-        self.language_tokenizer = AutoTokenizer.from_pretrained("google/paligemma-3b-pt-224")
+++        self.language_tokenizer = AutoTokenizer.from_pretrained(self.config.repo_id)
+++
++         self.model = PI0FlowMatching(config)
++ 
++         self.reset()
+

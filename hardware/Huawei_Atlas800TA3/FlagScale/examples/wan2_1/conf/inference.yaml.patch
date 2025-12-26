@@ -1,0 +1,22 @@
+diff --git a/examples/wan2_1/conf/inference.yaml b/examples/wan2_1/conf/inference.yaml
+index f56f3484..e0fb2715 100644
+--- a/examples/wan2_1/conf/inference.yaml
++++ b/examples/wan2_1/conf/inference.yaml
+@@ -1,6 +1,6 @@
+ defaults:
+   - _self_
+-  - inference: 1.3b
++  - inference: t2v
+ 
+ experiment:
+   exp_name: wan2_1
+@@ -15,7 +15,7 @@ experiment:
+   cmds:
+     before_start: source /root/miniconda3/bin/activate flagscale-inference
+   envs:
+-    CUDA_VISIBLE_DEVICES: 0
++    CUDA_VISIBLE_DEVICES: 1
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+     # Optionally, set HF_HOME and HF_ENDPOINT
+ 
+

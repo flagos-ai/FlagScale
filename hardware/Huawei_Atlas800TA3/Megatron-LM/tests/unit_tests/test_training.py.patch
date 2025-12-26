@@ -1,0 +1,13 @@
+diff --git a/tests/unit_tests/test_training.py b/tests/unit_tests/test_training.py
+index 953a80e09..8dec6d45b 100644
+--- a/tests/unit_tests/test_training.py
++++ b/tests/unit_tests/test_training.py
+@@ -25,7 +25,6 @@ def create_test_args():
+     args.skip_train = False
+     args.full_validation = False
+     args.multiple_validation_sets = False
+-    args.perform_rl_step = False
+ 
+     return args
+ 
+

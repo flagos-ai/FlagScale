@@ -1,0 +1,30 @@
+diff --git a/tests/functional_tests/test_cases/mixtral/mixtral_8x22b_tp2pp8ep8vpp1_release/model_config.yaml b/tests/functional_tests/test_cases/mixtral/mixtral_8x22b_tp2pp8ep8vpp1_release/model_config.yaml
+index 65ab3a33d..ff77ead9a 100644
+--- a/tests/functional_tests/test_cases/mixtral/mixtral_8x22b_tp2pp8ep8vpp1_release/model_config.yaml
++++ b/tests/functional_tests/test_cases/mixtral/mixtral_8x22b_tp2pp8ep8vpp1_release/model_config.yaml
+@@ -4,7 +4,7 @@ ENV_VARS:
+   NVTE_ALLOW_NONDETERMINISTIC_ALGO: 1
+   PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+   NCCL_NVLS_ENABLE: 0
+-  NON_DETERMINSTIC_RESULTS: 1
++  SKIP_PYTEST: 1
+ TEST_TYPE: "release"
+ MODEL_ARGS:
+   # Distributed args
+@@ -79,7 +79,7 @@ MODEL_ARGS:
+   --load: ${CHECKPOINT_LOAD_PATH}
+   --save: ${CHECKPOINT_SAVE_PATH}
+   --no-ckpt-fully-parallel-save: true
+-  --save-interval: 150
++  --save-interval: 500
+   # Add initialization args
+   --init-method-std: 0.008
+   # Add logging args
+@@ -100,5 +100,6 @@ MODEL_ARGS:
+ METRICS:
+   - "iteration-time"
+   - "lm loss"
++  - "num-zeros"
+   - "mem-allocated-bytes"
+   - "mem-max-allocated-bytes"
+

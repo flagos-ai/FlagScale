@@ -1,0 +1,22 @@
+diff --git a/tools/patch/unpatch.py b/tools/patch/unpatch.py
+index 7a4d0ced..1386c1a2 100644
+--- a/tools/patch/unpatch.py
++++ b/tools/patch/unpatch.py
+@@ -275,15 +275,8 @@ def apply_hardware_patch(
+             )
+ 
+             repo = Repo(submodule_path)
+-            try:
+-                repo.git.apply("--whitespace", "warn", new_patch_file)
+-            except Exception as e:
+-                logger.warning(
+-                    f"Failed to apply patch cleanly, and error is {e.stderr}. Retrying with --whitespace=fix."
+-                )
+-
+-                repo.git.apply("--whitespace", "fix", new_patch_file)
+-            logger.info(f"Patch {new_patch_file} has been applied.")
++            repo.git.apply("--whitespace", "fix", new_patch_file)
++            logger.info(f"    Patch {new_patch_file} has been applied.")
+ 
+         logger.info(f"Step 6: Moving patched temp path {temp_unpatch_path} to {final_path}")
+         os.makedirs(build_path, exist_ok=True)

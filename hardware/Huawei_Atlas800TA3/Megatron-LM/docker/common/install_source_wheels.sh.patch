@@ -1,0 +1,15 @@
+diff --git a/docker/common/install_source_wheels.sh b/docker/common/install_source_wheels.sh
+index 1308e6048..afa25a419 100644
+--- a/docker/common/install_source_wheels.sh
++++ b/docker/common/install_source_wheels.sh
+@@ -46,7 +46,8 @@ GROUPEDGEMM_WHEEL=$(ls $INPUT_WHEEL_DIR/grouped_gemm*.whl) || true
+ # Override deps that are already present in the base image
+ # only for dev
+ if [ "$ENVIRONMENT" = "dev" ]; then
+-    uv pip install --no-cache-dir --no-deps $TE_WHEEL
++    uv pip install --no-cache-dir --no-deps $TE_WHEEL \
++        "nvidia-modelopt[torch]>=0.29.0" "setuptools<80.0.0"
+ fi
+ 
+ # Install heavy optional deps like mamba, causalconv1d, groupedgemm
+

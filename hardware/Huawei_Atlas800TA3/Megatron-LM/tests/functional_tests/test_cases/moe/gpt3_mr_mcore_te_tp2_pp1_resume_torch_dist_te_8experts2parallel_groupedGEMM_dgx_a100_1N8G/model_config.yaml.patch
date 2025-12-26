@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/moe/gpt3_mr_mcore_te_tp2_pp1_resume_torch_dist_te_8experts2parallel_groupedGEMM_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/moe/gpt3_mr_mcore_te_tp2_pp1_resume_torch_dist_te_8experts2parallel_groupedGEMM_dgx_a100_1N8G/model_config.yaml
+index e970e1e02..eef52c9dd 100644
+--- a/tests/functional_tests/test_cases/moe/gpt3_mr_mcore_te_tp2_pp1_resume_torch_dist_te_8experts2parallel_groupedGEMM_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/moe/gpt3_mr_mcore_te_tp2_pp1_resume_torch_dist_te_8experts2parallel_groupedGEMM_dgx_a100_1N8G/model_config.yaml
+@@ -52,7 +52,6 @@ MODEL_ARGS:
+   --use-checkpoint-opt_param-scheduler: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
+-  --dist-ckpt-save-pre-mcore-014: true
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+   --no-bias-gelu-fusion: true
+

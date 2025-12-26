@@ -1,0 +1,5 @@
+diff --git a/tools/checkpoint/loader_base.py b/tools.bak/checkpoint/loader_base.py
+similarity index 100%
+rename from tools/checkpoint/loader_base.py
+rename to tools.bak/checkpoint/loader_base.py
+

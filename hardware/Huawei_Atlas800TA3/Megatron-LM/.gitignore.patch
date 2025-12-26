@@ -1,0 +1,13 @@
+diff --git a/.gitignore b/.gitignore
+index 144a8c2b8..6cb5f1ec4 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -13,6 +13,3 @@ wandb/
+ onelogger.log
+ onelogger.err
+ .venv
+-runs/
+-/test_cases/
+-**/dist/
+\ No newline at end of file
+

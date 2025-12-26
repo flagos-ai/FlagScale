@@ -1,0 +1,26 @@
+diff --git a/tools/checkpoint/loader_llama_mistral.py b/tools.bak/checkpoint/loader_llama_mistral.py
+similarity index 99%
+rename from tools/checkpoint/loader_llama_mistral.py
+rename to tools.bak/checkpoint/loader_llama_mistral.py
+index 3c3a1b610..fe344a52d 100644
+--- a/tools/checkpoint/loader_llama_mistral.py
++++ b/tools.bak/checkpoint/loader_llama_mistral.py
+@@ -384,15 +384,14 @@ def set_layer_state(args, model, hf_model, layer_idx):
+ def load_checkpoint_to_model(args):
+     '''Set model params.'''
+ 
+-    from model_provider import model_provider
+-    from gpt_builders import gpt_builder
++    from pretrain_gpt import model_provider
+     from transformers import AutoModelForCausalLM
+ 
+     # Load Huggingface model.
+     hf_model = AutoModelForCausalLM.from_pretrained(args.load, torch_dtype=args.params_dtype, low_cpu_mem_usage=True, device_map="cpu")
+ 
+     # Init Megatron model.
+-    model = model_provider(gpt_builder, pre_process=True, post_process=True).to(args.params_dtype)
++    model = model_provider(True, True).to(args.params_dtype)
+ 
+     # Set model state.
+     set_preprocess_state(args, model, hf_model)
+

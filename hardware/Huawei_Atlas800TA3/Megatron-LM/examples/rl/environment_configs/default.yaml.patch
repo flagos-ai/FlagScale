@@ -1,0 +1,13 @@
+diff --git a/examples/rl/environment_configs/default.yaml b/examples/rl/environment_configs/default.yaml
+deleted file mode 100644
+index 0d90cabc3..000000000
+--- a/examples/rl/environment_configs/default.yaml
++++ /dev/null
+@@ -1,6 +0,0 @@
+-- agent_type: examples.rl.environments.countdown.countdown_agent.CountdownAgent
+-  agent_args: {}
+-  weight: 1.0
+-- agent_type: examples.rl.environments.math.openmath_agent.OpenMathInstructAgent
+-  agent_args: {}
+-  weight: 1.0
+

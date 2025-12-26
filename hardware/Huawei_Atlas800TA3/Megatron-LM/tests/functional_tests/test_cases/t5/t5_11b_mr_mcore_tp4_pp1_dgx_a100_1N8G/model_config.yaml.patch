@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/t5/t5_11b_mr_mcore_tp4_pp1_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/t5/t5_11b_mr_mcore_tp4_pp1_dgx_a100_1N8G/model_config.yaml
+index e9556f5f3..51fcb5f6b 100644
+--- a/tests/functional_tests/test_cases/t5/t5_11b_mr_mcore_tp4_pp1_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/t5/t5_11b_mr_mcore_tp4_pp1_dgx_a100_1N8G/model_config.yaml
+@@ -51,7 +51,6 @@ MODEL_ARGS:
+   --deterministic-mode: true
+   --ckpt-format: torch_dist
+   --log-memory-to-tensorboard: true
+-  --legacy-tokenizer: true
+ TEST_TYPE: regular
+ METRICS:
+   - "iteration-time"
+

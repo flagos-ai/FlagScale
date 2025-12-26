@@ -1,0 +1,14 @@
+diff --git a/megatron/core/models/bert/bert_layer_specs.py b/megatron/core/models/bert/bert_layer_specs.py
+index 69cec788b..9517ee15e 100644
+--- a/megatron/core/models/bert/bert_layer_specs.py
++++ b/megatron/core/models/bert/bert_layer_specs.py
+@@ -12,8 +12,6 @@ from megatron.core.transformer.spec_utils import ModuleSpec
+ from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
+ 
+ try:
+-    import transformer_engine as te  # pylint: disable=unused-import
+-
+     from megatron.core.extensions.transformer_engine import (
+         TEDotProductAttention,
+         TELayerNormColumnParallelLinear,
+
