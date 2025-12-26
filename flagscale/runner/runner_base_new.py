@@ -57,3 +57,7 @@ class Runner(ABC):
     def stop(self, *args, **kwargs):
         """Optional method to override."""
         return self.launcher.stop(*args, **kwargs)
+
+    def query(self, *args, **kwargs):
+        """Optional method to override."""
+        return self.launcher.query(*args, **kwargs)

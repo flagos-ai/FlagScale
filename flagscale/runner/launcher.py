@@ -350,3 +350,235 @@ class SshLauncher(LauncherBase):
                 if node_rank >= nnodes:
                     break
                 self._stop_each(host, node_rank)
+
+    def _generate_query_script(self, host, node_rank):
+        """Genetrate the query script for each host."""
+        logging_config = self.config.train.system.logging
+
+        host_query_script_file = os.path.join(
+            logging_config.scripts_dir, f"host_{node_rank}_{host}_query.sh"
+        )
+
+        host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
+
+        os.makedirs(logging_config.scripts_dir, exist_ok=True)
+
+        with open(host_query_script_file, "w") as f:
+            f.write("#!/bin/bash\n\n")
+            f.write("if [ -f " + host_pid_file + " ]; then\n")
+            f.write("    pid=$(cat " + host_pid_file + ")\n")
+            f.write("    ps -p $pid -o state --no-headers\n")
+            f.write("else\n")
+            # TODO: This is a temporary fix. We need to find a better way to query the job.
+            f.write(
+                "    pid=$(ps aux | grep 'torchrun' | grep -v grep | head -n 1 | awk '{print $2}')\n"
+            )
+            f.write("    ps -p $pid -o state --no-headers\n")
+            f.write("fi\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(host_query_script_file, 0o755)
+
+        return host_query_script_file
+
+    def _generate_query_sub_process_script(self, host, node_rank):
+        """Genetrate the query script for each host."""
+        logging_config = self.config.train.system.logging
+
+        host_query_sub_process_script_file = os.path.join(
+            logging_config.scripts_dir, f"host_{node_rank}_{host}_query_sub_process.sh"
+        )
+
+        host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
+
+        os.makedirs(logging_config.scripts_dir, exist_ok=True)
+
+        with open(host_query_sub_process_script_file, "w") as f:
+            f.write("#!/bin/bash\n\n")
+            f.write("if [ -f " + host_pid_file + " ]; then\n")
+            f.write("    pid=$(cat " + host_pid_file + ")\n")
+            f.write("    ps -eo pid,ppid | awk -v ppid=$pid '$2 == ppid {print $1}'\n")
+            f.write("else\n")
+            # TODO: This is a temporary fix. We need to find a better way to query the job.
+            f.write(
+                "    pid=$(ps aux | grep 'torchrun' | grep -v grep | head -n 1 | awk '{print $2}')\n"
+            )
+            f.write("    ps -eo pid,ppid | awk -v ppid=$pid '$2 == ppid {print $1}'\n")
+            f.write("fi\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(host_query_sub_process_script_file, 0o755)
+
+        return host_query_sub_process_script_file
+
+    def _query_each(self, host, node_rank):
+        "Query each node status."
+        host_query_script_file = self._generate_query_script(host, node_rank)
+        logging_config = self.config.train.system.logging
+        result = ""
+        if host != "localhost":
+            ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+            # Step 1: make sure the scripts_dir exists on the remote host
+            run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port, query=True)
+            # Step 2: copy the host_run_script_file to the remote host
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            if no_shared_fs:
+                run_scp_command(host, host_query_script_file, logging_config.scripts_dir, ssh_port)
+            # Step 3: run the host_run_script_file on the remote host
+            try:
+                result = run_ssh_command(
+                    host, f"bash {host_query_script_file}", ssh_port, query=True
+                )
+            except Exception as e:
+                logger.error(f"Failed to query job status on {host}: {e}")
+        else:
+            try:
+                result = run_local_command(f"bash {host_query_script_file}", query=True)
+            except Exception as e:
+                logger.error(f"Failed to query job status on {host}: {e}")
+        result = result.stdout.rstrip() if result else ""
+        return result
+
+    def _query_each_sub_process(self, host, node_rank):
+        "Query each node sub process status."
+        host_query_script_file = self._generate_query_sub_process_script(host, node_rank)
+        logging_config = self.config.train.system.logging
+        result = ""
+        if host != "localhost":
+            ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+            # Step 1: make sure the scripts_dir exists on the remote host
+            run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port, query=True)
+            # Step 2: copy the host_run_script_file to the remote host
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            if no_shared_fs:
+                run_scp_command(host, host_query_script_file, logging_config.scripts_dir, ssh_port)
+            # Step 3: run the host_run_script_file on the remote host
+            try:
+                result = run_ssh_command(
+                    host, f"bash {host_query_script_file}", ssh_port, query=True
+                )
+            except Exception as e:
+                logger.error(f"Failed to query sub process status on {host}: {e}")
+        else:
+            try:
+                result = run_local_command(f"bash {host_query_script_file}", query=True)
+            except Exception as e:
+                logger.error(f"Failed to query sub process status on {host}: {e}")
+        result = result.stdout.rstrip() if result else ""
+        return result
+
+    def _query_status(self):
+        "Query Job status."
+        results = []
+        if self.resources is None:
+            result = self._query_each("localhost", 0)
+            results.append(result)
+
+        else:
+            host_list = list(self.resources.keys())
+            for host, _ in self.resources.items():
+                node_rank = host_list.index(host)
+                result = self._query_each(host, node_rank)
+                results.append(result)
+        if all((status != "" and status != "Z") for status in results):
+            job_status = JobStatus.RUNNING
+        elif all((status == "" or status == "Z") for status in results):
+            job_status = JobStatus.COMPLETED_OR_IDLE
+        else:
+            job_status = JobStatus.TRANSITIONAL
+        return job_status
+
+    def _query_sub_process_status(self):
+        "Query sub process status."
+        results = []
+        if self.resources is None:
+            result = self._query_each_sub_process("localhost", 0)
+            results.append(result)
+
+        else:
+            host_list = list(self.resources.keys())
+            for host, _ in self.resources.items():
+                node_rank = host_list.index(host)
+                result = self._query_each_sub_process(host, node_rank)
+                results.append(result)
+        if all(status for status in results):
+            status = True
+        else:
+            status = False
+        return status
+
+    def query_once(self):
+        """
+        Query job status once (non-blocking).
+        There are three kinds of status for a Job:
+            RUNNING: The job is running.
+            COMPLETED_OR_IDLE: The job is completed or idle.
+            TRANSITIONAL: The job is starting or stopping.
+
+        Returns:
+            JobStatus: Current job status
+        """
+        return self._query_status()
+
+    def start_monitoring_service(
+        self, interval=10, enable_log_collection=True, enable_diagnostic=True
+    ):
+        """
+        Start independent monitoring service (non-blocking).
+
+        Args:
+            interval (int): Monitor interval in seconds
+            enable_log_collection (bool): Enable log collection
+            enable_diagnostic (bool): Enable diagnostic report generation
+
+        Returns:
+            MonitorService: Monitor service instance
+        """
+        monitor_service = MonitorService(self.config, self, interval)
+        monitor_service.start_monitoring(
+            enable_log_collection=enable_log_collection, enable_diagnostic=enable_diagnostic
+        )
+        logger.info(f"Independent monitoring service started with interval={interval}s")
+        return monitor_service
+
+    def query(self, interval=10, timeout=None):
+        """
+        Query job status and log with optional timeout (blocking).
+        There are three kinds of status for a Job:
+            RUNNING: The job is running.
+            COMPLETED_OR_IDLE: The job is completed or idle.
+            TRANSITIONAL: The job is starting or stopping.
+
+        Args:
+            interval (int, optional): The interval of querying job status. Default: 10.
+            timeout (float, optional): The timeout of query job status, if None, the query will keep indefinitely. Default: None.
+
+        Returns:
+            None
+
+        Warning:
+                    This method is blocking and should be used with caution.
+                                Consider using query_once() or start_monitoring_service() for non-blocking alternatives.
+        """
+        logger.warning(
+            "Using blocking query method. Consider using query_once() or start_monitoring_service()"
+        )
+
+        if timeout is None:
+            logger.warning("Entering indefinite blocking query loop. Press Ctrl+C to exit.")
+            try:
+                while True:
+                    job_status = self._query_status()
+                    logger.info(f"Job status: {job_status.name}")
+                    time.sleep(interval)
+            except KeyboardInterrupt:
+                logger.info("Query interrupted by user")
+        else:
+            start_time = time.time()
+            cur_time = time.time()
+            while cur_time - start_time < timeout:
+                job_status = self._query_status()
+                logger.info(f"Job status: {job_status.name}")
+                time.sleep(interval)
+                cur_time = time.time()
+            logger.info(f"Query timeout reached ({timeout}s)")
