@@ -22,6 +22,7 @@ from flagscale.runner.runner_train import (
 # from flagscale.runner.runner_base import RunnerBase
 from flagscale.runner.utils import (
     flatten_dict_to_args,
+    flatten_dict_to_args_verl,
     get_free_port,
     get_nnodes,
     get_nproc_per_node,
