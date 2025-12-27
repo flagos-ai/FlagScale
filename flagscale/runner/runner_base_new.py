@@ -6,11 +6,13 @@ from omegaconf import DictConfig
 from flagscale.runner.runner_factory import RunnerFactory
 from flagscale.runner.utils import parse_hostfile
 
+# None --> native
+# native --> {task_type}_native in inner Factory registry
 TASK_TO_BACKEND_MAP = {
     "train": ["megatron", "torchrun"],
     "inference": ["vllm"],
-    "compress": ["compress_native"],
-    "serve": ["vllm", "sglang", "llama_cpp", "serve_native"],
+    "compress": ["native", None],
+    "serve": ["vllm", "sglang", "llama_cpp", "native", None],
     "rl": ["verl"],
 }
 
@@ -28,21 +30,27 @@ class Runner(ABC):
             if backend_attr is None:
                 backend_attr = self.config.serve[0]["engine"]
 
-        # backend is required for train and inference
+        # backend is required for train / inference / rl
         if self.task_type in ("train", "inference", "rl"):
             assert backend_attr is not None, (
                 f"backend_type is required for task_type='{self.task_type}'. "
                 f"Allowed backends: {TASK_TO_BACKEND_MAP[self.task_type]}"
             )
-            self.backend_type = backend_attr
+            backend_type = backend_attr
         else:
-            # backend is optional for compress / serve
-            self.backend_type = backend_attr or f"{self.task_type}_native"
+            # compress / serve: backend optional
+            backend_type = backend_attr or "native"
+
+        # normalize native → {task_type}_native
+        if backend_type == "native":
+            backend_type = f"{self.task_type}_native"
+
+        self.backend_type = backend_type
 
         # validate task_type and backend_type compatibility
         allowed_backends = TASK_TO_BACKEND_MAP[self.task_type]
         assert self.backend_type in allowed_backends, (
-            f"Unsupported backend type '{self.backend_type}' for task_type='{self.task_type}'. "
+            f"Unsupported backend type '{backend_attr}' for task_type='{self.task_type}'. "
             f"Allowed backends: {allowed_backends}"
         )
 
