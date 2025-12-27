@@ -101,7 +101,7 @@ class SshLauncher(LauncherBase):
         with_test=False,
         dryrun=False,
         cur_envs=None,
-        enable_monitoring=True,
+        enable_monitoring=False,
     ):
         export_cmd = []
         for k, v in self.user_envs.items():
@@ -131,6 +131,25 @@ class SshLauncher(LauncherBase):
                 self.backend.node_specific.get(host, {}) if self.backend.node_specific else {}
             )
             cmd = update_cmd_with_node_specific_config(cmd, node_specific_config)
+        elif self.task_type == "rl":
+            ray_cmd = []
+            if self.resources is not None:
+                runtime_env = self.config.experiment.runner.get(
+                    "runtime_env", 'third_party/verl/verl/trainer/runtime_env.yaml'
+                )
+                ray_dashboard_port = self.config.experiment.runner.get("ray_dashboard_port", 8265)
+                ray_cmd = [
+                    'ray',
+                    'job',
+                    'submit',
+                    f'--address=http://{host}:{ray_dashboard_port}',
+                    f'--runtime-env={runtime_env}',
+                    '--no-wait',
+                    '--',
+                ]
+            cmd = shlex.join(
+                ray_cmd + export_cmd + ['python3', '-m'] + [self.user_script] + self.user_args
+            )
         else:
             cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
 
@@ -142,6 +161,8 @@ class SshLauncher(LauncherBase):
             logging_config = self.config.logging
         elif self.task_type == "train":
             logging_config = self.config.train.system.logging
+        elif self.task_type == "rl":
+            logging_config = self.config.system.logging
         # todo: unify logging configs of all tasks
         if self.task_type == "train":
             host_run_script_file = self.backend.generate_run_script(
@@ -153,6 +174,16 @@ class SshLauncher(LauncherBase):
                 with_test=with_test,
                 root_dir=node_specific_config.get("build_dir", None),
                 enable_monitoring=enable_monitoring,
+            )
+        elif self.task_type == "rl":
+            host_run_script_file = self.backend.generate_run_script(
+                self.config,
+                host,
+                node_rank,
+                cmd,
+                background=True,
+                with_test=with_test,
+                resources=self.resources,
             )
         else:
             host_run_script_file = self.backend.generate_run_script(
@@ -202,6 +233,20 @@ class SshLauncher(LauncherBase):
             nnodes_from_args = runner_config.get("nnodes", None)
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
             available_ip = list(self.resources.keys())[0]
+            if self.task_type == "rl":
+                available_port = 6379
+                self._run_each(
+                    'localhost',
+                    available_ip,
+                    available_port,
+                    1,
+                    0,
+                    0,
+                    with_test=with_test,
+                    dryrun=dryrun,
+                    cur_envs=self.user_envs,
+                )
+                return None
             available_port = get_free_port()
             if self.task_type == "train":
                 num_processes = min(nnodes, _MAX_CPU_COUNT)
@@ -345,6 +390,15 @@ class SshLauncher(LauncherBase):
                     args = (host, node_rank)
                     tasks.append(args)
                 pool.starmap(self._stop_each, tasks)
+        elif self.task_type == "rl":
+            num_processes = min(nnodes, _MAX_CPU_COUNT)
+            cmds_config = self.config.experiment.get("cmds", None)
+            if cmds_config:
+                before_start = cmds_config.get("before_start", "")
+            with multiprocessing.Pool(processes=num_processes) as pool:
+                tasks = []
+                for node_rank, (host, _) in enumerate(self.resources.items()):
+                    run_ssh_command(host, f"{before_start};ray stop")
         else:
             for node_rank, (host, _) in enumerate(self.resources.items()):
                 if node_rank >= nnodes:
