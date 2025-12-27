@@ -487,7 +487,7 @@ def is_master(config, resources=None):
     if resources:
         master = list(resources.keys())[0]
         if is_ip_addr(master):
-            return get_ip_addr() == master
+            return get_ip_addr() in [master, "127.0.0.1"]
         else:
             output = subprocess.run(
                 "hostname", check=True, shell=True, text=True, capture_output=True

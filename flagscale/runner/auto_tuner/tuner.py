@@ -8,6 +8,8 @@ import shutil
 import sys
 import time
 
+from abc import ABC, abstractmethod
+
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.auto_tuner.generate import Generator, ServeGenerator
@@ -22,13 +24,76 @@ from flagscale.runner.auto_tuner.prune.pruner import Pruner
 from flagscale.runner.auto_tuner.record.recorder import Recorder, ServeRecorder
 from flagscale.runner.auto_tuner.search.searcher import Searcher, ServeSearcher
 from flagscale.runner.runner_base import JobStatus
-from flagscale.runner.runner_serve import SSHServeRunner
-from flagscale.runner.runner_train import SSHTrainRunner
 from flagscale.runner.utils import parse_hostfile
 
+FLAGSCALE_USE_V1 = os.environ.get("FLAGSCALE_USE_V1", "1").lower() in ("1", "true")
 
-class AutoTuner:
+if FLAGSCALE_USE_V1:
+    from flagscale.runner.runner_base_v1 import Runner
 
+    SSHServeRunner = Runner
+    SSHTrainRunner = Runner
+else:
+    from flagscale.runner.runner_serve import SSHServeRunner
+    from flagscale.runner.runner_train import SSHTrainRunner
+
+
+class AutoTunerBase(ABC):
+    @abstractmethod
+    def run(self, *args, **kwargs):
+        raise NotImplementedError
+
+    @abstractmethod
+    def tune(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def gen(self):
+        """Generate a task to run."""
+        # 1. Get a strategy from searcher
+        # 2. Whether prune by pruner
+        # 3. If not pruned, generate the task by generator
+        strategy = self.searcher.search()
+        while strategy and (self.pruner is not None and self.pruner.prune(strategy, self.history)):
+            strategy = self.searcher.search()
+        if strategy:
+            self.idx += 1
+            strategy["idx"] = self.idx
+            pruned_count = self.pruner.pruned_count if self.pruner is not None else 0
+            pruned_by_memory_model = (
+                self.pruner.pruned_by_memory_model if self.pruner is not None else 0
+            )
+            if "memory_model" in self.config.experiment.auto_tuner:
+                self.logger.info(
+                    f"Searching {self.idx+pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy, {pruned_by_memory_model} by memory model."
+                )
+            else:
+                self.logger.info(
+                    f"Searching {self.idx+pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy."
+                )
+            self.logger.info(f"Generate task_{self.idx}")
+            self.cur_strategy = strategy
+            self.cur_task = self.generator.gen(strategy)
+        else:
+            self.cur_strategy = None
+
+    def need_stop(self):
+        """Judge whether need to stop tuning."""
+        end_time = time.time()
+        # If the max time of tuner is reached, stop
+        if self.max_time:
+            if end_time - self.start_time > self.max_time:
+                return True
+
+        # If no task to tune, stop
+        if self.searcher.has_done():
+            return True
+
+        # TODO: Add task limits to control the tuner
+
+        return False
+
+
+class TrainAutoTuner(AutoTunerBase):
     def __init__(self, config: DictConfig):
         # Set logger
         OmegaConf.set_struct(config, False)
@@ -242,55 +307,10 @@ class AutoTuner:
             enable_monitoring = best_task.experiment.runner.get("enable_monitoring", False)
             runner.run(monitor=True, interval=60, enable_monitoring=enable_monitoring)
 
-    def need_stop(self):
-        """Judge whether need to stop tuning."""
-        end_time = time.time()
-        # If the max time of tuner is reached, stop
-        if self.max_time:
-            if end_time - self.start_time > self.max_time:
-                return True
-
-        # If no task to tune, stop
-        if self.searcher.has_done():
-            return True
-
-        # TODO: Add task limits to control the tuner
-
-        return False
-
     def checkout(self, mode="performance"):
         if not self.has_checkout:
             self.searcher.algo.checkout(mode)
             self.has_checkout = True
-
-    def gen(self):
-        """Generate a task to run."""
-        # 1. Get a strategy from searcher
-        # 2. Whether prune by pruner
-        # 3. If not pruned, generate the task by generator
-        strategy = self.searcher.search()
-        while strategy and (self.pruner is not None and self.pruner.prune(strategy, self.history)):
-            strategy = self.searcher.search()
-        if strategy:
-            self.idx += 1
-            strategy["idx"] = self.idx
-            pruned_count = self.pruner.pruned_count if self.pruner is not None else 0
-            pruned_by_memory_model = (
-                self.pruner.pruned_by_memory_model if self.pruner is not None else 0
-            )
-            if "memory_model" in self.config.experiment.auto_tuner:
-                self.logger.info(
-                    f"Searching {self.idx+pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy, {pruned_by_memory_model} by memory model."
-                )
-            else:
-                self.logger.info(
-                    f"Searching {self.idx+pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy."
-                )
-            self.logger.info(f"Generate task_{self.idx}")
-            self.cur_strategy = strategy
-            self.cur_task = self.generator.gen(strategy)
-        else:
-            self.cur_strategy = None
 
     def run(self, task=None):
         # Instantiate a runner and run the task
@@ -322,7 +342,10 @@ class AutoTuner:
                 break
             # If the task is completed or idle, stop monitoring
             try:
-                status = self.runner._query_status()
+                if FLAGSCALE_USE_V1:
+                    status = self.runner.launcher._query_status()
+                else:
+                    status = self.runner._query_status()
                 self.logger.info(f"task_{self.cur_strategy['idx']} status: {status.name}")
                 if status == JobStatus.COMPLETED_OR_IDLE:
                     break
@@ -334,7 +357,10 @@ class AutoTuner:
                         break
 
                 # Add sub process monitor
-                sub_process = self.runner._query_sub_process_status()
+                if FLAGSCALE_USE_V1:
+                    sub_process = self.runner.launcher._query_sub_process_status()
+                else:
+                    sub_process = self.runner._query_sub_process_status()
                 if sub_process:
                     sub_process_running = True
 
@@ -378,7 +404,7 @@ class AutoTuner:
         return None
 
 
-class ServeAutoTunner(AutoTuner):
+class ServeAutoTuner(AutoTunerBase):
     def __init__(self, config: DictConfig):
         # Set logger
         OmegaConf.set_struct(config, False)
