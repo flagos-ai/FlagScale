@@ -38,7 +38,7 @@ def run_node(
     with_test,
     dryrun,
     cur_envs,
-    enable_monitor,
+    enable_monitoring,
 ):
     cur_envs = update_nodes_envs(user_envs, host, resource_info)
     # Get the number of visible devices from the environment variable, e.g. CUDA_VISIBLE_DEVICES, MLU_VISIBLE_DEVICES
@@ -63,7 +63,7 @@ def run_node(
         with_test=with_test,
         dryrun=dryrun,
         cur_envs=cur_envs,
-        enable_monitoring=enable_monitor,
+        enable_monitoring=enable_monitoring,
     )
 
 
