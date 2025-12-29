@@ -469,26 +469,36 @@ class SshLauncher(LauncherBase):
         elif self.task_type == "serve":
             logging_config = self.config.logging
         result = ""
-        if host != "localhost":
-            ssh_port = self.config.experiment.runner.get("ssh_port", 22)
-            # Step 1: make sure the scripts_dir exists on the remote host
-            run_ssh_command(host, f"mkdir -p {logging_config.scripts_dir}", ssh_port, query=True)
-            # Step 2: copy the host_run_script_file to the remote host
-            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
-            if no_shared_fs:
-                run_scp_command(host, host_query_script_file, logging_config.scripts_dir, ssh_port)
-            # Step 3: run the host_run_script_file on the remote host
-            try:
-                result = run_ssh_command(
-                    host, f"bash {host_query_script_file}", ssh_port, query=True
-                )
-            except Exception as e:
-                logger.error(f"Failed to query job status on {host}: {e}")
-        else:
+        if self.task_type == "serve":
             try:
                 result = run_local_command(f"bash {host_query_script_file}", query=True)
             except Exception as e:
                 logger.error(f"Failed to query job status on {host}: {e}")
+        else:
+            if host != "localhost":
+                ssh_port = self.config.experiment.runner.get("ssh_port", 22)
+                # Step 1: make sure the scripts_dir exists on the remote host
+                run_ssh_command(
+                    host, f"mkdir -p {logging_config.scripts_dir}", ssh_port, query=True
+                )
+                # Step 2: copy the host_run_script_file to the remote host
+                no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+                if no_shared_fs:
+                    run_scp_command(
+                        host, host_query_script_file, logging_config.scripts_dir, ssh_port
+                    )
+                # Step 3: run the host_run_script_file on the remote host
+                try:
+                    result = run_ssh_command(
+                        host, f"bash {host_query_script_file}", ssh_port, query=True
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to query job status on {host}: {e}")
+            else:
+                try:
+                    result = run_local_command(f"bash {host_query_script_file}", query=True)
+                except Exception as e:
+                    logger.error(f"Failed to query job status on {host}: {e}")
         result = result.stdout.rstrip() if result else ""
         return result
 
@@ -526,10 +536,9 @@ class SshLauncher(LauncherBase):
     def _query_status(self):
         "Query Job status."
         results = []
-        if self.resources is None:
+        if self.resources is None or self.task_type == "serve":
             result = self._query_each("localhost", 0)
             results.append(result)
-
         else:
             host_list = list(self.resources.keys())
             for host, _ in self.resources.items():
