@@ -1,3 +1,4 @@
+import asyncio
 import multiprocessing
 import os
 import shlex
@@ -6,10 +7,13 @@ import time
 
 from abc import ABC, abstractmethod
 
+from flagscale.runner.backend import _get_profile_args, _get_serve_engine_args, _reset_serve_port
 from flagscale.runner.elastic.monitor_service import MonitorService
 from flagscale.runner.runner_base import JobStatus
 from flagscale.runner.runner_train import _get_runner_cmd_train
 from flagscale.runner.utils import (
+    benchmark,
+    dummy_random_input,
     get_free_port,
     get_nnodes,
     get_nproc_per_node,
@@ -393,7 +397,10 @@ class SshLauncher(LauncherBase):
 
     def _generate_query_script(self, host, node_rank):
         """Genetrate the query script for each host."""
-        logging_config = self.config.train.system.logging
+        if self.task_type == "train":
+            logging_config = self.config.train.system.logging
+        elif self.task_type == "serve":
+            logging_config = self.config.logging
 
         host_query_script_file = os.path.join(
             logging_config.scripts_dir, f"host_{node_rank}_{host}_query.sh"
@@ -423,7 +430,10 @@ class SshLauncher(LauncherBase):
 
     def _generate_query_sub_process_script(self, host, node_rank):
         """Genetrate the query script for each host."""
-        logging_config = self.config.train.system.logging
+        if self.task_type == "train":
+            logging_config = self.config.train.system.logging
+        elif self.task_type == "serve":
+            logging_config = self.config.logging
 
         host_query_sub_process_script_file = os.path.join(
             logging_config.scripts_dir, f"host_{node_rank}_{host}_query_sub_process.sh"
@@ -454,7 +464,10 @@ class SshLauncher(LauncherBase):
     def _query_each(self, host, node_rank):
         "Query each node status."
         host_query_script_file = self._generate_query_script(host, node_rank)
-        logging_config = self.config.train.system.logging
+        if self.task_type == "train":
+            logging_config = self.config.train.system.logging
+        elif self.task_type == "serve":
+            logging_config = self.config.logging
         result = ""
         if host != "localhost":
             ssh_port = self.config.experiment.runner.get("ssh_port", 22)
@@ -482,7 +495,10 @@ class SshLauncher(LauncherBase):
     def _query_each_sub_process(self, host, node_rank):
         "Query each node sub process status."
         host_query_script_file = self._generate_query_sub_process_script(host, node_rank)
-        logging_config = self.config.train.system.logging
+        if self.task_type == "train":
+            logging_config = self.config.train.system.logging
+        elif self.task_type == "serve":
+            logging_config = self.config.logging
         result = ""
         if host != "localhost":
             ssh_port = self.config.experiment.runner.get("ssh_port", 22)
@@ -616,3 +632,80 @@ class SshLauncher(LauncherBase):
                 time.sleep(interval)
                 cur_time = time.time()
             logger.info(f"Query timeout reached ({timeout}s)")
+
+    def _serve_alive(self):
+        engine_args = _get_serve_engine_args(self.config)
+        model_name = engine_args.get("served_model_name", None) or engine_args.get("model", None)
+        self.port = engine_args.get("port", None)
+        self.host = engine_args.get("host", None)
+        if not model_name:
+            raise ValueError("No model specified in config file.")
+
+        from openai import OpenAI
+
+        # Modify OpenAI's API key and API base to use vLLM's API server.
+        api_key = "EMPTY"
+        api_url = f"http://{self.host}:{self.port}/v1"
+        logger.info(f"Testing API {api_url}")
+
+        try:
+            client = OpenAI(api_key=api_key, base_url=api_url)
+            messages = [{"role": "user", "content": "who are you?"}]
+            response = client.chat.completions.create(model=model_name, messages=messages)
+        except Exception as e:
+            # logger.info(f"API {api_url} is not ready, please wait a moment")
+            return False
+
+        return True
+
+    def _profile_serve(self):
+        from vllm.transformers_utils.tokenizer import get_tokenizer
+
+        tokenizer_mode = "auto"
+        engine_args = _get_serve_engine_args(self.config)
+
+        trust_remote_code = engine_args.get("trust_remote_code", False)
+
+        served_model_name = engine_args.get("served_model_name", None)
+        model_name = engine_args.get("model", None)
+        self.port = engine_args.get("port", None)
+        self.host = engine_args.get("host", None)
+
+        if not model_name:
+            raise ValueError("No model specified in config file.")
+
+        tokenizer = get_tokenizer(
+            model_name, tokenizer_mode=tokenizer_mode, trust_remote_code=trust_remote_code
+        )
+
+        profile_args = _get_profile_args(self.config)
+        prefix_len = profile_args.get("prefix_len", 0)
+        input_len = profile_args.get("input_len", 1024)
+        output_len = profile_args.get("output_len", 1024)
+        num_prompts = profile_args.get("num_prompts", 200)
+        range_ratio = profile_args.get("range_ratio", 0.5)
+        dummy_input_requests = dummy_random_input(
+            tokenizer=tokenizer,
+            prefix_len=prefix_len,
+            input_len=input_len,
+            output_len=output_len,
+            num_prompts=num_prompts,
+            range_ratio=range_ratio,
+        )
+        api_url = f"http://{self.host}:{self.port}/v1/chat/completions"
+        logger.info(f"Profiling API {api_url}")
+
+        ### allow metric = [\"ttft\", \"tpot\", \"itl\", \"e2el\"]
+        ### allow percentiles = [\"25,50,75\"]
+        result = asyncio.run(
+            benchmark(
+                api_url,
+                model=model_name,
+                served_model_name=served_model_name,
+                tokenizer=tokenizer,
+                input_requests=dummy_input_requests,
+                selected_percentile_metrics="ttft,tpot,itl,e2el".split(","),
+                selected_percentiles=[float(99)],
+            )
+        )
+        return result
