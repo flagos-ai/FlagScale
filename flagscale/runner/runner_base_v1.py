@@ -7,7 +7,7 @@ from flagscale.runner.runner_factory import RunnerFactory
 from flagscale.runner.utils import parse_hostfile
 
 # None --> native
-# native --> {task_type}_native in inner Factory registry
+# native --> native_{task_type} in inner Factory registry
 TASK_TO_BACKEND_MAP = {
     "train": ["megatron", "torchrun"],
     "inference": ["vllm"],
@@ -41,9 +41,9 @@ class Runner(ABC):
             # compress / serve: backend optional
             backend_type = backend_attr or "native"
 
-        # normalize native → {task_type}_native
+        # normalize native → native_{task_type}
         if backend_type == "native":
-            backend_type = f"{self.task_type}_native"
+            backend_type = f"native_{self.task_type}"
 
         self.backend_type = backend_type
 

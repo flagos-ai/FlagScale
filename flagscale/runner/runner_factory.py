@@ -2,12 +2,11 @@ from typing import Dict, Type, TypeVar
 
 from flagscale.runner.backend import (
     BackendBase,
-    CompressNativeBackend,
     LlamaCppBackend,
     MegatronBackend,
-    ServeNativeBackend,
+    NativeCompressBackend,
+    NativeServeBackend,
     SglangBackend,
-    TorchBackend,
     VerlBackend,
     VllmBackend,
 )
@@ -52,13 +51,12 @@ class RunnerFactory:
 
 # backends
 RunnerFactory.register_backend("megatron", MegatronBackend)
-RunnerFactory.register_backend("torchrun", TorchBackend)
 RunnerFactory.register_backend("vllm", VllmBackend)
 RunnerFactory.register_backend("sglang", SglangBackend)
 RunnerFactory.register_backend("llama_cpp", LlamaCppBackend)
 RunnerFactory.register_backend("verl", VerlBackend)
-RunnerFactory.register_backend("compress_native", CompressNativeBackend)
-RunnerFactory.register_backend("serve_native", ServeNativeBackend)
+RunnerFactory.register_backend("native_compress", NativeCompressBackend)
+RunnerFactory.register_backend("native_serve", NativeServeBackend)
 
 # launchers
 RunnerFactory.register_launcher("ssh", SshLauncher)

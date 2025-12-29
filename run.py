@@ -5,6 +5,7 @@ import hydra
 
 from omegaconf import DictConfig, OmegaConf
 
+from flagscale.logger import logger
 from flagscale.runner.autotuner_factory import AutotunerFactory
 from flagscale.runner.runner_base_v1 import Runner
 from flagscale.runner.runner_compress import SSHCompressRunner
@@ -75,8 +76,12 @@ def get_runner(config: DictConfig, task_type: str):
         else:
             raise NotImplementedError(f"Task type '{task_type}' is not supported by cloud runner")
 
-    if FLAGSCALE_USE_V1:
+    if FLAGSCALE_USE_V1 and config.experiment.task.get("backend", None) not in {"pi0", "robotics"}:
         return Runner(config)
+
+    logger.warning(
+        "Using legacy runner, which will be removed in future. Please use new runner instead."
+    )
 
     return LEGACY_RUNNER_MAP[task_type](config)
 
@@ -100,8 +105,6 @@ def execute_action(runner, action: str, task_type: str, config: DictConfig) -> N
             runner.run(enable_monitoring=enable_monitoring)
 
             if enable_monitoring:
-                from flagscale.logger import logger
-
                 logger.info("Monitor service will be started automatically when training begins.")
         else:
             runner.run()

@@ -547,14 +547,6 @@ class MegatronBackend(BackendBase):
         return host_stop_script_file
 
 
-class TorchBackend(BackendBase):
-    def generate_run_script(self, *args, **kwargs):
-        pass
-
-    def generate_stop_script(self, *args, **kwargs):
-        pass
-
-
 class VllmBackend(BackendBase):
     def __init__(self, config: DictConfig):
         super().__init__(config)
@@ -1703,7 +1695,7 @@ class LlamaCppBackend(BackendBase):
         return host_stop_script_file
 
 
-class CompressNativeBackend(BackendBase):
+class NativeCompressBackend(BackendBase):
     def __init__(self, config: DictConfig):
         super().__init__(config)
         self.task_type = getattr(self.config.experiment.task, "type", None)
@@ -1814,7 +1806,7 @@ class CompressNativeBackend(BackendBase):
         return host_stop_script_file
 
 
-class ServeNativeBackend(BackendBase):
+class NativeServeBackend(BackendBase):
     def __init__(self, config: DictConfig):
         super().__init__(config)
         self.task_type = getattr(self.config.experiment.task, "type", None)
