@@ -7,7 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from flagscale.logger import logger
 from flagscale.runner.autotuner_factory import AutotunerFactory
-from flagscale.runner.runner_base_v1 import Runner
+from flagscale.runner.runner_base import Runner
 from flagscale.runner.runner_compress import SSHCompressRunner
 from flagscale.runner.runner_inference import SSHInferenceRunner
 from flagscale.runner.runner_rl import SSHRLRunner

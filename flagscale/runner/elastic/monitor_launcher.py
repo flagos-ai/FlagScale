@@ -13,7 +13,7 @@ import time
 from omegaconf import OmegaConf
 
 from flagscale.runner.elastic.monitor_service import MonitorService
-from flagscale.runner.runner_base import JobStatus
+from flagscale.runner.runner_base_legacy import JobStatus
 from flagscale.runner.utils import logger
 
 

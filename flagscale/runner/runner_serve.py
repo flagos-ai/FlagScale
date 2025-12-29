@@ -16,7 +16,7 @@ import psutil
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.runner_base import JobStatus, RunnerBase
+from flagscale.runner.runner_base_legacy import JobStatus, RunnerBase
 from flagscale.runner.utils import (
     ResourceManager,
     benchmark,

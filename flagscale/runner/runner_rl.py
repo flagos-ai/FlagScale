@@ -7,7 +7,7 @@ from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.runner_base import JobStatus, RunnerBase
+from flagscale.runner.runner_base_legacy import JobStatus, RunnerBase
 from flagscale.runner.utils import (
     flatten_dict_to_args_verl,
     get_free_port,

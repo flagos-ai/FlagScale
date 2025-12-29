@@ -24,13 +24,13 @@ from flagscale.runner.auto_tuner.prune.pruner import Pruner
 from flagscale.runner.auto_tuner.record.recorder import Recorder
 from flagscale.runner.auto_tuner.search.searcher import Searcher
 from flagscale.runner.auto_tuner.tuner import AutoTunerBase
-from flagscale.runner.runner_base import JobStatus
+from flagscale.runner.runner_base_legacy import JobStatus
 from flagscale.runner.utils import parse_hostfile
 
 FLAGSCALE_USE_V1 = os.environ.get("FLAGSCALE_USE_V1", "1").lower() in ("1", "true")
 
 if FLAGSCALE_USE_V1:
-    from flagscale.runner.runner_base_v1 import Runner
+    from flagscale.runner.runner_base import Runner
 
     SSHTrainRunner = Runner
 else:

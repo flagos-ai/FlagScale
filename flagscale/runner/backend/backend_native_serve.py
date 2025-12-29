@@ -1,12 +1,9 @@
-import copy
 import json
 import os
 
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend import BackendBase
-
-# from flagscale.runner.runner_base import RunnerBase
 from flagscale.runner.utils import (
     flatten_dict_to_args,
     flatten_dict_to_args_verl,
@@ -16,10 +13,9 @@ from flagscale.runner.utils import (
     logger,
     parse_hostfile,
 )
-from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
 
 
-def _get_args_sglang(config: DictConfig):
+def _get_args_ray(config: DictConfig):
     # see the following link for more details
     # https://github.com/facebookresearch/hydra/discussions/2750
     config_dict = OmegaConf.to_container(config, resolve=True)
@@ -116,17 +112,27 @@ def _update_config_serve(config: DictConfig):
     OmegaConf.set_struct(config, True)
 
 
-class SglangBackend(BackendBase):
+class NativeServeBackend(BackendBase):
     def __init__(self, config: DictConfig):
         super().__init__(config)
         self.task_type = getattr(self.config.experiment.task, "type", None)
         assert self.task_type == "serve", f"Unsupported task type: {self.task_type}"
+        self.deploy_config = self.config.experiment.get("runner", {}).get("deploy", {})
+        self.use_fs_serve = self.deploy_config.get("use_fs_serve", True)
         self._prepare()
 
     def _prepare(self):
         _update_config_serve(self.config)
+        self.user_args = _get_args_ray(self.config)
         self.user_envs = self.config.experiment.get("envs", {})
-        self.user_args = _get_args_sglang(self.config)
+        entrypoint = self.config.experiment.task.get("entrypoint", None)
+
+        if entrypoint:
+            self.user_script = entrypoint
+        elif self.use_fs_serve:
+            self.user_script = "flagscale/serve/run_fs_serve_vllm.py"
+        else:
+            self.user_script = "flagscale/serve/run_serve.py"
 
         hostfile_path = self.config.experiment.runner.get("hostfile", None)
         self.resources = None
@@ -148,18 +154,7 @@ class SglangBackend(BackendBase):
             else:
                 raise ValueError(f"The hostfile {hostfile_path} does not exist")
 
-        if (
-            self.config.experiment.get("runner", {})
-            .get("deploy", {})
-            .get("prefill_decode_disaggregation", False)
-        ):
-            self.user_script = "flagscale/serve/run_disagg_xpyd_router.py"
-        elif not self.config.experiment.runner.deploy.use_fs_serve:
-            self.user_script = "flagscale/serve/run_inference_engine.py"
-        else:
-            self.user_script = "flagscale/serve/run_fs_serve_vllm.py"
-
-        logger.info("\n************** Sglang Configuration **************")
+        logger.info("\n************** Ray Configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 
     def generate_run_script(self, config, host, node_rank, cmd, background=True, with_test=False):
@@ -192,16 +187,14 @@ class SglangBackend(BackendBase):
             before_start_cmd = ""
 
         cmd += f" --log-dir={logging_config.log_dir}"
-        logger.info(f"in _generate_run_script_serve, cmd: {cmd}")
 
         try:
-            import sglang
+            import vllm
 
-            sglang_path = os.path.dirname(sglang.__path__[0])
+            vllm_path = os.path.dirname(vllm.__path__[0])
         except Exception:
-            sglang_path = f"{root_dir}/sglang"
+            vllm_path = f"{root_dir}/vllm"
 
-        deploy_config = config.experiment.get("runner", {}).get("deploy", {})
         envs = config.experiment.get("envs", {})
 
         with open(host_run_script_file, "w") as f:
@@ -212,9 +205,9 @@ class SglangBackend(BackendBase):
             f.write(f"\n")
 
             f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
-            f.write(f"    export PYTHONPATH={sglang_path}:{root_dir}\n")
+            f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
             f.write(f"else\n")
-            f.write(f'    export PYTHONPATH="$PYTHONPATH:{sglang_path}:{root_dir}"\n')
+            f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
             f.write(f"fi\n")
             f.write(f"\n")
 
@@ -224,9 +217,9 @@ class SglangBackend(BackendBase):
             f.write(f"{envs_str}\n")
 
             if nodes:
+                f.write(f"ray_path=$(realpath $(which ray))\n")
                 master_ip = nodes[0][0]
                 target_port = nodes[0][1].get("port")
-                master_port = target_port if target_port else get_free_port()
 
                 f.write(f"# clean nodes \n")
                 if len(nodes) > 1:
@@ -236,7 +229,7 @@ class SglangBackend(BackendBase):
                         if not node.get("slots", None):
                             raise ValueError(f"Number of slots must be specified for node {node}.")
 
-                        node_cmd = "pkill -f 'sglang.launch_server' && pkill -f python"
+                        node_cmd = f"${{ray_path}} stop"
                         if before_start_cmd:
                             node_cmd = f"{before_start_cmd} && " + node_cmd
                         if envs_str:
@@ -248,17 +241,19 @@ class SglangBackend(BackendBase):
                         f.write(f"{ssh_cmd}\n")
 
                 if before_start_cmd:
-                    f.write(f"{before_start_cmd} && pkill -f 'sglang.launch_server'\n")
+                    f.write(f"{before_start_cmd} && ${{ray_path}} stop\n")
                 else:
-                    f.write(f"pkill -f 'sglang.launch_server'\n")
+                    f.write(f"${{ray_path}} stop\n")
 
                 f.write("pkill -f 'run_inference_engine'\n")
                 f.write("pkill -f 'run_fs_serve_vllm'\n")
                 f.write("pkill -f 'vllm serve'\n")
                 f.write(f"\n")
 
+                master_port = target_port if target_port else get_free_port()
+                address = f"{master_ip}:{master_port}"
+
                 nodes_envs = config.experiment.get("envs", {}).get("nodes_envs", {})
-                node_args = config.experiment.get("node_args", {})
 
                 for index, (ip, node) in enumerate(nodes):
                     per_node_cmd = None
@@ -268,93 +263,45 @@ class SglangBackend(BackendBase):
                         )
 
                     if not node.get("type", None):
-                        raise ValueError(
-                            f"Node type must be specified for node {node}. Available types are 'cpu', 'gpu', or a custom resource name."
-                        )
+                        raise ValueError(f"Node type must be specified for node {node}.")
                     if not node.get("slots", None):
-                        raise ValueError(
-                            f"Number of slots must be specified for node {node}. This can be done by setting the 'slots' attribute."
-                        )
+                        raise ValueError(f"Number of slots must be specified for node {node}.")
 
                     if index == 0:
+                        f.write(f"# start cluster\n")
+                        f.write(f"# master node\n")
+                        if node.type == "gpu":
+                            node_cmd = f"${{ray_path}} start --head --port={master_port} --num-gpus={node.slots}"
+                        elif node.type == "cpu":
+                            node_cmd = f"${{ray_path}} start --head --port={master_port} --num-cpus={node.slots}"
+                        else:
+                            resource = json.dumps({node.type: node.slots}).replace('"', '\"')
+                            node_cmd = f"${{ray_path}} start --head --port={master_port} --resources='{resource}'"
+
                         if per_node_cmd:
-                            f.write(f"{per_node_cmd}\n")
+                            node_cmd = f"{per_node_cmd} && " + node_cmd
+                        if before_start_cmd:
+                            node_cmd = f"{before_start_cmd} && " + node_cmd
+                        f.write(f"{node_cmd}\n")
 
-                    if index != 0:
-                        logger.info(f"generate run script args, config: {config}")
-                        args = None
-                        for item in config.get("serve", []):
-                            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
-                                args = item
-                                break
-                        if args is None:
-                            raise ValueError(
-                                "No 'sglang_model' configuration found in task config."
+                    else:
+                        if index == 1:
+                            f.write(f"\n")
+                            f.write(f"# worker nodes\n")
+
+                        if node.type == "gpu":
+                            node_cmd = (
+                                f"${{ray_path}} start --address={address} --num-gpus={node.slots}"
                             )
-
-                        common_args = copy.deepcopy(args.get("engine_args", {}))
-                        sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
-
-                        if sglang_args.get("dist-init-addr", None):
-                            logger.warning(
-                                f"sglang dist-init-addr:{ sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
+                        elif node.type == "cpu":
+                            node_cmd = (
+                                f"${{ray_path}} start --address={address} --num-cpus={node.slots}"
                             )
-                            was_struct = OmegaConf.is_struct(sglang_args)
-                            OmegaConf.set_struct(sglang_args, False)
-                            sglang_args.pop("dist-init-addr")
-                            if was_struct:
-                                OmegaConf.set_struct(sglang_args, True)
-
-                        command = ["nohup", "python", "-m", "sglang.launch_server"]
-
-                        if common_args.get("model", None):
-                            # if node specific args
-                            if (
-                                node_args.get(ip, None) is not None
-                                and node_args[ip].get("engine_args", None) is not None
-                            ):
-                                for key, value in node_args[ip]["engine_args"].items():
-                                    common_args[key] = value
-                                    logger.info(
-                                        f"node_args[{ip}] overwrite engine_args {key} = {value}"
-                                    )
-
-                            if ARGS_CONVERTER:
-                                converted_args = ARGS_CONVERTER.convert("sglang", common_args)
-                            else:
-                                converted_args = common_args
-
-                            common_args_flatten = flatten_dict_to_args(converted_args, ["model"])
-                            command.extend(common_args_flatten)
-
-                            sglang_args_flatten = flatten_dict_to_args(sglang_args, ["model"])
-                            command.extend(sglang_args_flatten)
                         else:
-                            raise ValueError("Either model should be specified in sglang_model.")
-
-                        command.extend(["--node-rank", str(index)])
-
-                        runner_config = config.experiment.runner
-                        nnodes_conf = runner_config.get("nnodes", None)
-                        addr_conf = runner_config.get("master_addr", None)
-                        port_conf = runner_config.get("master_port", None)
-
-                        if nnodes_conf is None or addr_conf is None or port_conf is None:
-                            raise ValueError(
-                                f"nnodes, master_addr, master_port must be specified in runner when engine is sglang with multi-nodes mode."
+                            resource = json.dumps({node.type: node.slots}).replace('"', '\\"')
+                            node_cmd = (
+                                f"${{ray_path}} start --address={address} --resources='{resource}'"
                             )
-
-                        command.extend(["--nnodes", str(nnodes_conf)])
-                        command.extend(["--dist-init-addr", str(addr_conf) + ":" + str(port_conf)])
-                        command.append("> /dev/null 2>&1 &")
-
-                        if docker_name:
-                            node_cmd = ' '.join(command)
-                        else:
-                            # Directly connecting to a remote Docker environment requires processing the command
-                            command.insert(0, "(")
-                            command.append(") && disown")
-                            node_cmd = ' '.join(command)
 
                         if per_node_cmd:
                             node_cmd = f"{per_node_cmd} && " + node_cmd
@@ -366,13 +313,9 @@ class SglangBackend(BackendBase):
                         ssh_cmd = f'ssh -n -p {ssh_port} {ip} "{node_cmd}"'
                         if docker_name:
                             ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
-
-                        logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
                         f.write(f"{ssh_cmd}\n")
-                    continue
 
             else:
-                # Note: config key device_type is specified for single node serving in neither gpu or cpu.
                 device_type = None
                 nproc_per_node = None
                 if config.experiment.get("runner", None) and config.experiment.runner.get(
@@ -384,14 +327,25 @@ class SglangBackend(BackendBase):
                         raise ValueError(
                             f"nproc_per_node must be specified when device_type {device_type} is specified."
                         )
+
                 node_cmd = None
+                if self.use_fs_serve and config.serve[0].get("engine", None):
+                    f.write(f"ray_path=$(realpath $(which ray))\n")
+                    if not device_type:
+                        node_cmd = f"${{ray_path}} start --head"
+                    elif device_type == "gpu":
+                        node_cmd = f"${{ray_path}} start --head --num-gpus={nproc_per_node}"
+                    elif device_type == "cpu":
+                        node_cmd = f"${{ray_path}} start --head --num-cpus={nproc_per_node}"
+                    else:
+                        resource = json.dumps({device_type: nproc_per_node}).replace('"', '\\"')
+                        node_cmd = f"${{ray_path}} start --head --resources='{resource}'"
 
                 if before_start_cmd:
                     node_cmd = f"{before_start_cmd} && {node_cmd}" if node_cmd else before_start_cmd
                 if node_cmd:
                     f.write(f"{node_cmd}\n")
 
-            logger.info(f"in generate_run_script_serve_sglang, write cmd: {cmd}")
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
             f.write(f"\n")
@@ -399,25 +353,23 @@ class SglangBackend(BackendBase):
             f.write(f"\n")
             f.write(f'cmd="{cmd}"\n')
             f.write(f"\n")
-            # TODO: need a option to control whether to append or overwrite the output file
-            # Now, it always appends to the output file
-            f.write(f"echo '=========== launch task ==========='\n")
+            f.write("echo '=========== launch task (RayBackend) ==========='\n")
+
             if background:
                 f.write(
                     f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
                 f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
+
         os.chmod(host_run_script_file, 0o755)
         return host_run_script_file
 
     def generate_stop_script(self, config, host, node_rank):
-        """
-        Adapted for Sglang process cleanup.
-        """
         logging_config = config.logging
         host_stop_script_file = os.path.join(
             logging_config.scripts_dir, f"host_{node_rank}_{host}_stop.sh"
@@ -427,36 +379,28 @@ class SglangBackend(BackendBase):
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
         cmds_config = config.experiment.get("cmds", None)
-        if cmds_config:
-            after_stop = cmds_config.get("after_stop", "")
-        else:
-            after_stop = ""
-
-        nodes = config.get("nodes", None)
-
         ssh_port = config.experiment.runner.get("ssh_port", 22)
         docker_name = config.experiment.runner.get("docker", None)
-        if cmds_config:
-            before_start_cmd = cmds_config.get("before_start", "")
-        else:
-            before_start_cmd = ""
+        nodes = config.get("nodes", None)
 
-        deploy_config = config.experiment.get("runner", {}).get("deploy", {})
+        after_stop = cmds_config.get("after_stop", "") if cmds_config else ""
+        before_start_cmd = cmds_config.get("before_start", "") if cmds_config else ""
         envs = config.experiment.get("envs", {})
+        envs_str = " && ".join(f"export {key}={value}" for key, value in envs.items())
+
         with open(host_stop_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             f.write("set -x\n")
-            f.write(f"\n")
             f.write(f"{before_start_cmd}\n")
-            f.write(f"\n")
-            envs_str = " && ".join(f"export {key}={value}" for key, value in envs.items())
-            f.write(f"{envs_str}\n")
+            f.write(f"{envs_str}\n\n")
+
+            f.write(f"ray_path=$(realpath $(which ray))\n")
 
             if nodes:
-                f.write(f"# clean nodes\n")
+                f.write(f"# clean nodes \n")
                 if len(nodes) > 1:
                     for ip, node in nodes[1:]:
-                        node_cmd = "pkill -f 'sglang.launch_server' && pkill -f python"
+                        node_cmd = f"${{ray_path}} stop && pkill -f python"
                         if before_start_cmd:
                             node_cmd = f"{before_start_cmd} && " + node_cmd
                         if envs_str:
@@ -467,11 +411,34 @@ class SglangBackend(BackendBase):
                             ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
                         f.write(f"{ssh_cmd}\n")
 
-            f.write("pkill -f 'sglang.launch_server'\n")
+                if before_start_cmd:
+                    f.write(f"{before_start_cmd} && ${{ray_path}} stop\n")
+                else:
+                    f.write(f"${{ray_path}} stop\n")
+            else:
+                node_cmd = None
+                if self.use_fs_serve and config.serve[0].get("engine", None):
+                    node_cmd = f"${{ray_path}} stop"
+                if before_start_cmd:
+                    node_cmd = f"{before_start_cmd} && {node_cmd}" if node_cmd else before_start_cmd
+                if node_cmd:
+                    f.write(f"{node_cmd}\n")
+
+            f.write("pkill -f 'run_inference_engine'\n")
+            f.write("pkill -f 'run_fs_serve_vllm'\n")
+            f.write("pkill -f 'vllm serve'\n")
+            f.write("pkill -f multiprocessing\n")
+
+            f.write("if [ -f " + host_pid_file + " ]; then\n")
+            f.write("    pid=$(cat " + host_pid_file + ")\n")
+            f.write("    pkill -P $pid\n")
+            f.write("    kill $pid\n")
+            f.write("fi\n")
 
             if after_stop:
                 f.write(f"{after_stop}\n")
 
+            f.write("\n")
             f.flush()
             os.fsync(f.fileno())
 

@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 
 from flagscale.runner.backend import _get_profile_args, _get_serve_engine_args, _reset_serve_port
 from flagscale.runner.elastic.monitor_service import MonitorService
-from flagscale.runner.runner_base import JobStatus
+from flagscale.runner.runner_base_legacy import JobStatus
 from flagscale.runner.runner_train import _get_runner_cmd_train
 from flagscale.runner.utils import (
     benchmark,

@@ -5,7 +5,7 @@ import sys
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.runner_base import RunnerBase
+from flagscale.runner.runner_base_legacy import RunnerBase
 from flagscale.runner.utils import (
     get_free_port,
     get_nnodes,
