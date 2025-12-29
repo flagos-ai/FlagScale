@@ -1,5 +1,6 @@
 import copy
 import importlib
+import json
 import os
 import shlex
 import sys
@@ -116,6 +117,19 @@ def _get_serve_engine_args(config, model="vllm_model"):
         raise ValueError(f"No 'engine_args' configuration found in task config: {serve_config}")
 
     return engine_args
+
+
+def _get_profile_args(config, model="vllm_model"):
+    serve_config = config.get("serve", [])
+    if not serve_config:
+        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
+
+    profile_args = {}
+    for item in serve_config:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            profile_args = item.get("profile", {})
+            break
+    return profile_args
 
 
 def _get_args_sglang(config: DictConfig):
@@ -588,8 +602,10 @@ class VllmBackend(BackendBase):
                 .get("prefill_decode_disaggregation", False)
             ):
                 self.user_script = "flagscale/serve/run_disagg_xpyd_router.py"
-            else:
+            elif not self.config.experiment.runner.deploy.use_fs_serve:
                 self.user_script = "flagscale/serve/run_inference_engine.py"
+            else:
+                self.user_script = "flagscale/serve/run_fs_serve_vllm.py"
 
         logger.info("\n************** configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
@@ -1212,8 +1228,10 @@ class SglangBackend(BackendBase):
             .get("prefill_decode_disaggregation", False)
         ):
             self.user_script = "flagscale/serve/run_disagg_xpyd_router.py"
-        else:
+        elif not self.config.experiment.runner.deploy.use_fs_serve:
             self.user_script = "flagscale/serve/run_inference_engine.py"
+        else:
+            self.user_script = "flagscale/serve/run_fs_serve_vllm.py"
 
         logger.info("\n************** Sglang Configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")

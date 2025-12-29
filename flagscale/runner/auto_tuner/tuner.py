@@ -564,9 +564,15 @@ class ServeAutoTuner(AutoTunerBase):
                 break
             # If the task is completed or idle, stop monitoring
             try:
-                status = self.runner._query_status()
+                if FLAGSCALE_USE_V1:
+                    status = self.runner.launcher._query_status()
+                else:
+                    status = self.runner._query_status()
                 if running:
-                    serve_alive = self.runner._serve_alive()
+                    if FLAGSCALE_USE_V1:
+                        serve_alive = self.runner.launcher._serve_alive()
+                    else:
+                        serve_alive = self.runner._serve_alive()
                     if serve_alive:
                         break
                 self.logger.info(f"task_{self.cur_strategy['idx']} status: {status.name}")
@@ -586,7 +592,10 @@ class ServeAutoTuner(AutoTunerBase):
 
         if serve_alive:
             try:
-                result = self.runner._profile_serve()
+                if FLAGSCALE_USE_V1:
+                    result = self.runner.launcher._profile_serve()
+                else:
+                    result = self.runner._profile_serve()
                 self.cur_result = result
             except Exception as e:
                 self.logger.info(f"fail to get profile result {e}")
