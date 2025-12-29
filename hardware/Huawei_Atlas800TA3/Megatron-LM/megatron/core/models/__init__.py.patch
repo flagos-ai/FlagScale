@@ -1,0 +1,7 @@
+diff --git a/megatron/core/models/__init__.py b/megatron/core/models/__init__.py
+index e76ed7485..e69de29bb 100644
+--- a/megatron/core/models/__init__.py
++++ b/megatron/core/models/__init__.py
+@@ -1 +0,0 @@
+-# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+

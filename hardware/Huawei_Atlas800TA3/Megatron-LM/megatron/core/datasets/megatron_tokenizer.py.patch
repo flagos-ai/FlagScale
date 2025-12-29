@@ -1,0 +1,14 @@
+diff --git a/megatron/core/datasets/megatron_tokenizer.py b/megatron/core/datasets/megatron_tokenizer.py
+index 224de24a9..0c38605ac 100644
+--- a/megatron/core/datasets/megatron_tokenizer.py
++++ b/megatron/core/datasets/megatron_tokenizer.py
+@@ -7,7 +7,7 @@ from typing import Any
+ import numpy
+ 
+ 
+-class MegatronLegacyTokenizer(ABC):
++class MegatronTokenizer(ABC):
+     """Abstract class for tokenizer
+ 
+     Absent a config or class-specific tracking of which objects are uniquely identifying, we must
+

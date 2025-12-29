@@ -1,5 +1,5 @@
 diff --git a/megatron/core/tensor_parallel/random.py b/megatron/core/tensor_parallel/random.py
-index 994560e51..4e4d757b0 100644
+index 54cac0e41..4e4d757b0 100644
 --- a/megatron/core/tensor_parallel/random.py
 +++ b/megatron/core/tensor_parallel/random.py
 @@ -24,8 +24,8 @@ from .utils import gather_split_1d_tensor, split_tensor_into_1d_equal_chunks
@@ -13,4 +13,40 @@ index 994560e51..4e4d757b0 100644
  
      HAVE_TE = True
  except ModuleNotFoundError:
+@@ -331,7 +331,6 @@ def model_parallel_cuda_manual_seed(
+     tp_rank: Optional[int] = None,
+     ep_rank: Optional[int] = None,
+     etp_rank: Optional[int] = None,
+-    force_reset_rng: bool = False,
+ ):
+     """Initialize model parallel cuda seed.
+ 
+@@ -362,9 +361,7 @@ def model_parallel_cuda_manual_seed(
+     # Data parallel gets the original seed.
+     data_parallel_seed = seed
+ 
+-    initialize_rng_tracker(
+-        te_rng_tracker, inference_rng_tracker, use_cudagraphable_rng, force_reset=force_reset_rng
+-    )
++    initialize_rng_tracker(te_rng_tracker, inference_rng_tracker, use_cudagraphable_rng)
+     _CUDA_RNG_STATE_TRACKER.reset()
+     # Set the default state.
+     torch.cuda.manual_seed(data_parallel_seed)
+@@ -522,14 +519,11 @@ class CheckpointWithoutOutput(object):
+     """
+     Checkpoint a model or part of the model and release the output.
+ 
+-    For the normal 'checkpoint` function, the outputs of it may be saved by the following
+-    modules for their backward computation. However, the output of the checkpointed function is
++    For the normal 'checkpoint` function, the outputs of it may be cached by the following
++    operations for its backward computation. However, the output of the checkpointed function is
+     re-generated at recomputation, so the output store is not technically needed. This method can
+     manually discard the output in the forward pass and restore it by recomputation in the
+     backward pass to reduce the memory usage.
+-
+-    Due to the reason above, to save memory with this method, the caller should make sure that the
+-    discarded output tensors are directly saved in the following modules for backward computation.
+     """
+ 
+     def __init__(self, fp8=False):
 

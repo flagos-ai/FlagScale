@@ -1,0 +1,30 @@
+diff --git a/megatron/core/transformer/heterogeneous/linear_replacements.py b/megatron/core/transformer/heterogeneous/linear_replacements.py
+index 78ac8d37d..4e3ae9507 100644
+--- a/megatron/core/transformer/heterogeneous/linear_replacements.py
++++ b/megatron/core/transformer/heterogeneous/linear_replacements.py
+@@ -16,8 +16,6 @@ from megatron.core.transformer.transformer_config import TransformerConfig
+ from megatron.core.utils import divide
+ 
+ try:
+-    import transformer_engine as te  # pylint: disable=unused-import
+-
+     from megatron.core.extensions.transformer_engine import TELayerNormColumnParallelLinear
+ 
+     HAVE_TE = True
+@@ -69,7 +67,6 @@ if HAVE_TE:
+             )
+ 
+         def forward(self, x, **kwargs):
+-            """Forward of TELayerNormColumnParallelLinearGathered"""
+             out, bias = super().forward(x)
+             assert bias is None, "bias should be None since we set skip_bias_add=False"
+ 
+@@ -103,7 +100,6 @@ class ColumnParallelLinearGathered(ColumnParallelLinear):
+         runtime_gather_output: bool | None = None,
+         **kwargs,
+     ):
+-        """Forward of ColumnParallelLinearGathered"""
+         out, bias = super().forward(input_, weight, runtime_gather_output)
+         assert bias is None, "bias should be None since we set skip_bias_add=False"
+ 
+

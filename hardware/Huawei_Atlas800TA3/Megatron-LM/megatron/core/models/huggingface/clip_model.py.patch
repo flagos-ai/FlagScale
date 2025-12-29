@@ -1,0 +1,14 @@
+diff --git a/megatron/core/models/huggingface/clip_model.py b/megatron/core/models/huggingface/clip_model.py
+index 7adc7d4fd..91cd0f697 100644
+--- a/megatron/core/models/huggingface/clip_model.py
++++ b/megatron/core/models/huggingface/clip_model.py
+@@ -21,7 +21,7 @@ class SiglipHuggingFaceModel(HuggingFaceModule):
+     Wrapper for Siglip HuggingFace models.
+     """
+ 
+-    # Currently applies to FSDP2 only, not the Megatron FSDP implementation.
++    # Currently applies to FSDP2 only, not the custom FSDP implementation.
+     _fsdp_modules = [SiglipEncoderLayer]
+ 
+     def __init__(self, config):
+

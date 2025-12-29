@@ -1,0 +1,18 @@
+diff --git a/megatron/inference/endpoints/common.py b/megatron/inference/endpoints/common.py
+index 76b352861..e430cc8f0 100644
+--- a/megatron/inference/endpoints/common.py
++++ b/megatron/inference/endpoints/common.py
+@@ -9,10 +9,10 @@ LOCK = threading.Lock()
+ 
+ 
+ def send_do_generate():
+-    choice = torch.tensor([GENERATE_NUM], dtype=torch.long, device=torch.cuda.current_device())
++    choice = torch.tensor([GENERATE_NUM], dtype=torch.long, device="cuda")
+     torch.distributed.broadcast(choice, 0)
+ 
+ 
+ def send_do_beam_search():
+-    choice = torch.tensor([BEAM_NUM], dtype=torch.long, device=torch.cuda.current_device())
++    choice = torch.tensor([BEAM_NUM], dtype=torch.long, device="cuda")
+     torch.distributed.broadcast(choice, 0)
+

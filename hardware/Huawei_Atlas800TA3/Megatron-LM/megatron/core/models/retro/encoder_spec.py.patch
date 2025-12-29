@@ -1,0 +1,14 @@
+diff --git a/megatron/core/models/retro/encoder_spec.py b/megatron/core/models/retro/encoder_spec.py
+index a7cb76ca1..63eea0b61 100644
+--- a/megatron/core/models/retro/encoder_spec.py
++++ b/megatron/core/models/retro/encoder_spec.py
+@@ -21,8 +21,6 @@ from megatron.core.transformer.mlp import MLP, MLPSubmodules
+ from megatron.core.transformer.transformer_block import TransformerBlockSubmodules
+ 
+ try:
+-    import transformer_engine as te  # pylint: disable=unused-import
+-
+     from megatron.core.extensions.transformer_engine import (
+         TEColumnParallelLinear,
+         TEDotProductAttention,
+

@@ -1,0 +1,14 @@
+diff --git a/megatron/core/inference/contexts/static_context.py b/megatron/core/inference/contexts/static_context.py
+index e28d82dc0..3559330ab 100644
+--- a/megatron/core/inference/contexts/static_context.py
++++ b/megatron/core/inference/contexts/static_context.py
+@@ -17,7 +17,7 @@ class StaticInferenceContext(BaseInferenceContext):
+     """
+ 
+     def __init__(self, max_batch_size: int, max_sequence_length: int):
+-        super().__init__(materialize_only_last_token_logits=True)
++        super().__init__(materialize_only_last_token_logits=False)
+         self.max_sequence_length = max_sequence_length
+         self.max_batch_size = max_batch_size
+         self.sequence_len_offset = 0
+

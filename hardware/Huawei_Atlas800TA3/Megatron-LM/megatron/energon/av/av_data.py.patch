@@ -1,0 +1,27 @@
+diff --git a/megatron/energon/av/av_data.py b/megatron/energon/av/av_data.py
+new file mode 100644
+index 000000000..dc85644c1
+--- /dev/null
++++ b/megatron/energon/av/av_data.py
+@@ -0,0 +1,20 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++from typing import Optional
++
++import torch
++
++from megatron.energon.dataclass_slots import dataclass_slots
++
++
++@dataclass_slots
++class AVData:
++    #: A list of video clips in the shape (frames, channels, h, w)
++    video_clips: Optional[list[torch.Tensor]]
++    #: The timestamps for the video clips. List of tuples (start, end) in seconds
++    video_timestamps: Optional[list[tuple[float, float]]]
++    #: A list of audio clips in the shape (channels, samples)
++    audio_clips: Optional[list[torch.Tensor]]
++    #: The timestamps for the audio clips. List of tuples (start, end) in seconds
++    audio_timestamps: Optional[list[tuple[float, float]]]
+

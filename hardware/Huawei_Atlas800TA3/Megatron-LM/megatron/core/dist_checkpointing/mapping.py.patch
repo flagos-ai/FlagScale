@@ -1,8 +1,70 @@
 diff --git a/megatron/core/dist_checkpointing/mapping.py b/megatron/core/dist_checkpointing/mapping.py
-index d6d8e3d28..c44100f21 100644
+index c4fb2f52a..c44100f21 100644
 --- a/megatron/core/dist_checkpointing/mapping.py
 +++ b/megatron/core/dist_checkpointing/mapping.py
-@@ -205,7 +205,7 @@ class ShardedTensor(ShardedBase):
+@@ -29,9 +29,6 @@ ShardedStateDict = Dict[str, Any]
+ ReplicaId = Union[int, Tuple[int, ...]]
+ 
+ 
+-_logged_deprecations = {}
+-
+-
+ class ShardedBase(ABC):
+     """Base class for ShardedTensor and ShardedStateDict."""
+ 
+@@ -138,40 +135,23 @@ class ShardedTensor(ShardedBase):
+                 f"equal to global shape dimensions for {self}"
+             )
+ 
+-        if self.axis_fragmentations is not None:
+-            for off, sh in zip(self.global_offset[self.prepend_axis_num :], self.local_shape):
+-                if sh != 0 and off % sh != 0:
+-                    raise CheckpointingException(
+-                        f"Global offset ({off}) must be divisible by local shape ({sh}) for {self}."
+-                    )
++        for off, sh in zip(self.global_offset[self.prepend_axis_num :], self.local_shape):
++            # NOTE: In custom FSDP, we have a case where a new parameter shard is created locally.
++            # For example, consider parameters [p0, p1, p2] sharded across GPU0 and GPU1.
++            # GPU0 receives p0 and a portion of p1, while GPU1 receives the
++            # remaining portion of p1 and p2.
++            # As a result, there is no parameter shard of p2 on GPU0, and
++            # the shape of p2 on GPU0 is zero.
++            if sh != 0 and off % sh != 0:
++                raise CheckpointingException(
++                    f"Global offset ({off}) must be divisible by local shape ({sh}) for {self}."
++                )
+ 
+         if has_flattened_range and self.flattened_range.step is not None:
+             raise CheckpointingException(
+                 f"`step` argument in the flattened range of a ShardedTensor is not supported."
+             )
+ 
+-        if self.prepend_axis_num:
+-            if not _logged_deprecations.get("prepend_axis_num", False):
+-                logger.warning(
+-                    "ShardedTensor.prepend_axis_num greater than 0 is deprecated."
+-                    " In Megatron-Core this can be prevented by setting sharded_state_dict"
+-                    " metadata['singleton_local_shards'] to True."
+-                )
+-                _logged_deprecations["prepend_axis_num"] = True
+-
+-        if self.flattened_range is not None:
+-            if not _logged_deprecations.get("flattened_range", False):
+-                logger.warning(
+-                    "ShardedTensor.flattened_range is deprecated."
+-                    " Use latest DistributedOptimizer formats."
+-                )
+-                _logged_deprecations["flattened_range"] = True
+-
+-    @property
+-    def has_regular_grid(self):
+-        """Alias for having a regular sharding grid."""
+-        return self.axis_fragmentations is not None
+-
+     def global_slice(self) -> Tuple[Union[int, slice], ...]:
+         """
+         Returns a tuple of int and slice objects representing a slice of the
+@@ -225,7 +205,7 @@ class ShardedTensor(ShardedBase):
              )
  
          # TODO: np.unravel_index?

@@ -1,0 +1,21 @@
+diff --git a/megatron/core/datasets/retro/config/tokenizers.py b/megatron/core/datasets/retro/config/tokenizers.py
+index 69ca94b3c..2e731c83b 100644
+--- a/megatron/core/datasets/retro/config/tokenizers.py
++++ b/megatron/core/datasets/retro/config/tokenizers.py
+@@ -4,12 +4,12 @@
+ 
+ from dataclasses import dataclass
+ 
+-from megatron.core.tokenizers import MegatronTokenizerBase
++from megatron.core.datasets.megatron_tokenizer import MegatronTokenizer
+ 
+ 
+ @dataclass
+ class RetroTokenizers:
+     """Container class for GPT and Bert tokenizers."""
+ 
+-    gpt: MegatronTokenizerBase = None
+-    bert: MegatronTokenizerBase = None
++    gpt: MegatronTokenizer = None
++    bert: MegatronTokenizer = None
+

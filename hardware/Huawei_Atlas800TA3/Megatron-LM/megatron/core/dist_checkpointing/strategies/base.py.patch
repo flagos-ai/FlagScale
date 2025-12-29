@@ -1,0 +1,15 @@
+diff --git a/megatron/core/dist_checkpointing/strategies/base.py b/megatron/core/dist_checkpointing/strategies/base.py
+index 4ecc0948b..a4763ac1c 100644
+--- a/megatron/core/dist_checkpointing/strategies/base.py
++++ b/megatron/core/dist_checkpointing/strategies/base.py
+@@ -221,4 +221,8 @@ class AsyncSaveShardedStrategy(SaveShardedStrategy):
+     def save(self, sharded_state_dict: ShardedStateDict, checkpoint_dir: Union[str, Path]):
+         """Each async strategy can be trivially used as a sync strategy."""
+         async_request = self.async_save(sharded_state_dict, checkpoint_dir)
+-        async_request.execute_sync()
++        # multiprocessing routines  may cause issue when called on parent process
++        # We keep this verbose call for now
++        global async_calls
++        async_calls.schedule_async_request(async_request)
++        async_calls.maybe_finalize_async_calls(blocking=True)
+

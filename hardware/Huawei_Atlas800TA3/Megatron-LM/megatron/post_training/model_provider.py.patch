@@ -1,0 +1,77 @@
+diff --git a/megatron/post_training/model_provider.py b/megatron/post_training/model_provider.py
+index 38ced5eda..598591c6b 100644
+--- a/megatron/post_training/model_provider.py
++++ b/megatron/post_training/model_provider.py
+@@ -2,7 +2,6 @@
+ 
+ """ModelOpt GPT model provider."""
+ 
+-import json
+ import os
+ from argparse import Namespace
+ from typing import Any, Dict
+@@ -20,6 +19,7 @@ from megatron.core.post_training.modelopt.gpt.model_specs import get_gpt_modelop
+ from megatron.core.post_training.modelopt.gpt.state_dict_hooks import (
+     mcore_gpt_load_te_state_dict_pre_hook,
+ )
++from megatron.core.post_training.modelopt.mamba.model_specs import get_mamba_stack_modelopt_spec
+ from megatron.post_training.algos import distillation
+ from megatron.post_training.checkpointing import load_modelopt_checkpoint, load_modelopt_state
+ from megatron.training import get_args, print_rank_0
+@@ -150,14 +150,6 @@ def model_provider(pre_process=True, post_process=True, parallel_output=True) ->
+     config.moe_apply_probs_on_input = args.export_moe_apply_probs_on_input 
+ 
+     if args.export_model_type == "GPTModel":
+-        if args.export_offline_model:
+-            # Record the original num_layers. This is needed for _set_default_aux_hidden_state_layers
+-            config.original_num_layers = config.num_layers
+-            # Set num_layers to 0 for base model in offline mode
+-            config.num_layers = 0
+-            # SP is not used for offline
+-            # TODO: DSR1 MTP may require SP
+-            config.sequence_parallel = False
+         if config.heterogeneous_block_specs:
+             transformer_layer_spec = get_gpt_heterogeneous_layer_spec(
+                 config=config,
+@@ -171,7 +163,6 @@ def model_provider(pre_process=True, post_process=True, parallel_output=True) ->
+                 real_quant_cfg=args.export_real_quant_cfg,
+                 use_arbitrary_attention_mask=True,
+             )
+-
+         model_kwargs = {
+             "transformer_layer_spec": transformer_layer_spec,
+             "vocab_size": args.padded_vocab_size,
+@@ -188,8 +179,6 @@ def model_provider(pre_process=True, post_process=True, parallel_output=True) ->
+         }
+         model = MCoreGPTModel(config=config, **model_kwargs)
+     elif args.export_model_type == "MambaModel":
+-        from megatron.core.post_training.modelopt.mamba.model_specs import get_mamba_stack_modelopt_spec
+-
+         mamba_stack_spec = get_mamba_stack_modelopt_spec(
+             remap_te_layernorm=args.export_te_mcore_model
+         )
+@@ -213,15 +202,14 @@ def model_provider(pre_process=True, post_process=True, parallel_output=True) ->
+     else:
+         raise ValueError("ModelOpt does not support model type {}".format(args.export_model_type))
+ 
+-    # [IMPORTANT] Load modelopt_state immediately before returning the model back to `get_model()`.
+-    # 
+-    # ModelOpt can create additional trainable parameters (e.g. for online speculative
+-    # decoding training or PEFT). Hence resuming modelopt_state during checkpoint loading is already
+-    # too late since Megatron created the optimizer right after calling model_provider before loading
+-    # the checkpoint. To ensure all trainable parameters are reigistered, we try to resume the
+-    # modelopt_state (which transforms the model to have additional parameters) before returning.
+-    if args.load is not None:
+-        load_modelopt_state(model=model)
++    # import modelopt.torch.speculative as mtsp
++    # config = {"eagle_num_layers": 1}
++    # model = mtsp.convert(model, [("eagle", config)])
++
++    # Load modelopt_state
++    modelopt_state = load_modelopt_state(model=model) if args.load else {}
++    if modelopt_state:
++        model = mto.restore_from_modelopt_state(model, modelopt_state)
+ 
+     _add_load_convert_hooks(model)
+ 
+

@@ -1,0 +1,37 @@
+diff --git a/megatron/core/extensions/transformer_engine_spec_provider.py b/megatron/core/extensions/transformer_engine_spec_provider.py
+index c630671ad..6d2b2c61c 100644
+--- a/megatron/core/extensions/transformer_engine_spec_provider.py
++++ b/megatron/core/extensions/transformer_engine_spec_provider.py
+@@ -4,12 +4,10 @@ import warnings
+ from typing import Optional, Tuple
+ 
+ from megatron.core.extensions.transformer_engine import (
+-    TEActivationOp,
+     TEColumnParallelGroupedLinear,
+     TEColumnParallelLinear,
+     TEDotProductAttention,
+     TELayerNormColumnParallelLinear,
+-    TELinear,
+     TENorm,
+     TERowParallelGroupedLinear,
+     TERowParallelLinear,
+@@ -25,10 +23,6 @@ from megatron.core.utils import get_te_version, is_te_min_version
+ class TESpecProvider(BackendSpecProvider):
+     """A protocol for providing the submodules used in Spec building."""
+ 
+-    def linear(self) -> type:
+-        """Which linear module TE backend uses"""
+-        return TELinear
+-
+     def column_parallel_linear(self) -> type:
+         """Which column parallel linear module TE backend uses"""
+         return TEColumnParallelLinear
+@@ -89,7 +83,3 @@ class TESpecProvider(BackendSpecProvider):
+             return SequentialMLP, MLPSubmodules(
+                 linear_fc1=TEColumnParallelLinear, linear_fc2=TERowParallelLinear
+             )
+-
+-    def activation_func(self) -> type:
+-        """Which module to use for activation function"""
+-        return TEActivationOp
+

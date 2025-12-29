@@ -1,0 +1,13 @@
+diff --git a/megatron/energon/flavors/webdataset/empty_dataset_error.py b/megatron/energon/flavors/webdataset/empty_dataset_error.py
+new file mode 100644
+index 000000000..1c58ce309
+--- /dev/null
++++ b/megatron/energon/flavors/webdataset/empty_dataset_error.py
+@@ -0,0 +1,6 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++
++class EmptyDatasetError(Exception):
++    """Raised when a dataset is empty."""
+

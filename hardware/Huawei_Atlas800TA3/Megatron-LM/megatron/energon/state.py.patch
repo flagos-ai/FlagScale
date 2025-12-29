@@ -1,0 +1,13 @@
+diff --git a/megatron/energon/state.py b/megatron/energon/state.py
+new file mode 100644
+index 000000000..fb482f344
+--- /dev/null
++++ b/megatron/energon/state.py
+@@ -0,0 +1,6 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++
++class FlexState(dict):
++    pass
+

@@ -1,0 +1,29 @@
+diff --git a/megatron/core/transformer/enums.py b/megatron/core/transformer/enums.py
+index 52b82029f..4d5d08fb6 100644
+--- a/megatron/core/transformer/enums.py
++++ b/megatron/core/transformer/enums.py
+@@ -13,14 +13,7 @@ class ModelType(enum.Enum):
+     """
+ 
+     encoder_or_decoder = 1
+-
+-    @property
+-    def encoder_and_decoder(self):
+-        """Deprecated property - use encoder_or_decoder instead."""
+-        raise ValueError(
+-            "ModelType.encoder_and_decoder is deprecated. Please use ModelType.encoder_or_decoder "
+-            "instead."
+-        )
++    encoder_and_decoder = 2
+ 
+ 
+ class LayerType(enum.Enum):
+@@ -54,7 +47,6 @@ class AttnMaskType(enum.Enum):
+     no_mask = 3  # only used for TE
+     padding_causal = 4  # only used for thd attention
+     arbitrary = 5
+-    causal_bottom_right = 6  # only used for TE
+ 
+ 
+ class AttnBackend(enum.Enum):
+

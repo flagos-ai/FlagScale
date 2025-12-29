@@ -1,0 +1,41 @@
+diff --git a/megatron/energon/task_encoder/__init__.py b/megatron/energon/task_encoder/__init__.py
+new file mode 100644
+index 000000000..98750deec
+--- /dev/null
++++ b/megatron/energon/task_encoder/__init__.py
+@@ -0,0 +1,34 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++from megatron.energon.task_encoder.base import (
++    AugmentTaskEncoder,
++    Batch,
++    DefaultTaskEncoder,
++    TaskEncoder,
++    batch_list,
++    batch_pad_stack,
++    batch_stack,
++    generic_batch,
++    stateless,
++)
++from megatron.energon.task_encoder.loader import (
++    get_train_dataset,
++    get_val_dataset,
++    get_val_datasets,
++)
++
++__all__ = [
++    "AugmentTaskEncoder",
++    "Batch",
++    "DefaultTaskEncoder",
++    "TaskEncoder",
++    "batch_list",
++    "batch_pad_stack",
++    "batch_stack",
++    "generic_batch",
++    "get_train_dataset",
++    "get_val_dataset",
++    "get_val_datasets",
++    "stateless",
++]
+

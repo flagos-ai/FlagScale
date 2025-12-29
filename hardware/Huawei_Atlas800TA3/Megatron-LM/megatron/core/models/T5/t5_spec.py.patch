@@ -1,0 +1,14 @@
+diff --git a/megatron/core/models/T5/t5_spec.py b/megatron/core/models/T5/t5_spec.py
+index a3ad84a21..724b4be74 100644
+--- a/megatron/core/models/T5/t5_spec.py
++++ b/megatron/core/models/T5/t5_spec.py
+@@ -16,8 +16,6 @@ from megatron.core.transformer.transformer_block import TransformerBlockSubmodul
+ from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
+ 
+ try:
+-    import transformer_engine as te  # pylint: disable=unused-import
+-
+     from megatron.core.extensions.transformer_engine import (
+         TEColumnParallelLinear,
+         TEDotProductAttention,
+

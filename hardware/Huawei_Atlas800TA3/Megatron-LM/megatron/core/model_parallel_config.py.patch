@@ -1,8 +1,59 @@
 diff --git a/megatron/core/model_parallel_config.py b/megatron/core/model_parallel_config.py
-index fc0041a0a..9e53424bf 100644
+index 9f5018c26..9e53424bf 100644
 --- a/megatron/core/model_parallel_config.py
 +++ b/megatron/core/model_parallel_config.py
-@@ -346,6 +346,16 @@ class ModelParallelConfig:
+@@ -237,14 +237,6 @@ class ModelParallelConfig:
+        Set the bootstrapping backend out of 'nccl', 'mpi', and 'gloo'
+     """
+ 
+-    overlap_moe_expert_parallel_comm: bool = False
+-    """Overlap EP A2A communications with independent computations of different micro-batches
+-    in 1f1b phase of pipelining or non-pipelining schedule.
+-    """
+-
+-    delay_wgrad_compute: bool = False
+-    """Delay the weight gradient computation to improve batch-level communication overlapping"""
+-
+     ###################
+     # Pipeline Parallel
+     ###################
+@@ -294,6 +286,11 @@ class ModelParallelConfig:
+        Defaults to 0, which means all micro-batches are deferred.
+     """
+ 
++    pipeline_model_parallel_split_rank: Optional[int] = None
++    """If int, rank where encoder and decoder should be split in cases where the model has both an
++       encoder and decoder (e.g., T5). Ignored if None.
++    """
++
+     overlap_p2p_comm_warmup_flush: bool = False
+     """If true, overlap communication and computation in warm up and flush phase.
+        Only valid when overlap_p2p_comm is True and batch_p2p_comm is False. 
+@@ -315,6 +312,9 @@ class ModelParallelConfig:
+        rank 1 |   0 1 2 0 1 2 3 4 3 4
+     """
+ 
++    delay_wgrad_compute: bool = False
++    """If true, delay the wgrad compute for better overlapping in combined 1F1B."""
++
+     ###################
+     # CPU Offloading
+     ###################
+@@ -334,12 +334,9 @@ class ModelParallelConfig:
+     cpu_offloading_activations: bool = True
+     """If True, offloads the activations to CPU."""
+ 
+-    cpu_offloading_weights: bool = False
++    cpu_offloading_weights: bool = True
+     """If True, offloads the weights to CPU."""
+ 
+-    cpu_offloading_double_buffering: bool = False
+-    """If True, enables double buffering across layers while reloading activations from CPU."""
+-
+     ###################
+     # Timing
+     ###################
+@@ -349,6 +346,16 @@ class ModelParallelConfig:
         the user adds a level 1 timer that is not called by all ranks.
      """
  
@@ -19,4 +70,15 @@ index fc0041a0a..9e53424bf 100644
      def __post_init__(self):
          """Python dataclass method that is used to modify attributes after initialization.
          See https://docs.python.org/3/library/dataclasses.html#post-init-processing for more
+@@ -387,8 +394,8 @@ class ModelParallelConfig:
+ 
+         if self.expert_model_parallel_size > 1 and self.tensor_model_parallel_size > 1:
+             if self.sequence_parallel is False:
+-                warnings.warn(
+-                    "When using expert parallelism and tensor parallelism for training, "
++                raise ValueError(
++                    "When using expert parallelism and tensor parallelism, "
+                     "sequence parallelism must be used"
+                 )
+ 
 

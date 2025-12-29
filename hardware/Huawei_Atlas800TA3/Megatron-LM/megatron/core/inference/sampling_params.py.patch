@@ -1,0 +1,20 @@
+diff --git a/megatron/core/inference/sampling_params.py b/megatron/core/inference/sampling_params.py
+index bfadd5dd9..75e6adb0e 100644
+--- a/megatron/core/inference/sampling_params.py
++++ b/megatron/core/inference/sampling_params.py
+@@ -37,14 +37,3 @@ class SamplingParams:
+         """
+         for key, value in attribute_value_pair.items():
+             setattr(self, key, value)
+-
+-    def serializable(self) -> dict:
+-        """Return a dictionary that is msgpack-serializable."""
+-        return self.__dict__.copy()
+-
+-    @classmethod
+-    def deserialize(cls, data: dict) -> "SamplingParams":
+-        """Construct SamplingParams from a msgpack-compatible dictionary."""
+-        obj = cls()
+-        obj.add_attributes(data)
+-        return obj
+

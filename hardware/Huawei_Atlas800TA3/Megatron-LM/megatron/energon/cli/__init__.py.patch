@@ -1,0 +1,9 @@
+diff --git a/megatron/energon/cli/__init__.py b/megatron/energon/cli/__init__.py
+new file mode 100644
+index 000000000..43842921c
+--- /dev/null
++++ b/megatron/energon/cli/__init__.py
+@@ -0,0 +1,2 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
+

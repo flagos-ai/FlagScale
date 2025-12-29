@@ -1,0 +1,18 @@
+diff --git a/megatron/core/dist_checkpointing/optimizer.py b/megatron/core/dist_checkpointing/optimizer.py
+index fb08ea52b..b3fcc7c64 100644
+--- a/megatron/core/dist_checkpointing/optimizer.py
++++ b/megatron/core/dist_checkpointing/optimizer.py
+@@ -25,12 +25,6 @@ from .mapping import (
+ )
+ from .utils import extract_sharded_tensors_and_factories
+ 
+-KEEP_VARS_HINT = (
+-    " Make sure state dict contains original torch.nn.Parameters (not pure torch.Tensors)"
+-    " by passing `keep_vars=True` to `.state_dict()`. If any transformation of the original"
+-    " parameter is needed, use a ShardedTensorFactory."
+-)
+-
+ 
+ def get_optim_param_to_id_map(optim_params_iter: Iterable[torch.nn.Parameter]) -> Dict[int, int]:
+     """Generate mapping from optimizer param to optimizer state id."""
+
