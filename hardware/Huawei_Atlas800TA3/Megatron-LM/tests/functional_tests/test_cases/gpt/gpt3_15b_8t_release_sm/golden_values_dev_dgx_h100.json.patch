@@ -1,0 +1,5 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_15b_8t_release_sm/golden_values_0.13.0_PyT25.05_dgx_a100_dev.json b/tests/functional_tests/test_cases/gpt/gpt3_15b_8t_release_sm/golden_values_dev_dgx_h100.json
+similarity index 100%
+rename from tests/functional_tests/test_cases/gpt/gpt3_15b_8t_release_sm/golden_values_0.13.0_PyT25.05_dgx_a100_dev.json
+rename to tests/functional_tests/test_cases/gpt/gpt3_15b_8t_release_sm/golden_values_dev_dgx_h100.json
+

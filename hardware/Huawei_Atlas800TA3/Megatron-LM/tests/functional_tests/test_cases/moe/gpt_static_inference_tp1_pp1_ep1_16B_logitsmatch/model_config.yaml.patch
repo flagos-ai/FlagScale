@@ -1,0 +1,16 @@
+diff --git a/tests/functional_tests/test_cases/moe/gpt_inference_tp1_pp1_ep1_16B_logitsmatch/model_config.yaml b/tests/functional_tests/test_cases/moe/gpt_static_inference_tp1_pp1_ep1_16B_logitsmatch/model_config.yaml
+similarity index 97%
+rename from tests/functional_tests/test_cases/moe/gpt_inference_tp1_pp1_ep1_16B_logitsmatch/model_config.yaml
+rename to tests/functional_tests/test_cases/moe/gpt_static_inference_tp1_pp1_ep1_16B_logitsmatch/model_config.yaml
+index fff0a0b1d..3f09b79d8 100644
+--- a/tests/functional_tests/test_cases/moe/gpt_inference_tp1_pp1_ep1_16B_logitsmatch/model_config.yaml
++++ b/tests/functional_tests/test_cases/moe/gpt_static_inference_tp1_pp1_ep1_16B_logitsmatch/model_config.yaml
+@@ -73,6 +73,7 @@ MODEL_ARGS:
+   --inference-max-seq-length: 4096
+   --output-path: ${TENSORBOARD_PATH}
+   --prompts: "Time travel to 2008, and go to a bar or a club or one of the myriad disco-basements on the Lower East Side that does not quite know which of those it is. Dance awkwardly in a room full of other glittered-up nerds, and wait for something to happen, buoyed on the feeling that this is the big swollen heart of life, that this is New York like the movies."
++  --incoming-requests-per-sec: -1 # all requests arrive up front.
+ METRICS:
+   - "generated_tokens"
+   - "logprobs"
+

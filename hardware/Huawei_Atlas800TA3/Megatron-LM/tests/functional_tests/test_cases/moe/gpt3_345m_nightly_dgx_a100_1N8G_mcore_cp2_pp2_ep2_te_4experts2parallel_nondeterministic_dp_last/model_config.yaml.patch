@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/moe/gpt3_345m_nightly_dgx_a100_1N8G_mcore_cp2_pp2_ep2_te_4experts2parallel_nondeterministic_dp_last/model_config.yaml b/tests/functional_tests/test_cases/moe/gpt3_345m_nightly_dgx_a100_1N8G_mcore_cp2_pp2_ep2_te_4experts2parallel_nondeterministic_dp_last/model_config.yaml
+index 7e776c888..f5014a23b 100644
+--- a/tests/functional_tests/test_cases/moe/gpt3_345m_nightly_dgx_a100_1N8G_mcore_cp2_pp2_ep2_te_4experts2parallel_nondeterministic_dp_last/model_config.yaml
++++ b/tests/functional_tests/test_cases/moe/gpt3_345m_nightly_dgx_a100_1N8G_mcore_cp2_pp2_ep2_te_4experts2parallel_nondeterministic_dp_last/model_config.yaml
+@@ -49,6 +49,7 @@ MODEL_ARGS:
+   --no-gradient-accumulation-fusion: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
++  --dist-ckpt-optim-fully-reshardable: true
+   --dist-ckpt-strictness: log_all # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+

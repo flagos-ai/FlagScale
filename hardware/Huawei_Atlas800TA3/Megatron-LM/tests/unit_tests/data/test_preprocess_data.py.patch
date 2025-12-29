@@ -1,0 +1,26 @@
+diff --git a/tests/unit_tests/data/test_preprocess_data.py b/tests/unit_tests/data/test_preprocess_data.py
+index faf54efa8..48f3a2e7b 100644
+--- a/tests/unit_tests/data/test_preprocess_data.py
++++ b/tests/unit_tests/data/test_preprocess_data.py
+@@ -191,9 +191,9 @@ def test_preprocess_data_gpt():
+             "--tokenizer-type",
+             "GPT2BPETokenizer",
+             "--vocab-file",
+-            gpt2_vocab(temp_dir),
++            "/opt/data/tokenizers/megatron/gpt2-vocab.json",
+             "--merge-file",
+-            gpt2_merge(temp_dir),
++            "/opt/data/tokenizers/megatron/gpt2-merges.txt",
+             "--append-eod",
+             "--workers",
+             "10",
+@@ -223,7 +223,7 @@ def test_preprocess_data_bert():
+             "--tokenizer-type",
+             "BertWordPieceLowerCase",
+             "--vocab-file",
+-            bert_vocab(temp_dir),
++            "/opt/data/tokenizers/megatron/gpt2-vocab.json",
+             "--split-sentences",
+             "--workers",
+             "10",
+

@@ -1,0 +1,43 @@
+diff --git a/tests/test_utils/recipes/gpt-inference.yaml b/tests/test_utils/recipes/gpt-dynamic-inference-with-coordinator.yaml
+similarity index 88%
+rename from tests/test_utils/recipes/gpt-inference.yaml
+rename to tests/test_utils/recipes/gpt-dynamic-inference-with-coordinator.yaml
+index f9ed04a51..2b7966bb0 100644
+--- a/tests/test_utils/recipes/gpt-inference.yaml
++++ b/tests/test_utils/recipes/gpt-dynamic-inference-with-coordinator.yaml
+@@ -14,6 +14,7 @@ spec:
+     /workspace/data/mcore_mistral/model: model/mcore_mistral/nemo_minitron-0.5b/v1
+     /workspace/data/mcore_mistral/tokenizer: model/mcore_mistral/nemo_minitron-0.5b/v1
+   script_setup: |
++    unset https_proxy
+     echo "machine gitlab-master.nvidia.com login okoenig password $RO_API_TOKEN" | tee -a /root/.netrc
+ 
+     # Checkout latest
+@@ -43,7 +44,7 @@ spec:
+         "CHECKPOINT_SAVE_PATH=/tmp/checkpoints"
+         "DATA_PATH=/workspace/data"
+         "DATA_CACHE_PATH=/workspace/data/cache"
+-        "TRAINING_SCRIPT_PATH=examples/inference/gpt/gpt_static_inference.py"
++        "TRAINING_SCRIPT_PATH=examples/inference/gpt/gpt_dynamic_inference_with_coordinator.py"
+         "TRAINING_PARAMS_PATH=./tests/functional_tests/test_cases/{model}/{test_case}/model_config.yaml"
+         "GOLDEN_VALUES_PATH=./tests/functional_tests/test_cases/{model}/{test_case}/golden_values_{environment}_{platforms}.json"
+         "OUTPUT_PATH={assets_dir}"
+@@ -56,13 +57,14 @@ spec:
+     bash ./tests/functional_tests/shell_test_utils/run_ci_test.sh ${{ARGUMENTS[@]}}
+ 
+ products:
+-  - test_case: [gpt_inference_tp1_pp1_583m_logitsmatch]
++  - test_case: [gpt_dynamic_inference_tp8_pp1_dp1_583m_logitsmatch_zmq]
+     products:
+       - environment: [dev]
+-        scope: [mr]
++        scope: [flaky]
+         platforms: [dgx_h100]
+-  - test_case: [gpt_inference_tp1_pp1_583m_cudagraphs]
++  - test_case: [gpt_dynamic_inference_tp1_pp1_dp8_583m_logitsmatch_zmq]
+     products:
+       - environment: [dev]
+         scope: [mr]
+         platforms: [dgx_h100]
++  
+

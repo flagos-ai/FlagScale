@@ -1,0 +1,9 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_nightly_mcore_te_tp2_pp1_modelopt_distill_resume/golden_values_dev_dgx_a100.json b/tests/functional_tests/test_cases/gpt/gpt3_nightly_mcore_te_tp2_pp1_modelopt_distill_resume/golden_values_dev_dgx_a100.json
+deleted file mode 100644
+index 9e26dfeeb..000000000
+--- a/tests/functional_tests/test_cases/gpt/gpt3_nightly_mcore_te_tp2_pp1_modelopt_distill_resume/golden_values_dev_dgx_a100.json
++++ /dev/null
+@@ -1 +0,0 @@
+-{}
+\ No newline at end of file
+

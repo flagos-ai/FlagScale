@@ -1,0 +1,29 @@
+diff --git a/hardware/Huawei_Atlas800TA3/FlagScale/flagscale/train/models/qwen2_5_vl/vit_model.py.patch b/hardware/Huawei_Atlas800TA3/FlagScale/flagscale/train/models/qwen2_5_vl/vit_model.py.patch
+new file mode 100644
+index 00000000..d62d2575
+--- /dev/null
++++ b/hardware/Huawei_Atlas800TA3/FlagScale/flagscale/train/models/qwen2_5_vl/vit_model.py.patch
+@@ -0,0 +1,22 @@
++diff --git a/flagscale/train/models/qwen2_5_vl/vit_model.py b/flagscale/train/models/qwen2_5_vl/vit_model.py
++index 2519d4db..2a21fe14 100644
++--- a/flagscale/train/models/qwen2_5_vl/vit_model.py
+++++ b/flagscale/train/models/qwen2_5_vl/vit_model.py
++@@ -25,7 +25,6 @@ class PatchEmbed(nn.Module):
++         temporal_patch_size: int = 2,
++         in_channels: int = 3,
++         embed_dim: int = 1152,
++-        bias: bool = False,
++     ) -> None:
++         """
++         Patch Embedding layer for Qwen2.5 Vision Model. Change the original image/video to patches.
++@@ -43,7 +42,7 @@ class PatchEmbed(nn.Module):
++         self.embed_dim = embed_dim
++ 
++         kernel_size = [temporal_patch_size, patch_size, patch_size]
++-        self.proj = nn.Conv3d(in_channels, embed_dim, kernel_size=kernel_size, stride=kernel_size, bias=bias)
+++        self.proj = nn.Conv3d(in_channels, embed_dim, kernel_size=kernel_size, stride=kernel_size, bias=False)
++ 
++     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
++         """
++
+

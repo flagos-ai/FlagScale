@@ -1,0 +1,22 @@
+diff --git a/megatron/energon/transforms/common.py b/megatron/energon/transforms/common.py
+new file mode 100644
+index 000000000..e4efc87e4
+--- /dev/null
++++ b/megatron/energon/transforms/common.py
+@@ -0,0 +1,15 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++from enum import Enum
++from typing import TypeVar
++
++import PIL.Image
++import torch
++
++TTransform = TypeVar("TTransform", bound=torch.nn.Module)
++
++
++class Sampling(Enum):
++    BILINEAR = PIL.Image.BILINEAR
++    NEAREST = PIL.Image.NEAREST
+

@@ -1,0 +1,14 @@
+diff --git a/tests/functional_tests/test_cases/mixtral/mixtral_8x7b_alltoall_tp2pp4ep4_release_sm/model_config.yaml b/tests/functional_tests/test_cases/mixtral/mixtral_8x7b_alltoall_tp2pp4ep4_release_sm/model_config.yaml
+index d809c945f..149073177 100644
+--- a/tests/functional_tests/test_cases/mixtral/mixtral_8x7b_alltoall_tp2pp4ep4_release_sm/model_config.yaml
++++ b/tests/functional_tests/test_cases/mixtral/mixtral_8x7b_alltoall_tp2pp4ep4_release_sm/model_config.yaml
+@@ -6,7 +6,7 @@ ENV_VARS:
+   NVTE_BWD_LAYERNORM_SM_MARGIN: 16
+   NCCL_P2P_NET_CHUNKSIZE: 2097152
+   NVTE_ALLOW_NONDETERMINISTIC_ALGO: 1
+-  SKIP_PYTEST: 1
++  NON_DETERMINSTIC_RESULTS: 1
+ TEST_TYPE: "release"
+ MODEL_ARGS:
+   # Distributed args
+

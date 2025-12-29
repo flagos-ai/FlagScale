@@ -1,0 +1,14 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_fsdp/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_fsdp/model_config.yaml
+index ae8f4011a..a38d28975 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_fsdp/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_fsdp/model_config.yaml
+@@ -38,7 +38,7 @@ MODEL_ARGS:
+   --transformer-impl: transformer_engine
+   --tensor-model-parallel-size: 2
+   --sequence-parallel: true
+-  --use-custom-fsdp: true
++  --use-megatron-fsdp: true
+   --data-parallel-sharding-strategy: optim_grads_params
+   --no-gradient-accumulation-fusion: true
+   --use-distributed-optimizer: true
+

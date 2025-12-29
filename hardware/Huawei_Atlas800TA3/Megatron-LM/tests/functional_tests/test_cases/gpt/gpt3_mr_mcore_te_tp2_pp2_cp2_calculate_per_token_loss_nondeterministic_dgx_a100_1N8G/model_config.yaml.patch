@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_calculate_per_token_loss_nondeterministic_dgx_a100_1N8G/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_calculate_per_token_loss_nondeterministic_dgx_a100_1N8G/model_config.yaml
+index 94ab3e5ad..a168bf941 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_calculate_per_token_loss_nondeterministic_dgx_a100_1N8G/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_mr_mcore_te_tp2_pp2_cp2_calculate_per_token_loss_nondeterministic_dgx_a100_1N8G/model_config.yaml
+@@ -45,6 +45,7 @@ MODEL_ARGS:
+   --attention-softmax-in-fp32: true
+   --use-mcore-models: true
+   --ckpt-format: torch_dist
++  --dist-ckpt-save-pre-mcore-014: true
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+   --attention-backend: flash
+

@@ -1,0 +1,112 @@
+diff --git a/flagscale/train/train_robobrain_x0.py b/flagscale/train/train_robobrain_x0.py
+index 6a6e657b..d7c6fe69 100644
+--- a/flagscale/train/train_robobrain_x0.py
++++ b/flagscale/train/train_robobrain_x0.py
+@@ -24,6 +24,9 @@ from functools import partial
+ from typing import List, Optional, Tuple, Union
+ 
+ import torch
++######### For huawei NPU #########
++import flagscale.train.npu_patch.megatron_adaptor
++
+ import torch._dynamo
+ 
+ from megatron.core import parallel_state
+@@ -105,6 +108,8 @@ from flagscale.train.models.qwen2_5_vl.layer_specs import (
+     get_gpt_layer_with_transformer_engine_spec,
+     get_mlp_module_spec,
+     get_qwen2vl_vision_model_spec,
++    get_qwen2vl_llm_layer_spec,
++    get_qwen2vl_layer_spec,
+ )
+ from flagscale.train.models.qwen2_5_vl.qwen2_5_vl_model import Qwen2_5VLModel
+ from flagscale.train.models.qwen2_5_vl.tensor_parallel import broadcast_data
+@@ -129,8 +134,8 @@ def model_provider(
+     # Config of vit, llm and projector
+     config = core_transformer_config_from_args(args)
+     use_te = args.transformer_impl == "transformer_engine"
+-    if not use_te:
+-        raise NotImplementedError("The Qwen2-VL model is only implemented with TransformerEngine!")
++    if use_te:
++        raise NotImplementedError("The Qwen2-VL model is only implemented with Local transformer for huawei NPU!")
+ 
+     if (
+         args.rotary_seq_len_interpolation_factor is not None
+@@ -148,8 +153,10 @@ def model_provider(
+ 
+     print_rank_0("building Qwen2-5-VL model in TE...")
+     # Layer Specs of vit, llm and projector
+-    transformer_layer_spec = get_gpt_layer_with_transformer_engine_spec(args.qk_layernorm)
+-    vision_model_spec = get_qwen2vl_vision_model_spec()
++    # transformer_layer_spec = get_gpt_layer_with_transformer_engine_spec(args.qk_layernorm)
++    transformer_layer_spec = get_qwen2vl_llm_layer_spec(args.qk_layernorm)
++    # vision_model_spec = get_qwen2vl_vision_model_spec()
++    vision_model_spec = get_qwen2vl_layer_spec()
+     vision_projector_spec = get_mlp_module_spec(add_norm=False).submodules
+     if args.enable_variable_seq_lengths:
+         config.variable_seq_lengths = True
+@@ -159,20 +166,25 @@ def model_provider(
+         language_transformer_layer_spec=transformer_layer_spec,
+         language_vocab_size=args.padded_vocab_size,
+         language_max_sequence_length=args.max_position_embeddings,
++
+         vision_transformer_config=vision_config,
+         vision_transformer_layer_spec=vision_model_spec,
+         drop_vision_class_token=False,  # NOTE: no class token to drop?
++
+         vision_projection_config=vision_projector_config,
+         vision_projection_layer_spec=vision_projector_spec,
+         vision_projection_type='mlp',
+         allow_missing_vision_projection_checkpoint=args.allow_missing_vision_projection_checkpoint,
++        
+         language_position_embedding_type=args.position_embedding_type,
+         language_rotary_percent=args.rotary_percent,
+         language_rotary_base=args.rotary_base,
++
+         pre_process=pre_process,
+         post_process=post_process,
+         add_decoder=add_decoder,
+         add_encoder=add_encoder,
++        
+         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
+         parallel_output=True,
+         language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+@@ -464,7 +476,7 @@ def get_batch(data_iterator):
+     position_ids = None
+ 
+     # Broadcast data.
+-    torch.cuda.nvtx.range_push("get_data")
++    # torch.cuda.nvtx.range_push("get_data")
+     if data_iterator is not None and get_tensor_model_parallel_rank() == 0:
+         data = next(data_iterator)
+         # pad_token_id = get_tokenizer().pad_token_id
+@@ -509,23 +521,23 @@ def get_batch(data_iterator):
+ 
+     image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
+     video_input_mask = broadcast_data(["video_input_mask"], data, torch.bool)["video_input_mask"]
+-    torch.cuda.nvtx.range_pop()
++    # torch.cuda.nvtx.range_pop()
+ 
+-    torch.cuda.nvtx.range_push("index tokens")
++    # torch.cuda.nvtx.range_push("index tokens")
+     tokenizer = get_tokenizer()
+ 
+     tokens = data_text.long().contiguous()
+     labels = target.contiguous()
+ 
+     assert tokens.shape == labels.shape, f"tokens: {tokens.shape} != labels: {labels.shape}"
+-    torch.cuda.nvtx.range_pop()
++    # torch.cuda.nvtx.range_pop()
+ 
+     # NOTE: no sequence packing in LLM inputs
+-    torch.cuda.nvtx.range_push("get_ltor_masks_and_position_ids")
++    # torch.cuda.nvtx.range_push("get_ltor_masks_and_position_ids")
+     attention_mask, loss_mask, position_ids = get_ltor_masks_and_position_ids(
+         tokens, image_thw_grids, video_thw_grids, labels, IGNORE_IDX, second_per_grid_ts
+     )
+-    torch.cuda.nvtx.range_pop()
++    # torch.cuda.nvtx.range_pop()
+ 
+     return (
+         tokens,
+

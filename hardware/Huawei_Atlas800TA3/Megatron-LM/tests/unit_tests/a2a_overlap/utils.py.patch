@@ -1,0 +1,14 @@
+diff --git a/tests/unit_tests/a2a_overlap/utils.py b/tests/unit_tests/a2a_overlap/utils.py
+index 195d74731..7db4256a8 100644
+--- a/tests/unit_tests/a2a_overlap/utils.py
++++ b/tests/unit_tests/a2a_overlap/utils.py
+@@ -35,7 +35,7 @@ class DummyNode:
+     to transformer layers in a real model.
+     """
+ 
+-    common_state = DummyState()
++    layer_state = DummyState()
+     chunk_state = DummyState()
+ 
+     def detach(self, x):
+

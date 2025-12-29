@@ -1,0 +1,13 @@
+diff --git a/tests/test_utils/recipes/common.yaml b/tests/test_utils/recipes/common.yaml
+index 9d2a19de4..5d7058699 100644
+--- a/tests/test_utils/recipes/common.yaml
++++ b/tests/test_utils/recipes/common.yaml
+@@ -10,6 +10,7 @@ spec:
+   gpus: 8
+   platforms: dgx_a100
+   script_setup: |
++    unset https_proxy
+     echo "machine gitlab-master.nvidia.com login okoenig password $RO_API_TOKEN" | tee -a /root/.netrc
+ 
+     # Checkout latest
+

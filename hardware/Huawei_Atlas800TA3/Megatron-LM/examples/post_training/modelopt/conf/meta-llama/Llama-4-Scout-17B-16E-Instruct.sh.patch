@@ -1,0 +1,11 @@
+diff --git a/examples/post_training/modelopt/conf/meta-llama/Llama-4-Scout-17B-16E-Instruct.sh b/examples/post_training/modelopt/conf/meta-llama/Llama-4-Scout-17B-16E-Instruct.sh
+index 5265656a5..3456a1e32 100644
+--- a/examples/post_training/modelopt/conf/meta-llama/Llama-4-Scout-17B-16E-Instruct.sh
++++ b/examples/post_training/modelopt/conf/meta-llama/Llama-4-Scout-17B-16E-Instruct.sh
+@@ -50,4 +50,5 @@ MODEL_ARGS=" \
+     --no-bias-swiglu-fusion \
+     --export-qk-l2-norm \
+     --export-moe-apply-probs-on-input \
++    --padded-vocab-size 202048 \
+ "
+

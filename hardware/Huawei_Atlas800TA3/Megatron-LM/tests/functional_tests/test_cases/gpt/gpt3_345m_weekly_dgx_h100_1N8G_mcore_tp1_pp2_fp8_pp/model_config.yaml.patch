@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp2_fp8_pp/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp2_fp8_pp/model_config.yaml
+index 3e852f4a6..cf4fe0172 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp2_fp8_pp/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp1_pp2_fp8_pp/model_config.yaml
+@@ -47,6 +47,7 @@ MODEL_ARGS:
+   --fp8-amax-compute-algo: max
+   --attention-softmax-in-fp32: true
+   --ckpt-format: torch_dist
++  --dist-ckpt-optim-fully-reshardable: true
+   --dist-ckpt-strictness: log_all  # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+

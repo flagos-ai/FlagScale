@@ -1,0 +1,11 @@
+diff --git a/examples/post_training/modelopt/conf/meta-llama/Llama-4-Maverick-17B-128E-Instruct.sh b/examples/post_training/modelopt/conf/meta-llama/Llama-4-Maverick-17B-128E-Instruct.sh
+index 952ab9db2..f5669a3e7 100644
+--- a/examples/post_training/modelopt/conf/meta-llama/Llama-4-Maverick-17B-128E-Instruct.sh
++++ b/examples/post_training/modelopt/conf/meta-llama/Llama-4-Maverick-17B-128E-Instruct.sh
+@@ -49,4 +49,5 @@ MODEL_ARGS=" \
+     --rotary-interleaved \
+     --no-rope-freq 4 \
+     --export-moe-apply-probs-on-input \
++    --padded-vocab-size 202048 \
+ "
+

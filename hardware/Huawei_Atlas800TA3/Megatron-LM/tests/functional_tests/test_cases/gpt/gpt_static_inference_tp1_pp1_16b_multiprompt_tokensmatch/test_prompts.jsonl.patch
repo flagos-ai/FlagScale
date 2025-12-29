@@ -1,0 +1,10 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt_static_inference_tp1_pp1_16b_multiprompt_tokensmatch/test_prompts.jsonl b/tests/functional_tests/test_cases/gpt/gpt_static_inference_tp1_pp1_16b_multiprompt_tokensmatch/test_prompts.jsonl
+new file mode 100644
+index 000000000..118447722
+--- /dev/null
++++ b/tests/functional_tests/test_cases/gpt/gpt_static_inference_tp1_pp1_16b_multiprompt_tokensmatch/test_prompts.jsonl
+@@ -0,0 +1,2 @@
++{"text": "Creative Commons Attribution-ShareAlike 4.0 International Public License\n\nBy exercising the Licensed Rights (defined below), You accept and agree to be bound by the terms and conditions of this Creative Commons Attribution-ShareAlike 4.0 International Public License (“Public License”)."}
++{"text": "GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007\n\nPreamble\n\nThe GNU General Public License is a free, copyleft license for software and other kinds of works."}
+\ No newline at end of file
+

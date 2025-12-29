@@ -1,0 +1,13 @@
+diff --git a/tests/test_utils/recipes/gpt-nemo.yaml b/tests/test_utils/recipes/gpt-nemo.yaml
+index 547938a7b..fc57f54d7 100644
+--- a/tests/test_utils/recipes/gpt-nemo.yaml
++++ b/tests/test_utils/recipes/gpt-nemo.yaml
+@@ -12,6 +12,7 @@ spec:
+   time_limit: 1800
+   scope:
+   script_setup: |
++    unset https_proxy
+     echo "machine gitlab-master.nvidia.com login okoenig password $RO_API_TOKEN" | tee -a /root/.netrc
+ 
+     # Checkout latest
+

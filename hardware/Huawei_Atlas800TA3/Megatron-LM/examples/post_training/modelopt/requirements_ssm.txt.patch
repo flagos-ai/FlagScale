@@ -1,0 +1,9 @@
+diff --git a/examples/post_training/modelopt/requirements_ssm.txt b/examples/post_training/modelopt/requirements_ssm.txt
+new file mode 100644
+index 000000000..b57ae4d41
+--- /dev/null
++++ b/examples/post_training/modelopt/requirements_ssm.txt
+@@ -0,0 +1,2 @@
++mamba-ssm>=2.2.5
++causal-conv1d @ git+https://github.com/Dao-AILab/causal-conv1d
+

@@ -1,0 +1,11 @@
+diff --git a/tests/functional_tests/test_cases/bert/bert_nightly_dgx_a100_1N8G_mcore_tp1_pp4_vp2/model_config.yaml b/tests/functional_tests/test_cases/bert/bert_nightly_dgx_a100_1N8G_mcore_tp1_pp4_vp2/model_config.yaml
+index efa044781..b4c5decf8 100644
+--- a/tests/functional_tests/test_cases/bert/bert_nightly_dgx_a100_1N8G_mcore_tp1_pp4_vp2/model_config.yaml
++++ b/tests/functional_tests/test_cases/bert/bert_nightly_dgx_a100_1N8G_mcore_tp1_pp4_vp2/model_config.yaml
+@@ -42,4 +42,5 @@ MODEL_ARGS:
+   --bf16: true
+   --ckpt-format: torch
+   --attention-backend: unfused
++  --legacy-tokenizer: true
+ TEST_TYPE: regular
+

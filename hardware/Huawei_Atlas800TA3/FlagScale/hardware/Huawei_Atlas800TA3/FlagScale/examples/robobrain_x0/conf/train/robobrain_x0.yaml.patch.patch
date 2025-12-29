@@ -1,0 +1,107 @@
+diff --git a/hardware/Huawei_Atlas800TA3/FlagScale/examples/robobrain_x0/conf/train/robobrain_x0.yaml.patch b/hardware/Huawei_Atlas800TA3/FlagScale/examples/robobrain_x0/conf/train/robobrain_x0.yaml.patch
+new file mode 100644
+index 00000000..2c9efefe
+--- /dev/null
++++ b/hardware/Huawei_Atlas800TA3/FlagScale/examples/robobrain_x0/conf/train/robobrain_x0.yaml.patch
+@@ -0,0 +1,100 @@
++diff --git a/examples/robobrain_x0/conf/train/robobrain_x0.yaml b/examples/robobrain_x0/conf/train/robobrain_x0.yaml
++index 954ed0b7..6885e12f 100644
++--- a/examples/robobrain_x0/conf/train/robobrain_x0.yaml
+++++ b/examples/robobrain_x0/conf/train/robobrain_x0.yaml
++@@ -4,28 +4,28 @@ system:
++   num_workers: 1
++   calculate_per_token_loss: true
++   tensor_model_parallel_size: 1
++-  pipeline_model_parallel_size: 1
+++  pipeline_model_parallel_size: 4
++   context_parallel_size: 1
++   disable_bias_linear: True
++   use_flash_attn: True
++-  use_distributed_optimizer: True
++-  sequence_parallel: True
+++  use_distributed_optimizer: False
+++  sequence_parallel: False
++   tp_comm_overlap: False
++   overlap_grad_reduce: False # if has text-only must be false
++   overlap_param_gather: False # if has text-only must be false
++   use_mcore_models: True
++-  transformer_impl: transformer_engine
++-  recompute_method: "uniform"
++-  recompute_granularity: "full"
++-  recompute_num_layers: 18
++-  use_te: True
+++  transformer_impl: local
+++  # recompute_method: "uniform"
+++  # recompute_granularity: "full"
+++  # recompute_num_layers: 18
+++  # use_te: True
++   precision:
++     bf16: True
++     attention_softmax_in_fp32: True
++   logging:
++-    timing_log_level: 2
++-    log_interval: 1
++-    tensorboard_log_interval: 1
+++    timing_log_level: 1
+++    log_interval: 10
+++    tensorboard_log_interval: 10
++     log_throughput: True
++     wandb_project: ${experiment.exp_name}
++     wandb_exp_name: ${experiment.exp_name}
++@@ -40,7 +40,7 @@ system:
++     async_save: False
++ 
++ model:
++-  attention_backend: flash # don't use "auto(nvte_flash_attn)"
+++  # attention_backend: flash # don't use "auto(nvte_flash_attn)"
++   disable_bias_linear: True
++   add_qkv_bias: True
++   num_layers: 36
++@@ -61,15 +61,18 @@ model:
++   hidden_dropout: 0.0
++   clip_grad: 1.0
++   #######################
++-  train_iters: 330
+++  train_iters: 2
+++  # formal train_iters:
+++  # train_iters: 262478 # 1 epoch
++   eval_iters: 0 # no valid
++   micro_batch_size: 1
++-  global_batch_size: 256
+++  global_batch_size: 1
++   allow_missing_vision_projection_checkpoint: False
++   apply_layernorm_1p: False
++   group_query_attention: True
++   no_masked_softmax_fusion: True
++-  untie_embeddings_and_output_weights: False
+++  # untie_embeddings_and_output_weights: False
+++  untie_embeddings_and_output_weights: True
++ 
++   # position embedding
++   position_embedding_type: mrope
++@@ -93,18 +96,20 @@ model:
++     lr_scheduler:
++       lr: 5.0e-5
++       min_lr: 0
++-      lr_warmup_iters: 30
+++      lr_warmup_iters: 0
++       lr_decay_style: cosine
++ 
++ data:
++-  data_path: /repos/flagscale_dataset/flag-scale/demo_0913_n2/wds-256
+++  data_path: /root/FlagScale/demo_0913_n2/wds-1
+++  # formal dataset:
+++  # data_path: /share/project/dumengfei/data/libero_data_0910_F1A1C10/wds-1
++   vision_root: /
++   dataloader_type: external
++   split: 100,0,0
++   shuffle-buffer-size: 1000
++   tokenizer:
++     tokenizer_type: Qwen2VLTokenizer
++-    tokenizer_path: /models/BAAI/RoboBrain-X0-Preview
+++    tokenizer_path: /data/hcr/models/BAAI/RoboBrain-X0-Preview
++     vocab_size: 151643 # action
++     make_vocab_size_divisible_by: 64
++     extra_vocab_size: 293
++
+

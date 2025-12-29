@@ -1,0 +1,12 @@
+diff --git a/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/transformer/test_transformer_block.py.patch b/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/transformer/test_transformer_block.py.patch
+index 2784c0b1..b24c9c62 100644
+--- a/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/transformer/test_transformer_block.py.patch
++++ b/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/transformer/test_transformer_block.py.patch
+@@ -1,5 +1,5 @@
+ diff --git a/tests/unit_tests/transformer/test_transformer_block.py b/tests/unit_tests/transformer/test_transformer_block.py
+-index 48b678c5f..971509977 100644
++index 6a37ceac3..2ad8d0d95 100644
+ --- a/tests/unit_tests/transformer/test_transformer_block.py
+ +++ b/tests/unit_tests/transformer/test_transformer_block.py
+ @@ -74,14 +74,14 @@ class TestParallelTransformerBlock:
+

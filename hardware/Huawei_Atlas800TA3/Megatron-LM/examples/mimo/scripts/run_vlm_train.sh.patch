@@ -1,0 +1,14 @@
+diff --git a/examples/mimo/scripts/run_vlm_train.sh b/examples/mimo/scripts/run_vlm_train.sh
+index d05ee85dd..702b29795 100755
+--- a/examples/mimo/scripts/run_vlm_train.sh
++++ b/examples/mimo/scripts/run_vlm_train.sh
+@@ -93,7 +93,7 @@ TOKENIZER_ARGS=(
+ # Dataset args
+ DATASET_ARGS=(
+     --dataloader-type external
+-    --dataset-provider energon_llava_vlm
++    --dataset-provider llava_vlm
+     --data-path $DATASET_PATH
+ )
+ 
+

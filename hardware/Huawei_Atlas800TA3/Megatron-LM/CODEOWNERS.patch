@@ -1,0 +1,58 @@
+diff --git a/CODEOWNERS b/CODEOWNERS
+index 9d49e88c6..1a931600f 100644
+--- a/CODEOWNERS
++++ b/CODEOWNERS
+@@ -8,22 +8,12 @@ megatron/core/
+ ^[Core-MLPerf] @mcore-reviewers/mlperf
+ megatron/core/
+ 
+-# Models
+-[BERT] @mcore-reviewers/bert
+-megatron/core/models/bert/
+-
+ [GPT] @mcore-reviewers/gpt
+ megatron/core/models/gpt/
+ 
+-[Retro] @mcore-reviewers/retro
+-megatron/core/models/retro/
+-
+ [Multimodal] @mcore-reviewers/multi-modal
+ megatron/core/models/multimodal/
+ 
+-[T5] @mcore-reviewers/t5
+-megatron/core/models/t5/
+-
+ [Hybrid-mamba] @mcore-reviewers/hybrid-mamba
+ megatron/core/models/mamba/
+ 
+@@ -48,7 +38,7 @@ megatron/core/datasets/
+ megatron/core/pipeline_parallel/
+ 
+ # Transformer
+-[Transformer] @mcore-reviewers/transformer
++[Transformer] @mcore-reviewers/core-adlr @mcore-reviewers/core-nemo
+ megatron/core/transformer/
+ 
+ [MoE-ADLR] @mcore-reviewers/moe-adlr
+@@ -62,7 +52,7 @@ megatron/core/transformer/moe/
+ megatron/core/inference/
+ 
+ # Parallel State
+-[ParallelState] @mcore-reviewers/parallelstate
++[ParallelState] @mcore-reviewers/core-adlr @mcore-reviewers/core-nemo
+ megatron/core/parallel_state.py
+ 
+ [CI][1] @mcore-reviewers/ci
+@@ -73,4 +63,8 @@ Dockerfile.ci.lts
+ Dockerfile.ci.dev
+ tests/
+ megatron/core/transformer/transformer_block.py
+-megatron/core/transformer/transformer_layer.py
+\ No newline at end of file
++megatron/core/transformer/transformer_layer.py
++
++[RL] @mcore-reviewers/rl
++megatron/rl/
++examples/rl/
+\ No newline at end of file
+

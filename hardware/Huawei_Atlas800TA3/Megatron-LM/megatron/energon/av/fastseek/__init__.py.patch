@@ -1,0 +1,11 @@
+diff --git a/megatron/energon/av/fastseek/__init__.py b/megatron/energon/av/fastseek/__init__.py
+new file mode 100644
+index 000000000..d9d71f049
+--- /dev/null
++++ b/megatron/energon/av/fastseek/__init__.py
+@@ -0,0 +1,4 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++from .fastseek import Fastseek as Fastseek
++from .keyframeinfo import KeyframeInfo as KeyframeInfo
+

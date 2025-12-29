@@ -1,0 +1,38 @@
+diff --git a/megatron/energon/av/fastseek/keyframeinfo.py b/megatron/energon/av/fastseek/keyframeinfo.py
+new file mode 100644
+index 000000000..5134997ab
+--- /dev/null
++++ b/megatron/energon/av/fastseek/keyframeinfo.py
+@@ -0,0 +1,31 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++from dataclasses import dataclass
++
++
++@dataclass
++class KeyframeInfo:
++    """
++    Information about a detected keyframe
++
++    The exact meaning of the information will vary per container, however in general
++
++    index: the unit of representation for a frame (e.g., frame number)
++    pts: a timestamp that can be used by a decoder to seek to exactly this frame
++
++    """
++
++    index: int
++    pts: int
++
++    def __eq__(self, other) -> bool:
++        if isinstance(other, KeyframeInfo):
++            return self.index == other.index
++
++        return self.index == other
++
++    def __lt__(self, other) -> bool:
++        if isinstance(other, KeyframeInfo):
++            return self.index < other.index
++
++        return self.index < other
+

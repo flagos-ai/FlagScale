@@ -1,0 +1,19 @@
+diff --git a/megatron/energon/transforms/custom.py b/megatron/energon/transforms/custom.py
+new file mode 100644
+index 000000000..90e48b334
+--- /dev/null
++++ b/megatron/energon/transforms/custom.py
+@@ -0,0 +1,12 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++import torch
++
++from megatron.energon.transforms.mappers import TransformMapper
++
++
++class CustomTransform(TransformMapper[torch.nn.Module]):
++    """Abstract class for additional custom transforms.
++    Inherit from this and override at least `apply_transform`.
++    """
+

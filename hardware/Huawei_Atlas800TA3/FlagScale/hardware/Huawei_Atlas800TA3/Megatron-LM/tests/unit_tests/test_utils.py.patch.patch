@@ -1,0 +1,16 @@
+diff --git a/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/test_utils.py.patch b/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/test_utils.py.patch
+index 4ed94dda..12c34d68 100644
+--- a/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/test_utils.py.patch
++++ b/hardware/Huawei_Atlas800TA3/Megatron-LM/tests/unit_tests/test_utils.py.patch
+@@ -1,8 +1,8 @@
+ diff --git a/tests/unit_tests/test_utils.py b/tests/unit_tests/test_utils.py
+-index c507c0537..98dcf0030 100644
++index 64a25e600..72eae81b3 100644
+ --- a/tests/unit_tests/test_utils.py
+ +++ b/tests/unit_tests/test_utils.py
+-@@ -366,14 +366,14 @@ def test_straggler_detector():
++@@ -369,14 +369,14 @@ def test_straggler_detector():
+  
+      # Check if the instance is in disabled state.
+      straggler_detector_disabled()
+

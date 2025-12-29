@@ -1,0 +1,24 @@
+diff --git a/megatron/core/inference/headers.py b/megatron/core/inference/headers.py
+new file mode 100644
+index 000000000..ff894cc19
+--- /dev/null
++++ b/megatron/core/inference/headers.py
+@@ -0,0 +1,17 @@
++# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
++
++from enum import Enum
++
++
++class Headers(Enum):
++    """
++    Enum representing headers used for communication with the inference-coordinator.
++    """
++
++    CONNECT = 0
++    ACK = 1
++    SUBMIT_REQUEST = 2
++    ENGINE_REPLY = 3
++    PAUSE = 4
++    UNPAUSE = 5
++    STOP = 6
+

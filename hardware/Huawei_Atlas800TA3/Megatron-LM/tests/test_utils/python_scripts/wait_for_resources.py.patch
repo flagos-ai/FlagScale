@@ -1,0 +1,14 @@
+diff --git a/tests/test_utils/python_scripts/wait_for_resources.py b/tests/test_utils/python_scripts/wait_for_resources.py
+index 452899f45..6b20fc55c 100644
+--- a/tests/test_utils/python_scripts/wait_for_resources.py
++++ b/tests/test_utils/python_scripts/wait_for_resources.py
+@@ -56,7 +56,7 @@ def main(pipeline_id):
+                 break
+             time.sleep(60)
+ 
+-        except requests.exceptions.ConnectionError as e:
++        except (requests.exceptions.ConnectionError, gitlab.exceptions.GitlabListError) as e:
+             logger.info(f"Network error. Retrying... {e}")
+             time.sleep(15)
+             continue
+

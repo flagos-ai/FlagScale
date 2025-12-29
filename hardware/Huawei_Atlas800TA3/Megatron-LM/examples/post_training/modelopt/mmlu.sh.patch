@@ -1,0 +1,13 @@
+diff --git a/examples/post_training/modelopt/mmlu.sh b/examples/post_training/modelopt/mmlu.sh
+index c62e7c435..36918b89d 100644
+--- a/examples/post_training/modelopt/mmlu.sh
++++ b/examples/post_training/modelopt/mmlu.sh
+@@ -11,6 +11,7 @@ MLM_DEFAULT_ARGS="--finetune --auto-detect-ckpt-format --export-te-mcore-model -
+ ${LAUNCH_SCRIPT} ${SCRIPT_DIR}/mmlu.py \
+     ${MODEL_ARGS} \
+     --tensor-model-parallel-size ${TP} \
++    --expert-tensor-parallel-size ${ETP} \
+     --expert-model-parallel-size ${EP} \
+     --pipeline-model-parallel-size ${PP} \
+     --tokenizer-model ${TOKENIZER_MODEL} \
+

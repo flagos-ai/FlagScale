@@ -1,0 +1,13 @@
+diff --git a/megatron/energon/wrappers/skip.py b/megatron/energon/wrappers/skip.py
+new file mode 100644
+index 000000000..8bbeb5587
+--- /dev/null
++++ b/megatron/energon/wrappers/skip.py
+@@ -0,0 +1,6 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++
++class SkipSample(Exception):
++    """Exception to raise in the map_fn to skip a sample."""
+

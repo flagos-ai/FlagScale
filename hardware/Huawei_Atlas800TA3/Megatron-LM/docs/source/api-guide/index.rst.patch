@@ -1,0 +1,12 @@
+diff --git a/docs/source/api-guide/index.rst b/docs/source/api-guide/index.rst
+index 7c68c57fc..710a7caf4 100644
+--- a/docs/source/api-guide/index.rst
++++ b/docs/source/api-guide/index.rst
+@@ -21,4 +21,4 @@ API Guide
+    optimizer_param_scheduler
+    optimizer_cpu_offload
+    multi_token_prediction
+-   encoder_decoder_parallelism
+\ No newline at end of file
++   tokenizers
+

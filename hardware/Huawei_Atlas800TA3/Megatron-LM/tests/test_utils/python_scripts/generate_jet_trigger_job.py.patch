@@ -1,0 +1,14 @@
+diff --git a/tests/test_utils/python_scripts/generate_jet_trigger_job.py b/tests/test_utils/python_scripts/generate_jet_trigger_job.py
+index 3fe0ef713..6c5ff73c3 100644
+--- a/tests/test_utils/python_scripts/generate_jet_trigger_job.py
++++ b/tests/test_utils/python_scripts/generate_jet_trigger_job.py
+@@ -131,7 +131,7 @@ def main(
+                 "rules": [
+                     {
+                         "if": '($CI_PIPELINE_SOURCE == "parent_pipeline" || $CI_MERGE_REQUEST_ID) && $CI_COMMIT_BRANCH == "main"',
+-                        "auto_cancel": {"on_new_commit": "none"},
++                        "auto_cancel": {"on_new_commit": "interruptible"},
+                     },
+                     {"if": '$CI_PIPELINE_SOURCE == "parent_pipeline" || $CI_MERGE_REQUEST_ID'},
+                     {"when": "never"},
+

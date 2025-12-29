@@ -1,0 +1,14 @@
+diff --git a/LICENSE b/LICENSE
+index aa248579f..621920c37 100644
+--- a/LICENSE
++++ b/LICENSE
+@@ -37,7 +37,7 @@ Below are licenses used in those files, as indicated.
+ 
+ 
+ --------------------------------------------------------------------------------------
+--- LICENSE FOR Facebook, huggingface, Google Research, LLaVA, Mamba, and vLLM code  --
++-- LICENSE FOR Facebook, huggingface, Google Research, LLaVA, Mamba, TinyZero and vLLM code  --
+ 
+ 
+                                  Apache License
+

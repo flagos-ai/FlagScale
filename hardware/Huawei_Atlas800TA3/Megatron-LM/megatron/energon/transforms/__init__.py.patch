@@ -1,0 +1,37 @@
+diff --git a/megatron/energon/transforms/__init__.py b/megatron/energon/transforms/__init__.py
+new file mode 100644
+index 000000000..88087c64b
+--- /dev/null
++++ b/megatron/energon/transforms/__init__.py
+@@ -0,0 +1,30 @@
++# Copyright (c) 2025, NVIDIA CORPORATION.
++# SPDX-License-Identifier: BSD-3-Clause
++
++from megatron.energon.transforms.custom import CustomTransform
++from megatron.energon.transforms.mappers import (
++    CenterCropMapper,
++    RandomCropMapper,
++    RandomHorizontalFlipMapper,
++    RandomPerspectiveMapper,
++    RandomResizedCropMapper,
++    RandomRotationMapper,
++    RandomVerticalFlipMapper,
++    ResizeMapper,
++    TransformMapper,
++)
++from megatron.energon.transforms.merge import MergeTransform
++
++__all__ = [
++    "TransformMapper",
++    "ResizeMapper",
++    "RandomResizedCropMapper",
++    "CenterCropMapper",
++    "RandomCropMapper",
++    "RandomHorizontalFlipMapper",
++    "RandomVerticalFlipMapper",
++    "RandomRotationMapper",
++    "RandomPerspectiveMapper",
++    "MergeTransform",
++    "CustomTransform",
++]
+

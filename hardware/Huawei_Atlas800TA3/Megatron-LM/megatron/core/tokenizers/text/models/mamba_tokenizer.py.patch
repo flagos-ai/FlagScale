@@ -1,0 +1,19 @@
+diff --git a/megatron/core/tokenizers/text/models/mamba_tokenizer.py b/megatron/core/tokenizers/text/models/mamba_tokenizer.py
+new file mode 100644
+index 000000000..9f7d76d17
+--- /dev/null
++++ b/megatron/core/tokenizers/text/models/mamba_tokenizer.py
+@@ -0,0 +1,12 @@
++# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
++
++from megatron.core.tokenizers.text.text_tokenizer import MegatronTokenizerText
++
++
++class MambaTokenizer(MegatronTokenizerText):
++    """Base class for Megatron Mamba tokenizer."""
++
++    def __init__(self, path: str = None, config: dict = None, **kwargs) -> None:
++        config['class_name'] = self.__class__.__name__
++        config['class_path'] = self.__class__.__module__
++        super().__init__(path, config, **kwargs)
+

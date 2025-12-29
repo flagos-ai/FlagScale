@@ -1,0 +1,20 @@
+diff --git a/hardware/Huawei_Atlas800TA3/FlagScale/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py.patch b/hardware/Huawei_Atlas800TA3/FlagScale/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py.patch
+index ba223261..704087c5 100644
+--- a/hardware/Huawei_Atlas800TA3/FlagScale/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py.patch
++++ b/hardware/Huawei_Atlas800TA3/FlagScale/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py.patch
+@@ -1,12 +1,11 @@
+ diff --git a/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py b/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py
+-index e7e1517b..e7c4639d 100644
++index a89aa152..e7c4639d 100644
+ --- a/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py
+ +++ b/tools/datasets/qwenvl/convert_custom_dataset_to_wds_chatml_str.py
+-@@ -9,7 +9,7 @@ import pickle
++@@ -9,6 +9,7 @@ import pickle
+  from argparse import ArgumentParser
+  from typing import List, Union
+  
+--import cv2
+ +# import cv2
+  import webdataset as wds
+  import yaml
+

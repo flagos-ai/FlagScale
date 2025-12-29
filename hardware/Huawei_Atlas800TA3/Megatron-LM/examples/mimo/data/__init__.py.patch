@@ -1,0 +1,13 @@
+diff --git a/examples/mimo/data/__init__.py b/examples/mimo/data/__init__.py
+index 0519ecba6..df73bc4ab 100644
+--- a/examples/mimo/data/__init__.py
++++ b/examples/mimo/data/__init__.py
+@@ -1 +1,5 @@
+- 
+\ No newline at end of file
++from .energon_avlm_task_encoder import VisionAudioQASample
++
++all = [
++    VisionAudioQASample,
++]
+

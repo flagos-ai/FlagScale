@@ -1,0 +1,13 @@
+diff --git a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_sp_cp_tp_overlap/model_config.yaml b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_sp_cp_tp_overlap/model_config.yaml
+index a4288ded4..bbbcf96b6 100644
+--- a/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_sp_cp_tp_overlap/model_config.yaml
++++ b/tests/functional_tests/test_cases/gpt/gpt3_345m_weekly_dgx_h100_1N8G_mcore_tp4_cp2_current_scaling_native_fp8_tp_sp_cp_tp_overlap/model_config.yaml
+@@ -48,6 +48,7 @@ MODEL_ARGS:
+   --use-distributed-optimizer: true
+   --attention-softmax-in-fp32: true
+   --ckpt-format: torch_dist
++  --dist-ckpt-optim-fully-reshardable: true
+   --dist-ckpt-strictness: log_all  # backward compatibility for TE changes
+   --data-cache-path: ${DATA_CACHE_PATH}
+   --bf16: true
+

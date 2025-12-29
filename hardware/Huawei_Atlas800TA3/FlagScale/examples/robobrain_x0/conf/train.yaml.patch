@@ -1,0 +1,32 @@
+diff --git a/examples/robobrain_x0/conf/train.yaml b/examples/robobrain_x0/conf/train.yaml
+index e56e58c0..d507bdfa 100644
+--- a/examples/robobrain_x0/conf/train.yaml
++++ b/examples/robobrain_x0/conf/train.yaml
+@@ -15,23 +15,15 @@ experiment:
+     nnodes: 1
+     nproc_per_node: 4
+     rdzv_backend: static
+-    # hostfile: /share/project/jiyuheng/exp0/hostfile.32
+-    # ssh_port: 22
+   cmds:
+     before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
+   envs:
+-    CUDA_VISIBLE_DEVICES: 4,5,6,7
++    ASCEND_RT_VISIBLE_DEVICES: 12,13,14,15
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+     NVTE_APPLY_QK_LAYER_SCALING: 0
+     NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+-    NCCL_IB_DISABLE: 0
+-    # GLOO_SOCKET_IFNAME: eth0
+-    # NCCL_SOCKET_IFNAME: eth0
+-    # NCCL_IB_HCA: mlx5_100,mlx5_101,mlx5_102,mlx5_103,mlx5_104,mlx5_105,mlx5_106,mlx5_107
+-    NCCL_IB_HCA: mlx5_104,mlx5_105,mlx5_106,mlx5_107
+-    GLOO_SOCKET_IFNAME: ens101
+-    NCCL_SOCKET_IFNAME: ens101
+-    NCCL_IB_GID_INDEX: 7
++    LD_PRELOAD: "/usr/local/python3.11.5/lib/python3.11/site-packages/scikit_learn.libs/libgomp-947d5fa1.so.1.0.0"
++    HCCL_DETERMINISTIC: true
+ 
+ action: run
+ 
+

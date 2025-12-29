@@ -1,0 +1,15 @@
+diff --git a/examples/post_training/modelopt/conf/qwen/Qwen3-235B-A22B.sh b/examples/post_training/modelopt/conf/qwen/Qwen3-235B-A22B.sh
+index 3f7b8adf2..0241cac97 100644
+--- a/examples/post_training/modelopt/conf/qwen/Qwen3-235B-A22B.sh
++++ b/examples/post_training/modelopt/conf/qwen/Qwen3-235B-A22B.sh
+@@ -41,6 +41,9 @@ MODEL_ARGS=" \
+     --use-mcore-models \
+     --rotary-percent 1.0 \
+     --rotary-base 1000000 \
++    --rotary-seq-len-interpolation-factor 1 \
+     --no-bias-swiglu-fusion \
++    --attention-dropout 0.0 \
++    --hidden-dropout 0.0 \
+     --sequence-parallel \
+ "
+
