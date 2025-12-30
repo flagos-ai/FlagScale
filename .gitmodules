@@ -4,8 +4,8 @@
 	branch = main
 [submodule "third_party/vllm"]
 	path = third_party/vllm
-	url = https://github.com/zhaoyinglia/vllm.git
-	branch = vllm-fl
+	url = https://github.com/flagos-ai/vllm-FL.git
+	branch = main
 [submodule "third_party/Megatron-Energon"]
 	path = third_party/Megatron-Energon
 	url = https://github.com/NVIDIA/Megatron-Energon.git
