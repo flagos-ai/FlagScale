@@ -5,12 +5,14 @@ import shlex
 import subprocess
 import time
 
+from datetime import datetime
+
+from omegaconf import DictConfig, OmegaConf
+
 from flagscale.runner.elastic.monitor_service import MonitorService
 from flagscale.runner.launcher.launcher_base import LauncherBase
-from flagscale.runner.runner_base_legacy import JobStatus
-from flagscale.runner.runner_serve import _get_profile_args, _get_serve_engine_args
-from flagscale.runner.runner_train import _get_runner_cmd_train
 from flagscale.runner.utils import (
+    JobStatus,
     benchmark,
     dummy_random_input,
     get_free_port,
@@ -26,6 +28,102 @@ from flagscale.runner.utils import (
 )
 
 _MAX_CPU_COUNT = multiprocessing.cpu_count()
+
+
+def _get_profile_args(config, model="vllm_model"):
+    serve_config = config.get("serve", [])
+    if not serve_config:
+        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
+
+    profile_args = {}
+    for item in serve_config:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            profile_args = item.get("profile", {})
+            break
+    return profile_args
+
+
+def _get_serve_engine_args(config, model="vllm_model"):
+    serve_config = config.get("serve", [])
+    if not serve_config:
+        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
+    engine_args = {}
+
+    for item in serve_config:
+        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            engine_args = item.get("engine_args", {})
+            break
+    if not engine_args:
+        raise ValueError(f"No 'engine_args' configuration found in task config: {serve_config}")
+
+    return engine_args
+
+
+def _get_runner_cmd_train(
+    host, master_addr, master_port, nnodes, node_rank, nproc_per_node, config: DictConfig
+):
+    runner_config = config.experiment.runner
+    logging_config = config.train.system.logging
+
+    if runner_config.get("per_node_task", False):
+        nnodes = 1
+        node_rank = 0
+        master_addr = "localhost"
+
+    rdzv_id = runner_config.get("rdzv_id", "default")
+    log_dir = runner_config.get("log_dir", logging_config.details_dir)
+    log_dir = os.path.abspath(log_dir)
+    no_shared_fs = runner_config.get("no_shared_fs", False)
+    if no_shared_fs:
+        log_dir = os.path.join(log_dir, f"host")
+    else:
+        log_dir = os.path.join(log_dir, f"host_{node_rank}_{host}")
+    log_dir = os.path.join(log_dir, datetime.now().strftime("%Y%m%d_%H%M%S.%f"))
+    rdzv_backend = runner_config.get("rdzv_backend", "c10d")
+    rdzv_endpoint = runner_config.get("rdzv_endpoint", f"{master_addr}:{master_port}")
+    redirect = runner_config.get("redirects", "3")
+    tee = runner_config.get("tee", "3")
+    backend = runner_config.get("backend", "torchrun")
+
+    runner_args = OmegaConf.to_container(runner_config, resolve=True)
+    if "type" in runner_args:
+        del runner_args["type"]
+    if "backend" in runner_args:
+        del runner_args["backend"]
+    if "per_node_task" in runner_args:
+        del runner_args["per_node_task"]
+    if "hostfile" in runner_args:
+        del runner_args["hostfile"]
+    if "ssh_port" in runner_args:
+        del runner_args["ssh_port"]
+    if "master_addr" in runner_args:
+        del runner_args["master_addr"]
+    if "master_port" in runner_args:
+        del runner_args["master_port"]
+    if "enable_monitoring" in runner_args:
+        del runner_args["enable_monitoring"]
+    runner_args["rdzv_id"] = rdzv_id
+    # runner_args["master_addr"] = master_addr
+    # runner_args["master_port"] = master_port
+    runner_args["nnodes"] = nnodes
+    runner_args["node_rank"] = node_rank
+    runner_args["nproc_per_node"] = nproc_per_node
+    runner_args["rdzv_backend"] = rdzv_backend
+    runner_args["rdzv_endpoint"] = rdzv_endpoint
+
+    runner_args["log_dir"] = log_dir if backend == "torchrun" else os.path.join(log_dir, rdzv_id)
+    runner_args["redirects"] = redirect
+    runner_args["tee"] = tee
+
+    runner_cmd = [backend]
+    for key, value in runner_args.items():
+        if isinstance(value, bool):
+            if value:
+                runner_cmd.append(f"--{key}")
+        else:
+            runner_cmd.append(f"--{key}")
+            runner_cmd.append(f"{value}")
+    return runner_cmd
 
 
 def run_node(

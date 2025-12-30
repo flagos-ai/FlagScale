@@ -140,22 +140,6 @@ def _get_profile_args(config, model="vllm_model"):
     return profile_args
 
 
-def _get_serve_engine_args(config, model="vllm_model"):
-    serve_config = config.get("serve", [])
-    if not serve_config:
-        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
-    engine_args = {}
-
-    for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
-            engine_args = item.get("engine_args", {})
-            break
-    if not engine_args:
-        raise ValueError(f"No 'engine_args' configuration found in task config: {serve_config}")
-
-    return engine_args
-
-
 def _update_auto_engine_args(config, model="vllm_model", new_engine_args={}):
     serve_config = config.get("serve", [])
     if not serve_config:

@@ -11,7 +11,7 @@ from flagscale.runner.auto_tuner.generate import ServeGenerator
 from flagscale.runner.auto_tuner.record.recorder import ServeRecorder
 from flagscale.runner.auto_tuner.search.searcher import ServeSearcher
 from flagscale.runner.auto_tuner.tuner import AutoTunerBase
-from flagscale.runner.runner_base_legacy import JobStatus
+from flagscale.runner.utils import JobStatus
 
 FLAGSCALE_USE_V1 = os.environ.get("FLAGSCALE_USE_V1", "1").lower() in ("1", "true")
 

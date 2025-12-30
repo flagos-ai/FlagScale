@@ -11,6 +11,7 @@ import time
 import traceback
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Optional, Tuple
 
 import aiohttp
@@ -22,6 +23,12 @@ from tqdm.asyncio import tqdm
 from flagscale.logger import logger
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
+
+
+class JobStatus(Enum):
+    RUNNING = "Running"
+    TRANSITIONAL = "Transitional (Stopping or Starting)"
+    COMPLETED_OR_IDLE = "Completed or Not Started"
 
 
 def log_and_raise_error(message):
