@@ -27,7 +27,7 @@ class Runner(ABC):
 
         backend_attr = getattr(self.config.experiment.task, "backend", None)
         if self.task_type == "serve":
-            if backend_attr is None:
+            if backend_attr is None and not self.config.experiment.task.get("entrypoint", None):
                 backend_attr = self.config.serve[0]["engine"]
 
         # backend is required for train / inference / rl
