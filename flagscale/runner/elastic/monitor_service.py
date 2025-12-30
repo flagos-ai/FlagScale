@@ -7,8 +7,7 @@ import time
 
 from flagscale.runner.elastic.diagnostic import generate_diagnostic_report
 from flagscale.runner.elastic.log_collector import collect_logs
-from flagscale.runner.runner_base_legacy import JobStatus
-from flagscale.runner.utils import get_remote_file_mtime, logger
+from flagscale.runner.utils import JobStatus, get_remote_file_mtime, logger
 
 
 class MonitorService:
