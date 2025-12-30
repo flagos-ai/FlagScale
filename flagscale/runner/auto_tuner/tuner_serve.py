@@ -5,8 +5,6 @@ import logging
 import os
 import time
 
-from abc import ABC, abstractmethod
-
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.auto_tuner.generate import ServeGenerator

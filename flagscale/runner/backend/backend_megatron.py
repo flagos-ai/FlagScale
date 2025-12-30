@@ -4,7 +4,7 @@ from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.backend import BackendBase
+from flagscale.runner.backend.backend import BackendBase
 from flagscale.runner.runner_train import (
     _get_args_megatron,
     _get_args_pi0,
@@ -20,102 +20,6 @@ from flagscale.runner.utils import (
     logger,
     parse_hostfile,
 )
-
-
-def _get_args_vllm(config: DictConfig):
-    # step1: yaml -> dict
-    assert config.experiment.task.backend in ["vllm"], "This function only supports vllm backend."
-    config_dict = OmegaConf.to_container(config, resolve=True)
-
-    # step2: restructuring the config
-    config_dict = config_dict["inference"]
-    config_dict["logging"].pop("log_dir")
-    config_dict["logging"].pop("scripts_dir")
-    config_dict["logging"].pop("pids_dir")
-    if not config_dict.get("logging"):
-        config_dict.pop("logging")
-
-    # step3: dict -> yaml
-    logging_config = config.inference.logging
-    new_config = OmegaConf.create(config_dict)
-    new_conf_file = os.path.join(logging_config.scripts_dir, f"inference.yaml")
-
-    # step4: write the new yaml file to `outputs_dir/inference_logs/scripts/inference.yaml`
-    with open(new_conf_file, "w") as f:
-        OmegaConf.save(config=new_config, f=f.name, resolve=True)
-
-    args = []
-    args.append(f"--config-path={new_conf_file}")
-
-    return args
-
-
-def _get_serve_engine(config):
-    serve_config = config.get("serve", [])
-    if not serve_config:
-        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
-    if serve_config and len(serve_config) > 1:
-        logger.warning(f"Multiple 'serve' configurations found in task config: {serve_config}")
-
-    engine = serve_config[0].get("engine", None)
-    return engine
-
-
-def _get_serve_engine_args(config, model="vllm_model"):
-    serve_config = config.get("serve", [])
-    if not serve_config:
-        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
-    engine_args = {}
-
-    for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
-            engine_args = item.get("engine_args", {})
-            break
-    if not engine_args:
-        raise ValueError(f"No 'engine_args' configuration found in task config: {serve_config}")
-
-    return engine_args
-
-
-def _get_profile_args(config, model="vllm_model"):
-    serve_config = config.get("serve", [])
-    if not serve_config:
-        raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
-
-    profile_args = {}
-    for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
-            profile_args = item.get("profile", {})
-            break
-    return profile_args
-
-
-def _get_args_sglang(config: DictConfig):
-    # see the following link for more details
-    # https://github.com/facebookresearch/hydra/discussions/2750
-    config_dict = OmegaConf.to_container(config, resolve=True)
-
-    # step2: restructuring the config
-    # config_dict = config_dict["serve"]
-    config_dict["logging"].pop("log_dir")
-    config_dict["logging"].pop("scripts_dir")
-    config_dict["logging"].pop("pids_dir")
-    if not config_dict.get("logging"):
-        config_dict.pop("logging")
-
-    # step3: dict -> yaml
-    logging_config = config.logging
-    new_config = OmegaConf.create(config_dict)
-    new_conf_file = os.path.join(logging_config.scripts_dir, f"serve.yaml")
-
-    # step4: write the new yaml file to `outputs_dir/serve_logs/scripts/serve.yaml`
-    with open(new_conf_file, "w") as f:
-        OmegaConf.save(config=new_config, f=f.name, resolve=True)
-
-    args = []
-    args.append(f"--config-path={new_conf_file}")
-
-    return args
 
 
 class MegatronBackend(BackendBase):
