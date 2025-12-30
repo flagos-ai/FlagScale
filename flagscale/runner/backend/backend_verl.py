@@ -94,7 +94,9 @@ class VerlBackend(BackendBase):
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
         verl_dir = os.path.join(root_dir, "third_party", "verl")
         cmds_config = config.experiment.get("cmds", None)
         if cmds_config:

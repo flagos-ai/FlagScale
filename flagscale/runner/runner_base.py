@@ -48,7 +48,7 @@ class Runner(ABC):
 
         # validate task_type and backend_type compatibility
         allowed_backends = TASK_TO_BACKEND_MAP[self.task_type]
-        assert self.backend_type in allowed_backends, (
+        assert backend_attr in allowed_backends, (
             f"Unsupported backend type '{backend_attr}' for task_type='{self.task_type}'. "
             f"Allowed backends: {allowed_backends}"
         )

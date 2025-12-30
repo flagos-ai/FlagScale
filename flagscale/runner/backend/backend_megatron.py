@@ -76,7 +76,9 @@ class MegatronBackend(BackendBase):
         if root_dir is not None:
             root_dir = os.path.abspath(root_dir)
         else:
-            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            root_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            )
         assert os.path.exists(root_dir), f"ROOT_DIR {root_dir} does not exist."
         megatron_dir = os.path.join(root_dir, "third_party", "Megatron-LM")
         cmds_config = config.experiment.get("cmds", None)

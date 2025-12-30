@@ -110,7 +110,9 @@ class NativeCompressBackend(BackendBase):
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
         compress_dir = os.path.join(root_dir, "compress")
         ### set megatron dir for dataset
         megtron_dir = os.path.join(root_dir, "megatron")

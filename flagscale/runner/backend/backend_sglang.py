@@ -178,7 +178,9 @@ class SglangBackend(BackendBase):
         host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
 
         cmds_config = config.experiment.get("cmds", None)
         ssh_port = config.experiment.runner.get("ssh_port", 22)
