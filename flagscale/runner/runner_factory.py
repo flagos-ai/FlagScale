@@ -1,6 +1,6 @@
 from typing import Dict, Type, TypeVar
 
-from flagscale.runner.backend.backend import BackendBase
+from flagscale.runner.backend.backend_base import BackendBase
 from flagscale.runner.backend.backend_llama_cpp import LlamaCppBackend
 from flagscale.runner.backend.backend_megatron import MegatronBackend
 from flagscale.runner.backend.backend_native_compress import NativeCompressBackend
@@ -8,7 +8,8 @@ from flagscale.runner.backend.backend_native_serve import NativeServeBackend
 from flagscale.runner.backend.backend_sglang import SglangBackend
 from flagscale.runner.backend.backend_verl import VerlBackend
 from flagscale.runner.backend.backend_vllm import VllmBackend
-from flagscale.runner.launcher import LauncherBase, SshLauncher
+from flagscale.runner.launcher.launcher_base import LauncherBase
+from flagscale.runner.launcher.launcher_ssh import SshLauncher
 
 BackendType = TypeVar("BackendType", bound=BackendBase)
 LauncherType = TypeVar("LauncherType", bound=LauncherBase)

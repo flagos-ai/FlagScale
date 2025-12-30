@@ -5,9 +5,8 @@ import shlex
 import subprocess
 import time
 
-from abc import ABC, abstractmethod
-
 from flagscale.runner.elastic.monitor_service import MonitorService
+from flagscale.runner.launcher.launcher_base import LauncherBase
 from flagscale.runner.runner_base_legacy import JobStatus
 from flagscale.runner.runner_serve import _get_profile_args, _get_serve_engine_args
 from flagscale.runner.runner_train import _get_runner_cmd_train
@@ -69,16 +68,6 @@ def run_node(
         cur_envs=cur_envs,
         enable_monitoring=enable_monitoring,
     )
-
-
-class LauncherBase(ABC):
-    @abstractmethod
-    def run(self, *args, **kwargs):
-        raise NotImplementedError
-
-    @abstractmethod
-    def stop(self, *args, **kwargs):
-        raise NotImplementedError
 
 
 class SshLauncher(LauncherBase):

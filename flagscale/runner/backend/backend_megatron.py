@@ -4,7 +4,7 @@ from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.backend.backend import BackendBase
+from flagscale.runner.backend.backend_base import BackendBase
 from flagscale.runner.runner_train import (
     _get_args_megatron,
     _get_args_pi0,

@@ -2,7 +2,7 @@ import os
 
 from omegaconf import DictConfig, OmegaConf
 
-from flagscale.runner.backend.backend import BackendBase
+from flagscale.runner.backend.backend_base import BackendBase
 from flagscale.runner.utils import (
     flatten_dict_to_args,
     flatten_dict_to_args_verl,
