@@ -24,9 +24,9 @@ except ImportError as e:
         git clone --no-checkout https://github.com/baaivision/Emu3.5.git tmp_repo
         cd tmp_repo
         git sparse-checkout init --cone
-        git sparse-checkout set src
+        git sparse-checkout set src assets
         git checkout main
-        mv src ../src
+        mv assets src ../
         cd ..
         rm -rf tmp_repo
         ```

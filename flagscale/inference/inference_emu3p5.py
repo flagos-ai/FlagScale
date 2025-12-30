@@ -114,6 +114,7 @@ if __name__ == "__main__":
             "cudagraph_capture_sizes": [1, 2],
         },
         additional_config={
+            "cfg_batch_size": 2,
             "boi_token_id": processor.special_token_ids["BOI"],
             "soi_token_id": processor.special_token_ids["IMG"],
             "eol_token_id": processor.special_token_ids["EOL"],

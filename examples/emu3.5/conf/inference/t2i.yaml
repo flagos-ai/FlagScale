@@ -15,7 +15,7 @@ llm:
 # prompt case is here: flagscale/inference/emu_utils/prompt_case.py
 generate:
   task_type: t2i
-  ratio: "default"
+  ratio: default
   image_area: 1048576
   sampling:
     max_tokens: 5120
