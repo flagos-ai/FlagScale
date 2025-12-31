@@ -24,12 +24,15 @@ jobs:
         - /home/flagscale_cicd/flask/static:/workspace/report
         - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
         - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
-        - /home/flagscale_cicd/sccache:/root/.cache/sccache
+        - /data/sccache:/root/.cache/sccache
       options: --gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        env:
+          HTTP_PROXY: "http://10.1.0.34:7890"
+          HTTPS_PROXY: "http://10.1.0.34:7890"
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.ref }}
@@ -69,6 +72,10 @@ jobs:
           elif [ "${{ inputs.type }}" = "inference" ] || [ "${{ inputs.type }}" = "serve" ]; then
             source /root/miniconda3/bin/activate flagscale-inference
             export SCCACHE_DIR=/root/.cache/sccache
+            export CMAKE_C_COMPILER_LAUNCHER=$(which sccache)
+            export CMAKE_CXX_COMPILER_LAUNCHER=$(which sccache)
+            export CMAKE_CUDA_COMPILER_LAUNCHER=$(which sccache)
+            export SCCACHE_CACHE_SIZE="100G"
             sccache --start-server
             sccache --show-stats
 
