@@ -1,0 +1,14 @@
+diff --git a/megatron/training/yaml_arguments.py b/megatron/training/yaml_arguments.py
+index 390d503ee..ae1f3069d 100644
+--- a/megatron/training/yaml_arguments.py
++++ b/megatron/training/yaml_arguments.py
+@@ -409,7 +409,8 @@ def core_transformer_config_from_yaml(args, transfomer_key = "language_model"):
+     # Hardcoded 
+     kw_args['deallocate_pipeline_outputs'] = True
+     kw_args['pipeline_dtype'] = kw_args['params_dtype']
+-    kw_args['batch_p2p_comm'] = not args.overlap_p2p_comm 
++    kw_args['batch_p2p_comm'] = not args.overlap_p2p_comm
++    kw_args['untie_embeddings_and_output_weights'] = args.untie_embeddings_and_output_weights 
+     
+     assert args.activation_func in ["swiglu","squaredrelu","gelu"], f"{args.activation_func} is not a supported activation function"
+     if args.activation_func == "swiglu":
