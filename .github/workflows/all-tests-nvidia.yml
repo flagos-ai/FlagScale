@@ -2,7 +2,7 @@ name: All Tests Nvidia
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "refactor"]
     paths-ignore:
       - 'hardware/BI_V150/**'
       - 'hardware/Cambricon_MLU/**'
@@ -13,7 +13,7 @@ on:
       - 'hardware/Metax_C550/**'
       - 'hardware/Tsing_micro/**'
   pull_request:
-    branches: ["main"]
+    branches: ["main", "refactor"]
     paths-ignore:
       - 'hardware/BI_V150/**'
       - 'hardware/Cambricon_MLU/**'
