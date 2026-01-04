@@ -1,0 +1,359 @@
+diff --git a/vllm_mlu/vllm_mlu/v1/engine/core.py b/vllm_mlu/vllm_mlu/v1/engine/core.py
+new file mode 100644
+index 000000000..be18b2430
+--- /dev/null
++++ b/vllm_mlu/vllm_mlu/v1/engine/core.py
+@@ -0,0 +1,352 @@
++# SPDX-License-Identifier: Apache-2.0
++import queue
++import signal
++from typing import Callable, Optional
++from concurrent.futures import Future
++from typing import Optional, Callable
++
++import psutil
++
++from vllm.config import ParallelConfig, SpeculativeConfig, VllmConfig
++from vllm.logger import logger
++from vllm.transformers_utils.config import (
++    maybe_register_config_serialize_by_value)
++from vllm.utils import get_exception_traceback, resolve_obj_by_qualname
++from vllm.v1.engine import EngineCoreOutputs
++from vllm.v1.engine.core import (EngineCore,
++                                 EngineCoreProc,
++                                 DPEngineCoreProc)
++from vllm.v1.engine.mm_input_cache import MirroredProcessingCache
++from vllm.v1.executor.abstract import Executor
++from vllm.v1.core.sched.interface import SchedulerInterface
++from vllm.v1.core.sched.output import SchedulerOutput
++from vllm.v1.core.sched.scheduler import Scheduler as V1Scheduler
++from vllm.v1.outputs import ModelRunnerOutput
++from vllm.v1.structured_output import StructuredOutputManager
++from vllm.version import __version__ as VLLM_VERSION
++
++import vllm_mlu._mlu_utils as mlu_envs
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++from vllm_mlu.mlu_metric import LLMMetric
++from vllm_mlu.v1.core.sched.scheduler import (SchedulerWithProfiler,
++                                              MLUUnchunkScheduler)
++
++
++class EngineCore_MluHijack(EngineCore):
++
++    def __init__(self,
++                 vllm_config: VllmConfig,
++                 executor_class: type[Executor],
++                 log_stats: bool,
++                 executor_fail_callback: Optional[Callable] = None):
++        assert vllm_config.model_config.runner_type != "pooling"
++
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: load_general_plugins in run_engine_core
++        '''
++        # # plugins need to be loaded at the engine/scheduler level too
++        # from vllm.plugins import load_general_plugins
++        # load_general_plugins()
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++        self.vllm_config = vllm_config
++        logger.info("Initializing a V1 LLM engine (v%s) with config: %s",
++                    VLLM_VERSION, vllm_config)
++
++        self.log_stats = log_stats
++
++        # Setup Model.
++        self.model_executor = executor_class(vllm_config)
++        if executor_fail_callback is not None:
++            self.model_executor.register_failure_callback(
++                executor_fail_callback)
++
++        # Setup KV Caches and update CacheConfig after profiling.
++        num_gpu_blocks, num_cpu_blocks, kv_cache_config = \
++            self._initialize_kv_caches(vllm_config)
++
++        vllm_config.cache_config.num_gpu_blocks = num_gpu_blocks
++        vllm_config.cache_config.num_cpu_blocks = num_cpu_blocks
++
++        self.structured_output_manager = StructuredOutputManager(vllm_config)
++
++        # Setup scheduler.
++        if isinstance(vllm_config.scheduler_config.scheduler_cls, str):
++            Scheduler = resolve_obj_by_qualname(
++                vllm_config.scheduler_config.scheduler_cls)
++        else:
++            Scheduler = vllm_config.scheduler_config.scheduler_cls
++
++        # This warning can be removed once the V1 Scheduler interface is
++        # finalized and we can maintain support for scheduler classes that
++        # implement it
++        if Scheduler is not V1Scheduler:
++            logger.warning(
++                "Using configured V1 scheduler class %s. "
++                "This scheduler interface is not public and "
++                "compatibility may not be maintained.",
++                vllm_config.scheduler_config.scheduler_cls)
++
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: use V1UnchunkScheduler when unchunked
++        '''
++        scheduler_config = vllm_config.scheduler_config
++        enable_chunked_prefill = (scheduler_config
++                                  and scheduler_config.enable_chunked_prefill)
++        if (mlu_envs.VLLM_V1_USE_UNCHUNK_SCHED
++                and not enable_chunked_prefill):
++            Scheduler = MLUUnchunkScheduler
++            logger.info(f"Select MLU-V1 UnchunkScheduler.")
++        else:
++            Scheduler = SchedulerWithProfiler
++            logger.info(f"Select MLU-V1 ChunkScheduler.")
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++        self.scheduler: SchedulerInterface = Scheduler(
++            vllm_config=vllm_config,
++            kv_cache_config=kv_cache_config,
++            structured_output_manager=self.structured_output_manager,
++            include_finished_set=vllm_config.parallel_config.data_parallel_size
++            > 1,
++            log_stats=self.log_stats,
++        )
++
++        # Setup MM Input Mapper.
++        self.mm_input_cache_server = MirroredProcessingCache(
++            vllm_config.model_config)
++
++        # Setup batch queue for pipeline parallelism.
++        # Batch queue for scheduled batches. This enables us to asynchronously
++        # schedule and execute batches, and is required by pipeline parallelism
++        # to eliminate pipeline bubbles.
++        self.batch_queue_size = self.model_executor.max_concurrent_batches
++        self.batch_queue: Optional[queue.Queue[tuple[Future[ModelRunnerOutput],
++                                                     SchedulerOutput]]] = None
++        if self.batch_queue_size > 1:
++            logger.info("Batch queue is enabled with size %d",
++                        self.batch_queue_size)
++            self.batch_queue = queue.Queue(self.batch_queue_size)
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: v1 support offline benchmark
++        '''
++        self.step_latency = []
++        self.model_exec_latency = []
++        self.mm_encoder_latency = []
++        self.num_gpu_blocks = num_gpu_blocks
++        self.num_cpu_blocks = num_cpu_blocks
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++    def step(self) -> EngineCoreOutputs:
++        """Schedule, execute, and make output."""
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: v1 support offline benchmark
++        '''
++        if mlu_envs.VLLM_LATENCY_DEBUG_EN:
++            step_start = LLMMetric.get_mlu_cost_time()
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++        # Check for any requests remaining in the scheduler - unfinished,
++        # or finished and not yet removed from the batch.
++        if not self.scheduler.has_requests():
++            return {}, False
++        scheduler_output = self.scheduler.schedule()
++        model_output = self.execute_model(scheduler_output)
++        engine_core_outputs = self.scheduler.update_from_output(
++            scheduler_output, model_output)  # type: ignore
++
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: v1 support offline benchmark
++        '''
++        has_sched_reqs = (scheduler_output.total_num_scheduled_tokens > 0)
++        if mlu_envs.VLLM_LATENCY_DEBUG_EN and has_sched_reqs:
++            self.step_latency.append(LLMMetric.get_mlu_cost_time() - step_start)
++        if mlu_envs.VLLM_LATENCY_DEBUG_WITH_DEVICE_EN and has_sched_reqs:
++            self.model_exec_latency.append(self.get_model_exec_latency())
++            mm_encoder_latency = self.get_mm_encoder_latency()
++            if mm_encoder_latency:
++                self.mm_encoder_latency.append(mm_encoder_latency)
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++        return (engine_core_outputs,
++                scheduler_output.total_num_scheduled_tokens > 0)
++
++    def get_model_exec_latency(self):
++        latency = self.model_executor.get_latency()
++        return latency
++
++    def get_mm_encoder_latency(self):
++        return self.model_executor.get_mm_encoder_latency()
++
++    def get_hfu_info(self, batch, input_len, output_len):
++        return self.model_executor.get_hfu_info(batch, input_len, output_len)
++
++    def get_latency(self):
++        return (self.step_latency, self.model_exec_latency, self.mm_encoder_latency)
++
++    def get_memory_usage(self):
++        peak_memory, block_memory = self.model_executor.get_memory_usage()
++        return (peak_memory, block_memory,
++                self.num_gpu_blocks, self.num_cpu_blocks)
++
++    def recapture_model(self,
++                        prefill_enable_mlugraph: bool,
++                        batch_size: int,
++                        input_len: int):
++        self.model_executor.recapture_model(
++            prefill_enable_mlugraph, batch_size, input_len)
++
++    def init_metric(self, use_unchunk_sched: bool, min_prefill_batch: int):
++        self.step_latency = []
++        self.model_exec_latency = []
++        self.mm_encoder_latency = []
++        mlu_envs.VLLM_V1_USE_UNCHUNK_SCHED = use_unchunk_sched
++        mlu_envs.VLLM_V1_MIN_PREFILL_BATCH = min_prefill_batch
++
++    def start_scheduler_profile(self):
++        self.scheduler.start_scheduler_profile()
++
++    def stop_scheduler_profile(self):
++        self.scheduler.stop_scheduler_profile()
++
++
++class EngineCoreProc_MluHijack(EngineCoreProc):
++
++    @staticmethod
++    def run_engine_core(*args,
++                        dp_rank: int = 0,
++                        local_dp_rank: int = 0,
++                        **kwargs):
++        """Launch EngineCore busy loop in background process."""
++
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: load_general_plugins for mp backend engine
++        '''
++        # plugins need to be loaded at the engine/scheduler level too
++        from vllm.plugins import load_general_plugins
++        load_general_plugins()
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++
++        # Signal handler used for graceful termination.
++        # SystemExit exception is only raised once to allow this and worker
++        # processes to terminate without error
++        shutdown_requested = False
++
++        # Ensure we can serialize transformer config after spawning
++        maybe_register_config_serialize_by_value()
++
++        def signal_handler(signum, frame):
++            nonlocal shutdown_requested
++            if not shutdown_requested:
++                shutdown_requested = True
++                raise SystemExit()
++
++        # Either SIGTERM or SIGINT will terminate the engine_core
++        signal.signal(signal.SIGTERM, signal_handler)
++        signal.signal(signal.SIGINT, signal_handler)
++
++        engine_core: Optional[EngineCoreProc] = None
++        try:
++            parallel_config: ParallelConfig = kwargs[
++                "vllm_config"].parallel_config
++            if parallel_config.data_parallel_size > 1 or dp_rank > 0:
++                # Set data parallel rank for this engine process.
++                parallel_config.data_parallel_rank = dp_rank
++                parallel_config.data_parallel_rank_local = local_dp_rank
++                engine_core = DPEngineCoreProc(*args, **kwargs)
++            else:
++                engine_core = EngineCoreProc(*args, **kwargs)
++
++            engine_core.run_busy_loop()
++
++        except SystemExit:
++            logger.debug("EngineCore exiting.")
++            raise
++        except Exception as e:
++            if engine_core is None:
++                logger.exception("EngineCore failed to start.")
++            else:
++                logger.exception("EngineCore encountered a fatal error.")
++                engine_core._send_engine_dead()
++            raise e
++        finally:
++            if engine_core is not None:
++                engine_core.shutdown()
++
++
++MluHijackObject.apply_hijack(EngineCore,
++                             "get_mm_encoder_latency",
++                             EngineCore_MluHijack.get_mm_encoder_latency)
++MluHijackObject.apply_hijack(EngineCore,
++                             "get_model_exec_latency",
++                             EngineCore_MluHijack.get_model_exec_latency)
++MluHijackObject.apply_hijack(EngineCore,
++                             "get_hfu_info",
++                             EngineCore_MluHijack.get_hfu_info)
++MluHijackObject.apply_hijack(EngineCore,
++                             "get_latency",
++                             EngineCore_MluHijack.get_latency)
++MluHijackObject.apply_hijack(EngineCore,
++                             "get_memory_usage",
++                             EngineCore_MluHijack.get_memory_usage)
++MluHijackObject.apply_hijack(EngineCore,
++                             "recapture_model",
++                             EngineCore_MluHijack.recapture_model)
++MluHijackObject.apply_hijack(EngineCore,
++                             "init_metric",
++                             EngineCore_MluHijack.init_metric)
++MluHijackObject.apply_hijack(EngineCore,
++                             "start_scheduler_profile",
++                             EngineCore_MluHijack.start_scheduler_profile)
++MluHijackObject.apply_hijack(EngineCore,
++                             "stop_scheduler_profile",
++                             EngineCore_MluHijack.stop_scheduler_profile)
++MluHijackObject.apply_hijack(EngineCore,
++                             EngineCore.__init__,
++                             EngineCore_MluHijack.__init__)
++MluHijackObject.apply_hijack(EngineCore,
++                             EngineCore.step,
++                             EngineCore_MluHijack.step)
++MluHijackObject.apply_hijack(EngineCoreProc,
++                             EngineCoreProc.run_engine_core,
++                             EngineCoreProc_MluHijack.run_engine_core)
+

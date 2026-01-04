@@ -1,8 +1,8 @@
 diff --git a/megatron/training/checkpointing.py b/megatron/training/checkpointing.py
-index 104fa6882..1c501cc1b 100644
+index 104fa6882..722859bf6 100644
 --- a/megatron/training/checkpointing.py
 +++ b/megatron/training/checkpointing.py
-@@ -286,12 +286,14 @@ def read_metadata(tracker_filename):
+@@ -286,12 +286,15 @@ def read_metadata(tracker_filename):
                  print_rank_0('ERROR: Invalid metadata file {}. Exiting'.format(
                      tracker_filename))
                  sys.exit()
@@ -15,11 +15,12 @@ index 104fa6882..1c501cc1b 100644
      # Get the max iteration retrieved across the ranks.
      if torch.distributed.is_initialized():
 -        iters_cuda = torch.tensor([iteration], dtype=torch.long, device='cuda')
-+        iters_cuda = torch.tensor([iteration], dtype=torch.long, device='cuda' if 'nccl' in torch.distributed.get_backend() else 'cpu')
++        # iters_cuda = torch.tensor([iteration], dtype=torch.long, device='cuda' if 'nccl' in torch.distributed.get_backend() else 'cpu')
++        iters_cuda = torch.tensor([iteration], dtype=torch.long, device='cuda' if torch.distributed.get_backend() != 'gloo' else 'cpu')
          torch.distributed.all_reduce(iters_cuda, op=torch.distributed.ReduceOp.MAX)
          max_iter = iters_cuda[0].item()
  
-@@ -692,6 +694,28 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+@@ -692,6 +695,28 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
      if not torch.distributed.is_initialized() \
         or is_last_rank():
          def wandb_finalize_fn():
@@ -48,7 +49,7 @@ index 104fa6882..1c501cc1b 100644
              wandb_utils.on_save_checkpoint_success(checkpoint_name, get_checkpoint_tracker_filename(save_dir), save_dir, iteration)
          if args.async_save:
              assert async_save_request is not None
-@@ -774,9 +798,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
+@@ -774,9 +799,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
  
      torch.distributed.barrier(group=mpu.get_data_parallel_group())
  
@@ -59,7 +60,7 @@ index 104fa6882..1c501cc1b 100644
      torch.distributed.barrier(group=mpu.get_data_parallel_group())
  
      dataloader_save_dict = {}
-@@ -1239,6 +1261,10 @@ def load_args_from_checkpoint(
+@@ -1239,6 +1262,10 @@ def load_args_from_checkpoint(
              checkpoint_args, 'add_bias_linear', not getattr(checkpoint_args, 'disable_bias_linear')
          )
  
@@ -70,7 +71,7 @@ index 104fa6882..1c501cc1b 100644
      def _set_arg(arg_name, old_arg_name=None, force=False):
          if not force and getattr(args, arg_name, None) is not None:
              return
-@@ -1274,6 +1300,8 @@ def load_args_from_checkpoint(
+@@ -1274,6 +1301,8 @@ def load_args_from_checkpoint(
      _set_arg('add_qkv_bias', force=True)
      _set_arg('squared_relu', force=True)
      _set_arg('swiglu', force=True)
@@ -79,7 +80,7 @@ index 104fa6882..1c501cc1b 100644
      _set_arg('untie_embeddings_and_output_weights', force=True)
      _set_arg('apply_layernorm_1p', force=True)
      _set_arg('normalization', force=True)
-@@ -1432,6 +1460,14 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+@@ -1432,6 +1461,14 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
          mismatch_msg = "(TP, PP) mismatch after resume ({} vs {} from checkpoint)".format(
              run_tp_pp, ckpt_tp_pp
          )
@@ -94,7 +95,7 @@ index 104fa6882..1c501cc1b 100644
  
          # Determine if RNG state will be loaded
          if (ckpt_tp_pp == run_tp_pp and not release and not args.finetune and not args.no_load_rng
-@@ -1468,6 +1504,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+@@ -1468,6 +1505,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
                      ckpt_tp_pp != run_tp_pp
                      and sharded_sd_metadata['distrib_optim_sharding_type']
                      not in DistributedOptimizer.checkpoint_fully_reshardable_formats
@@ -102,7 +103,7 @@ index 104fa6882..1c501cc1b 100644
                  ):
                      raise RuntimeError(f"{mismatch_msg}: not supported for DistributedOptimizer with sharding type"
                                         f" {sharded_sd_metadata['distrib_optim_sharding_type']}."
-@@ -1481,7 +1518,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+@@ -1481,7 +1519,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
              gen_sd_optim = None
              gen_sd_opt_param_scheduler = None
  
@@ -111,3 +112,8 @@ index 104fa6882..1c501cc1b 100644
          model_sd_kwargs = dict(metadata=sharded_sd_metadata)
  
          # Determine if rerun state will be loaded
+@@ -1829,3 +1867,4 @@ def load_biencoder_checkpoint(model, only_query_model=False,
+         print(' successfully loaded {}'.format(checkpoint_name))
+ 
+     return model
++

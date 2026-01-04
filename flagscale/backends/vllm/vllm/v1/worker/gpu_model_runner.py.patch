@@ -1,5 +1,5 @@
 diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
-index a438c7777..fd3566d73 100644
+index a438c7777..0a40a9505 100644
 --- a/vllm/v1/worker/gpu_model_runner.py
 +++ b/vllm/v1/worker/gpu_model_runner.py
 @@ -125,6 +125,23 @@ AttnMetadataDict: TypeAlias = dict[str, AttentionMetadata]
@@ -42,51 +42,25 @@ index a438c7777..fd3566d73 100644
              )
              self.requests[req_id] = req_state
  
-@@ -616,25 +635,28 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+@@ -616,11 +635,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
              num_computed_tokens = req_data.num_computed_tokens[i]
              new_block_ids = req_data.new_block_ids[i]
              resumed_from_preemption = req_data.resumed_from_preemption[i]
-+            req_state.sampling_params = req_data.sampling_params[i]
-+            req_state.hybrid_metadata = req_data.hybrid_metadata[i]
++            if getattr(req_data, 'sampling_params', None) is not None:
++                req_state.sampling_params = req_data.sampling_params[i]
++            if getattr(req_data, 'hybrid_metadata', None) is not None:
++                req_state.hybrid_metadata = req_data.hybrid_metadata[i]
  
              # Update the cached states.
              req_state.num_computed_tokens = num_computed_tokens
  
 -            if not is_last_rank:
--                # When using PP, the scheduler sends the sampled tokens back,
--                # because there's no direct communication between the first-
--                # stage worker and the last-stage worker.
--                new_token_ids = req_data.new_token_ids[i]
--                # Add the sampled token(s) from the previous step (if any).
--                # This doesn't include "unverified" tokens like spec tokens.
--                num_new_tokens = (num_computed_tokens + len(new_token_ids) -
--                                  req_state.num_tokens)
--                if num_new_tokens == 1:
--                    # Avoid slicing list in most common case.
--                    req_state.output_token_ids.append(new_token_ids[-1])
--                elif num_new_tokens > 0:
--                    req_state.output_token_ids.extend(
--                        new_token_ids[-num_new_tokens:])
 +            # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-+            # if not is_last_rank:
-+            # When using PP, the scheduler sends the sampled tokens back,
-+            # because there's no direct communication between the first-
-+            # stage worker and the last-stage worker.
-+            new_token_ids = req_data.new_token_ids[i]
-+            # Add the sampled token(s) from the previous step (if any).
-+            # This doesn't include "unverified" tokens like spec tokens.
-+            num_new_tokens = (num_computed_tokens + len(new_token_ids) -
-+                                req_state.num_tokens)
-+            if num_new_tokens == 1:
-+                # Avoid slicing list in most common case.
-+                req_state.output_token_ids.append(new_token_ids[-1])
-+            elif num_new_tokens > 0:
-+                req_state.output_token_ids.extend(
-+                    new_token_ids[-num_new_tokens:])
- 
-             # Update the block IDs.
-             if not resumed_from_preemption:
-@@ -664,18 +686,30 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
++            if not is_last_rank or getattr(req_data, 'hybrid_metadata', None) is not None:
+                 # When using PP, the scheduler sends the sampled tokens back,
+                 # because there's no direct communication between the first-
+                 # stage worker and the last-stage worker.
+@@ -664,9 +688,14 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                  self.input_batch.block_table.append_row(
                      new_block_ids, req_index)
  
@@ -97,33 +71,22 @@ index a438c7777..fd3566d73 100644
              # For the last rank, we don't need to update the token_ids_cpu
              # because the sampled tokens are already cached.
 -            if not is_last_rank:
--                # Add new_token_ids to token_ids_cpu.
--                start_token_index = num_computed_tokens
--                end_token_index = num_computed_tokens + len(new_token_ids)
--                self.input_batch.token_ids_cpu[
--                    req_index,
--                    start_token_index:end_token_index] = new_token_ids
--                self.input_batch.num_tokens_no_spec[
--                    req_index] = end_token_index
--                self.input_batch.num_tokens[req_index] = end_token_index
 +            # NOTE(zhaoyinglia): emu must use token_ids from schdeuled_output
-+            # if not is_last_rank:
-+            # Add new_token_ids to token_ids_cpu.
-+            start_token_index = num_computed_tokens
-+            end_token_index = num_computed_tokens + len(new_token_ids)
-+            self.input_batch.token_ids_cpu[
-+                req_index,
-+                start_token_index:end_token_index] = new_token_ids
-+            self.input_batch.num_tokens_no_spec[
-+                req_index] = end_token_index
-+            self.input_batch.num_tokens[req_index] = end_token_index
-+            # NOTE(zhaoyinglia): Update topk/topp/temp, cause different token type needs different value
-+            self.input_batch.top_k_cpu[req_index] = req_state.sampling_params.top_k
-+            self.input_batch.top_p_cpu[req_index] = req_state.sampling_params.top_p
-+            self.input_batch.temperature_cpu[req_index] = req_state.sampling_params.temperature
-+            self.input_batch.top_k[req_index] = req_state.sampling_params.top_k
-+            self.input_batch.top_p[req_index] = req_state.sampling_params.top_p
-+            self.input_batch.temperature[req_index] = req_state.sampling_params.temperature
++            if not is_last_rank or getattr(req_data, 'hybrid_metadata', None) is not None:
+                 # Add new_token_ids to token_ids_cpu.
+                 start_token_index = num_computed_tokens
+                 end_token_index = num_computed_tokens + len(new_token_ids)
+@@ -676,6 +705,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
+                 self.input_batch.num_tokens_no_spec[
+                     req_index] = end_token_index
+                 self.input_batch.num_tokens[req_index] = end_token_index
++                # NOTE(zhaoyinglia): Update topk/topp/temp, cause different token type needs different value
++                self.input_batch.top_k_cpu[req_index] = req_state.sampling_params.top_k
++                self.input_batch.top_p_cpu[req_index] = req_state.sampling_params.top_p
++                self.input_batch.temperature_cpu[req_index] = req_state.sampling_params.temperature
++                self.input_batch.top_k[req_index] = req_state.sampling_params.top_k
++                self.input_batch.top_p[req_index] = req_state.sampling_params.top_p
++                self.input_batch.temperature[req_index] = req_state.sampling_params.temperature
  
              # Add spec_token_ids to token_ids_cpu.
              spec_token_ids = (

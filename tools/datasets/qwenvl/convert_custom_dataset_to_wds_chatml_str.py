@@ -9,7 +9,6 @@ import pickle
 from argparse import ArgumentParser
 from typing import List, Union
 
-import cv2
 import webdataset as wds
 import yaml
 

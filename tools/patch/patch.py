@@ -484,6 +484,22 @@ def validate_patch_args(device_type, task, commit, main_path):
         ), "The args commit, device_type, task must not be None."
 
 
+def domain_to_backends(domain) -> str:
+    """
+    Convert domain to backends
+    Args:
+        domain (str): Domain name provided by the user.
+    Returns:
+        str: Backend names separated by commas.
+    """
+    input_lower = domain.lower()
+
+    if input_lower in ["robo", "robotics"]:
+        return ",".join(["Megatron-LM", "Megatron-Energon"])
+    else:
+        raise ValueError(f'Unsupported domain {domain}')
+
+
 def normalize_backend(backend):
     """
     Normalize backend to standard backend names

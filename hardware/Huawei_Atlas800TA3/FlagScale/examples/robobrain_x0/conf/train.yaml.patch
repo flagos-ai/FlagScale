@@ -1,0 +1,39 @@
+diff --git a/examples/robobrain_x0/conf/train.yaml b/examples/robobrain_x0/conf/train.yaml
+new file mode 100644
+index 00000000..d507bdfa
+--- /dev/null
++++ b/examples/robobrain_x0/conf/train.yaml
+@@ -0,0 +1,32 @@
++defaults:
++  - train: robobrain_x0
++  - _self_
++
++experiment:
++  exp_name: robobrain_x0
++  exp_dir: ./${experiment.exp_name}
++  task:
++    type: train
++    backend: megatron
++    entrypoint: ./flagscale/train/train_robobrain_x0.py
++
++  runner:
++    backend: torchrun
++    nnodes: 1
++    nproc_per_node: 4
++    rdzv_backend: static
++  cmds:
++    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
++  envs:
++    ASCEND_RT_VISIBLE_DEVICES: 12,13,14,15
++    CUDA_DEVICE_MAX_CONNECTIONS: 1
++    NVTE_APPLY_QK_LAYER_SCALING: 0
++    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
++    LD_PRELOAD: "/usr/local/python3.11.5/lib/python3.11/site-packages/scikit_learn.libs/libgomp-947d5fa1.so.1.0.0"
++    HCCL_DETERMINISTIC: true
++
++action: run
++
++hydra:
++  run:
++    dir: ${experiment.exp_dir}/hydra
+

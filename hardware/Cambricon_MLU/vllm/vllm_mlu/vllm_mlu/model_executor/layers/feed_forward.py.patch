@@ -1,14 +1,17 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/layers/feed_forward.py b/vllm_mlu/vllm_mlu/model_executor/layers/feed_forward.py
 new file mode 100755
-index 000000000..03ac5a0a3
+index 000000000..27487e446
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/layers/feed_forward.py
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,221 @@
 +import torch
 +import torch.nn.functional as F
-+from typing import Optional
++from typing import Any, Optional
 +
-+from vllm.distributed import get_tensor_model_parallel_world_size
++from vllm.distributed import (
++    get_parallel_world_size_with_group,
++    get_parallel_rank_with_group,
++)
 +from vllm.distributed.communication_op import tensor_model_parallel_all_reduce
 +from vllm.logger import init_logger
 +from vllm.lora.layers import BaseLayerWithLoRA
@@ -22,7 +25,6 @@ index 000000000..03ac5a0a3
 +
 +from vllm_mlu import _mlu_ops as mlu_ops
 +from vllm_mlu.mlu_hijack_utils import set_is_gated
-+from vllm.distributed import get_tensor_model_parallel_rank
 +
 +logger = init_logger(__name__)
 +
@@ -40,6 +42,8 @@ index 000000000..03ac5a0a3
 +        skip_bias_add: bool = False,
 +        reduce_results: bool = True,
 +        prefix: str = "",
++        tp_group: Any = None,
++        keep_full_weights: bool = False,
 +    ) -> None:
 +        super().__init__()
 +        self.hidden_size = hidden_size
@@ -53,9 +57,17 @@ index 000000000..03ac5a0a3
 +        self.skip_bias_add = skip_bias_add
 +        self.reduce_results = reduce_results
 +        self.use_bt_ffn = True
-+        self.tp_size = get_tensor_model_parallel_world_size()
 +        set_is_gated(self.is_gated)
-+        self.tp_rank = get_tensor_model_parallel_rank()
++
++        # modify tp_size, tp_rank and tp_group when enable data parallel
++        self.tp_size = get_parallel_world_size_with_group(tp_group)
++        self.tp_rank = get_parallel_rank_with_group(tp_group)
++        self.tp_group = tp_group
++        self.keep_full_weights = keep_full_weights
++        if self.keep_full_weights:
++            self.tp_size = 1
++            self.tp_rank = 0
++            self.tp_group = None
 +
 +        # up_proj with gate or not
 +        if self.is_gated:
@@ -63,14 +75,18 @@ index 000000000..03ac5a0a3
 +                                                 [intermediate_size] * 2,
 +                                                 bias=bias,
 +                                                 quant_config=quant_config,
-+                                                 prefix=f"{prefix}.{up_proj_name}")
++                                                 prefix=f"{prefix}.{up_proj_name}",
++                                                 tp_group=self.tp_group,
++                                                 keep_full_weights=keep_full_weights)
 +        else:
 +            up_proj = ColumnParallelLinear(hidden_size,
 +                                           intermediate_size,
 +                                           bias=bias,
 +                                           skip_bias_add=skip_bias_add,
 +                                           quant_config=quant_config,
-+                                           prefix=f"{prefix}.{up_proj_name}")
++                                           prefix=f"{prefix}.{up_proj_name}",
++                                           tp_group=self.tp_group,
++                                           keep_full_weights=keep_full_weights)
 +        self.register_module(up_proj_name, up_proj)
 +
 +        # down_proj
@@ -80,7 +96,10 @@ index 000000000..03ac5a0a3
 +                                      skip_bias_add=skip_bias_add,
 +                                      reduce_results=reduce_results,
 +                                      quant_config=quant_config,
-+                                      prefix=f"{prefix}.{down_proj_name}")
++                                      prefix=f"{prefix}.{down_proj_name}",
++                                      tp_group=self.tp_group,
++                                      keep_full_weights=keep_full_weights)
++
 +        self.register_module(down_proj_name, down_proj)
 +
 +    def prepare_weight(self):
@@ -141,7 +160,9 @@ index 000000000..03ac5a0a3
 +        self,
 +        hidden_states,
 +        residual: Optional[torch.Tensor] = None,
-+        smooth_quant_scale: Optional[torch.Tensor] = None
++        smooth_quant_scale: Optional[torch.Tensor] = None,
++        use_tp_weight: bool = False,
++        output: Optional[torch.Tensor] = None,
 +    ):
 +        self.prepare_weight()
 +
@@ -158,17 +179,22 @@ index 000000000..03ac5a0a3
 +            #   output = active(mul_out)
 +            # Notes: We cannot use the activation function in matmul because it does not support gated operation
 +            #  we might support its in tmo matmul in the future
-+            fc1 = mlu_ops.matmul(hidden_states.view(-1, self.hidden_size), up_proj.weight, up_proj.bias,
-+                                None, 'none', self.alpha, self.beta)
++            up_proj_weight = up_proj.weight
++            down_proj_weight = down_proj.weight
++            if self.keep_full_weights and use_tp_weight:
++                up_proj_weight = up_proj.tp_weight
++                down_proj_weight = down_proj.tp_weight
++            fc1 = mlu_ops.matmul(hidden_states.view(-1, self.hidden_size), up_proj_weight, up_proj.bias,
++                                 None, 'none', self.alpha, self.beta)
 +            act_out = mlu_ops.active(fc1, self.hidden_act, self.is_gated)
 +            beta = 0.0
 +            if residual_ is not None:
 +                beta = 1.0
 +                residual_ = residual_.view(-1, residual_.shape[-1])
-+            out_ = mlu_ops.matmul(act_out, down_proj.weight, None, residual_, 'none', self.alpha, beta)
++            out_ = mlu_ops.matmul(act_out, down_proj_weight, None, residual_, 'none', self.alpha, beta)
 +            # bias if existed need to add after second matmul according to the original design of vllm
 +            if self.reduce_results:
-+                out = tensor_model_parallel_all_reduce(out_)
++                out = tensor_model_parallel_all_reduce(out_, self.tp_group)
 +            else:
 +                out = out_
 +            # do the bias add if needed
@@ -177,18 +203,24 @@ index 000000000..03ac5a0a3
 +            else:
 +                return out, down_proj.bias
 +        else:
-+            fc1, bias = up_proj(hidden_states, smooth_quant_scale=smooth_quant_scale)
++            fc1, bias = up_proj(hidden_states, smooth_quant_scale=smooth_quant_scale, use_tp_weight=use_tp_weight)
 +            if bias is not None:
 +                fc1 += bias
 +            input_scale= None
-+            if (fc1.shape[-1] < 24000 and
-+                self.quant_config is not None and self.quant_config.get_name() == "SmoothQuant" and
-+                self.quant_config.input_quant_method == "per_token"):
++            if (self.quant_config is not None and self.quant_config.get_name() == "SmoothQuant" and
++                self.quant_config.input_quant_method == "per_token" and not self.quant_config.is_fp8):
 +                down_proj.quant_method.skip_quant_input = True
-+                fc1, input_scale = mlu_ops.per_token_smooth_quantize(fc1, down_proj.smooth, None, None, act_mode=self.hidden_act, is_gated=self.is_gated)
++                down_proj_smooth = down_proj.smooth
++                if self.keep_full_weights and use_tp_weight:
++                    assert down_proj.tp_smooth is not None, "tp_smooth is not initialized"
++                    down_proj_smooth = down_proj.tp_smooth
++                fc1, input_scale = mlu_ops.per_token_smooth_quantize(
++                    fc1, down_proj_smooth, None, None, act_mode=self.hidden_act, is_gated=self.is_gated)
 +            else:
 +                fc1 = mlu_ops.active(fc1, self.hidden_act, self.is_gated)
-+            out, bias = down_proj(fc1, residual=residual_, smooth_quant_scale=input_scale)
++            out, bias = down_proj(
++                fc1, residual=residual_, smooth_quant_scale=input_scale,
++                use_tp_weight=use_tp_weight, output=output)
 +
 +            if self.skip_bias_add:
 +                return out, bias

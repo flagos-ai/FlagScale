@@ -213,6 +213,46 @@ def run_ssh_command(host, cmd, port=None, dryrun=False, query=False):
         return result
 
 
+def get_remote_file_mtime(host, filepath, port=22):
+    """
+    Get modification time of a file on a remote host (in seconds since epoch).
+
+    Args:
+        host (str): The address of the remote host (e.g., 'user@hostname').
+        filepath (str): The path to the file on the remote host.
+        port (int): SSH port number (default: 22).
+
+    Returns:
+        int: The modification time in seconds since epoch if successful; returns -1 if an error occurs.
+    """
+    try:
+        cmd = ["ssh", "-p", str(port), host, f"stat -c%Y {filepath}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return int(result.stdout.strip())
+    except subprocess.CalledProcessError:
+        return -1
+
+
+def get_remote_file_size(host, filepath, port=22):
+    """
+    Get size of a file on a remote host (in bytes).
+
+    Args:
+        host (str): The address of the remote host (e.g., 'user@hostname').
+        filepath (str): The path to the file on the remote host.
+        port (int): SSH port number (default: 22).
+
+    Returns:
+        int: The size in bytes if successful; returns -1 if an error occurs.
+    """
+    try:
+        cmd = ["ssh", "-p", str(port), host, f"stat -c%s {filepath}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return int(result.stdout.strip())
+    except Exception:
+        return -1
+
+
 def run_scp_command(host, src, dst, port=None, dryrun=False):
     if port:
         scp_cmd = f"scp -P {port} -r {src} {host}:{dst} "

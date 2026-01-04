@@ -1,25 +1,26 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/models/clip.py b/vllm_mlu/vllm_mlu/model_executor/models/clip.py
 new file mode 100644
-index 000000000..837f50312
+index 000000000..0dcd4fc02
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/models/clip.py
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,227 @@
 +from typing import Optional
 +
 +import torch
 +import torch.nn as nn
 +from transformers import CLIPVisionConfig
-+from transformers.models.clip.modeling_clip import CLIPSdpaAttention
 +
 +from vllm.distributed import get_tensor_model_parallel_world_size
-+from vllm_mlu.mlu_hijack_utils import MluHijackObject
-+from vllm_mlu.model_executor.layers.feed_forward import FeedForward
 +from vllm.model_executor.layers.quantization import QuantizationConfig
 +from vllm.model_executor.models.clip import (CLIPVisionModel,
 +                                             CLIPVisionTransformer,
 +                                             CLIPEncoderLayer,
 +                                             CLIPAttention)
 +from vllm.logger import init_logger
++
++from vllm_mlu import _mlu_ops as mlu_ops
++from vllm_mlu.mlu_hijack_utils import MluHijackObject
++from vllm_mlu.model_executor.layers.feed_forward import FeedForward
 +
 +logger = init_logger(__name__)
 +
@@ -50,10 +51,9 @@ index 000000000..837f50312
 +    =============================
 +    @brief: perf attn using tmo flash attn
 +    '''
-+    if self.dropout is None or self.dropout == 0.0:
++    dropout = self.config.attention_dropout
++    if dropout is None or dropout == 0.0:
 +        # Always true for inference
-+        from vllm_mlu import _mlu_ops as mlu_ops
-+
 +        out = mlu_ops.flash_attention(
 +            query_states,
 +            key_states,
@@ -75,7 +75,7 @@ index 000000000..837f50312
 +            query_states,
 +            key_states,
 +            value_states,
-+            p=self.dropout,
++            p=dropout,
 +            scale=self.scale
 +        )
 +    '''
@@ -89,7 +89,7 @@ index 000000000..837f50312
 +    Modify by vllm_mlu
 +    =============================
 +    @brief: add residual
-+    '''
++    ''' 
 +    attn_output, _ = self.out_proj(out, residual)
 +    '''
 +    ==================
@@ -115,17 +115,13 @@ index 000000000..837f50312
 +    =============================
 +    @brief: perf attn using tmo flash attn, do not check xformers
 +    '''
-+    if num_heads % tp_size == 0:
-+        self.self_attn = CLIPAttention(
-+            config,
-+            quant_config=quant_config,
-+            prefix=f"{prefix}.self_attn",
-+        )
-+        self.use_parallel_attn = True
-+    else:
-+        logger.warning("Use CLIPSdpaAttention for clip model, this can be slow.")
-+        self.self_attn = CLIPSdpaAttention(config)
-+        self.use_parallel_attn = False
++    assert num_heads % tp_size == 0, "Use CLIPSdpaAttention for clip model, this can be slow"
++    self.self_attn = CLIPAttention(
++        config,
++        quant_config=quant_config,
++        prefix=f"{prefix}.self_attn",
++    )
++    self.use_parallel_attn = True
 +    '''
 +    ==================
 +    End of MLU Hijack

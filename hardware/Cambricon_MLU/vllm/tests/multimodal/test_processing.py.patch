@@ -1,0 +1,13 @@
+diff --git a/tests/multimodal/test_processing.py b/tests/multimodal/test_processing.py
+index 8b52911c6..2f97475f1 100644
+--- a/tests/multimodal/test_processing.py
++++ b/tests/multimodal/test_processing.py
+@@ -1086,6 +1086,7 @@ def test_hf_processor_kwargs(model_id, call_kwargs, expected_kwargs):
+         prompt="",
+         mm_data={},
+         mm_kwargs=call_kwargs,
++        tok_kwargs={},
+     )
+ 
+     assert out_kwargs == expected_kwargs
+

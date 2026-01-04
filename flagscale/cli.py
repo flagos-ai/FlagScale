@@ -175,6 +175,88 @@ def change_to_flagscale():
     return flag_scale_path
 
 
+def _install_from_source(backend, device):
+    """Install backend from source code using builder functions."""
+    import os
+    import sys
+
+    # need run in source directory
+    flagscale_path = os.path.dirname(os.path.abspath(__file__))
+    if 'site-packages' in flagscale_path or 'dist-packages' in flagscale_path:
+        root_dir = os.getcwd()
+        if not os.path.exists(os.path.join(root_dir, "setup.py")):
+            raise click.ClickException(
+                "Cannot find FlagScale source directory. Please:\n"
+                "  Run this command from FlagScale source directory"
+            )
+        click.echo(f"[install] Using FlagScale source directory: {root_dir}")
+    else:
+        root_dir = os.path.abspath(os.path.join(flagscale_path, ".."))
+
+    # Import builder functions
+    sys.path.insert(0, root_dir)
+    from install.builder import build_and_install_backend, check_device
+    from tools.patch.patch import normalize_backend
+
+    # Validate device
+    try:
+        check_device(device)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    # Normalize backend name
+    backend_normalized = normalize_backend(backend)
+
+    # Build and install the backend (includes unpatch step)
+    try:
+        build_and_install_backend(backend_normalized, device, root_dir)
+        click.echo(f"[install] Successfully installed {backend_normalized} from source.")
+    except subprocess.CalledProcessError as e:
+        raise click.ClickException(f"Failed to build {backend_normalized}: {e}")
+    except Exception as e:
+        raise click.ClickException(f"Error during installation: {e}")
+
+
+def _install_from_whl(backend, device, version=None):
+    from flag_scale.version import get_whl_version
+
+    versions, compatible_versions = get_whl_version(backend, device)
+    if compatible_versions:
+        install_version = None
+        if version:
+            for compatible_version in compatible_versions:
+                if version in compatible_version:
+                    install_version = compatible_version
+                    break
+        else:
+            versions = [Version(version) for version in compatible_versions]
+            install_version = max(versions)
+            for idx, ver in enumerate(versions):
+                if ver == install_version:
+                    install_version = compatible_versions[idx]
+                    break
+
+        if install_version:
+            install_version = f"{backend}" + "-" + install_version + ".whl"
+            click.echo(f"Installing {install_version} for {backend} on {device}.")
+            install_version = quote(install_version)
+            ks3_path = f"https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/whl/{backend}/{device}/{install_version}"
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    ks3_path,
+                    "--no-build-isolation",
+                    "--verbose",
+                ]
+            )
+            click.echo(f"Successfully installed {backend} from whl package.")
+    else:
+        raise ValueError(f"No compatible versions found for {backend} on {device}.")
+
+
 def get_valid_backends_subsets(config_path):
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
@@ -417,40 +499,40 @@ def show(backend, device="gpu"):
 
 
 @flagscale.command()
-@click.argument("backend", type=str)
+@click.option("--backend", type=str, default=None, help="Backend name for installation")
+@click.option("--domain", type=str, default=None, help="Domain name for installation")
 @click.option("--device", default="gpu", help="Device type (e.g., gpu, cpu)")
 @click.option("--version", default=None)
-def install(backend, device="gpu", version=None):
+@click.option("--from-source", is_flag=True, help="Force install from source code")
+def install(backend=None, domain=None, device="gpu", version=None, from_source=False):
     """
-    Install the whl version of backend.
+    Install the whl version of backend. If whl is not available, install from source.
     """
-    from flag_scale.version import get_whl_version
 
     if "metax" in device.lower():
         device = "metax"
-    versions, compatible_versions = get_whl_version(backend, device)
-    if not compatible_versions:
-        raise click.ClickException(f"No compatible versions found for {backend} on {device}.")
-    install_version = None
-    if version:
-        for compatible_version in compatible_versions:
-            if version in compatible_version:
-                install_version = compatible_version
-                break
-    else:
-        versions = [Version(version) for version in compatible_versions]
-        install_version = max(versions)
-        for idx, version in enumerate(versions):
-            if version == install_version:
-                install_version = compatible_versions[idx]
-                break
-        install_version = f"{backend}" + "-" + install_version + ".whl"
-        click.echo(f"Installing {install_version} for {backend} on {device}.")
-        install_version = quote(install_version)
-        ks3_path = f"https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/whl/{backend}/{device}/{install_version}"
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", ks3_path, "--no-build-isolation", "--verbose"]
-        )
+    assert backend or domain, "Either backend or domain must be specified"
+    backends = []
+    if backend:
+        backends = backend.split(",")
+    if domain:
+        if domain == "robotics":
+            backends = ["Megatron-LM", "Megatron-Energon"]
+        else:
+            raise ValueError(f"Unsupported domain: {domain}")
+
+    # Try to install from whl first unless --from-source is specified
+    for backend in backends:
+        if not from_source:
+            try:
+                _install_from_whl(backend, device, version)
+            except Exception as e:
+                click.echo(f"Error installing whl package: {e}", err=True)
+                click.echo(f"Falling back to source installation for {backend}...")
+                # Install from source
+                _install_from_source(backend, device)
+        else:
+            _install_from_source(backend, device)
 
 
 if __name__ == "__main__":

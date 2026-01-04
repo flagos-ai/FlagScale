@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.0", "wheel", "gitpython"]
+requires = ["setuptools>=77.0", "wheel", "gitpython", "pyyaml", "cryptography", "pip", "hatchling", "hatch-vcs", "editables"]
 build-backend = "build_backend.flagscale_build_backend"
 
 [tool.black]

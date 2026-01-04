@@ -10,8 +10,6 @@ import subprocess
 import sys
 import time
 
-from pathlib import Path
-
 from omegaconf import OmegaConf
 
 from flagscale.runner.elastic.monitor_service import MonitorService
@@ -54,6 +52,8 @@ def main():
     parser.add_argument(
         "--pid-file", required=True, help="The path of the PID file for the training process"
     )
+    parser.add_argument("--host", required=True, help="Hostname or IP of this node")
+    parser.add_argument("--node-rank", type=int, required=True, help="Node rank of this node")
     parser.add_argument(
         "--no-shared-fs", action="store_true", help="Whether it is in non-shared file system mode"
     )
@@ -90,12 +90,12 @@ def main():
 
     # Create dummy runners and monitoring services
     runner = MonitorRunner(config, args.pid_file)
-    monitor = MonitorService(config, runner, interval=args.interval)
+    monitor = MonitorService(
+        config, runner, interval=args.interval, host=args.host, node_rank=args.node_rank
+    )
 
     # Start the monitoring service
-    monitor.start_monitoring(
-        enable_log_collection=args.enable_log_collection, enable_diagnostic=args.enable_diagnostic
-    )
+    monitor.start_monitoring()
 
     logger.info(f"The monitoring service has been started. Interval: {args.interval} seconds")
     logger.info(f"PID file: {args.pid_file}")

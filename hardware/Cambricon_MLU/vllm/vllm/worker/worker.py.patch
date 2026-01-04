@@ -1,0 +1,15 @@
+diff --git a/vllm/worker/worker.py b/vllm/worker/worker.py
+index 9a9286326..46270bfe6 100644
+--- a/vllm/worker/worker.py
++++ b/vllm/worker/worker.py
+@@ -76,7 +76,8 @@ class Worker(LocalOrDistributedWorkerBase):
+                         "mlp_speculator",
+                         "eagle",
+                         "deepseek_mtp",
+-                         "mimo_mtp")) \
++                        "glm4_moe_mtp",
++                        "mimo_mtp")) \
+                     else {"return_hidden_states": True}
+ 
+         ModelRunnerClass: Type[GPUModelRunnerBase] = ModelRunner
+

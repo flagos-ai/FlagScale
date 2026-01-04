@@ -1,6 +1,6 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/layers/quantization/awq_mlu.py b/vllm_mlu/vllm_mlu/model_executor/layers/quantization/awq_mlu.py
 new file mode 100644
-index 000000000..94dab6fc4
+index 000000000..b83ce0219
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/layers/quantization/awq_mlu.py
 @@ -0,0 +1,415 @@
@@ -51,7 +51,7 @@ index 000000000..94dab6fc4
 +        device_capability: Optional[int] = None) -> Tuple[bool, Optional[str]]:
 +
 +    if device_capability is None:
-+        major, minor = get_device_capability()
++        major, minor = current_platform.get_device_capability()
 +        device_capability = major * 10 + minor
 +
 +    supported_types = query_mlu_supported_quant_types(
@@ -324,7 +324,7 @@ index 000000000..94dab6fc4
 +        iweight, izeros = self.unpack_awq_int32_into_int8(qweight, qzeros, bits)
 +        # Reverse the order of the iweight and izeros tensors
 +        iweight, izeros = self.reverse_awq_order(iweight, izeros, bits)
-+
++    
 +        # overflow checks
 +        iweight = torch.bitwise_and(iweight, (2**bits) - 1)
 +        if izeros is not None:
@@ -339,7 +339,7 @@ index 000000000..94dab6fc4
 +                fweight = iweight * scales
 +            # transpose [ci, co] -> [co, ci]
 +            fweight = fweight.transpose(0, 1)
-+
++            
 +            return fweight, None
 +
 +        if self.quant_config.zero_point and self.quant_config.support_scale_zeros and izeros is not None:

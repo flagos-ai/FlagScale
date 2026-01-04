@@ -1,54 +1,381 @@
 diff --git a/vllm/config.py b/vllm/config.py
-index bd52fc90b..bc42267ce 100644
+index 3fbb6015f..47bf6558a 100644
 --- a/vllm/config.py
 +++ b/vllm/config.py
-@@ -1542,6 +1542,7 @@ class ParallelConfig:
-         if self.data_parallel_size > 1:
-             # Data parallel was specified in the engine args.
-             self.data_parallel_master_port = get_open_port()
-+            self.data_parallel_master_ip = envs.VLLM_DP_MASTER_IP
-             # TODO multi-node
+@@ -11,6 +11,7 @@ import textwrap
+ import uuid
+ import warnings
+ from collections import Counter
++from collections.abc import Mapping
+ from contextlib import contextmanager
+ from dataclasses import (MISSING, Field, asdict, field, fields, is_dataclass,
+                          replace)
+@@ -799,6 +800,7 @@ class ModelConfig:
+             "generate": registry.is_text_generation_model(architectures),
+             "pooling": registry.is_pooling_model(architectures),
+         }
++
+         supported_runner_types_lst: list[RunnerType] = [
+             runner_type
+             for runner_type, is_supported in runner_support.items()
+@@ -881,6 +883,9 @@ class ModelConfig:
+                 "awq_marlin",
+                 "ipex",
+                 "moe_wna16",
++                # NOTE: MLU quantization methods overrides
++                "awq_mlu",
++                "gptq_mlu",
+             ]
+             quantization_methods = [
+                 q for q in supported_quantization if q not in overrides
+@@ -1102,7 +1107,7 @@ class ModelConfig:
+         if not hasattr(self.hf_text_config, "model_type"):
+             return False
+         elif self.hf_text_config.model_type in \
+-            ('deepseek_v2', 'deepseek_v3', 'deepseek_mtp'):
++            ('deepseek_v2', 'deepseek_v3', 'deepseek_mtp', 'kimi_k2'):
+             return self.hf_text_config.kv_lora_rank is not None
+         elif self.hf_text_config.model_type == 'eagle':
+             # if the model is an EAGLE module, check for the
+@@ -1218,7 +1223,8 @@ class ModelConfig:
+             self, parallel_config: "ParallelConfig") -> tuple[int, int]:
+         from vllm.distributed.utils import get_pp_indices
+         if (self.hf_text_config.model_type == "deepseek_mtp"
+-                or self.hf_config.model_type == "mimo_mtp"):
++                or self.hf_config.model_type == "mimo_mtp"
++                or self.hf_config.model_type == "glm4_moe_mtp"):
+             total_num_hidden_layers = getattr(self.hf_text_config,
+                                               "num_nextn_predict_layers", 0)
          else:
-             # Otherwise fall back to env vars (e.g. for offline SPMD case).
-@@ -1561,7 +1562,7 @@ class ParallelConfig:
-         ray_only_devices: list[str] = []
-         from vllm.platforms import current_platform
-         if (current_platform.device_type in ray_only_devices
--                and self.world_size > 1):
-+                and self.world_size_across_dp > 1):
-             if self.distributed_executor_backend is None:
-                 self.distributed_executor_backend = "ray"
-             if self.distributed_executor_backend != "ray":
-@@ -1569,18 +1570,20 @@ class ParallelConfig:
-                     f"{current_platform.device_type.upper()} backend only "
-                     "supports Ray for distributed inference.")
+@@ -1444,8 +1450,8 @@ class ModelConfig:
  
--        if self.distributed_executor_backend is None and self.world_size > 1:
-+        if self.distributed_executor_backend is None and self.world_size_across_dp > 1:
-             # We use multiprocessing by default if world_size fits on the
-             # current node and we aren't in a ray placement group.
  
-             from vllm.executor import ray_utils
-             backend = "mp"
-+            if self.data_parallel_size > 1:
-+                backend = "ray"
-             ray_found = ray_utils.ray_is_available()
-             if current_platform.is_neuron():
-                 # neuron uses single process to control multiple devices
-                 backend = "uni"
-             elif (current_platform.is_cuda()
--                  and cuda_device_count_stateless() < self.world_size):
-+                  and cuda_device_count_stateless() < self.world_size_across_dp):
-                 if not ray_found:
-                     raise ValueError("Unable to load Ray which is "
-                                      "required for multi-node inference, "
-@@ -1600,7 +1603,7 @@ class ParallelConfig:
-             logger.info("Defaulting to use %s for distributed inference",
-                         backend)
+ BlockSize = Literal[1, 8, 16, 32, 64, 128]
+-CacheDType = Literal["auto", "fp8", "fp8_e4m3", "fp8_e5m2"]
+-PrefixCachingHashAlgo = Literal["builtin", "sha256"]
++CacheDType = Literal["auto", "fp8", "fp8_e4m3", "fp8_e5m2", "int8"]
++PrefixCachingHashAlgo = Literal["builtin", "sha256", "sha256_cbor_64bit"]
  
--        if self.distributed_executor_backend is None and self.world_size == 1:
-+        if self.distributed_executor_backend is None and self.world_size_across_dp == 1:
-             self.distributed_executor_backend = "uni"
  
-         self._verify_args()
+ @config
+@@ -1490,7 +1496,12 @@ class CacheConfig:
+     prefix_caching_hash_algo: PrefixCachingHashAlgo = "builtin"
+     """Set the hash algorithm for prefix caching:\n
+     - "builtin" is Python's built-in hash.\n
+-    - "sha256" is collision resistant but with certain overheads."""
++    - "sha256" is collision resistant but with certain overheads.
++    This option uses Pickle for object serialization before hashing.\n
++    - "sha256_cbor_64bit" provides a reproducible, cross-language compatible
++    hash. It serializes objects using canonical CBOR and hashes them with
++    SHA-256. The resulting hash consists of the lower 64 bits of the SHA-256
++    digest."""
+     cpu_offload_gb: float = 0
+     """The space in GiB to offload to CPU, per GPU. Default is 0, which means
+     no offloading. Intuitively, this argument can be seen as a virtual way to
+@@ -1760,6 +1771,10 @@ class ParallelConfig:
+     """Backend to use for data parallel, either "mp" or "ray"."""
+     enable_expert_parallel: bool = False
+     """Use expert parallelism instead of tensor parallelism for MoE layers."""
++    num_redundant_experts: int = 0
++    """`num_redundant_experts` is deprecated and has been replaced with
++    `eplb_config.num_redundant_experts`. This will be removed in v0.12.0.
++    Please use `eplb_config.num_redundant_experts` instead."""
+     max_parallel_loading_workers: Optional[int] = None
+     """Maximum number of parallel loading workers when loading model
+     sequentially in multiple batches. To avoid RAM OOM when using tensor
+@@ -2488,7 +2503,15 @@ class SpeculativeConfig:
+                 "n_predict": n_predict,
+                 "architectures": ["MiMoMTPModel"]
+             })
+-            return hf_config
++
++        if hf_config.architectures[0] == "Glm4MoeForCausalLM":
++            hf_config.model_type = "glm4_moe_mtp"
++            n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
++            hf_config.update({
++                "num_hidden_layers": 0,
++                "n_predict": n_predict,
++                "architectures": ["Glm4MoeMTPModel"]
++            })
+ 
+         return hf_config
+ 
+@@ -2508,8 +2531,8 @@ class SpeculativeConfig:
+             if self.target_model_config and \
+                 (self.target_model_config.hf_text_config.model_type \
+                         == "deepseek_v3" or
+-                    self.target_model_config.hf_text_config.model_type \
+-                        == "mimo"):
++                    self.target_model_config.hf_text_config.model_type in
++                        ("mimo","ernie4_5_moe", "qwen3_next", "glm4_moe")):
+                 # use the draft model from the same model:
+                 self.model = self.target_model_config.model
+             elif self.method in ("ngram", "[ngram]"):
+@@ -2598,8 +2621,8 @@ class SpeculativeConfig:
+                 elif (self.draft_model_config.hf_config.model_type ==
+                       "mlp_speculator"):
+                     self.method = "mlp_speculator"
+-                elif (self.draft_model_config.hf_config.model_type ==
+-                      "deepseek_mtp"):
++                elif (self.draft_model_config.hf_config.model_type
++                      in ("deepseek_mtp", "mimo_mtp", "glm4_moe_mtp")):
+                     self.method = "deepseek_mtp"
+                     if self.num_speculative_tokens > 1:
+                         logger.warning(
+@@ -3001,9 +3024,14 @@ class MultiModalConfig:
+     Defaults to 1 (V0) or 999 (V1) for each modality.
+ 
+     For example, to allow up to 16 images and 2 videos per prompt:
+-    `{"images": 16, "videos": 2}`
++    `{"image": 16, "video": 2}`
+     """
+ 
++    media_io_kwargs: dict[str, dict[str, Any]] = field(default_factory=dict)
++    """Additional args passed to process media inputs, keyed by modalities.
++    For example, to set num_frames for video, set
++    `--media-io-kwargs '{"video": {"num_frames": 40} }'` """
++
+     mm_processor_kwargs: Optional[dict[str, object]] = None
+     """
+     Overrides for the multi-modal processor obtained from
+@@ -3020,6 +3048,48 @@ class MultiModalConfig:
+     If `True`, disable caching of the processed multi-modal inputs.
+     """
+ 
++    mm_processor_cache_gb: float = 4
++    """
++    The size (in GiB) of the multi-modal processor cache, which is used to
++
++    This cache is duplicated for each API process and engine core process,
++    resulting in a total memory usage of
++    `mm_processor_cache_gb * (api_server_count + data_parallel_size)`.
++
++    Set to `0` to disable this cache completely (not recommended).
++    """
++    MMEncoderTPMode = Literal["weights", "data"]
++    mm_encoder_tp_mode: MMEncoderTPMode = "weights"
++    """
++    Indicates how to optimize multi-modal encoder inference using
++    tensor parallelism (TP).
++
++    - `"weights"`: Within the same vLLM engine, split the weights of
++        each layer across TP ranks. (default TP behavior)
++    - `"data"`: Within the same vLLM engine, split the batched input data
++        across TP ranks to process the data in parallel, while hosting
++        the full weights on each TP rank.
++        This batch-level DP is not to be confused with API request-level
++        DP (which is controlled by `--data-parallel-size`).
++        This is only supported on a per-model basis and falls back to
++        `"weights"` if the encoder does not support DP.
++    """
++
++    interleave_mm_strings: bool = False
++    """
++    Enable fully interleaved support for multimodal prompts.
++    """
++
++    skip_mm_profiling: bool = False
++    """
++    When enabled, skips multimodal memory profiling and only profiles with
++    language backbone model during engine initialization.
++
++    This reduces engine startup time but shifts the responsibility to users for
++    estimating the peak memory usage of the activation of multimodal encoder and
++    embedding cache.
++    """
++
+     def compute_hash(self) -> str:
+         """
+         WARNING: Whenever a new field is added to this config,
+@@ -3049,7 +3119,16 @@ class MultiModalConfig:
+             999 if envs.VLLM_USE_V1 else 1,
+         )
+ 
+-    # TODO: Add configs to init vision tower or not.
++    def merge_mm_processor_kwargs(
++        self,
++        inference_kwargs: Mapping[str, object],
++    ) -> dict[str, object]:
++        """
++        Get the keyword arguments to pass to the multi-modal processor
++        according to the extra arguments passed during inference.
++        """
++        kwargs = self.mm_processor_kwargs or {}
++        return kwargs | dict(inference_kwargs)
+ 
+ 
+ @config
+@@ -3442,7 +3521,8 @@ def get_served_model_name(model: str,
+ 
+ GuidedDecodingBackendV0 = Literal["auto", "outlines", "lm-format-enforcer",
+                                   "xgrammar", "guidance"]
+-GuidedDecodingBackendV1 = Literal["auto", "xgrammar", "guidance"]
++
++GuidedDecodingBackendV1 = Literal["auto", "xgrammar", "guidance", "outlines"]
+ GuidedDecodingBackend = Literal[GuidedDecodingBackendV0,
+                                 GuidedDecodingBackendV1]
+ 
+@@ -4173,6 +4253,142 @@ class CompilationConfig:
+             ]
+ 
+ 
++@config
++@dataclass
++class MluConfig:
++    """Configuration for vllm_mlu."""
++
++    # common configs for all model
++
++    prefill_enable_mlugraph: bool = False
++    """Whether to use context mlugraph.
++
++    When True, the system will capture a context mlugraph for the specific
++    batch size and seq len.
++    NOTE: Context mlugraph can only used in offline benchmark.
++    """
++
++    prefill_mlugraph_batch_size: int = None
++    """The batch size that captured by context mlugraph."""
++
++    prefill_mlugraph_seq_len: int = None
++    """The seq len that captured by context mlugraph."""
++
++    enable_custom_data_parallel_opt: bool = False
++    """Flag to indicate that if the model can enable custom data parallel
++    optimization.
++
++    NOTE: This flag will be automatically set at runtime.
++    """
++
++    # specific configs for deepseek model
++
++    prefill_mcc_parallel_num: int = 1
++    """Number of parallel tasks to form MCC(Merged Compute and Communication)
++    for prefill operations.
++
++    This controls how many subtasks to be split in model execution procedure,
++    which only affect the prefill phase.
++    """
++
++    dispatch_shared_expert_parallel: bool = True
++    """
++    Whether to parallelize the computation of shared-experts and the all-gather
++    of the input to the MOE layer.
++    """
++
++    decode_dispatch_combine_use_all2all: bool = False
++    """Whether to use All-to-All communication for combining dispatched results
++    during decoding.
++
++    When True, uses more aggressive All-to-All communication pattern which may
++    improve performance in large-scale distributed decoding scenarios at the
++    cost of higher network bandwidth usage. Defaults to False for most use
++    cases.
++    """
++
++    layer_embedding_logit_tp_size: Optional[int] = None
++    """Tensor parallelism degree specifically for embedding layers.
++
++    If None, will use the global tensor parallel size. Can be set to a smaller
++    value than the global TP size to reduce memory usage for large embedding
++    tables while maintaining higher parallelism for other layers.
++    """
++
++    layer_dense_mlp_tp_size: Optional[int] = None
++    """Tensor parallelism degree specifically for dense MLP layers.
++
++    If None, will use the global tensor parallel size. Useful for models where
++    MLP layers have different computational characteristics than attention
++    layers, allowing for more optimal resource allocation.
++    """
++
++    prefill_dispatch_use_RS_AG: bool = True
++    """Whether to use Reduce-Scatter and All-Gather for prefill phase dispatch.
++
++    When True (default), uses optimized Reduce-Scatter/All-Gather communication
++    pattern during the prefill phase which is generally more efficient for
++    longer sequences. Set to False only for debugging or specific workload
++    characteristics.
++    """
++
++    decoder_attn_dtype: Optional[str] = None
++    """Decoder attention dtype.
++
++    If None, will use the global attention dtype.
++    """
++
++
++    @property
++    def is_dpsk_mcc_enabled(self):
++        """Getter: is_dpsk_mcc_enabled"""
++        return self.prefill_mcc_parallel_num > 1
++
++    def compute_hash(self) -> str:
++        """
++        WARNING: Whenever a new field is added to this config,
++        ensure that it is included in the factors list if
++        it affects the computation graph.
++
++        Provide a hash that uniquely identifies all the configs
++        that affect the structure of the computation
++        graph from input ids/embeddings to the final hidden states,
++        excluding anything before input ids/embeddings and after
++        the final hidden states.
++        """
++        # no factors to consider.
++        # this config will not affect the computation graph.
++        factors: list[Any] = []
++        hash_str = hashlib.md5(str(factors).encode(),
++                               usedforsecurity=False).hexdigest()
++        return hash_str
++
++    @classmethod
++    def from_dict(cls, dict_value: dict) -> "MluConfig":
++        """Parse the CLI value for the MLU config."""
++        return cls(**dict_value)
++
++    def __post_init__(self):
++        """Verify configs are valid."""
++        self._verify_args()
++
++    def _verify_args(self) -> None:
++        if self.enable_custom_data_parallel_opt:
++            raise ValueError(
++                "enable_custom_data_parallel_opt param will be automatically "
++                "set at runtime and should be False when init."
++            )
++        if self.prefill_mcc_parallel_num < 1:
++            raise ValueError(
++                f"prefill_mcc_parallel_num={self.prefill_mcc_parallel_num} "
++                f"must be > 0"
++            )
++        if self.is_dpsk_mcc_enabled and self.layer_dense_mlp_tp_size:
++            raise ValueError(
++                f"Parameter conflict: DPSK MCC cannot be enabled with "
++                f"layer_dense_mlp_tp_size({self.layer_dense_mlp_tp_size})"
++            )
++
+ @config
+ @dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+ class VllmConfig:
+@@ -4227,6 +4443,8 @@ class VllmConfig:
+     """The configurations for distributed KV cache transfer."""
+     kv_events_config: Optional[KVEventsConfig] = None
+     """The configurations for event publishing."""
++    mlu_config: MluConfig = field(default_factory=MluConfig)
++    """MLU configuration."""
+     # some opaque config, only used to provide additional information
+     # for the hash computation, mainly used for testing, debugging or out of
+     # tree config registration.
+@@ -4315,6 +4533,10 @@ class VllmConfig:
+             vllm_factors.append(self.kv_transfer_config.compute_hash())
+         else:
+             vllm_factors.append("None")
++        if self.mlu_config:
++            vllm_factors.append(self.mlu_config.compute_hash())
++        else:
++            vllm_factors.append("None")
+         if self.additional_config:
+             if isinstance(additional_config := self.additional_config, dict):
+                 additional_config_hash = hashlib.md5(
 

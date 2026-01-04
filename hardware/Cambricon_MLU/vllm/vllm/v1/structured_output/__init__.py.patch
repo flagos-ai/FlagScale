@@ -1,0 +1,21 @@
+diff --git a/vllm/v1/structured_output/__init__.py b/vllm/v1/structured_output/__init__.py
+index b2b0ee796..8a75305e4 100644
+--- a/vllm/v1/structured_output/__init__.py
++++ b/vllm/v1/structured_output/__init__.py
+@@ -83,6 +83,15 @@ class StructuredOutputManager:
+                     tokenizer=self.tokenizer,
+                     vocab_size=vocab_size,
+                 )
++            elif backend == "outlines":
++                from vllm.v1.structured_output.backend_outlines import (
++                    OutlinesBackend)
++
++                self.backend = OutlinesBackend(
++                    self.vllm_config,
++                    tokenizer=self.tokenizer,
++                    vocab_size=vocab_size,
++                )
+             else:
+                 raise ValueError(
+                     f"Unsupported structured output backend: {backend}")
+

@@ -1,0 +1,90 @@
+system:
+  no_shared_fs: ${experiment.runner.no_shared_fs}
+  num_workers: 16
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 2
+  context_parallel_size: 1
+  disable_bias_linear: true
+  reset_position_ids: True
+  reset_attention_mask: True
+  qk_layernorm: true
+  sequence_parallel: true
+  use_distributed_optimizer: true
+  overlap_grad_reduce: true
+  overlap_param_gather: true
+  finetune: true
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+    log_timers_to_tensorboard: true
+    log_validation_ppl_to_tensorboard: true
+    log_throughput: true
+    log_params_norm: true
+    log_num_zeros_in_grad: true
+    log_memory_to_tensorboard: true
+  checkpoint:
+    save_interval: ${experiment.save_steps}
+    load: ${experiment.load}
+    ckpt_format: ${experiment.ckpt_format}
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 54
+  hidden_size: 2560
+  ffn_hidden_size: 19456
+  kv_channels: 128
+  group_query_attention: true
+  num_attention_heads: 32
+  num_query_groups: 8 # num_key_value_heads
+  seq_length: 4096
+  max_position_embeddings: 32768
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  rotary_base: 1000000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: true
+  no_position_embedding: true
+  no_rope_fusion: true
+
+  # training
+  seed: ${experiment.seed}
+  # finetune: false
+  micro_batch_size: 1
+  global_batch_size: 16
+  eval_iters: 0
+  train_samples: 25600000 #1T #29297664 #120B tokens
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-3
+      min_lr: 3.0e-4
+      lr_warmup_samples: 2048000
+      lr_decay_style: cosine
+
+
+data:
+  data_path: /path
+  split: 1
+  no_mmap_bin_files: true
+  tokenizer:
+    legacy_tokenizer: true
+    tokenizer_type: QwenTokenizerFS
+    tokenizer_path: xxx
+    vocab_size: 151669 
+    padded_vocab_size: 151936 
+    make_vocab_size_divisible_by: 64

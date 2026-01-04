@@ -1,0 +1,37 @@
+diff --git a/examples/qwen3/conf/train/10b.yaml b/examples/qwen3/conf/train/10b.yaml
+index ec5dd177..fde4e730 100644
+--- a/examples/qwen3/conf/train/10b.yaml
++++ b/examples/qwen3/conf/train/10b.yaml
+@@ -1,7 +1,7 @@
+ system:
+   no_shared_fs: ${experiment.runner.no_shared_fs}
+   num_workers: 16
+-  tensor_model_parallel_size: 1
++  tensor_model_parallel_size: 2
+   pipeline_model_parallel_size: 2
+   context_parallel_size: 1
+   disable_bias_linear: true
+@@ -57,6 +57,7 @@ model:
+   untie_embeddings_and_output_weights: true
+   no_position_embedding: true
+   no_rope_fusion: true
++  attention_backend: flash
+ 
+   # training
+   seed: ${experiment.seed}
+@@ -78,13 +79,13 @@ model:
+ 
+ 
+ data:
+-  data_path: /path
++  data_path: /datasets/pile_wikipedia_demo
+   split: 1
+   no_mmap_bin_files: true
+   tokenizer:
+     legacy_tokenizer: true
+     tokenizer_type: QwenTokenizerFS
+-    tokenizer_path: xxx
++    tokenizer_path: /models/qwentokenizer/
+     vocab_size: 151669 
+     padded_vocab_size: 151936 
+     make_vocab_size_divisible_by: 64

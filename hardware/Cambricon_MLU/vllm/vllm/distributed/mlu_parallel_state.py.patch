@@ -1,0 +1,317 @@
+diff --git a/vllm/distributed/mlu_parallel_state.py b/vllm/distributed/mlu_parallel_state.py
+new file mode 100644
+index 000000000..4fbc463c7
+--- /dev/null
++++ b/vllm/distributed/mlu_parallel_state.py
+@@ -0,0 +1,310 @@
++from typing import Optional
++
++import torch
++
++from vllm.distributed.parallel_state import (
++    get_dp_group, get_tensor_model_parallel_world_size,
++    get_world_group, init_model_parallel_group,
++    get_tensor_model_parallel_rank, GroupCoordinator)
++
++
++# mlu groups and functions
++_TP_WORLD: Optional[GroupCoordinator] = None
++
++
++def get_tp_world_group() -> GroupCoordinator:
++    assert _TP_WORLD is not None, ("world tensor parallel group is not initialized")
++    return _TP_WORLD
++
++
++def get_tp_world_world_size():
++    """Return world size for the tensor model parallel group."""
++    return get_tp_world_group().world_size
++
++
++def get_tp_world_rank():
++    """Return my rank for the tensor model parallel group."""
++    return get_tp_world_group().rank_in_group
++
++
++# logits tensor parallel group
++_EMBED_LOGITS_TP: Optional[GroupCoordinator] = None
++
++
++def get_logits_tp_group() -> GroupCoordinator:
++    assert _EMBED_LOGITS_TP is not None, ("logits tensor parallel group is not initialized")
++    return _EMBED_LOGITS_TP
++
++
++def get_logits_tp_world_size():
++    """Return world size for the logits tensor parallel group."""
++    return get_logits_tp_group().world_size
++
++
++def get_logits_tp_rank():
++    """Return my rank for the logits tensor parallel group."""
++    return get_logits_tp_group().rank_in_group
++
++
++# dense mlp tensor parallel group
++_DENSE_MLP_TP: Optional[GroupCoordinator] = None
++
++
++def get_dense_mlp_tp_group() -> GroupCoordinator:
++    assert _DENSE_MLP_TP is not None, ("dense mlp tensor parallel group is not initialized")
++    return _DENSE_MLP_TP
++
++
++def get_dense_mlp_tp_world_size():
++    """Return world size for the dense mlp tensor parallel group."""
++    return get_dense_mlp_tp_group().world_size
++
++
++def get_dense_mlp_tp_rank():
++    """Return my rank for the dense mlp tensor parallel group."""
++    return get_dense_mlp_tp_group().rank_in_group
++
++
++def get_data_parallel_group_world_size():
++    """Return world size for the data parallel group."""
++    return get_dp_group().world_size
++
++
++def get_data_parallel_group_rank():
++    """Return my rank for the data parallel group."""
++    return get_dp_group().rank_in_group
++
++
++def get_parallel_world_size_with_group(group):
++    """Return world size for the special group."""
++    if group is not None:
++        return group.world_size
++    else:
++        return get_tensor_model_parallel_world_size()
++
++
++def get_parallel_rank_with_group(group):
++    """Return my rank for the special group."""
++    if group is not None:
++        return group.rank_in_group
++    else:
++        return get_tensor_model_parallel_rank()
++
++
++_MOE_TP: Optional[GroupCoordinator] = None
++
++
++def get_moe_tp_group() -> GroupCoordinator:
++    assert _MOE_TP is not None, ("moe tensor parallel group is not initialized")
++    return _MOE_TP
++
++
++# kept for backward compatibility
++get_moe_tensor_parallel_group = get_moe_tp_group
++
++
++_MOE_EP: Optional[GroupCoordinator] = None
++
++
++def get_moe_ep_group() -> GroupCoordinator:
++    assert _MOE_EP is not None, ("moe expert parallel group is not initialized")
++    return _MOE_EP
++
++
++# kept for backward compatibility
++get_moe_expert_parallel_group = get_moe_ep_group
++
++
++def get_moe_tensor_parallel_world_size():
++    """Return world size for the moe tensor parallel group."""
++    return get_moe_tp_group().world_size
++
++
++def get_moe_tensor_parallel_rank():
++    """Return my rank for the moe tensor parallel group."""
++    return get_moe_tp_group().rank_in_group
++
++
++def get_moe_expert_parallel_world_size():
++    """Return world size for the moe expert parallel group."""
++    return get_moe_ep_group().world_size
++
++
++def get_moe_expert_parallel_rank():
++    """Return my rank for the moe expert parallel group."""
++    return get_moe_ep_group().rank_in_group
++
++
++def initialize_model_parallel_mlu(
++    tensor_model_parallel_size: int = 1,
++    pipeline_model_parallel_size: int = 1,
++    backend: Optional[str] = None,
++) -> None:
++    """
++    Initialize model parallel groups.
++
++    Arguments:
++        tensor_model_parallel_size: number of GPUs used for tensor model
++            parallelism.
++        pipeline_model_parallel_size: number of GPUs used for pipeline model
++            parallelism.
++
++    Let's say we have a total of 8 GPUs denoted by g0 ... g7 and we
++    use 2 GPUs to parallelize the model tensor, and 4 GPUs to parallelize
++    the model pipeline. The present function will
++    create 4 tensor model-parallel groups and 2 pipeline model-parallel groups:
++        4 tensor model-parallel groups:
++            [g0, g1], [g2, g3], [g4, g5], [g6, g7]
++        2 pipeline model-parallel groups:
++            [g0, g2, g4, g6], [g1, g3, g5, g7]
++    Note that for efficiency, the caller should make sure adjacent ranks
++    are on the same DGX box. For example if we are using 2 DGX-1 boxes
++    with a total of 16 GPUs, rank 0 to 7 belong to the first box and
++    ranks 8 to 15 belong to the second box.
++    """
++    assert torch.distributed.is_initialized()
++    world_size: int = torch.distributed.get_world_size()
++    backend = backend or torch.distributed.get_backend(
++        get_world_group().device_group)
++
++    from vllm.config import get_current_vllm_config
++    config = get_current_vllm_config()
++
++    global _TP_WORLD
++    assert _TP_WORLD is None, ("world tensor parallel group is already initialized")
++    group_ranks = [list(range(get_world_group().world_size))]
++    _TP_WORLD = init_model_parallel_group(group_ranks,
++                                          get_world_group().local_rank,
++                                          backend,
++                                          use_message_queue_broadcaster=True,
++                                          group_name="tp_world")
++
++    # Build the logits data parallel groups.
++    global _EMBED_LOGITS_TP
++    assert _EMBED_LOGITS_TP is None, (
++        "logits data parallel group is already initialized")
++
++    embed_logits_tp_size = config.parallel_config.tensor_parallel_size
++    if not config.mlu_config.layer_embedding_logit_tp_size:
++        config.mlu_config.layer_embedding_logit_tp_size = embed_logits_tp_size
++    else:
++        embed_logits_tp_size = config.mlu_config.layer_embedding_logit_tp_size
++    assert (
++        world_size % embed_logits_tp_size == 0 and world_size >= embed_logits_tp_size
++    ), (
++        f"world_size should be divisible by embed_logits_tp_size, "
++        f"world_size: {world_size}, embed_logits_tp_size: {embed_logits_tp_size}"
++    )
++    all_ranks = torch.arange(world_size).reshape(
++        world_size // embed_logits_tp_size, embed_logits_tp_size)
++    logits_tp_group_ranks = all_ranks.unbind(0)
++    logits_tp_group_ranks = [x.tolist() for x in logits_tp_group_ranks]
++
++    # message queue broadcaster is set to be used in logits data parallel group
++    _EMBED_LOGITS_TP = init_model_parallel_group(logits_tp_group_ranks,
++                                                 get_world_group().local_rank,
++                                                 backend,
++                                                 use_message_queue_broadcaster=True,
++                                                 group_name="emb_logits_tp")
++
++    # Build the dense mlp tensor parallel groups.
++    global _DENSE_MLP_TP
++    assert _DENSE_MLP_TP is None, (
++        "dense mlp tensor parallel group is already initialized")
++    dense_mlp_tp_size = (config.parallel_config.tensor_parallel_size * 
++                            config.parallel_config.data_parallel_size)
++    if not config.mlu_config.layer_dense_mlp_tp_size:
++        config.mlu_config.layer_dense_mlp_tp_size = dense_mlp_tp_size
++    else:
++        dense_mlp_tp_size = config.mlu_config.layer_dense_mlp_tp_size
++    assert (
++        world_size % dense_mlp_tp_size == 0 and world_size >= dense_mlp_tp_size
++    ), (
++        f"world_size should be divisible by dense_mlp_tp_size, "
++        f"world_size: {world_size}, dense_mlp_tp_size: {dense_mlp_tp_size}"
++    )
++    all_ranks = torch.arange(world_size).reshape(
++        world_size // dense_mlp_tp_size, dense_mlp_tp_size)
++    dense_mlp_tp_group_ranks = all_ranks.unbind(0)
++    dense_mlp_tp_group_ranks = [x.tolist() for x in dense_mlp_tp_group_ranks]
++
++    # message queue broadcaster is set to be used in dense mlp tensor parallel group
++    _DENSE_MLP_TP = init_model_parallel_group(dense_mlp_tp_group_ranks,
++                                              get_world_group().local_rank,
++                                              backend,
++                                              use_message_queue_broadcaster=True,
++                                              group_name="dense_mlp_tp")
++
++    # Build the moe tensor parallel groups.
++    global _MOE_TP
++    assert _MOE_TP is None, (
++        "moe tensor parallel group is already initialized")
++    global _MOE_EP
++    assert _MOE_EP is None, (
++        "moe expert parallel group is already initialized")
++
++    from vllm.config import get_current_vllm_config
++    config = get_current_vllm_config()
++    assert config is not None
++    data_parallel_size = config.parallel_config.data_parallel_size
++    enable_expert_parallel = config.parallel_config.enable_expert_parallel
++    real_tensor_model_parallel_size = tensor_model_parallel_size * data_parallel_size
++
++    world_size: int = torch.distributed.get_world_size()
++    all_ranks = torch.arange(world_size).reshape(
++        -1, data_parallel_size, pipeline_model_parallel_size,
++        tensor_model_parallel_size)
++    moe_group_ranks = all_ranks.transpose(1, 2).reshape(
++        -1, real_tensor_model_parallel_size).unbind(0)
++    moe_group_ranks = [x.tolist() for x in moe_group_ranks]
++    moe_world_ranks = all_ranks.transpose(1, 2).reshape(-1, 1).unbind(0)
++    moe_world_ranks = [x.tolist() for x in moe_world_ranks]
++
++    if enable_expert_parallel:
++        moe_tp_group_ranks = moe_world_ranks
++        moe_ep_group_ranks = moe_group_ranks
++    else:
++        moe_tp_group_ranks = moe_group_ranks
++        moe_ep_group_ranks = moe_world_ranks
++
++    # message queue broadcaster is set to be used in moe tensor parallel group
++    _MOE_TP = init_model_parallel_group(moe_tp_group_ranks,
++                                        get_world_group().local_rank,
++                                        backend,
++                                        use_message_queue_broadcaster=True,
++                                        group_name="moe_tp")
++
++    # message queue broadcaster is set to be used in moe expert parallel group
++    _MOE_EP = init_model_parallel_group(moe_ep_group_ranks,
++                                        get_world_group().local_rank,
++                                        backend,
++                                        use_message_queue_broadcaster=True,
++                                        group_name="moe_ep")
++
++
++def destroy_model_parallel_mlu():
++    """Set the groups to none and destroy them."""
++    global _TP_WORLD
++    if _TP_WORLD:
++        _TP_WORLD.destroy()
++    _TP_WORLD = None
++
++    global _EMBED_LOGITS_TP
++    if _EMBED_LOGITS_TP:
++        _EMBED_LOGITS_TP.destroy()
++    _EMBED_LOGITS_TP = None
++
++    global _DENSE_MLP_TP
++    if _DENSE_MLP_TP:
++        _DENSE_MLP_TP.destroy()
++    _DENSE_MLP_TP = None
++
++    global _MOE_TP
++    if _MOE_TP:
++        _MOE_TP.destroy()
++    _MOE_TP = None
++
++    global _MOE_EP
++    if _MOE_EP:
++        _MOE_EP.destroy()
++    _MOE_EP = None
+

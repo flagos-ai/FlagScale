@@ -1,0 +1,21 @@
+diff --git a/vllm/model_executor/models/blip2.py b/vllm/model_executor/models/blip2.py
+index 279541bed..c64cf4cc0 100644
+--- a/vllm/model_executor/models/blip2.py
++++ b/vllm/model_executor/models/blip2.py
+@@ -454,6 +454,7 @@ class Blip2MultiModalProcessor(BaseMultiModalProcessor[Blip2ProcessingInfo]):
+         prompt: str,
+         mm_data: Mapping[str, object],
+         mm_kwargs: Mapping[str, object],
++        tok_kwargs: Mapping[str, object],
+     ) -> BatchFeature:
+         if not mm_data:
+             # HF processor always adds placeholders even when there's no image
+@@ -465,6 +466,7 @@ class Blip2MultiModalProcessor(BaseMultiModalProcessor[Blip2ProcessingInfo]):
+             prompt=prompt,
+             mm_data=mm_data,
+             mm_kwargs=mm_kwargs,
++            tok_kwargs=tok_kwargs,
+         )
+ 
+     def _get_mm_fields_config(
+

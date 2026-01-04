@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/model_executor/layers/quantization/utils/fp8_utils.py b/vllm_mlu/vllm_mlu/model_executor/layers/quantization/utils/fp8_utils.py
 new file mode 100644
-index 000000000..fe87bef16
+index 000000000..283a6c7bf
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/model_executor/layers/quantization/utils/fp8_utils.py
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,421 @@
 +# SPDX-License-Identifier: Apache-2.0
 +
 +# Adapted from https://github.com/sgl-project/sglang/pull/2575
@@ -20,11 +20,32 @@ index 000000000..fe87bef16
 +from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
 +    CUTLASS_BLOCK_FP8_SUPPORTED)
 +from vllm.model_executor.layers.quantization.utils.fp8_utils import (
-+    _w8a8_block_fp8_matmul,
 +    _per_token_group_quant_fp8_colmajor)
 +from vllm.platforms import current_platform
 +
++from vllm_mlu import _mlu_ops as mlu_ops
++
 +logger = init_logger(__name__)
++
++'''
++=============================
++Modify by vllm_mlu
++=============================
++@brief: get total core for split triton kernel
++'''
++
++import triton.backends.mlu.driver as driver
++
++_devprob = driver.BangUtils().get_device_properties(torch.mlu.current_device())
++TOTAL_CLUSTER_NUM = _devprob.get("cluster_num")
++TOTAL_CORE_NUM = TOTAL_CLUSTER_NUM * _devprob.get("core_num_per_cluster")
++
++'''
++==================
++End of MLU Hijack
++==================
++'''
++
 +
 +def apply_w8a8_block_fp8_linear(
 +    input: torch.Tensor,
@@ -34,6 +55,7 @@ index 000000000..fe87bef16
 +    input_scale: Optional[torch.Tensor] = None,
 +    bias: Optional[torch.Tensor] = None,
 +    cutlass_block_fp8_supported: bool = CUTLASS_BLOCK_FP8_SUPPORTED,
++    use_aiter_and_is_supported: bool = False,
 +) -> torch.Tensor:
 +    assert input_scale is None
 +    # View input as 2D matrix for fp8 methods
@@ -75,55 +97,6 @@ index 000000000..fe87bef16
 +    if bias is not None:
 +        output = output + bias
 +    return output.to(dtype=input.dtype).view(*output_shape)
-+
-+@triton.jit
-+def _per_token_group_quant_fp8(
-+    # Pointers to inputs and output
-+    y_ptr,
-+    y_q_ptr,
-+    y_s_ptr,
-+    group_size: tl.constexpr,
-+    # Avoid to divide zero
-+    eps,
-+    # Information for float8
-+    fp8_min,
-+    fp8_max,
-+    # Meta-parameters
-+    GROUP_BLOCK_NUM,
-+):
-+    """A Triton-accelerated function to perform per-token-group
-+    quantization on a tensor.
-+    This function converts the tensor values into float8 values.
-+    """
-+    # Map the program id to the row of X and Y it should compute.
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: split for limit the memory usage(65536)
-+    '''
-+    g_id = tl.program_id(0)
-+    y_ptr += g_id * group_size * GROUP_BLOCK_NUM
-+    y_q_ptr += g_id * group_size * GROUP_BLOCK_NUM
-+    y_s_ptr += g_id * GROUP_BLOCK_NUM
-+    '''
-+    ==================
-+    End of MLU Hijack
-+    ==================
-+    '''
-+
-+    cols = tl.arange(0, group_size)  # N <= BLOCK
-+    for group_id in range(GROUP_BLOCK_NUM):
-+        cols_group = cols + group_id * group_size
-+        y = tl.load(y_ptr + cols_group).to(tl.float32)
-+        # Quant
-+        _absmax = tl.maximum(tl.max(tl.abs(y)), eps)
-+        y_s = _absmax / fp8_max
-+        y_q = tl.clamp(y / y_s, fp8_min, fp8_max).to(y_q_ptr.dtype.element_ty)
-+
-+        tl.store(y_q_ptr + cols_group, y_q)
-+        tl.store(y_s_ptr + group_id, y_s)
-+
 +
 +def per_token_group_quant_fp8(
 +    x: torch.Tensor,
@@ -214,21 +187,140 @@ index 000000000..fe87bef16
 +            num_stages=num_stages,
 +        )
 +    else:
-+        _per_token_group_quant_fp8[(M, )](
-+            x,
-+            x_q,
-+            x_s,
-+            group_size,
-+            eps,
-+            fp8_min=fp8_min,
-+            fp8_max=fp8_max,
-+            GROUP_BLOCK_NUM=group_per_block,
-+            num_warps=num_warps,
-+            num_stages=num_stages,
-+        )
++        '''
++        =============================
++        Modify by vllm_mlu
++        =============================
++        @brief: replaced the 'scaled_quantize' kernel from the 'tmo' library with 
++                '_per_token_group_quant_fp8' kernel 
++        '''
++        # Check if x is contiguous, if not, create a new tensor for contiguous x
++        if not x.is_contiguous():
++            x = x.contiguous()
++        x_origin_shape = x.shape
++        x = x.reshape(*x.shape[:-1], -1, group_size)
++        x_q, x_s = mlu_ops.scaled_quantize(x,
++                                           None,
++                                           quant_type=dtype,
++                                           quant_mode='dynamic_per_token')
++        x_q = x_q.reshape(x_origin_shape)
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
 +
 +    return x_q, x_s
 +
++@triton.jit
++def _w8a8_block_fp8_matmul(
++    # Pointers to inputs and output
++    A,
++    B,
++    C,
++    As,
++    Bs,
++    # Shape for matmul
++    M,
++    N,
++    K,
++    # Block size for block-wise quantization
++    group_n,
++    group_k,
++    # Stride for inputs and output
++    stride_am,
++    stride_ak,
++    stride_bk,
++    stride_bn,
++    stride_cm,
++    stride_cn,
++    stride_As_m,
++    stride_As_k,
++    stride_Bs_k,
++    stride_Bs_n,
++    # Meta-parameters
++    BLOCK_SIZE_M: tl.constexpr,
++    BLOCK_SIZE_N: tl.constexpr,
++    BLOCK_SIZE_K: tl.constexpr,
++    GROUP_SIZE_M: tl.constexpr,
++):
++    """Triton-accelerated function used to perform linear operations (dot
++    product) on input tensors `A` and `B` with block-wise quantization, and
++    store the result in output tensor `C`.
++    """
++
++    pid = tl.program_id(axis=0)
++    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
++    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: split for limit the memory usage(65536)
++    '''
++    num_block_size_all = num_pid_m * num_pid_n
++    num_block_size_per = num_block_size_all // tl.num_programs(axis=0)
++    num_block_size_rem = num_block_size_all % tl.num_programs(axis=0)
++    
++    core_deal_num_block_size = num_block_size_per + (pid < num_block_size_rem)
++    core_deal_num_block_start = num_block_size_per * pid + min(num_block_size_rem, pid)
++
++    for pid_i in range(0, core_deal_num_block_size):
++        pid_in_core_deal_block = core_deal_num_block_start + pid_i
++
++        num_pid_in_group = GROUP_SIZE_M * num_pid_n
++        group_id = pid_in_core_deal_block // num_pid_in_group
++        first_pid_m = group_id * GROUP_SIZE_M
++        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
++        pid_m = first_pid_m + (pid_in_core_deal_block % group_size_m)
++        pid_n = (pid_in_core_deal_block % num_pid_in_group) // group_size_m
++
++        '''
++        ==================
++        End of MLU Hijack
++        ==================
++        '''
++        offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
++        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
++        offs_k = tl.arange(0, BLOCK_SIZE_K)
++        a_ptrs = A + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
++        b_ptrs = B + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
++
++        As_ptrs = As + offs_am * stride_As_m
++        offs_bsn = offs_bn // group_n
++        Bs_ptrs = Bs + offs_bsn * stride_Bs_n
++
++        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
++        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
++            a = tl.load(a_ptrs,
++                        mask=offs_k[None, :] < K - k * BLOCK_SIZE_K,
++                        other=0.0)
++            b = tl.load(b_ptrs,
++                        mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
++                        other=0.0)
++
++            k_start = k * BLOCK_SIZE_K
++            offs_ks = k_start // group_k
++            a_s = tl.load(As_ptrs + offs_ks * stride_As_k)
++            b_s = tl.load(Bs_ptrs + offs_ks * stride_Bs_k)
++
++            accumulator += tl.dot(a, b) * a_s[:, None] * b_s[None, :]
++            a_ptrs += BLOCK_SIZE_K * stride_ak
++            b_ptrs += BLOCK_SIZE_K * stride_bk
++
++        if C.dtype.element_ty == tl.bfloat16:
++            c = accumulator.to(tl.bfloat16)
++        elif C.dtype.element_ty == tl.float16:
++            c = accumulator.to(tl.float16)
++        else:
++            c = accumulator.to(tl.float32)
++
++        offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
++        offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
++        c_ptrs = C + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
++        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
++        tl.store(c_ptrs, c, mask=c_mask)
 +
 +def w8a8_block_fp8_matmul(
 +    A: torch.Tensor,
@@ -253,71 +345,84 @@ index 000000000..fe87bef16
 +    Returns:
 +        torch.Tensor: The result of matmul.
 +    """
++
++    '''
++    =============================
++    Modify by vllm_mlu
++    =============================
++    @brief: replaced the 'scaled_matmul' kernel from the 'tmo' library with 
++            '_w8a8_block_fp8_matmul' kernel 
++    '''
++    
 +    assert len(block_size) == 2
 +    block_n, block_k = block_size[0], block_size[1]
 +
 +    assert A.shape[-1] == B.shape[-1]
 +    assert A.shape[:-1] == As.shape[:-1] and A.is_contiguous()
-+    assert triton.cdiv(A.shape[-1], block_k) == As.shape[-1]
-+    M = A.numel() // A.shape[-1]
-+
 +    assert B.ndim == 2 and Bs.ndim == 2
-+    N, K = B.shape
-+    assert triton.cdiv(N, block_n) == Bs.shape[0]
-+    assert triton.cdiv(K, block_k) == Bs.shape[1]
 +
-+    C_shape = A.shape[:-1] + (N, )
-+    C = A.new_empty(C_shape, dtype=output_dtype)
-+    '''
-+    =============================
-+    Modify by vllm_mlu
-+    =============================
-+    @brief: using default config for triton-mlu
-+    '''
-+    # Default config
-+    # Block-wise quant: BLOCK_SIZE_N must be divisible by block_size[0]
-+    # BLOCK_SIZE_K must be divisible by block_size[1]
-+    config = {
-+        "BLOCK_SIZE_M": 64,
-+        "BLOCK_SIZE_N": block_size[0],
-+        "BLOCK_SIZE_K": block_size[1],
-+        "GROUP_SIZE_M": 32,
-+        "num_warps": 1,
-+        "num_stages": 1,
-+    }
++    if (B.shape[0] % 128 == 0) and (B.shape[1] % 128 == 0):
++        C = mlu_ops.scaled_matmul(A, B, As, Bs, output_dtype, bias=None, c=None, act_mode="none",
++                                quant_bit_size=8, alpha=1, beta=1, use_hp_active=False,
++                                a_quant_bit_size=8, a_calib=None, b_calib=None)
++    else:
++        # NOTE(wulingchao): scaled_matmul 底层算子只支持n和k是128的倍数
++        assert triton.cdiv(A.shape[-1], block_k) == As.shape[-1]
++        M = A.numel() // A.shape[-1]
++
++        assert B.ndim == 2 and Bs.ndim == 2
++        N, K = B.shape
++        assert triton.cdiv(N, block_n) == Bs.shape[0]
++        assert triton.cdiv(K, block_k) == Bs.shape[1]
++
++        C_shape = A.shape[:-1] + (N, )
++        C = A.new_empty(C_shape, dtype=output_dtype)
++
++        # Default config
++        # Block-wise quant: BLOCK_SIZE_N must be divisible by block_size[0]
++        # BLOCK_SIZE_K must be divisible by block_size[1]
++        config = {
++            "BLOCK_SIZE_M": 64,
++            "BLOCK_SIZE_N": block_size[0],
++            "BLOCK_SIZE_K": block_size[1],
++            "GROUP_SIZE_M": 32,
++            "num_warps": 1,
++            "num_stages": 1,
++        }
++
++        def grid(META):
++            return (TOTAL_CORE_NUM, )
++
++        _w8a8_block_fp8_matmul[grid](
++            A,
++            B,
++            C,
++            As,
++            Bs,
++            M,
++            N,
++            K,
++            block_n,
++            block_k,
++            A.stride(-2),
++            A.stride(-1),
++            B.stride(1),
++            B.stride(0),
++            C.stride(-2),
++            C.stride(-1),
++            As.stride(-2),
++            As.stride(-1),
++            Bs.stride(1),
++            Bs.stride(0),
++            **config,
++        )
++
++
 +    '''
 +    ==================
 +    End of MLU Hijack
 +    ==================
 +    '''
-+
-+    def grid(META):
-+        return (triton.cdiv(M, META["BLOCK_SIZE_M"]) *
-+                triton.cdiv(N, META["BLOCK_SIZE_N"]), )
-+
-+    _w8a8_block_fp8_matmul[grid](
-+        A,
-+        B,
-+        C,
-+        As,
-+        Bs,
-+        M,
-+        N,
-+        K,
-+        block_n,
-+        block_k,
-+        A.stride(-2),
-+        A.stride(-1),
-+        B.stride(1),
-+        B.stride(0),
-+        C.stride(-2),
-+        C.stride(-1),
-+        As.stride(-2),
-+        As.stride(-1),
-+        Bs.stride(1),
-+        Bs.stride(0),
-+        **config,
-+    )
 +
 +    return C
 

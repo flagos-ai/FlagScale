@@ -1,9 +1,9 @@
 diff --git a/vllm_mlu/vllm_mlu/__init__.py b/vllm_mlu/vllm_mlu/__init__.py
 new file mode 100644
-index 000000000..d296626f3
+index 000000000..42f2fa409
 --- /dev/null
 +++ b/vllm_mlu/vllm_mlu/__init__.py
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,28 @@
 +#
 +# Copyright (c) 2025 Cambricon Technologies Co., Ltd. All Rights Reserved.
 +# This file is a part of the vllm-mlu project.
@@ -27,7 +27,10 @@ index 000000000..d296626f3
 +
 +
 +def register_mlu_hijack():
++    """Register the MLU models and hijack."""
 +    from vllm_mlu import mlu_hijack
++    from vllm_mlu.model_executor.models import register_model
++    register_model()
 +    return
 \ No newline at end of file
 

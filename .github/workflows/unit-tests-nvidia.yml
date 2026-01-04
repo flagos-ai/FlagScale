@@ -63,6 +63,10 @@ jobs:
 
           if [ "${{ inputs.backend }}" = "train_megatron" ] || [ "${{ inputs.backend }}" = "train_flagscale" ]; then
             echo ""
+            # For megatron unit tests. See details in https://github.com/NVIDIA/Megatron-LM/blob/8479eb35fbca9631acb846c3ad5d868e02214227/tests/unit_tests/conftest.py#L78
+            mkdir -p /opt/data
+            cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/
+            cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/
             # PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="Megatron-LM" --verbose --no-build-isolation
           elif [ "${{ inputs.backend }}" = "vllm" ] || [ "${{ inputs.backend }}" = "inference_flagscale" ]; then
             source /root/miniconda3/bin/activate flagscale-inference
