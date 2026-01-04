@@ -140,7 +140,12 @@ class ServeGenerator(Generator):
                 f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve_config}"
             )
 
-        engine = model_config.engine
+        backend_value = config.get('experiment', {}).get('task', {}).get('backend')
+        if backend_value is None:
+            engine = model_config.get("engine", None)
+        else:
+            engine = backend_value
+
         if "engine" in strategy:
             engine = model_config.engine = strategy["engine"]
 
