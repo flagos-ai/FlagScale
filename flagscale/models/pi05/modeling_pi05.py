@@ -28,15 +28,6 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-
-# from lerobot.policies.pretrained import PreTrainedPolicy, T
-# from lerobot.policies.rtc.modeling_rtc import RTCProcessor
-from lerobot.utils.constants import (
-    ACTION,
-    OBS_LANGUAGE_ATTENTION_MASK,
-    OBS_LANGUAGE_TOKENS,
-    OPENPI_ATTENTION_MASK_VALUE,
-)
 from safetensors.torch import (
     load_model as load_model_as_safetensor,
     save_model as save_model_as_safetensor,
@@ -50,6 +41,15 @@ from typing_extensions import Unpack
 
 # from lerobot.configs.policies import PreTrainedConfig
 from flagscale.models.pi05.configuration_pi05 import DEFAULT_IMAGE_SIZE, PI05Config
+
+# from lerobot.policies.pretrained import PreTrainedPolicy, T
+# from lerobot.policies.rtc.modeling_rtc import RTCProcessor
+from flagscale.models.utils.constants import (
+    ACTION,
+    OBS_LANGUAGE_ATTENTION_MASK,
+    OBS_LANGUAGE_TOKENS,
+    OPENPI_ATTENTION_MASK_VALUE,
+)
 from flagscale.train.utils.hub import HubMixin
 
 T = TypeVar("T", bound="PI05Policy")
