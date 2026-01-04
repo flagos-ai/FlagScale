@@ -8,7 +8,6 @@ from omegaconf import DictConfig, OmegaConf
 from flagscale.logger import logger
 from flagscale.runner.autotuner_factory import AutotunerFactory
 from flagscale.runner.runner_base import Runner
-from flagscale.runner.runner_compress import SSHCompressRunner
 from flagscale.runner.runner_inference import SSHInferenceRunner
 from flagscale.runner.runner_serve import CloudServeRunner, SSHServeRunner
 from flagscale.runner.runner_train import CloudTrainRunner, SSHTrainRunner
@@ -25,7 +24,6 @@ VALID_TASKS = {"train", "inference", "compress", "serve", "rl"}
 LEGACY_RUNNER_MAP = {
     "train": SSHTrainRunner,
     "inference": SSHInferenceRunner,
-    "compress": SSHCompressRunner,
     "serve": SSHServeRunner,
 }
 
