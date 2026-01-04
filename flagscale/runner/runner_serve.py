@@ -290,7 +290,6 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
     else:
         before_start_cmd = ""
     cmd += f" --log-dir={logging_config.log_dir}"
-    logger.info(f"in _generate_run_script_serve, cmd: {cmd}")
     try:
         import vllm
 

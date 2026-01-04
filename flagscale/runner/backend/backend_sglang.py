@@ -184,7 +184,6 @@ class SglangBackend(BackendBase):
             before_start_cmd = ""
 
         cmd += f" --log-dir={logging_config.log_dir}"
-        logger.info(f"in _generate_run_script_serve, cmd: {cmd}")
 
         try:
             import sglang
