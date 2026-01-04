@@ -1,12 +1,12 @@
 diff --git a/megatron/core/tensor_parallel/layers.py b/megatron/core/tensor_parallel/layers.py
-index 5c6f34b70..c4f77ea61 100644
+index 5c6f34b70..027e64dea 100644
 --- a/megatron/core/tensor_parallel/layers.py
 +++ b/megatron/core/tensor_parallel/layers.py
 @@ -448,6 +448,7 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
          grad_output_buffer,
          wgrad_deferral_limit,
          tp_group,
-+        use_transformer_engine_fl,
++        te_fl_prefer,
      ):
          """Forward."""
          if gradient_accumulation_fusion and hasattr(weight, "main_grad"):
@@ -14,7 +14,7 @@ index 5c6f34b70..c4f77ea61 100644
          ctx.wgrad_deferral_limit = wgrad_deferral_limit
          ctx.grad_output_buffer = grad_output_buffer
          ctx.tp_group = tp_group
-+        ctx.use_transformer_engine_fl = use_transformer_engine_fl
++        ctx.te_fl_prefer = te_fl_prefer
  
          if sequence_parallel:
              dim_size = list(input.size())
@@ -30,7 +30,7 @@ index 5c6f34b70..c4f77ea61 100644
 -                    fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp16(
 -                        total_input, grad_output, weight.main_grad
 -                    )
-+                if not ctx.use_transformer_engine_fl:
++                if not (ctx.te_fl_prefer == 'flagos' or ctx.te_fl_prefer == 'reference'):
 +                    if weight.main_grad.dtype == torch.float32:
 +                        fused_weight_gradient_mlp_cuda.wgrad_gemm_accum_fp32(
 +                            total_input, grad_output, weight.main_grad
@@ -70,7 +70,7 @@ index 5c6f34b70..c4f77ea61 100644
      wgrad_deferral_limit: Optional[int] = 0,
      async_grad_allreduce: Optional[bool] = None,
      tp_group: Optional[torch.distributed.ProcessGroup] = None,
-+    use_transformer_engine_fl: Optional[bool] = False,
++    te_fl_prefer: Optional[str] = 'vendor',
  ) -> torch.Tensor:
      """Linear layer execution with asynchronous communication and
      gradient accumulation fusion in backprop.
@@ -78,20 +78,19 @@ index 5c6f34b70..c4f77ea61 100644
          grad_output_buffer,
          wgrad_deferral_limit,
          tp_group,
-+        use_transformer_engine_fl,
++        te_fl_prefer,
      ]
  
      if not linear_with_grad_accumulation_and_async_allreduce.warned:
-@@ -938,6 +949,8 @@ class ColumnParallelLinear(torch.nn.Module):
+@@ -938,6 +949,7 @@ class ColumnParallelLinear(torch.nn.Module):
          if not weight.requires_grad:
              return linear_with_frozen_weight(input, weight, *args, **kwargs)
          else:
-+            if self.config.use_transformer_engine_fl:
-+                kwargs['use_transformer_engine_fl'] = True
++            kwargs['te_fl_prefer'] = self.config.te_fl_prefer
              return linear_with_grad_accumulation_and_async_allreduce(input, weight, *args, **kwargs)
  
      def forward(
-@@ -1298,3 +1311,4 @@ class RowParallelLinear(torch.nn.Module):
+@@ -1298,3 +1310,4 @@ class RowParallelLinear(torch.nn.Module):
              f"{type(self).__name__}(in_features={self.input_size}, "
              f"out_features={self.output_size}, bias={use_bias}, TP={tp})"
          )
