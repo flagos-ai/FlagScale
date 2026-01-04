@@ -41,7 +41,6 @@ Directory structure:
 `-- config.yaml
 ```
 
-
 # Serving
 
 ## Edit Config
@@ -84,7 +83,6 @@ python examples/robobrain_x0_5/client_libero.py  \
 --right-wrist-img orbbec_2_latest.jpg \
 --num-steps 20
 ```
-
 
 # Training
 
@@ -137,10 +135,10 @@ cp -r ./demo_0913_n2/deps/* /
 cd FlagScale/
 vim examples/robobrain_x0_5/conf/train/libero_qwengroot.yaml
 ```
-Change 4 fields:
-- checkpoint_dir: path to model checkpoint
+Change 3 fields:
 - framework.qwenvl.base_vlm: path to backbone model (for example: qwenvl) checkpoint
 - datasets.data_path: path to dataset, for example: ./demo_0913_n2/wds-2
+- (optional) checkpoint_dir: path to model checkpoint
 
 ## Start Training
 ```sh
