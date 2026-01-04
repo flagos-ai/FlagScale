@@ -2,7 +2,7 @@ import os
 import re
 import subprocess
 import time
-
+from collections import defaultdict
 # from megatron.training import get_args
 
 
@@ -118,6 +118,121 @@ def compute_pipeline_parallelism_cost(
 
 import random
 
+LAYER_RE = re.compile(r"decoder\.layers\.(\d+)\.(.+)")
+
+def extract_stage_ops_from_raw_log(log_text: str):
+    layers = defaultdict(lambda: {
+        "has_attention": False,
+        "has_mlp": False,
+        "has_qkv": False,
+        "has_proj": False,
+        "has_fc1": False,
+        "has_fc2": False,
+    })
+
+    for raw_line in log_text.splitlines():
+        line = raw_line.strip()   
+
+        if "decoder.layers." not in line:
+            continue
+
+        m = LAYER_RE.search(line)
+        if not m:
+            continue
+
+        layer_id = int(m.group(1))
+        suffix = m.group(2)
+
+        # attention
+        if "self_attention.linear_qkv" in suffix:
+            layers[layer_id]["has_attention"] = True
+            layers[layer_id]["has_qkv"] = True
+
+        if "self_attention.linear_proj" in suffix:
+            layers[layer_id]["has_attention"] = True
+            layers[layer_id]["has_proj"] = True
+
+        # mlp
+        if "mlp.linear_fc1" in suffix:
+            layers[layer_id]["has_mlp"] = True
+            layers[layer_id]["has_fc1"] = True
+
+        if "mlp.linear_fc2" in suffix:
+            layers[layer_id]["has_mlp"] = True
+            layers[layer_id]["has_fc2"] = True
+
+    return layers
+
+def tp_collectives_per_stage(layers, sequence_parallel=False):
+    total = 0
+    per_layer = {}
+
+    for layer_id, ops in layers.items():
+        cnt = tp_collectives_per_layer(
+            has_attention=ops["has_attention"],
+            has_mlp=ops["has_mlp"],
+            sequence_parallel=sequence_parallel,
+        )
+        per_layer[layer_id] = cnt
+        total += cnt
+
+    return total, per_layer
+
+def tp_collectives_per_layer(
+    has_attention=True,
+    has_mlp=True,
+    sequence_parallel=False
+):
+    cnt = 0
+    if has_attention:
+        cnt += 1  # qkv backward
+        cnt += 2  # proj fwd + bwd
+    if has_mlp:
+        cnt += 1  # fc1 backward
+        cnt += 2  # fc2 fwd + bwd
+    if sequence_parallel:
+        cnt += 4  # ln fwd/bwd rs + ag
+    return cnt
+
+def ring_allreduce_time(
+    n_bytes,
+    N_ranks,
+    N_nodes,
+    alpha_base,
+    alpha_intra,
+    alpha_inter,
+    hops,
+    alpha_switch,
+    beta,
+):
+    alpha_hw = (
+        2 * (N_ranks - N_nodes) * alpha_intra
+        + 2 * (N_nodes - 1) * (alpha_inter * hops * alpha_switch)
+    )
+
+    bw_term = 2 * (N_ranks - 1) / N_ranks * n_bytes * beta
+
+    return alpha_base + alpha_hw + bw_term
+
+def stage_has_tp_from_process_mesh(process_mesh):
+    assert len(process_mesh) % 5 == 0
+
+    stage_has_tp = {}
+    stage_id = 0
+
+    for i in range(0, len(process_mesh), 5):
+        device = process_mesh[i:i+5]
+        tp = device[0]
+        pp = device[4]
+
+        has_tp = tp > 1
+
+        for _ in range(pp):
+            stage_has_tp[stage_id] = has_tp
+            stage_id += 1
+
+    return stage_has_tp
+
 
 def simulator(
     process_mesh: list = None,
@@ -132,7 +247,8 @@ def simulator(
         "/workspace/single_process_simulator_nd/FlagScale:"
         "/workspace/single_process_simulator_nd/FlagScale/third_party/Megatron-LM"
     )
-    os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+    os.environ["ENABLE_SIMULATOR"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
     os.environ["RANK"] = str(simulated_rank)
     os.environ["LOCAL_RANK"] = "0"
@@ -166,7 +282,7 @@ def simulator(
     train_command = (
         "python "
         + program_entry
-        + "--tensor-model-parallel-size 1 --timing-log-level 2  --disable-bias-linear --use-flash-attn --sequence-parallel --use-distributed-optimizer --use-mcore-models --transformer-impl transformer_engine --hetero-device-types A800 A800 --hetero-current-device-type A800   --bf16 --attention-softmax-in-fp32 --accumulate-allreduce-grads-in-fp32 --log-interval 1 --log-throughput --tensorboard-log-interval 1 --wandb-project aquila2 --wandb-exp-name test --tensorboard-dir /share/project/heyongzhe/FlagScale/outputs/tensorboard --wandb-save-dir /share/project/heyongzhe/FlagScale/outputs/wandb --num-layers 32 --hidden-size 4096 --num-attention-heads 32 --seq-length 2048 --max-position-embeddings 2048 --norm-epsilon 1e-05 --use-rotary-position-embeddings --no-position-embedding --swiglu --multiple-of 256 --normalization RMSNorm  --untie-embeddings-and-output-weights --init-method-std 0.0165 --attention-dropout 0.0 --hidden-dropout 0.0 --weight-decay 0.1 --clip-grad 1.0 --train-samples 128 --global-batch-size 64 --micro-batch-size 1 --seed 42 --lr 0.0002 --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.95 --lr 0.00015 --min-lr 1.5e-05 --lr-warmup-samples 0 --lr-decay-style cosine --data-path /workspace/FlagScale/datapath/pile_wikipedia_demo  --split 1 --tokenizer-type AquilaTokenizerFS --vocab-file ./examples/aquila/tokenizer/vocab.json --merge-file ./examples/aquila/tokenizer/merges.txt --special-tokens-file ./examples/aquila/tokenizer/special_tokens.txt --vocab-size 100008 "
+        + "--tensor-model-parallel-size 1 --timing-log-level 2  --disable-bias-linear --use-flash-attn --sequence-parallel --use-distributed-optimizer  --use-mcore-models --transformer-impl transformer_engine --hetero-device-types A800 A800 --hetero-current-device-type A800   --bf16 --attention-softmax-in-fp32 --accumulate-allreduce-grads-in-fp32 --log-interval 1 --log-throughput --tensorboard-log-interval 1 --wandb-project aquila2 --wandb-exp-name test --tensorboard-dir /share/project/heyongzhe/FlagScale/outputs/tensorboard --wandb-save-dir /share/project/heyongzhe/FlagScale/outputs/wandb --num-layers 32 --hidden-size 4096 --num-attention-heads 32 --seq-length 2048 --max-position-embeddings 2048 --norm-epsilon 1e-05 --use-rotary-position-embeddings --no-position-embedding --swiglu --multiple-of 256 --normalization RMSNorm  --untie-embeddings-and-output-weights --init-method-std 0.0165 --attention-dropout 0.0 --hidden-dropout 0.0 --weight-decay 0.1 --clip-grad 1.0 --train-samples 128 --global-batch-size 64 --micro-batch-size 1 --seed 42 --lr 0.0002 --weight-decay 0.01 --adam-beta1 0.9 --adam-beta2 0.95 --lr 0.00015 --min-lr 1.5e-05 --lr-warmup-samples 0 --lr-decay-style cosine --data-path /workspace/FlagScale/datapath/pile_wikipedia_demo  --split 1 --tokenizer-type AquilaTokenizerFS --vocab-file ./examples/aquila/tokenizer/vocab.json --merge-file ./examples/aquila/tokenizer/merges.txt --special-tokens-file ./examples/aquila/tokenizer/special_tokens.txt --vocab-size 100008 "
         + process_mesh_str
         + simulation_arguments
         + pp_layer_split_args
@@ -186,14 +302,41 @@ def simulator(
     print(result)
     output = result.stdout.strip()
     print(train_command)
+
+    print("------------------------------output1--------------------------------------")
     print(output)
+    print("--------------------------------------------------------------------")
     # example output: "[simulatior output] forward: 12.34, backward: 56.78, communication: 90.12"
     match = re.search(r"forward:\s*([\d.]+),\s*backward:\s*([\d.]+)", output)
+    s_out = extract_stage_ops_from_raw_log(output)
+    reduce_op_cnt = tp_collectives_per_stage(s_out)[0]
+
+    
+    n_bytes = 16.7
+    n_rank  = 2
+    n_nodes = 1
+    alpha_base = 5e-6
+    alpha_intra = 1e-6
+    alpha_inter = 3e-6
+    hops = 1 if n_nodes > 1 else 0
+    alpha_switch = 1.2
+    beta   = 1 / (25  * 1024**3)
+    
+    time = ring_allreduce_time(n_bytes, n_rank, n_nodes, alpha_base, alpha_intra, alpha_inter, hops, alpha_switch, beta)
+    
+    fw_cm_time = time * reduce_op_cnt * 0.33
+    bw_cm_time = time * reduce_op_cnt * 0.66
+    stp = stage_has_tp_from_process_mesh(process_mesh)
+
+
     if match:
         fwd_time = float(match.group(1))
         bwd_time = float(match.group(2))
         # comm_time = float(match.group(3))
         comm_time = estimate_comm_time_between_stages(1, 2048, 4096)
+        if stp[stage]: 
+            fwd_time += fw_cm_time 
+            bwd_time += bw_cm_time
         print("forward:", fwd_time)
         print("backward:", bwd_time)
         print("communication:", comm_time)
