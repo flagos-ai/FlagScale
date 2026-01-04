@@ -1,6 +1,6 @@
 - serve_id: vllm_model
   engine_args:
-    model: /your/model/checkpoint/path
+    model: outputs/libero_qwengroot/checkpoints/ckpt_out
     subtask_mode: true
     host: 0.0.0.0
     port: 5001
@@ -10,5 +10,4 @@
     torch_dtype: torch.float32
     framework:
       qwenvl: 
-        base_vlm: /your/backbone/model/checkpoint/path
-
+        base_vlm: outputs/libero_qwengroot/checkpoints/ckpt_out/backbone
