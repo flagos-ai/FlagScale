@@ -6,6 +6,7 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
+    backend: vllm
   runner:
     hostfile: examples/qwen2_5/conf/hostfile_nodes_envs.txt
     docker: ds    # Modify to suit your Docker environment

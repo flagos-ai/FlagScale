@@ -8,6 +8,7 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
+    backend: sglang
   runner:
     hostfile: examples/qwen3/conf/hostfile.txt
     docker: ds

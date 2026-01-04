@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /models/Qwen2.5-7B-Instruct
     tensor_parallel_size: 2

@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /models/deepseek_r1 # path of weight of deepseek r1
     tensor_parallel_size: 8

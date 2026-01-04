@@ -7,6 +7,7 @@ experiment:
   exp_dir: ./outputs
   task:
     type: serve
+    backend: vllm
   runner:
     nnodes: 1
     nproc_per_node: 4

@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /share/project/lms/robobrain2_32b # should be customized
     served_model_name: robobrain2_32b-nv-flagos

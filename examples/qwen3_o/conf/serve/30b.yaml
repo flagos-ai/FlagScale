@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /share/Qwen3-Omni-30B-A3B-Instruct
     served_model_name: Qwen3-Omni-30B-A3B-Instruct-nvidia-flagos
