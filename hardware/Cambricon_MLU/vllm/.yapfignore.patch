@@ -1,8 +1,0 @@
-diff --git a/.yapfignore b/.yapfignore
-index 2d6dcf838..381582590 100644
---- a/.yapfignore
-+++ b/.yapfignore
-@@ -1 +1,2 @@
- collect_env.py
-+vllm/model_executor/layers/fla/ops/*.py
-
