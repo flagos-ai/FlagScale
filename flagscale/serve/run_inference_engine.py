@@ -150,7 +150,11 @@ def main():
             f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve.task_config}"
         )
 
-    engine = model_config.get("engine", None)
+    backend_value = serve.task_config.get('experiment', {}).get('task', {}).get('backend')
+    if backend_value is None:
+        engine = model_config.get("engine", None)
+    else:
+        engine = backend_value
 
     if engine == "vllm":
         if model_config.get("serve_id", None) != "vllm_model":
