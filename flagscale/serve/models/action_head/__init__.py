@@ -1,1 +1,0 @@
-# Adopted from NVIDIA/Isaac-GR00T (https://github.com/NVIDIA/Isaac-GR00T/tree/main)
