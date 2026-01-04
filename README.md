@@ -253,17 +253,18 @@ Our evaluation process leverages the capabilities of [FlagEval](https://flageval
 2. Start evaluation.
     ```sh
     IP=$(ip addr show | grep -E 'inet ([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '127.0.0.1' | grep -v '::1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    MODEL_NAME=$(curl -s http://localhost:9010/v1/models | jq -r '.data[].id')
     curl http://120.92.17.239:5050/evaluation \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer no-key" \
     -d '{
         "eval_infos": [
             {
-                "eval_model": "robobrain2_3b-nv-flagos",
-                "model": "robobrain2_3b-nv-flagos",
+                "eval_model": '$MODEL_NAME',
+                "model": '$MODEL_NAME',
                 "eval_url": "http://'$IP':9010/v1/chat/completions",
                 "tokenizer": "BAAI/RoboBrain2.0-3B",
-                "base_model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
+                "base_model_name": "BAAI/RoboBrain2.0-3B",
                 "num_concurrent": 4,
                 "batch_size": 8
             }
