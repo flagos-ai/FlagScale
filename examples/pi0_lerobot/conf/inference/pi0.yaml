@@ -1,0 +1,22 @@
+engine:
+  # Model variant: "pi0" or "pi0.5"
+  model_variant: "pi0"
+  model: path-to-your-pi0_base-model
+  tokenizer: path-to-your-paligemma-3b-pt-224-tokenizer
+  # TODO: (yupu) Use the stat safetensors
+  stat_path: path-to-your-dataset/meta/stats.json
+  device: "cuda"
+
+generate:
+  images:
+    observation.images.cam_high: path-to-your-cam-high-image.jpg
+    observation.images.cam_left_wrist: path-to-your-cam-left-wrist-image.jpg
+    observation.images.cam_right_wrist: path-to-your-cam-right-wrist-image.jpg
+  state_path: path-to-your-state-file.pt
+  task_path: path-to-your-task-file.txt
+  # Optional rename_map to map input keys to policy expected keys
+  rename_map:
+    observation.images.cam_high: observation.images.base_0_rgb
+    observation.images.cam_left_wrist: observation.images.left_wrist_0_rgb
+    observation.images.cam_right_wrist: observation.images.right_wrist_0_rgb
+

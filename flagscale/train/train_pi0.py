@@ -26,7 +26,7 @@ def init_ddp(config):
     random.seed(config.seed)
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
-    torch.distributed.init_process_group(backend='nccl', init_method='env://')
+    torch.distributed.init_process_group(backend="nccl", init_method="env://")
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = True
@@ -45,7 +45,9 @@ def init_wandb(config, *, resuming: bool, log_code: bool = False, enabled: bool 
         run_id = (ckpt_dir / "wandb_id.txt").read_text().strip()
         wandb.init(id=run_id, resume="must", project=config.project_name)
     else:
-        wandb.init(name=config.exp_name, config=vars(config), project=config.project_name)
+        wandb.init(
+            name=config.exp_name, config=vars(config), project=config.project_name
+        )
         (ckpt_dir / "wandb_id.txt").write_text(wandb.run.id)
 
     if log_code:
@@ -70,7 +72,9 @@ def main(config):
         batch_size=config.batch_size,
         shuffle_buffer_size=10000,
         max_samples_per_sequence=100,
-        worker_config=WorkerConfig.default_worker_config(num_workers=1, data_parallel_group=None),
+        worker_config=WorkerConfig.default_worker_config(
+            num_workers=1, data_parallel_group=None
+        ),
         task_encoder=TaskEncoder(config),
         repeat=True,
     )
@@ -87,13 +91,23 @@ def main(config):
         config=model_config,
     )
     policy = policy.cuda()
-    policy = DDP(policy, device_ids=[int(os.environ["LOCAL_RANK"])], find_unused_parameters=True)
+    policy = DDP(
+        policy, device_ids=[int(os.environ["LOCAL_RANK"])], find_unused_parameters=True
+    )
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
     step = 0
     done = False
     while not done:
         batch = next(data_iter)
-        batch = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
+        batch = {
+            k: (v.to(device) if isinstance(v, torch.Tensor) else v)
+            for k, v in batch.items()
+        }
+
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                print(f"{k}: {v.shape}")
+
         loss, _ = policy.forward(batch)
         loss.backward()
         optimizer.step()
@@ -109,7 +123,6 @@ def main(config):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoint_path_not_set")
     parser.add_argument("--project-name", type=str, default="default_project")
@@ -118,9 +131,13 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer-path", type=str, default="tokenizer_path not set")
     parser.add_argument("--state-key", type=str, default="state_key not set")
     parser.add_argument("--action-key", type=str, default="action_key not set")
-    parser.add_argument("--action-token-key", type=str, default="action_token_key not set")
+    parser.add_argument(
+        "--action-token-key", type=str, default="action_token_key not set"
+    )
     parser.add_argument("--stat-path", type=str, default="stat_path not set")
-    parser.add_argument("--output-directory", type=str, default="output_directory not set")
+    parser.add_argument(
+        "--output-directory", type=str, default="output_directory not set"
+    )
     parser.add_argument("--vision-root", type=str, default="")
 
     parser.add_argument("--seed", type=int, default=42)
@@ -140,5 +157,6 @@ if __name__ == "__main__":
 
     config = parser.parse_args()
 
+    logger.info("=" * 100)
     logger.info(f"train_pi0.py config: {config}")
     main(config)

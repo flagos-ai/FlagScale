@@ -67,7 +67,10 @@ def _get_args_robotics(config: DictConfig):
 
 
 def _get_args_pi0(config: DictConfig):
-    assert config.experiment.task.backend == "pi0", "This function only supports lerobot backend."
+    assert config.experiment.task.backend in [
+        "pi0",
+        "lerobot",
+    ], "This function only supports pi0 or lerobot backend."
 
     # Convert the DictConfig to a regular dictionary
     config_dict = OmegaConf.to_container(config, resolve=True)
@@ -400,7 +403,7 @@ class SSHTrainRunner(RunnerBase):
             self.user_args = _get_args_megatron(self.config)
         elif self.config.experiment.task.backend == "robotics":
             self.user_args = _get_args_robotics(self.config)
-        elif self.config.experiment.task.backend == "pi0":
+        elif self.config.experiment.task.backend in ["pi0", "lerobot"]:
             self.user_args = _get_args_pi0(self.config)
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
         self.user_envs = self.config.experiment.get("envs", {})

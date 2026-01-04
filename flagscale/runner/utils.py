@@ -62,7 +62,7 @@ def wait_for_ray_master(
     logger.info(f"Master info is {master_ip}:{port}")
     for attempt in range(max_attempts):
         status, msg = is_ray_master_running(master_ip, port)
-        logger.info(f"Check Ray master status (attempt {attempt+1}/{max_attempts}): {msg}")
+        logger.info(f"Check Ray master status (attempt {attempt + 1}/{max_attempts}): {msg}")
 
         if status:
             return True
@@ -286,18 +286,17 @@ def run_scp_command(host, src, dst, port=None, dryrun=False):
 
 def flatten_dict_to_args_verl(config_dict, pre_str=""):
     args = []
-    if 'config-path' in config_dict:
-        args.append(f'--config-path={config_dict["config-path"]}')
-        config_dict.pop('config-path')
+    if "config-path" in config_dict:
+        args.append(f"--config-path={config_dict['config-path']}")
+        config_dict.pop("config-path")
 
-    if 'config-name' in config_dict:
-        args.append(f'--config-name={config_dict["config-name"]}')
-        config_dict.pop('config-name')
+    if "config-name" in config_dict:
+        args.append(f"--config-name={config_dict['config-name']}")
+        config_dict.pop("config-name")
 
     for key, value in config_dict.items():
-
         if isinstance(value, dict):
-            if key == 'append_kargs':
+            if key == "append_kargs":
                 target_str = f"+"
             else:
                 target_str = f"{key}."
@@ -306,11 +305,11 @@ def flatten_dict_to_args_verl(config_dict, pre_str=""):
             v_str = ""
             for v in value:
                 v_str += f"{v}"
-            args.append(f"{pre_str+key}=" + v_str)
+            args.append(f"{pre_str + key}=" + v_str)
         elif isinstance(value, bool):
-            args.append(f"{pre_str+key}={value}")
+            args.append(f"{pre_str + key}={value}")
         else:
-            args.append(f"{pre_str+key}=" + f"{value}")
+            args.append(f"{pre_str + key}=" + f"{value}")
 
     return args
 
@@ -458,9 +457,8 @@ def is_ip_addr(master):
 
 
 def is_master_node(lws_leader_address):
-
-    host_name = lws_leader_address.split('.')[0]
-    local_hostname = socket.gethostname().split('.')[0]
+    host_name = lws_leader_address.split(".")[0]
+    local_hostname = socket.gethostname().split(".")[0]
 
     return host_name == local_hostname
 
@@ -661,7 +659,6 @@ async def benchmark(
     selected_percentile_metrics,
     selected_percentiles,
 ):
-
     async def limited_request_func(request_func_input, pbar):
         return await request_func(request_func_input=request_func_input, pbar=pbar)
 
