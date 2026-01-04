@@ -1,0 +1,19 @@
+defaults:
+  - model
+  - _self_
+
+data:
+  data_path:
+  num_calibration_samples: 16
+  max_seq_length: 8192
+  tokenzier_args: null
+
+compress_args:
+  quantization:
+    - algo:
+        gptq:
+          blocksize: 128
+          percdamp: 0.01
+      ignore: ["re:.*vision_model*", "re:.*mm_projector*", "re:.*lm_head"]
+      targets: [Linear]
+      scheme: W4A16

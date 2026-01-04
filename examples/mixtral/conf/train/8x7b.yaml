@@ -1,0 +1,73 @@
+system:
+  tensor_model_parallel_size: 2
+  pipeline_model_parallel_size: 4
+  expert_model_parallel_size: 4
+  use_mcore_models: true
+  transformer_impl: transformer_engine
+  sequence_parallel: true
+  use_distributed_optimizer: true
+  precision:
+    bf16: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: mixtral
+    wandb_exp_name: mixtral-8x7b
+  checkpoint:
+    ckpt_format: torch
+    save_interval: 200
+
+
+model:
+  num_layers: 32
+  hidden_size: 4096
+  ffn_hidden_size: 14336
+  num_attention_heads: 32
+  seq_length: 4096
+  max_position_embeddings: 32768
+  swiglu: true
+  normalization: RMSNorm
+  norm_epsilon: 1e-05
+  group_query_attention: true
+  num_query_groups: 8
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  disable_bias_linear: true
+  position_embedding_type: rope
+  rotary_base: 1000000
+  no_position_embedding: true
+  no_masked_softmax_fusion: true
+  untie_embeddings_and_output_weights: true
+  # moe args
+  num_experts: 8
+  moe_router_load_balancing_type: aux_loss
+  moe_router_topk: 2
+  moe_aux_loss_coeff: 0.02
+  # moe_grouped_gemm: true
+
+  # seed: 42
+  train_iters: 1000
+  micro_batch_size: 1
+  global_batch_size: 2048
+  clip_grad: 1.0
+  eval_interval: 1000
+  eval_iters: 10
+
+  optimizer:
+    lr: 1e-4
+    weight_decay: 0.1
+    lr_scheduler:
+      min_lr: 1.0e-5
+      lr_warmup_iters: 500
+      lr_decay_iters: 320000
+      lr_decay_style: cosine
+
+
+data:
+  data_path: <xxxx>
+  split: 1
+  tokenizer:
+    tokenizer_type: QwenTokenizerFS
+    tokenizer_path: <xxxx>
+    make_vocab_size_divisible_by: 64

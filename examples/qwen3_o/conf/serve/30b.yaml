@@ -1,0 +1,16 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /share/Qwen3-Omni-30B-A3B-Instruct
+    served_model_name: Qwen3-Omni-30B-A3B-Instruct-nvidia-flagos
+    host: 0.0.0.0
+    port: 9011
+  engine_args_specific:
+    vllm:
+      max-model-len: 40000
+      limit-mm-per-prompt: image=16 # should be changed to limit-mm-per-prompt.image: 16 after Qwen3-o's PR merged into vllm-project/vllm
+  profile:
+    prefix_len: 0
+    input_len: 1024
+    output_len: 1024
+    num_prompts: 128
+    range_ratio: 1

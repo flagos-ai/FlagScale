@@ -1,0 +1,21 @@
+defaults:
+  - _self_
+  - serve: 7b
+experiment:
+  exp_name: minicpm_o_2.6
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+    backend: vllm
+  deploy:
+    use_fs_serve: false
+  runner:
+    ssh_port: 22
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-inference
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

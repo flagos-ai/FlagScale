@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - serve: 671b
+
+experiment:
+  exp_name: deepseek_v3
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+    backend: vllm
+  deploy:
+    use_fs_serve: false
+  runner:
+    hostfile: examples/deepseek/conf/hostfile.txt
+    docker: ds
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-inference && export GLOO_SOCKET_IFNAME=bond0 # replace "bond0" with your own network card
+
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

@@ -1,0 +1,19 @@
+engine:
+  model: ${experiment.model}
+  loader: diffusers
+  results_path: ${experiment.exp_dir}/results
+  output_format: image
+  device: "cuda"
+  torch_dtype: float16
+  transformations:
+    LogIOTransformation:
+      log_level: "info"
+    StateScopeTransformation:
+      {}
+
+generate:
+  prompts: "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
+  width: 512
+  height: 512
+  num_inference_steps: 50
+  guidance_scale: 7.0

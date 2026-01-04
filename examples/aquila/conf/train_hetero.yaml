@@ -1,0 +1,47 @@
+defaults:
+  - train: hetero
+  - _self_
+
+experiment:
+  exp_name: aquila2
+  exp_dir: ./outputs
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/train_gpt.py
+  runner:
+    hostfile: xxx # Please replace with your actual hostfile path
+    rdzv_backend: "static" # hetero training only supports static
+  cmds:
+    before_start: "ulimit -n 1048576"
+    after_stop: ""
+
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+ # specific envs
+ # the priority: node ip > device type > the global envs
+    # device_type_specific:
+    #   mlu590:
+    #     MLU_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    #     CNCL_IB_RELAXED_ORDERING_ENABLE: 1
+    #     CNCL_MLULINK_OVER_ROCE_DISABLE: 1
+    #   A800:
+    #     CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # node_specific:
+    #   xxx.xxx.xx.xxx:
+    #     CUDA_VISIBLE_DEVICES: 0,1,2,3
+
+# the other specific config for different device type or node
+# device_type_specific:
+#   mlu590:
+#     build_dir: xxxx/build/Cambricon_MLU/FlagScale/
+# node_specific:
+#   xxxxx.xxx.xx.xxx:
+#     build_dir: xxxx/xxxx/build/Cambricon_MLU/FlagScale/
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

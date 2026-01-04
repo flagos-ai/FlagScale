@@ -1,0 +1,72 @@
+system:
+  tensor_model_parallel_size: 8
+  pipeline_model_parallel_size: 4
+  make_vocab_size_divisible_by: 64
+  disable_bias_linear: True
+  sequence_parallel: True
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+    accumulate_allreduce_grads_in_fp32: True
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "train-llama3-70B"
+    wandb_exp_name: "train-llama3-70B"
+  checkpoint:
+    ckpt_format: torch
+    save_interval: 100
+
+model:
+  num_layers: 80
+  hidden_size: 8192
+  num_attention_heads: 64
+  group_query_attention: True
+  num_query_groups: 8
+  ffn_hidden_size: 28672
+  seq_length: 8192
+  max_position_embeddings: 8192
+  norm_epsilon: 1e-5
+  norm_init_weight: 0.02
+  use_rotary_position_embeddings: True
+  rotary_base: 500000
+  no_position_embedding: True
+  reset_position_ids: True
+  add_qkv_bias: false
+  reset_attention_mask: True
+  swiglu: True
+  normalization: RMSNorm
+  untie_embeddings_and_output_weights: True
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+
+  train_samples: 6160066
+  micro_batch_size: 1
+  global_batch_size: 1024
+  seed: 42
+
+  optimizer:
+    start_weight_decay: 1.5e-6
+    end_weight_decay: 1.5e-5
+    weight_decay_incr_style: cosine
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.5e-4
+      min_lr: 1.5e-5
+      lr_warmup_samples: 2048000
+      lr_decay_style: cosine
+
+data:
+  data_path: ${data_path:??}
+  split: 1
+  tokenizer:
+    tokenizer_type: Llama3TokenizerFS
+    tokenizer_path: ${tokenizer_path:??}
+    vocab_size: 128256

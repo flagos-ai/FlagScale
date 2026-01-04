@@ -1,0 +1,19 @@
+defaults:
+  - _self_
+  - serve: 32b
+experiment:
+  exp_name: deepseek_r1_distill_qwen_32b
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+    backend: vllm
+  deploy:
+    use_fs_serve: false
+  runner:
+    ssh_port: 22
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

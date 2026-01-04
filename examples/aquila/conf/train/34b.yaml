@@ -1,0 +1,70 @@
+system:
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 4
+  make_vocab_size_divisible_by: 64
+  disable_bias_linear: True
+  sequence_parallel: True
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+    accumulate_allreduce_grads_in_fp32: True
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "train-aquila-34B"
+    wandb_exp_name: "train-test-34B"
+  checkpoint:
+    save_interval: 1000
+    rampup_save_interval: 5000
+
+model:
+  num_layers: 60
+  hidden_size: 6144
+  num_attention_heads: 48
+  group_query_attention: True
+  num_query_groups: 8
+  hidden_dim_multiplier: 1.3
+  seq_length: 4096
+  max_position_embeddings: 4096
+  norm_epsilon: 1e-5
+  norm_init_weight: 0.3
+  use_rotary_position_embeddings: true
+  no_position_embedding: true
+  swiglu: true
+  multiple_of: 4096
+  normalization: RMSNorm
+  untie_embeddings_and_output_weights: true
+  init_method_std: 0.0165
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  weight_decay: 0.1
+  clip_grad: 1.0
+  train_samples: 488281250
+  rampup_batch_size: [32, 32, 2000000]
+  eval_iters: 0
+  eval_interval: 2000
+  micro_batch_size: 1
+  global_batch_size: 1024
+  seed: 42
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.5e-4
+      min_lr: 1.5e-5
+      lr_warmup_samples: 500000
+      lr_decay_style: cosine
+
+data:
+  data_path: ${data_path:??}
+  split: 1
+  tokenizer:
+    tokenizer_type: AquilaTokenizerFS
+    vocab_file: ./examples/aquila/tokenizer/vocab.json
+    merge_file: ./examples/aquila/tokenizer/merges.txt
+    special_tokens_file: ./examples/aquila/tokenizer/special_tokens.txt
+    vocab_size: 100008

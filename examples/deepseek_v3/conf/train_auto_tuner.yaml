@@ -1,0 +1,56 @@
+# DeepSeek 16B, 2.4A Model
+defaults:
+  - _self_
+  - train: 16b_a3b
+
+experiment:
+  exp_name: DeepSeek-16b-a3b-auto-tune
+  seed: 42
+  save_steps: 10000
+  load: null
+  exp_dir: xxx
+  ckpt_format: torch
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/train_gpt.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    nnodes: 4
+    nproc_per_node: 8
+    hostfile: null
+  cmds:
+    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+  auto_tuner:
+    space:
+      data_parallel_size: auto
+      use_distributed_optimizer: auto
+      tensor_model_parallel_size: [1, 2, 4, 8]
+      expert_model_parallel_size: [1, 2, 4, 8]
+      sequence_parallel: [true]
+      pipeline_model_parallel_size: [1, 2, 4]
+      num_layers_per_virtual_pipeline_stage: [0] # turn off vpp
+      context_parallel_size: [1]
+      micro_batch_size: [1, 2, 4]
+      use_recompute: [false]
+    control:
+      run_best: false
+      max_time_per_task: 200
+      train_iters: 3
+      # max_time: 600
+    memory_model:
+      model_name: default
+      gpu_memory: 80000
+      gpu_utilization: [0.5, 0.88] # min-max
+
+action: auto_tune
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

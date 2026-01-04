@@ -1,0 +1,29 @@
+defaults:
+- _self_
+- serve: cloud_model
+
+experiment:
+  exp_name: cloud
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+  runner:
+    type: cloud
+    nnodes: ${oc.env:LWS_GROUP_SIZE, 1}
+    master_addr: ${oc.env:LWS_LEADER_ADDRESS, 127.0.0.1}
+    master_port: ${oc.env:MASTER_PORT, 7396}
+    device_type: ${oc.env:DEVICE_TYPE, gpu}
+    nproc_per_node: ${oc.env:AIRS_ACCELERATOR_NUM, 1}
+    deploy:
+      use_fs_serve: false
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-inference
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

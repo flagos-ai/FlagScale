@@ -1,0 +1,19 @@
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  use_flash_attn: True
+  sequence_parallel: True
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "compress-emu3-7B"
+    wandb_exp_name: "compress-test-7B"
+  save_dir:
+
+
+model:
+  model_cls: AutoModelForCausalLM
+  model_path: BAAI/Emu3-Gen/
+  device_map: cuda:0
+  trust_remote_code: true
+  torch_dtype: bfloat16

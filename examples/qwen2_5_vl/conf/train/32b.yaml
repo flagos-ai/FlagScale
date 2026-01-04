@@ -1,0 +1,107 @@
+system:
+  num_workers: 1
+  calculate_per_token_loss: true
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 4
+  context_parallel_size: 1
+  decoder_first_pipeline_num_layers: 13 # 13 or pp8: 1
+  disable_bias_linear: True
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  sequence_parallel: True
+  tp_comm_overlap: False
+  overlap_grad_reduce: False
+  overlap_param_gather: False
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  # recompute_method: "uniform"
+  # recompute_granularity: "full"
+  # recompute_num_layers: 1
+  use_te: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: False
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    log_throughput: True
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+    log_params_norm: True
+    log_num_zeros_in_grad: True
+  checkpoint:
+    save_interval: 1000
+    pretrained_checkpoint: xxxxx
+    dataloader_save: ${experiment.exp_dir}/checkpoints/dataloader
+    use_dist_ckpt: False
+    ckpt_format: torch
+    async_save: False
+
+model:
+  attention_backend: flash # auto: nvte_flash_attn
+  disable_bias_linear: True
+  add_qkv_bias: True
+  num_layers: 64
+  hidden_size: 5120
+  ffn_hidden_size: 27648
+  num_attention_heads: 40
+  num_query_groups: 8
+  seq_length: 15360 # 16384 15360
+  max_padding_length: 15360 # real seq_length
+  # especial for qwen2.5-vl
+  enable_variable_seq_lengths: True
+  max_position_embeddings: 128000 # only useful for additional position embedding
+  swiglu: True
+  normalization: RMSNorm
+  norm_epsilon: 1e-6
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_iters: 15846
+  eval_iters: 0
+  micro_batch_size: 1
+  global_batch_size: 256
+  allow_missing_vision_projection_checkpoint: False
+  apply_layernorm_1p: False
+  group_query_attention: True
+  no_masked_softmax_fusion: True
+  untie_embeddings_and_output_weights: True
+
+  # position embedding
+  position_embedding_type: mrope
+  rotary_percent: 1.0
+  rotary_base: 1000000
+  rotary_seq_len_interpolation_factor: 1
+  no_rope_fusion: False
+  mrope_section: [16, 24, 24]
+  eod_mask_loss: False
+
+  # vision model
+  freeze_LM: False
+  freeze_ViT: False
+  disable_vision_class_token: True
+  seed: 42
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    adam_eps: 1e-8
+    lr_scheduler:
+      lr: 1.0e-5
+      min_lr: 0.0
+      lr_warmup_iters: 800
+      lr_decay_style: cosine
+
+data:
+  data_path: xxxx
+  vision_root: xxxx
+  dataloader_type: external
+  split: 100,0,0
+  tokenizer:
+    tokenizer_type: Qwen2VLTokenizer
+    tokenizer_path: xxxx
+    vocab_size: 152064
+    extra_vocab_size: 421
+    make_vocab_size_divisible_by: 64

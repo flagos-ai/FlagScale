@@ -1,0 +1,27 @@
+defaults:
+  - _self_
+  - serve: 7b
+
+experiment:
+  exp_name: llava_onevision
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+    backend: vllm
+    entrypoint: null
+  deploy:
+    port: 6701
+    use_fs_serve: true
+  runner:
+    hostfile: null #examples/llava_onevision/conf/hostfile.txt
+    docker: llava
+    ssh_port: 22
+
+  cmds:
+    before_start: export RAY_DEDUP_LOGS=0
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

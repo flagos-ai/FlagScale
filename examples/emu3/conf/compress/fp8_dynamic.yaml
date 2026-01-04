@@ -1,0 +1,19 @@
+defaults:
+  - model
+  - _self_
+
+data:
+  data_path: null
+  max_calib_data: null
+  max_seq_len: null
+  tokenzier_args:
+    tokenizer_path: BAAI/Emu3-Gen/
+    special_tokens_file: BAAI/Emu3-Gen/emu3_vision_tokens.txt
+    trust_remote_code: true
+
+compress_args:
+  quantization:
+    - algo:
+      targets: ["Linear"]
+      ignore: ["lm_head"]
+      scheme: FP8_DYNAMIC

@@ -1,0 +1,15 @@
+# Global reviewers for the entire repository
+* @FlagOpen/flagscale-reviewers
+
+vllm/ @zhaoyinglia @ceci3 @aoyulong
+megatron/ @heavyrain-lzy @aoyulong @zhaoyinglia
+megatron-energon/ @caozhou1995
+requirements/ @aoyulong
+docker/ @phoenixdong
+hardware/ @caozhou1995
+
+flagscale/auto_tuner @caozhou1995
+flagscale/compress @ceci3
+flagscale/inference @zhaoyinglia
+flagscale/runner @aoyulong
+flagscale/serve @cyber-pioneer

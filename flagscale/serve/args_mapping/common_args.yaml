@@ -1,0 +1,27 @@
+# Common serve args for all backends
+common_args:
+  # Server binding configuration
+  - host
+  - port
+
+  # Model configuration
+  - model
+  - seed
+  - served_model_name
+
+  # Generation configuration
+  - max_model_len
+  - chat_template
+  - reasoning_parser
+
+  # System optimization configuration
+  - device
+  - kv_cache_dtype
+  - max_num_seqs
+
+  # Log and metrics configuration
+  - uvicorn_log_level
+  - show_hidden_metrics_for_version
+
+  # Authentication configuration
+  - api_key

@@ -1,0 +1,22 @@
+defaults:
+  - model
+  - _self_
+
+data:
+  data_path:
+  num_calibration_samples: 16
+  max_seq_length: 9216
+  tokenzier_args:
+    tokenizer_path: BAAI/Emu3-Gen/
+    special_tokens_file: BAAI/Emu3-Gen/emu3_vision_tokens.txt
+    trust_remote_code: true
+
+compress_args:
+  quantization:
+    - algo:
+        gptq:
+          blocksize: 128
+          percdamp: 0.01
+      ignore: ["lm_head"]
+      targets: ["Linear"]
+      scheme: W4A16

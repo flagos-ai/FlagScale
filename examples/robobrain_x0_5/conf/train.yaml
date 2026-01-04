@@ -1,0 +1,33 @@
+defaults:
+  - _self_
+  - train: libero_qwengroot
+
+experiment:
+  exp_name: libero_qwengroot
+  seed: 42
+  save_steps: 10000
+  load: null
+  exp_dir: outputs/${experiment.exp_name}
+  ckpt_format: torch
+  task:
+    type: train
+    backend: robotics
+    entrypoint: flagscale/train/train_robobrain_x0.5_qwengroot.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    hostfile: null
+  cmds:
+    before_start: echo "Starting RoboBrain-x0.5 Training"
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: 2,3
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    WANDB_MODE: offline
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

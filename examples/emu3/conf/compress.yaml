@@ -1,0 +1,23 @@
+defaults:
+  - _self_
+  - compress: fp8_dynamic
+
+experiment:
+  exp_name: emu3
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: compress
+    entrypoint: flagscale/compress/compressor_emu3.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source activate flagscale
+  envs:
+    CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

@@ -1,0 +1,113 @@
+system:
+  no_shared_fs: false
+  num_workers: 16
+  tensor_model_parallel_size: 2
+  pipeline_model_parallel_size: 2
+  expert_model_parallel_size: 2
+  finetune: false
+  no_load_rng: true
+  no_load_optim: true
+  context_parallel_size: 1
+  disable_bias_linear: true
+  reset_position_ids: true
+  reset_attention_mask: true
+  qk_layernorm: true
+  sequence_parallel: true
+  use_distributed_optimizer: true
+  overlap_grad_reduce: true
+  overlap_param_gather: true
+  attention_backend: auto
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    no_log_loss_scale_to_tensorboard: true
+  checkpoint:
+    no_save_optim: true
+    no_save_rng: true
+    save_interval: 100000
+    tensorboard_log_interval: 999999
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 4
+  hidden_size: 2048
+  num_attention_heads: 16
+  num_query_groups: 16 # num_key_value_heads
+  seq_length: 4096
+  max_position_embeddings: 4096
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  rotary_base: 1000000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: true
+  no_position_embedding: true
+  no_rope_fusion: true
+
+  # mla args ==================
+  multi_latent_attention: true
+  kv_lora_rank: 512
+  qk_head_dim: 128
+  qk_pos_emb_head_dim: 64
+  v_head_dim: 128
+
+  # moe args ===================
+  ffn_hidden_size: 11264
+  moe_ffn_hidden_size: 1408
+  moe_grouped_gemm: true
+  moe_shared_expert_intermediate_size: 2816
+  num_experts: 4
+  moe_router_load_balancing_type: "seq_aux_loss"
+  moe_router_score_function: sigmoid
+  moe_router_enable_expert_bias: true
+  moe_router_bias_update_rate: 0.001
+  moe_aux_loss_coeff: 0.02
+  moe_layer_freq: "[0]+[1]*3"
+  # node limited routing
+  moe_router_num_groups: 1
+  moe_router_group_topk: 1
+  moe_router_topk: 2
+  moe_router_topk_scaling_factor: 2.446
+  moe_token_dispatcher_type: "alltoall"
+  # moe_permute_fusion: true
+
+  # mtp_args
+  mtp_num_layers: 1
+
+  # training
+  seed: 42
+  micro_batch_size: 1
+  global_batch_size: 16
+  eval_iters: 0
+  train_samples: 160
+  
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-3
+      min_lr: 3.0e-4
+      lr_warmup_samples: 32
+      lr_decay_style: WSD
+      lr_wsd_decay_style: cosine
+      lr_wsd_decay_samples: 16
+
+data:
+  data_path: /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo
+  split: 1
+  no_mmap_bin_files: true
+  tokenizer:
+    legacy_tokenizer: true
+    tokenizer_type: QwenTokenizerFS
+    tokenizer_path: /home/gitlab-runner/tokenizers/qwentokenizer
+    vocab_size: 151851
+    make_vocab_size_divisible_by: 64

@@ -1,0 +1,28 @@
+defaults:
+  - train: 7b
+  - _self_
+
+experiment:
+  exp_name: aquila2
+  exp_dir: ./outputs
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/train_gpt.py
+  runner:
+    type: cloud
+    rdzv_id: demo
+    nnodes: ${env:WORLD_SIZE}
+    node_rank: ${env:RANK}
+    nproc_per_node: 8
+    master_addr: ${env:MASTER_ADDR}
+    master_port: 12345
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra/${oc.env:RANK}

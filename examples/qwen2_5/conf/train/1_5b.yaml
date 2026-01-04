@@ -1,0 +1,80 @@
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  make_vocab_size_divisible_by: 128
+  disable_bias_linear: True
+  sequence_parallel: True
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  distributed-timeout-minutes: 60
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+    accumulate_allreduce_grads_in_fp32: True
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "train-qwen2.5-1.5B"
+    wandb_exp_name: "train-qwen2.5-1.5B"
+  checkpoint:
+    load: ${megatron_model__path:}
+    # If you want to train the model, you need to comment out ckpt_format, ckpt_convert_format, ckpt_convert_save, which are used for converting ckpt.
+    ckpt_format: torch_dist # ${experiment.ckpt_format}
+    ckpt_convert_format: torch # ${experiment.ckpt_convert_format}
+    ckpt_convert_save: ${experiment.ckpt_convert_save}
+    save_interval: 5000000
+    rampup_save_interval: 50000
+
+model:
+  use_mcore_models: true
+  num_layers: 28
+  hidden_size: 1536
+  num_attention_heads: 12
+  num_query_groups: 2
+  group_query_attention: True
+  ffn_hidden_size: 8960
+  seq_length: 4096
+  max_position_embeddings: 4096
+  norm_epsilon: 1e-6
+  norm_init_weight: 0.02
+  use_rotary_position_embeddings: true
+  rotary_base: 1000000.0
+  no_position_embedding: true
+  reset_position_ids: true
+  add_qkv_bias: true
+  reset_attention_mask: true
+  swiglu: true
+  normalization: RMSNorm
+  untie_embeddings_and_output_weights: false
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  weight_decay: 0.0
+  clip_grad: 1.0
+  train_samples: 1478125
+  eval_iters: 0
+  eval_interval: 2000000
+  micro_batch_size: 1
+  global_batch_size: 512
+  finetune: true
+  transformer_impl: transformer_engine
+  seed: 42
+    #data_searching_range: [1156,1274]
+  optimizer:
+    weight_decay: 0.0
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1e-5
+      min_lr: 0
+      lr_warmup_samples: 21120
+      lr_decay_style: cosine
+
+data:
+  data_path: ${data_path:??}
+  split: 1
+  apply_sft_dataset_separated_loss_mask_if_existed: true
+  tokenizer:
+    tokenizer_type: HFTokenizerFS
+    tokenizer_path: ${HF_model_path:??}
+    vocab_size: 151665

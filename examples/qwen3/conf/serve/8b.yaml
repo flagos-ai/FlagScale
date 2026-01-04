@@ -1,0 +1,11 @@
+- serve_id: vllm_model
+  engine_args:
+    model: ${oc.env:QWEN3_PATH}
+    host: 0.0.0.0
+    uvicorn_log_level: warning
+    port: ${oc.env:QWEN3_PORT}
+    gpu_memory_utilization: 0.9
+    trust_remote_code: true
+    no_enable_prefix_caching: true
+    compilation_config: '{"full_cuda_graph": true}'
+

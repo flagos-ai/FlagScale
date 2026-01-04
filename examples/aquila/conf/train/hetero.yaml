@@ -1,0 +1,127 @@
+system:
+  tensor_model_parallel_size: 2
+  # pp stages
+  pipeline_model_parallel_size: 3
+  disable_bias_linear: True
+  use_flash_attn: True
+  sequence_parallel: True
+  use_distributed_optimizer: True
+  use_mcore_models: true
+  transformer_impl: transformer_engine
+  hetero:
+    enable_hetero: True
+    # mesh format [tp1,cp1,ep1,dp1,pp1,(tp2,cp2...)]
+
+    # 1 mesh, diff pp
+    # hetero_pipeline_layer_split: [4, 2, 2, 4]
+    # hetero_process_meshes: [2, 1, 1, 1, 4]
+    # hetero_device_types: ["A800"]
+
+    # 2 mesh, diff pp
+    # hetero_pipeline_layer_split: [4, 2, 2, 4]
+    # hetero_process_meshes: [2, 1, 1, 1, 3, 2, 1, 1, 1, 1]
+    # hetero_device_types: ["A800", "A800"]
+
+
+    # 2 mesh, diff pp and tp
+    # hetero_pipeline_layer_split: [6, 2, 4]
+    # hetero_process_meshes: [2, 1, 1, 1, 2, 4, 1, 1, 1, 1]
+    # hetero_device_types: ["A800", "A800"]
+
+    # 3 mesh
+    hetero_pipeline_layer_split: [6, 2, 4]
+    hetero_process_meshes: [2, 1, 1, 1, 1, 4, 1, 1, 1, 1, 2, 1, 1, 1, 1]
+    hetero_device_types: ["A800", "A800", "A800"]
+
+    standalone_embedding_stage: False
+    hetero_current_device_type: "A800"
+  recompute:
+    recompute_granularity: "full"
+    recompute_method: "uniform"
+    recompute_num_layers: 1
+
+    ## pp 2 stages
+    # recompute_granularity_per_stage: [1, 0, 1, 1]
+    # recompute_method_per_stage: [1, 0, 1, 0]
+    # recompute_num_layers_per_stage: [1, 2, 1, 1]
+
+    ## pp 3 stages
+    recompute_granularity_per_stage_micro_batch:
+      - [1, 30, 0, 2, 0]
+      - [1, 30, 1, 2, 1]
+      - [1, 30, 1, 2, 1]
+    recompute_method_per_stage_micro_batch:
+      - [1, 30, 0, 2, 0]
+      - [1, 30, 0, 2, 0]
+      - [1, 30, 1, 2, 1]
+    recompute_num_layers_per_stage_micro_batch:
+      - [1, 30, 2, 2, 2]
+      - [1, 30, 1, 2, 1]
+      - [1, 30, 2, 2, 2]
+
+    # pp 4 stages
+    # recompute_granularity_per_stage: [1, 0, 2, 1, 1, 1]
+    # recompute_method_per_stage: [1, 0, 2, 0, 1, 1]
+    # recompute_num_layers_per_stage: [1, 2, 2, 1, 1, 2]
+
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+    accumulate_allreduce_grads_in_fp32: True
+  logging:
+    log_interval: 1
+    log_throughput: true
+    tensorboard_log_interval: 1
+    wandb_project: "aquila2"
+    wandb_exp_name: "test"
+  checkpoint:
+    save_interval: 1000
+
+
+model:
+  num_layers: 12
+  hidden_size: 4096
+  num_attention_heads: 32
+  seq_length: 2048
+  max_position_embeddings: 2048
+  norm_epsilon: 1e-5
+  use_rotary_position_embeddings: true
+  no_position_embedding: true
+  swiglu: true
+  multiple_of: 256
+  normalization: RMSNorm
+  # rotary_interleaved_patch: true
+  untie_embeddings_and_output_weights: true
+  init_method_std: 0.0165
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  weight_decay: 0.1
+  clip_grad: 1.0
+  train_samples: 100000
+  global_batch_size: 32
+  micro_batch_size: 1
+  # rampup_batch_size: [32, 32, 2000000]
+  seed: 42
+
+  optimizer:
+    lr: 2e-4
+    weight_decay: 0.01
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.5e-4
+      min_lr: 1.5e-5
+      lr_warmup_samples: 500
+      lr_decay_style: cosine
+
+data:
+  data_path: xxxx # Please replace with your actual data path
+  split: 1
+  tokenizer:
+    tokenizer_type: xxxx # Please replace with your actual tokenizer type
+    tokenizer_path: xxxx # Please replace with your actual tokenizer path
+    vocab_file: null
+    merge_file: null
+    special_tokens_file: null
+    vocab_size: xxxx # Please replace with your actual vocab size
+    make_vocab_size_divisible_by: 64

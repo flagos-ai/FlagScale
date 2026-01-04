@@ -1,0 +1,95 @@
+system:
+  distributed_backend: nccl
+  reset_position_ids: True
+  reset_attention_mask: True
+  add_qkv_bias: True
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  disable_bias_linear: True
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  precision:
+    bf16: True
+    initial_loss_scale: 522893
+    min_loss_scale: 1.0
+    attention_softmax_in_fp32: True
+    accumulate_allreduce_grads_in_fp32: True
+  logging:
+    log_interval: 1
+    log_throughput: True
+    tensorboard_log_interval: 1
+    wandb-log-model: False
+    wandb-log-model-interval: 1
+    wandb_project: "train-aquila-3B"
+    wandb_exp_name: "train-test-3B"
+  checkpoint:
+    load: outputs_llama3/checkpoint_mc
+    ckpt_format: torch
+    save_interval: 1193 #2385
+
+  # hetero:
+  #   enable_hetero: True
+  #   hetero_use_cpu_communication: False
+  #   use_partial_reduce_for_shared_embedding: True
+  #   # mesh format [tp1,cp1,ep1,dp1,pp1,(tp2,cp2...)]
+
+  #   hetero_pipeline_layer_split: [26,10]
+  #   #hetero_pipeline_layer_split: [18,18]
+  #   #hetero_process_meshes: [1, 1, 1, 32, 1, 1,1,1,32,1]
+  #   hetero_process_meshes: [1, 1, 1, 32, 1, 1,1,1,64,1]
+  #   #hetero_device_types: ["B150","B150"]
+  #   hetero_device_types: ["A800","B150"]
+
+  #   standalone_embedding_stage: False
+  #   hetero_current_device_type: "A800"
+model:
+  transformer_impl: transformer_engine
+  num_layers: 36
+  hidden_size: 2048
+  num_attention_heads: 16
+  group_query_attention: True
+  num_query_groups: 2
+  seq_length: 4096
+  max_position_embeddings: 4096 # only for adding position embeddings
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  no_position_embedding: true
+  rotary_base: 1000000
+  swiglu: true
+  multiple_of: 256
+  hidden_dim_multiplier: 2 # ffn_hidden_size 11008
+  normalization: RMSNorm
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: False
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  weight_decay: 0.1
+  clip_grad: 1.0
+  train_samples: 244141056 #1TB tokens #29297664 #120B tokens
+  eval_iters: 0
+  micro_batch_size: 2
+  global_batch_size: 2048
+  seed: 42
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-3
+      min_lr: 3.0e-4
+      lr_warmup_samples: 2048
+      lr_decay_style: WSD
+      lr_wsd_decay_style: cosine
+      lr_wsd_decay_samples: 2048
+
+data:
+  data_path: ${data_path:??}
+  split: 1
+  no_mmap_bin_files: true
+  tokenizer:
+    tokenizer_type: QwenTokenizerFS
+    tokenizer_path: ${tokenizer_model_path:??}
+    vocab_size: 151851
+    make_vocab_size_divisible_by: 64

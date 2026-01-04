@@ -1,0 +1,22 @@
+- serve_id: vllm_model
+  engine_args:
+    model: PaddlePaddle/ERNIE-4.5-300B-A47B-PT # add Post-trained models
+    host: 0.0.0.0
+    max_model_len: 128000
+    max_num_seqs: 256 # for high-throughput server
+    uvicorn_log_level: warning
+    port: 30000
+  engine_args_specific:
+    vllm:
+      tensor_parallel_size: 8
+      pipeline_parallel_size: 2
+      gpu_memory_utilization: 0.98
+      trust_remote_code: true
+      enforce_eager: true # enforce_eager is recommended to be set true, false may trigger unknown but reproduced NCCL exception
+      enable_chunked_prefill: true
+  profile:
+    prefix_len: 0
+    input_len: 1024
+    output_len: 1024
+    num_prompts: 128
+    range_ratio: 1

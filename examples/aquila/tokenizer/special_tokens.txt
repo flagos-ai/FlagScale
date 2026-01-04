@@ -1,0 +1,8 @@
+<|startofpiece|>
+<|endofpiece|>
+<|LDWANG|>
+[MASK]
+[gMASK]
+[sMASK]
+[CLS]
+</s>

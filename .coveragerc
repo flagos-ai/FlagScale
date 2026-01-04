@@ -1,0 +1,5 @@
+[html]
+directory = coverage
+
+[run]
+data_file = /workspace/report/$COMMIT_ID/cov-temp-flagscale/.coverage_$LOCAL_RANK

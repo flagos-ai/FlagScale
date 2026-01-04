@@ -1,0 +1,11 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /models/minicpm_o_2.6 # path of weight of minicpm_o_2.6
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    gpu_memory_utilization: 0.9
+    max_num_seqs: 256
+    limit_mm_per_prompt: image=18
+    port: 9010
+    trust_remote_code: true
+    enable_chunked_prefill: true

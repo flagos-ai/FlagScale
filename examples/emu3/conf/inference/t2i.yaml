@@ -1,0 +1,27 @@
+llm:
+  model: ${experiment.model}
+  vq_model: ${experiment.vq_model}
+  dtype: bfloat16
+  skip_tokenizer_init: true
+  trust_remote_code: true
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.5
+  disable_log_stats: false
+  enable_chunked_prefill: true
+
+generate:
+  mode: 'G'
+  prompts: [
+    "a shiba inu",
+    "a portrait of young girl.",
+  ]
+  ratios: [
+    "1:1",
+    "16:9",
+  ]
+  sampling:
+    top_k: 2048
+    max_tokens: 40960
+    guidance_scale: 3.0
+    detokenize: false

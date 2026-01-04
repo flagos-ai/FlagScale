@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77.0", "wheel", "gitpython", "pyyaml", "cryptography", "pip", "hatchling", "hatch-vcs", "editables"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flag_scale"
+version = "1.0.0"
+description = "FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI)."
+dynamic = ["dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/flagos-ai/FlagScale"
+
+[project.scripts]
+flagscale = "flag_scale.flagscale.cli:flagscale"
+
+[tool.black]
+line-length = 100
+skip_string_normalization = true
+skip_magic_trailing_comma = true
+
+[tool.isort]
+line_length = 100
+profile = "black"
+use_parentheses = true
+skip_gitignore = true
+combine_as_imports = true
+lines_between_types = 1
+known_local_folder = ["flagscale"]
+known_first_party = ["megatron", "vllm"]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+default_section = "THIRDPARTY"

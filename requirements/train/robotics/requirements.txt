@@ -1,0 +1,10 @@
+webdataset
+epath
+wandb
+qwen_vl_utils # robotics
+diffusers # robotics
+multi-storage-client # for megatron-energon
+flask_cors
+datasets
+draccus
+git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi

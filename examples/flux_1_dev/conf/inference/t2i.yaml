@@ -1,0 +1,21 @@
+engine:
+  model: ${experiment.model}
+  loader: diffusers
+  pipeline:
+    class: diffusers.FluxPipeline
+    from_pretrained:
+      torch_dtype: bfloat16
+  device: cuda
+  results_path: ${experiment.exp_dir}/results
+  output_format: "image"
+
+generate:
+  prompts: "A cat holding a sign that says hello world"
+  height: 1024
+  width: 1024
+  guidance_scale: 3.5
+  num_inference_steps: 50
+  max_sequence_length: 512
+  generator:
+    device: cpu
+    seed: 0

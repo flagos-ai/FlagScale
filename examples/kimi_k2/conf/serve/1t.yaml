@@ -1,0 +1,22 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /models/Kimi-K2-Instruct # add Post-trained models
+    served_model_name: Kimi-K2-Instruct-nvidia-origin # add Post-trained models
+    host: 0.0.0.0
+    uvicorn_log_level: warning
+    max_model_len: 32768
+    port: 30000
+  engine_args_specific:
+    vllm:
+      tensor_parallel_size: 16 # recommended by Moonshot https://modelscope.cn/models/moonshotai/Kimi-K2-Instruct/file/view/master/docs%2Fdeploy_guidance.md?status=1
+      pipeline_parallel_size: 1
+      gpu_memory_utilization: 0.98
+      trust_remote_code: true
+      enforce_eager: true # enforce_eager is recommended to be set true, false may trigger unknown but reproduced NCCL exception
+      enable_chunked_prefill: true
+  profile:
+    prefix_len: 0
+    input_len: 1024
+    output_len: 1024
+    num_prompts: 128
+    range_ratio: 1

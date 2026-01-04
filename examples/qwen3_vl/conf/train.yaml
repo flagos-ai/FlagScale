@@ -1,0 +1,32 @@
+defaults:
+  - train: 8b
+  - _self_
+
+experiment:
+  exp_name: train_qwen3_vl_8b
+  exp_dir: ./${experiment.exp_name}
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/train_qwen3_vl.py
+  runner:
+    nnodes: 1
+    nproc_per_node: 8
+    rdzv_backend: static
+  # cmds:  
+  #   before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
+  envs:
+    # NCCL_DEBUG: INFO
+    # NCCL_DEBUG_SUBSYSTEM: ALL
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    # CUDA_VISIBLE_DEVICES: 0,1,2,3
+    # CUDA_VISIBLE_DEVICES: 4,5,6,7
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

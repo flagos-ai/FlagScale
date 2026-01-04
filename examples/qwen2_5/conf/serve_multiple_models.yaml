@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - serve: multiple_models
+
+experiment:
+  exp_name: multiple_models
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+    backend: vllm
+    entrypoint: null
+  runner:
+    hostfile: null # /path/to/hostfile.txt
+    deploy:
+      port: 6701
+      use_fs_serve: true
+      enable_composition: true
+      name: /generate
+      request:
+        - arg: prompt
+          type: str
+  cmds:
+    before_start: export RAY_DEDUP_LOGS=0
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

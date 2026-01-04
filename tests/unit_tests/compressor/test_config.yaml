@@ -1,0 +1,48 @@
+experiment:
+  exp_name: emu3
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: compress
+    entrypoint: flagscale/compress/compressor_emu3.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source activate flagscale-inference
+  envs:
+    CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+action: run
+compress:
+  system:
+    tensor_model_parallel_size: 1
+    pipeline_model_parallel_size: 1
+    use_flash_attn: true
+    sequence_parallel: true
+    logging:
+      log_interval: 1
+      tensorboard_log_interval: 1
+      wandb_project: compress-emu3-7B
+      wandb_exp_name: compress-test-7B
+    save_dir: null
+  model:
+    model_cls: AutoModelForCausalLM
+    model_path: BAAI/Emu3-Gen
+    device_map: cuda:0
+    trust_remote_code: true
+    torch_dtype: bfloat16
+  data:
+    data_path: null
+    max_calib_data: null
+    max_seq_len: null
+    tokenzier_args:
+      tokenizer_path: BAAI/Emu3-Gen/
+      special_tokens_file: BAAI/Emu3-Gen/emu3_vision_tokens.txt
+      trust_remote_code: true
+  compress_args:
+    quantization:
+    - algo: null
+      targets:
+      - Linear
+      ignore:
+      - lm_head
+      scheme: FP8_DYNAMIC

@@ -1,0 +1,34 @@
+# DeepSeek light model with 16 layers, 11b a2b
+# For DualPipeV Performance Testing
+defaults:
+  - _self_
+  - train: 11b_a2b
+
+experiment:
+  exp_name: DeepSeek-light
+  seed: 42
+  save_steps: 300
+  load: None
+  exp_dir: /path
+  ckpt_format: torch
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/train_gpt.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    hostfile: null
+  cmds:
+    before_start: "ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train"
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+action: run
+
+hydra:
+  run:
+     dir: ${experiment.exp_dir}/hydra

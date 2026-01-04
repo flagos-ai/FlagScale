@@ -1,0 +1,10 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /models/BAAI/RoboBrain-X0-Preview
+    model_sub_task: /models/BAAI/RoboBrain-X0-Preview
+    subtask_mode: true
+    host: 0.0.0.0
+    port: 5001
+    debug: false
+    threaded: true
+    tokenizer_path: /models/physical-intelligence/fast

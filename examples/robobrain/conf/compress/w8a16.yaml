@@ -1,0 +1,16 @@
+defaults:
+  - model
+  - _self_
+
+data:
+  data_path: null
+  max_calib_data: null
+  max_seq_len: null
+  tokenzier_args: 
+
+compress_args:
+  quantization:
+    - algo:
+      targets: ["Linear"]
+      ignore: ["re:.*vision_model*", "re:multi_modal_projector*", "re:.*lm_head"]
+      scheme: W8A16

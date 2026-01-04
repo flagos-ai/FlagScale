@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - inference: 1.3b
+
+experiment:
+  exp_name: wan2_1
+  exp_dir: outputs/${experiment.exp_name}
+  model: Wan-AI/Wan2.1-T2V-1.3B-Diffusers 
+  task:
+    type: inference
+    backend: vllm # TODO(yupu): Remove this restriction
+    entrypoint: flagscale/inference/diffusion_entrypoint.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-inference
+  envs:
+    CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # Optionally, set HF_HOME and HF_ENDPOINT
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

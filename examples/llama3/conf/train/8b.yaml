@@ -1,0 +1,69 @@
+system:
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 2
+  disable_bias_linear: True
+  use_flash_attn: True
+  sequence_parallel: True
+  use_distributed_optimizer: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "train-llama3-8B"
+    wandb_exp_name: "train-test-8B"
+  checkpoint:
+    load: outputs_llama3/checkpoint_mc
+    save_interval: 10
+    finetune: True
+
+model:
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  num_layers: 32
+  hidden_size: 4096
+  ffn_hidden_size: 14336
+  num_attention_heads: 32
+  seq_length: 4096
+  group_query_attention: True
+  num_query_groups: 8
+  max_position_embeddings: 8192
+  norm_epsilon: 1e-5
+  use_rotary_position_embeddings: True
+  no_position_embedding: True
+  swiglu: True
+  normalization: RMSNorm
+  # rotary_interleaved_patch: False
+  position_embedding_type: rope
+  rotary_base: 500000
+  untie_embeddings_and_output_weights: True
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_samples: 200000
+  eval_iters: 100
+  eval_interval: 1000
+  micro_batch_size: 1
+  global_batch_size: 2048
+
+  optimizer:
+    weight_decay: 1e-2
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.0e-5
+      min_lr: 1.0e-6
+      lr_warmup_fraction: .1
+      lr_decay_style: cosine
+
+data:
+  data_path: examples/llama/pile-openwebtext_text_document/pile-openwebtext_text_document
+  split: 1
+  tokenizer:
+    tokenizer_type: Llama3TokenizerFS
+    tokenizer_path: meta-llama3/Meta-Llama-3-8B
+    vocab_size: 128256
+    make_vocab_size_divisible_by: 64

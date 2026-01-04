@@ -1,0 +1,10 @@
+- serve_id: vllm_model
+  engine: vllm
+  engine_args:
+    model: /models/Qwen2.5-0.5B-Instruct
+    port: 8000
+    host: 0.0.0.0
+    served_model_name: cloud
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    max_model_len: 32768

@@ -1,0 +1,49 @@
+system:
+  distributed_backend: nccl
+  reset_position_ids: False
+  reset_attention_mask: False
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  use_distributed_optimizer: True
+  precision:
+    fp16: False
+    bf16: True
+  logging:
+    log_interval: 10
+    tensorboard_log_interval: 10
+    tensorboard_dir: ./outputs/logs
+  checkpoint:
+    save: ./outputs/ckpts/
+    save_interval: 100
+
+model:
+  num_layers: 32
+  hidden_size: 4096
+  num_attention_heads: 8
+  seq_length: 2048
+  max_position_embeddings: 2048
+  init_method_std: 0.02
+  clip_grad: 1.0
+  micro_batch_size: 1
+  global_batch_size: 8
+  train_iters: 100
+  eval_iters: 200
+  eval_interval: 200
+  seed: 1234
+  use_distributed_optimizer: true
+  optimizer:
+    weight_decay: 0.01
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 6.0e-4
+      min_lr: 6.0e-5
+      lr_warmup_fraction: 0.01
+      lr_decay_style: cosine
+  ckpt-format: torch
+
+data:
+  data_path: ${data_path:??}
+  split: "1"
+  tokenizer:
+    tokenizer_path: ${tokenizer_path:??} # The vocab file can be found at https://github.com/RWKV-Vibe/RWKV-LM-V7/tree/main/data/tokenizer

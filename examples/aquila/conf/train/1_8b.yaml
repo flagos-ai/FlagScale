@@ -1,0 +1,87 @@
+system:
+  #skip_iters_range: [10, 20]
+  distributed_backend: flagcx
+  reset_position_ids: True
+  reset_attention_mask: True
+  add_qkv_bias: True
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 2
+  disable_bias_linear: True
+  use_distributed_optimizer: True
+  precision:
+    bf16: True
+    min_loss_scale: 1.0
+    attention_softmax_in_fp32: True
+    accumulate_allreduce_grads_in_fp32: True
+  logging:
+    log_interval: 1
+    log_throughput: True
+    tensorboard_log_interval: 1
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+  checkpoint:
+    ckpt_format: torch
+    save_interval: 5
+
+  hetero:
+    enable_hetero: True
+    hetero_use_cpu_communication: False
+    use_partial_reduce_for_shared_embedding: True
+    # mesh format [tp1,cp1,ep1,dp1,pp1,(tp2,cp2...)]
+    hetero_pipeline_layer_split: [12,12]
+    hetero_process_meshes: [1,1,1,2,1, 1,1,1,2,1]
+    hetero_device_types: ["A800", "mlu590"]
+
+    standalone_embedding_stage: False
+    hetero_current_device_type: "A800"
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 24
+  hidden_size: 2048
+  num_attention_heads: 16
+  seq_length: 4096
+  max_position_embeddings: 4096 # only for adding position embeddings
+  norm_epsilon: 1e-6
+  norm_init_weight: 0.8441
+  use_rotary_position_embeddings: true
+  no_position_embedding: true
+  rotary_base: 1000000
+  swiglu: true
+  multiple_of: 128
+  #hidden_dim_multiplier: 2 # ffn_hidden_size 11008 / 5504
+  normalization: RMSNorm
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: True
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  weight_decay: 0.1
+  clip_grad: 1.0
+  train_samples: 8192  #8192 #29297664 #120B tokens 100step
+  eval_iters: 0
+  micro_batch_size: 8
+  global_batch_size: 1024
+  seed: 42
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-4
+      min_lr: 3.0e-5
+      lr_warmup_samples: 2048000
+      lr_wsd_decay_style: cosine
+
+
+data:
+  data_path: xxx # Please replace with your actual data path
+  split: 1
+  no_mmap_bin_files: true
+  tokenizer:
+    tokenizer_type: QwenTokenizerFS
+    tokenizer_path: xxx xxxx # Please replace with your actual tokenizer path
+    vocab_size: xxx # Please replace with your actual vocab size
+    make_vocab_size_divisible_by: 64
+

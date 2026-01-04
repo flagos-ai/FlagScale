@@ -1,0 +1,15 @@
+- serve_id: vllm_model
+  engine_args:
+    host: 0.0.0.0
+    port: 5000
+    model: path-to-your-pi0_base-model
+    tokenizer: path-to-your-paligemma-3b-pt-224-tokenizer
+    stat_path: path-to-your-dataset/meta/stats.json
+    device: "cuda"
+    images_keys:
+      - observation.images.base_0_rgb
+      - observation.images.left_wrist_0_rgb
+      - observation.images.right_wrist_0_rgb
+    # Only used for warmup
+    images_shape: [3, 480, 640]
+    state_key: observation.state

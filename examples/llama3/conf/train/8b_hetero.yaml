@@ -1,0 +1,100 @@
+system:
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 2
+  disable_bias_linear: True
+  use_flash_attn: True
+  sequence_parallel: True
+  use_distributed_optimizer: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "train-llama3-8B"
+    wandb_exp_name: "train-test-8B"
+  checkpoint:
+    load: outputs_llama3/checkpoint_mc
+    save_interval: 10
+    finetune: True
+    ckpt_format: "torch"
+
+model:
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  num_layers: 32
+  hidden_size: 4096
+  ffn_hidden_size: 14336
+  num_attention_heads: 32
+  seq_length: 4096
+  group_query_attention: True
+  num_query_groups: 8
+  max_position_embeddings: 8192
+  norm_epsilon: 1e-5
+  use_rotary_position_embeddings: True
+  no_position_embedding: True
+  swiglu: True
+  normalization: RMSNorm
+  # rotary_interleaved_patch: False
+  position_embedding_type: rope
+  rotary_base: 500000
+  untie_embeddings_and_output_weights: True
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_samples: 200000
+  eval_iters: 100
+  eval_interval: 1000
+  micro_batch_size: 1
+  global_batch_size: 16
+
+  hetero:
+    enable_hetero: True
+    hetero_use_cpu_communication: True
+    # mesh format [tp1,cp1,ep1,dp1,pp1,(tp2,cp2...)]
+
+    # 2 mesh, diff tp dp pp
+    hetero_pipeline_layer_split: [18, 14]
+    hetero_process_meshes: [2, 1, 1, 4, 1, 4, 1, 1, 2, 1]
+    hetero_device_types: ["A800", "A100"]
+
+    standalone_embedding_stage: False
+    hetero_current_device_type: "A800"
+
+  # recompute:
+  #   recompute_granularity: "full"
+  #   recompute_method: "uniform"
+  #   recompute_num_layers: 1
+
+  #   ## pp 2 stages and num_micro_batches 4
+  #   recompute_granularity_per_stage_micro_batch:
+  #     - [1, 3, 0, 1, 0]
+  #     - [1, 3, 1, 1, 1]
+  #   recompute_method_per_stage_micro_batch:
+  #     - [1, 3, 0, 1, 0]
+  #     - [1, 3, 0, 1, 0]
+  #   recompute_num_layers_per_stage_micro_batch:
+  #     - [1, 3, 2, 1, 2]
+  #     - [1, 3, 1, 1, 1]
+
+
+  optimizer:
+    weight_decay: 1e-2
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.0e-5
+      min_lr: 1.0e-6
+      lr_warmup_fraction: .1
+      lr_decay_style: cosine
+
+data:
+  data_path: examples/llama/pile-openwebtext_text_document/pile-openwebtext_text_document
+  split: 1
+  tokenizer:
+    tokenizer_type: Llama3TokenizerFS
+    tokenizer_path: meta-llama3/Meta-Llama-3-8B
+    vocab_size: 128256
+    make_vocab_size_divisible_by: 64

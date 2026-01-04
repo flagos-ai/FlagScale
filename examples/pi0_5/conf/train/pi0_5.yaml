@@ -1,0 +1,52 @@
+system:
+  # Whether to use HuggingFace Accelerator or manual DDP
+  use_accelerator: true
+  seed: 42
+  batch_size: 1
+  train_steps: 100000
+  log_freq: 10
+  output_directory: ${experiment.exp_dir}/ckpt
+  # Whether to save checkpoint
+  save_checkpoint: true
+  # Number of steps between checkpoints
+  save_freq: 1000
+  optimizer_lr: 2.5e-5
+  optimizer_betas: [0.9, 0.95]
+  optimizer_eps: 1e-8
+  optimizer_weight_decay: 0.01
+  optimizer_grad_clip_norm: 1.0
+  scheduler_warmup_steps: 1000
+  scheduler_decay_steps: 30000
+  scheduler_decay_lr: 2.5e-6
+  # Whether to shuffle the data
+  shuffle: false
+  grad_clip_norm: 1.0
+  # TODO: (yupu) The following configs will be implemented later
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  wandb_enabled: false
+  project_name: ${experiment.exp_name}
+  exp_name: ${experiment.exp_name}
+
+model:
+  model_variant: pi0.5
+  # Path to the pretrained pi05_base model checkpoint
+  checkpoint_dir: path-to-your-pi05_base-model
+  # Path to paligemma tokenizer
+  tokenizer_path: path-to-your-paligemma-3b-pt-224-tokenizer
+  tokenizer_max_length: 200
+  action_steps: 50
+  # TODO(yupu): Support resuming from checkpoint
+
+data:
+  tolerance_s: 0.0001
+  use_imagenet_stats: true
+  # Path to the training data
+  data_path: path-to-your-dataset
+  # To match the input features naming from the dataset to the policy config
+  # For example, for the aloha_mobile_cabinet dataset, the rename_map is:
+  # rename_map: '{\"observation.images.cam_high\": \"observation.images.base_0_rgb\", \"observation.images.cam_left_wrist\": \"observation.images.left_wrist_0_rgb\", \"observation.images.cam_right_wrist\": \"observation.images.right_wrist_0_rgb\"}'
+  rename_map: '{\"observation.images.cam_high\": \"observation.images.base_0_rgb\", \"observation.images.cam_left_wrist\": \"observation.images.left_wrist_0_rgb\", \"observation.images.cam_right_wrist\": \"observation.images.right_wrist_0_rgb\"}'
+  # By default, Pi0.5 uses quantiles for state and action normalization, if false, it uses mean and std instead
+  use_quantiles: false

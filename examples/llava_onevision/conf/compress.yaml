@@ -1,0 +1,23 @@
+defaults:
+  - _self_
+  - compress: w4a16
+
+experiment:
+  exp_name: llava_ov
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: compress
+    entrypoint: flagscale/compress/compressor_llava_ov.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source activate flagscale
+  envs:
+    CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

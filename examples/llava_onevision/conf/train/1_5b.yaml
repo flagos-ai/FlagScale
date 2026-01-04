@@ -1,0 +1,95 @@
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  disable_bias_linear: True
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  recompute_method: "uniform"
+  recompute_granularity: "full"
+  recompute_num_layers: 1
+  use_te: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "train-llava-ov"
+    wandb_exp_name: "train-llava-ov"
+    log_params_norm: True
+    log_num_zeros_in_grad: True
+  checkpoint:
+    save_interval: 1000
+    pretrained_checkpoint: xxxx
+    dataloader_save: ${experiment.exp_dir}/checkpoints/dataloader
+    use_dist_ckpt: False
+    ckpt_format: torch
+    async_save: False
+
+model:
+  num_layers: 28
+  hidden_size: 1536
+  ffn_hidden_size: 8960
+  num_attention_heads: 12
+  num_query_groups: 2
+  seq_length: 12288
+  # max_position_embeddings: 32768
+  max_position_embeddings: 12288
+  swiglu: True
+  normalization: RMSNorm
+  init_method_std: 0.014
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_iters: 10
+  profile: False
+  profile-step-start: 10
+  profile-step-end: 20
+  profile_ranks: 7
+  use_pytorch_profiler: True
+  eval_iters: 0
+  micro_batch_size: 2
+  global_batch_size: 512
+  allow_missing_vision_projection_checkpoint: True
+  apply_layernorm_1p: True
+  group_query_attention: True
+  no_masked_softmax_fusion: True
+  untie-embeddings-and-output-weights: False
+  position_embedding_type: rope
+  rotary_percent: 1.0
+  rotary_base: 1000000
+  eod_mask_loss: True
+  freeze_LM: False
+  freeze_ViT: False
+  patch_dim: 14
+  img_h: 384
+  img_w: 384
+  language_model_type: qwen2_1.5b
+  vision_model_type: siglip
+  disable_vision_class_token: True
+  mm_patch_merge_type: flat
+  seed: 12345
+
+  optimizer:
+    weight_decay: 0.0
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.0e-3
+      lr_warmup_fraction: .03
+      lr_decay_style: cosine
+
+data:
+  interleaved_dataset: True
+  training_dataset_only: True
+  data_path: xxxx
+  dataloader_type: external
+  split: 100,0,0
+  tokenizer:
+    tokenizer_type: Qwen2TokenizerFS
+    tokenizer_path: xxxx
+    # vocab_size: 152064 # 7b
+    vocab_size: 151936 # 1.5b
+    make_vocab_size_divisible_by: 64

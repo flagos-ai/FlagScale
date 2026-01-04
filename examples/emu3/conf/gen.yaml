@@ -1,0 +1,28 @@
+defaults:
+  - _self_
+  - inference: t2i
+
+experiment:
+  exp_name: emu3_gen
+  exp_dir: outputs/${experiment.exp_name}
+  model: BAAI/Emu3-Gen
+  vq_model: BAAI/Emu3-VisionTokenizer
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/inference_emu3.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale
+  envs:
+    VLLM_USE_V1: 0 # Classifier-free-guidance is only supported in vllm v0
+    VLLM_LOGGING_LEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: 4
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

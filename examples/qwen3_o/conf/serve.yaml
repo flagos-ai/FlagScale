@@ -1,0 +1,23 @@
+defaults:
+- _self_
+- serve: 30b
+
+experiment:
+  exp_name: qwen3_o_30b
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: serve
+    backend: vllm
+  runner:
+    hostfile: null
+    deploy:
+      use_fs_serve: false
+  envs:
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    USE_FLAGGEMS: true
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

@@ -1,0 +1,19 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /share/grok-2
+    served-model-name: grok-2-nvidia-flagos
+    tokenizer-path: /share/grok-2/tokenizer.tok.json
+    host: 0.0.0.0
+    port: 9010
+  engine_args_specific:
+    sglang:
+      tp: 8
+      quantization: fp8
+      attention-backend: triton
+  profile:
+    prefix_len: 0
+    input_len: 1024
+    output_len: 1024
+    num_prompts: 128
+    range_ratio: 1
+

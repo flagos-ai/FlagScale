@@ -1,0 +1,13 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /share/QwQ-32B # should be customized
+    served_model_name: qwq-32b-flagos
+    tensor_parallel_size: 8
+    max_model_len: 32768
+    pipeline_parallel_size: 1
+    max_num_seqs: 8 # Even at full 32,768 context usage, 8 concurrent operations won't trigger OOM
+    gpu_memory_utilization: 0.9
+    port: 9010
+    trust_remote_code: true
+    enforce_eager: true
+    enable_chunked_prefill: true

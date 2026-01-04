@@ -1,0 +1,24 @@
+llm:
+  model: ${experiment.model}
+  vq_model: ${experiment.vq_model}
+  dtype: bfloat16
+  trust_remote_code: true
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.5
+  disable_log_stats: false
+
+generate:
+  mode: 'U'
+  prompts: [
+    "Please describe the image",
+    "Please describe the image",
+  ]
+  images: [
+    demo.png,
+    demo.png,
+  ]
+  sampling:
+    temperature: 0.0
+    max_tokens: 1024
+    detokenize: false

@@ -1,0 +1,8 @@
+**************************************************
+output.prompt='The president of the United States'
+output.outputs[0].text=', George W. Bush, is known for his leadership in the 19'
+output.outputs[0].token_ids=[11, 9857, 467, 13, 14079, 11, 374, 3881, 369, 806, 11438, 304, 279, 220, 16, 24]
+**************************************************
+output.prompt='The capital of France'
+output.outputs[0].text=', Paris, is known for its iconic landmarks.1. The Eiffel'
+output.outputs[0].token_ids=[11, 12095, 11, 374, 3881, 369, 1181, 26277, 59924, 13, 16, 13, 576, 468, 3092, 301]

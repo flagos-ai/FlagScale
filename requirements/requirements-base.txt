@@ -1,0 +1,41 @@
+# Install outside of the conda environment
+aiohttp
+gitpython
+hydra-core
+numpy
+pandas
+psutil
+pytest
+PyYaml
+requests
+tqdm
+
+# from megatron dockerfile
+black==24.4.2
+isort==5.13.2
+flake8==7.1.0
+pylint==3.2.6
+
+pre-commit>=2.20.0
+diff-cover
+
+# serving
+diffusers
+translate
+imageio
+python-multipart
+imageio[ffmpeg]
+ks3sdk
+pyarrow
+pandas
+h5py
+flask
+flask_cors
+tqdm_loggable
+types_boto3_s3
+qwen_vl_utils 
+scipy
+pynvml
+webdataset
+epath
+wandb

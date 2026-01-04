@@ -1,0 +1,26 @@
+__pycache__
+*.so
+build
+.coverage_*
+*.egg-info
+*~
+slurm*
+logs
+.vscode
+log_file/*
+outputs
+*.log
+*.out
+.idea/
+third_party/*
+dist/*
+
+# test results
+tests/functional_tests/test_cases/*/*/results_test
+
+# template files generated
+template_conf.yaml
+template_funcs.py
+
+# data files
+assets/
