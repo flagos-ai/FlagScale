@@ -1,30 +1,22 @@
 engine:
-  model: /models/lerobot/pi0
-  tokenizer: /models/google/paligemma-3b-pt-224
-  stat_path: /models/lerobot/aloha_mobile_cabinet/meta/stats.json
-  loader: pi0
-  results_path: ${experiment.exp_dir}/results
+  # Model variant: "pi0" or "pi0.5"
+  model_variant: "pi0"
+  model: path-to-your-pi0_base-model
+  tokenizer: path-to-your-paligemma-3b-pt-224-tokenizer
+  # TODO: (yupu) Use the stat safetensors
+  stat_path: path-to-your-dataset/meta/stats.json
   device: "cuda"
-  output_format: image
-  torch_dtype: float32
-  transformations:
-    LogIOTransformation:
-      log_level: "info"
-    StateScopeTransformation:
-      {}
 
 generate:
-  images_keys:
-    - observation.images.camera0
-    - observation.images.camera1
-    - observation.images.camera2
-  images_shape: [3, 480, 640]
-  batch_size: 2
-  action_dim: 14
-  action_horizon: 10
-  state_key: observation.state
-  instruction:
-    task: 
-      - "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
-      - "retro serie of different cars with different colors and shapes"
+  images:
+    observation.images.cam_high: path-to-your-cam-high-image.jpg
+    observation.images.cam_left_wrist: path-to-your-cam-left-wrist-image.jpg
+    observation.images.cam_right_wrist: path-to-your-cam-right-wrist-image.jpg
+  state_path: path-to-your-state-file.pt
+  task_path: path-to-your-task-file.txt
+  # Optional rename_map to map input keys to policy expected keys
+  rename_map:
+    observation.images.cam_high: observation.images.base_0_rgb
+    observation.images.cam_left_wrist: observation.images.left_wrist_0_rgb
+    observation.images.cam_right_wrist: observation.images.right_wrist_0_rgb
 

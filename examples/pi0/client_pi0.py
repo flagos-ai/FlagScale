@@ -1,9 +1,6 @@
 import argparse
 import base64
-import io
 import json
-import os
-import random
 import sys
 import time
 
@@ -12,24 +9,14 @@ from typing import Any, Dict
 
 import numpy as np
 import requests
-
-from PIL import Image
-
-IMG_WIDTH = 640
-IMG_HEIGHT = 480
+import torch
 
 
 def encode_image(path: str) -> str:
     """Read image as base64 string."""
     path = Path(path)
     if not path.exists():
-        print(f"[WARNING] Image not found: {path.resolve()}. Use fake images.")
-        image = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT))
-        buffer = io.BytesIO()
-        image.save(buffer, format='JPEG', quality=50)
-        buffer.seek(0)
-        jpeg_binary = buffer.read()
-        return base64.b64encode(jpeg_binary).decode("utf-8")
+        raise FileNotFoundError(f"Image not found: {path.resolve()}")
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
@@ -47,33 +34,44 @@ def check_health(base_url: str) -> None:
     print(f"[√] Server healthy - GPU: {data['gpu_info']['device_name']}")
 
 
+def load_state_from_file(state_path: str) -> np.ndarray:
+    """Load state tensor from file and convert to numpy array.
+
+    Args:
+        state_path: Path to state file (.pt file)
+
+    Returns:
+        State array with shape (1, state_dim)
+    """
+    state = torch.load(state_path, map_location="cpu")
+    if isinstance(state, torch.Tensor):
+        state = state.numpy()
+    # Ensure shape is (1, state_dim)
+    if state.ndim == 1:
+        state = state[np.newaxis, :]
+    return state
+
+
 def build_payload(args) -> Dict[str, Any]:
-    """Construct JSON payload for /infer."""
-    # 1. Dummy robot state (batch=1, dim=args.state_dim)
-    state = np.random.uniform(-1, 1, size=(1, args.state_dim)).tolist()
-    # 2. Encode images
+    """Construct JSON payload for /infer.
+
+    The client must send images with keys matching the config's images_keys.
+    Default keys are:
+    - observation.images.base_0_rgb
+    - observation.images.left_wrist_0_rgb
+    - observation.images.right_wrist_0_rgb
+    """
+    # Encode images with keys matching config images_keys
     img_sample = {
-        "cam_high": encode_image(args.base_img),
-        "cam_left_wrist": encode_image(args.left_wrist_img),
-        "cam_right_wrist": encode_image(args.right_wrist_img),
+        "observation.images.base_0_rgb": encode_image(args.img1),
+        "observation.images.left_wrist_0_rgb": encode_image(args.img2),
+        "observation.images.right_wrist_0_rgb": encode_image(args.img3),
     }
-    # 3. Image masks (True: image is valid)
-    image_masks = {"base_0_rgb": True, "left_wrist_0_rgb": True, "right_wrist_0_rgb": True}
-    return {
-        "instruction": "Grab the orange and put it into the basket.",
-        "qpos": [[random.random() for _ in range(args.state_dim)]],
-        "eef_pose": [[random.random() for _ in range(args.state_dim)]],
-        "state": state,
-        "high_level_instruction": args.high_level_instruction,
-        "fine_grained_instruction": args.fine_grained_instruction,
-        "images": [img_sample],
-        "image_masks": [image_masks],
-        "num_steps": args.num_steps,
-        "temperature": args.temperature,
-        "top_p": args.top_p,
-        "max_new_tokens": args.max_new_tokens,
-        "do_sample": args.do_sample,
-    }
+    # Load state from file
+    state = load_state_from_file(args.state_path)
+    state = state.tolist()
+
+    return {"instruction": args.instruction, "state": state, "images": [img_sample]}
 
 
 def pretty_print_resp(resp: requests.Response) -> None:
@@ -92,25 +90,19 @@ def main():
     parser.add_argument(
         "--port", type=int, default=5000, help="Port of local SSH tunnel (default: 15000)"
     )
-    parser.add_argument("--base-img", required=True, help="Path to base camera RGB image")
+    parser.add_argument("--img1", required=True, help="Path to first camera RGB image")
+    parser.add_argument("--img2", required=True, help="Path to second camera RGB image")
+    parser.add_argument("--img3", required=True, help="Path to third camera RGB image")
     parser.add_argument(
-        "--left-wrist-img", required=True, help="Path to left wrist camera RGB image"
+        "--state-path",
+        required=True,
+        help="Path to state tensor file (.pt file) with shape (1, state_dim)",
     )
     parser.add_argument(
-        "--right-wrist-img", required=True, help="Path to right wrist camera RGB image"
+        "--instruction",
+        default="Grab the orange and put it into the basket.",
+        help="Task instruction for the robot",
     )
-    parser.add_argument(
-        "--state-dim", type=int, default=14, help="Dim of robot low-dim state vector (default: 14)"
-    )
-    parser.add_argument("--num-steps", type=int, default=20)
-    parser.add_argument("--temperature", type=float, default=0.8)
-    parser.add_argument("--top-p", type=float, default=0.95)
-    parser.add_argument("--max-new-tokens", type=int, default=64)
-    parser.add_argument("--do-sample", action="store_true")
-    parser.add_argument(
-        "--high-level-instruction", default="Grab the orange and put it into the basket."
-    )
-    parser.add_argument("--fine-grained-instruction", default=None)
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"

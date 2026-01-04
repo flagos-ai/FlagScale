@@ -1,4 +1,4 @@
-# Adopted from https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/configs/types.py
+# Copied from https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/configs/types.py
 
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #

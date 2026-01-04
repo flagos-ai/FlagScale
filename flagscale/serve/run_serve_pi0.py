@@ -14,7 +14,7 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from PIL import Image
 
 from flagscale.inference.utils import parse_torch_dtype
-from flagscale.models.pi0.modeling_pi0 import PI0Policy, PI0PolicyConfig
+from flagscale.models.pi0_old.modeling_pi0 import PI0Policy, PI0PolicyConfig
 from flagscale.runner.utils import logger
 
 app = Flask(__name__)

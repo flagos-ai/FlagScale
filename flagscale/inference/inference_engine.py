@@ -15,7 +15,7 @@ from omegaconf import DictConfig
 
 from flagscale.inference.runtime_context import RuntimeContext
 from flagscale.inference.utils import parse_torch_dtype
-from flagscale.models.pi0.modeling_pi0 import PI0Policy, PI0PolicyConfig
+from flagscale.models.pi0_old.modeling_pi0 import PI0Policy, PI0PolicyConfig
 from flagscale.runner.utils import logger
 from flagscale.transformations import create_transformations_from_config
 

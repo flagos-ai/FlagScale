@@ -3,11 +3,11 @@ defaults:
 - serve: pi0
 
 experiment:
-  exp_name: pi0
+  exp_name: pi0_serve
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
-    entrypoint: flagscale/serve/run_serve_pi0.py
+    entrypoint: flagscale/serve/run_serve_pi.py
   runner:
     hostfile: null
     deploy:
