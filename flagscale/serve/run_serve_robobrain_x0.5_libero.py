@@ -13,7 +13,7 @@ from PIL import Image
 
 from flagscale import serve
 from flagscale.inference.utils import parse_torch_dtype
-from flagscale.models.robotics.qwen_groot import Qwen_GR00T
+from flagscale.models.robobrain_x.qwen_groot import Qwen_GR00T
 from flagscale.runner.utils import logger
 
 app = Flask(__name__)

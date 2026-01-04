@@ -19,8 +19,8 @@ from transformers import PretrainedConfig
 from transformers.feature_extraction_utils import BatchFeature
 
 from flagscale.logger import logger
-from flagscale.models.robotics.action_encoder import SinusoidalPositionalEncoding, swish
-from flagscale.models.robotics.cross_attention_dit import DiT
+from flagscale.models.robobrain_x.action_encoder import SinusoidalPositionalEncoding, swish
+from flagscale.models.robobrain_x.cross_attention_dit import DiT
 
 # TODO try to meger DiT Modules with follow_match_head, they are just the same arch, but diff loss, use diffusers package will be simple
 
