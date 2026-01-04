@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /share/Qwen2.5-VL-32B-Instruct # should be customized
     served_model_name: qwenvl32-nv-flagos

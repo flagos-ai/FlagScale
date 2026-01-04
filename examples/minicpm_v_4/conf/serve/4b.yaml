@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /share/models/MiniCPM-V-4
     served_model_name: MiniCPM-V-4-nvidia-flagos

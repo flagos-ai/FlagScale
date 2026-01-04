@@ -6,6 +6,7 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
+    backend: vllm
   deploy:
     use_fs_serve: false
   runner:

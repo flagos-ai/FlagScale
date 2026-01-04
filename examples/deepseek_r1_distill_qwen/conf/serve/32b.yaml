@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /share/DeepSeek-R1-Distill-Qwen-32B # should be customized
     served_model_name: deepseek-r1-distill-qwen-32b-flagos

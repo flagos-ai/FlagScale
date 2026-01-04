@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /models/minicpm_o_2.6 # path of weight of minicpm_o_2.6
     tensor_parallel_size: 1

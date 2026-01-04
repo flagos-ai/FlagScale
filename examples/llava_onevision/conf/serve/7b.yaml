@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /models/llava
     served_model_name: llava

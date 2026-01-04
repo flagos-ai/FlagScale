@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: sglang
   engine_args:
     model: /share/grok-2
     served-model-name: grok-2-nvidia-flagos

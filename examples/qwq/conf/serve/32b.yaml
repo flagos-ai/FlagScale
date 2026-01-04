@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /share/QwQ-32B # should be customized
     served_model_name: qwq-32b-flagos

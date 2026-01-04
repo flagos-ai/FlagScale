@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: PaddlePaddle/ERNIE-4.5-300B-A47B-PT # add Post-trained models
     host: 0.0.0.0

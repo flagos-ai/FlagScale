@@ -1,7 +1,4 @@
 - serve_id: vllm_model
-  # engine: vllm
-  # engine: llama_cpp
-  engine: sglang
   engine_args:
     model: /models/Qwen3-8B/
     host: 0.0.0.0

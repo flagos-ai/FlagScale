@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: /models/Kimi-K2-Instruct # add Post-trained models
     served_model_name: Kimi-K2-Instruct-nvidia-origin # add Post-trained models

@@ -1,5 +1,4 @@
 - serve_id: vllm_model
-  engine: vllm
   engine_args:
     model: ${oc.env:QWEN3_PATH}
     host: 0.0.0.0
