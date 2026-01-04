@@ -3,8 +3,8 @@ backends_commit:
 backends_version:
   FlagScale: 0.9.0
   Megatron-LM: 0.15.0rc5
-commit: 5d325155df29e0dd94250651f9c0d7529fdca69e
-contact: ''
+commit: d1951289346d32d44470ab83a921f2a4000ac250
+contact: ''''''
 device_type: Metax_C550
 models:
 - OpenSeek-10B

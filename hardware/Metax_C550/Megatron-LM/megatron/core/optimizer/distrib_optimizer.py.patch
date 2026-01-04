@@ -1,5 +1,5 @@
 diff --git a/megatron/core/optimizer/distrib_optimizer.py b/megatron/core/optimizer/distrib_optimizer.py
-index aca60bc67..d61b322f7 100644
+index aca60bc67..6c1ba14aa 100644
 --- a/megatron/core/optimizer/distrib_optimizer.py
 +++ b/megatron/core/optimizer/distrib_optimizer.py
 @@ -52,6 +52,18 @@ from .grad_scaler import MegatronGradScaler
@@ -48,7 +48,7 @@ index aca60bc67..d61b322f7 100644
 +
 +                # gen dist meta
 +                param_world_indexes = param_gbuf_ranges["world_indexes"]
-+                tp_split_dim = -1 if getattr(model_param, 'tensor_model_parallel', False) else \
++                tp_split_dim = -1 if not getattr(model_param, 'tensor_model_parallel', False) else \
 +                    getattr(model_param, 'partition_dim')
 +                dist_meta = MuonDistMeta(gbuf_index, bucket_index, model_param.shape, param_world_indexes, tp_split_dim)
 +
