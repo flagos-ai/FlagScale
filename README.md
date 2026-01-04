@@ -211,7 +211,7 @@ Require vllm env. See details in [Setup](#-setup)
     python run.py --config-path ./examples/aquila/conf --config-name inference action=run
     ```
     
-#### Serve
+#### Serve <a name="quick-start-serving"></a>
 1. Setup env
     ```
     PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=domain=robotics --config-settings=device=gpu  --verbose --no-build-isolation
@@ -242,6 +242,55 @@ Require vllm env. See details in [Setup](#-setup)
     python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=stop
     ```
 
+#### Evaluation
+
+Our evaluation process leverages the capabilities of [FlagEval](https://flageval.baai.ac.cn/#/home) platform. Currently, it supports both LLM and VLM, but does not support VLA at this time.
+
+1. [Start the server](#quick-start-serving).
+    ```sh
+    python run.py --config-path ./examples/robobrain2/conf --config-name serve action=run
+    ```
+2. Start evaluation.
+    ```sh
+    IP=$(ip addr show | grep -E 'inet ([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '127.0.0.1' | grep -v '::1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    curl http://120.92.17.239:5050/evaluation \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{
+        "eval_infos": [
+            {
+                "eval_model": "robobrain2_3b-nv-flagos",
+                "model": "robobrain2_3b-nv-flagos",
+                "eval_url": "http://'$IP':9010/v1/chat/completions",
+                "tokenizer": "BAAI/RoboBrain2.0-3B",
+                "base_model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
+                "num_concurrent": 4,
+                "batch_size": 8
+            }
+        ],
+        "domain": "MM"
+    }'
+    ```
+3. Check Progress.
+   `request_id` is in response of `Start evaluation`.
+    ```sh
+    curl http://120.92.17.239:5050/evaluation_progress \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{
+        "request_id": "4c32ee2b-5d21-41c1-beea-3c4f6f8f2c20",
+        "domain": "MM"
+    }'
+    ```
+4. Check result.
+    ```sh
+    curl -X GET http://120.92.17.239:5050/evaldiffs \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{
+        "request_id": "4c32ee2b-5d21-41c1-beea-3c4f6f8f2c20"
+    }'
+    ```
 
 ### 🧱 DeepSeek-R1 Serving <a name="deepseek-r1-serving"></a>
 
