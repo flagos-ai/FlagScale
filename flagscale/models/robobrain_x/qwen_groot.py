@@ -28,8 +28,8 @@ from flagscale.logger import logger
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
 
-from flagscale.models.robotics.groot_action_header import FlowmatchingActionHead
-from flagscale.models.robotics.qwen2_5 import _QWen_VL_Interface
+from flagscale.models.robobrain_x.groot_action_header import FlowmatchingActionHead
+from flagscale.models.robobrain_x.qwen2_5 import _QWen_VL_Interface
 
 
 class Qwen_GR00T(PreTrainedModel):

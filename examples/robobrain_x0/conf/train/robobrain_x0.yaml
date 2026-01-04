@@ -97,14 +97,16 @@ model:
       lr_decay_style: cosine
 
 data:
-  data_path: /repos/flagscale_dataset/flag-scale/demo_0913_n2/wds-256
+  # data_path: /repos/flagscale_dataset/flag-scale/demo_0913_n2/wds-256
+  data_path: /nfs/hcr/repos/flagscale_dataset/flag-scale/demo_0913_n2/wds-256
   vision_root: /
   dataloader_type: external
   split: 100,0,0
   shuffle-buffer-size: 1000
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
-    tokenizer_path: /models/BAAI/RoboBrain-X0-Preview
+    # tokenizer_path: /models/BAAI/RoboBrain-X0-Preview
+    tokenizer_path: /nfs/hcr/models/BAAI/RoboBrain-X0-Preview
     vocab_size: 151643 # action
     make_vocab_size_divisible_by: 64
     extra_vocab_size: 293

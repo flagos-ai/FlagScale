@@ -29,7 +29,7 @@ from megatron.energon import WorkerConfig, get_loader, get_train_dataset
 from tools.datasets.vla.data.dataset_helpers_np_pil import TaskEncoder
 
 from flagscale.logger import logger
-from flagscale.models.robotics.qwen_groot import Qwen_GR00T, get_batch
+from flagscale.models.robobrain_x.qwen_groot import Qwen_GR00T, get_batch
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

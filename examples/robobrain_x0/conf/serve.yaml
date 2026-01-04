@@ -13,7 +13,7 @@ experiment:
     deploy:
       use_fs_serve: false
   envs:
-    CUDA_VISIBLE_DEVICES: 0
+    CUDA_VISIBLE_DEVICES: 2
     CUDA_DEVICE_MAX_CONNECTIONS: 1
 
 action: run

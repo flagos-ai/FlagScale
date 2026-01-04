@@ -156,6 +156,9 @@ Change 2 fields:
 
 ## Start Training
 ```sh
+# add your path of Megatron-LM-FL to PYTHONPATH
+export PYTHONPATH=$PYTHONPATH:/nfs/hcr/repos/Megatron-LM-FL
+
 cd FlagScale/
 python run.py --config-path ./examples/robobrain_x0/conf/ --config-name train action=run
 ```
