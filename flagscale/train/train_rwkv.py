@@ -30,7 +30,7 @@ from megatron.training.utils import (
     get_blend_and_blend_per_split,
 )
 
-from flagscale.models.megatron_models.rwkv.rwkv_model import RWKVModel
+from flagscale.models.megatron.rwkv.rwkv_model import RWKVModel
 
 try:
     from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled

@@ -16,7 +16,7 @@ unzip images.zip
 cd ./tools/datasets/qwenvl/
 
 
-export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
+export PYTHONPATH=$PYTHONPATH:../../../flagscale/train/
 
 python convert_custom_dataset_to_wds_chatml_str.py \
     --dataset-root=/mnt/LLaVA-Pretrain \

@@ -64,14 +64,12 @@ jobs:
             cd Megatron-LM-FL
             pip install --no-build-isolation .
             cd ../
-            git submodule update --init third_party/Megatron-Energon/
             pip install httpx multi-storage-client boto3 google-cloud-storage fastapi uvicorn griffe
             if [ "${{ inputs.task }}" = "llava_onevision" ]; then
               git clone https://github.com/flagos-ai/Megatron-LM-FL.git
               cd Megatron-LM-FL
               pip install --no-build-isolation .
               cd ../
-              git submodule update --init third_party/Megatron-Energon/
               pip install httpx multi-storage-client boto3 google-cloud-storage fastapi uvicorn griffe
             fi
           elif [ "${{ inputs.type }}" = "inference" ] || [ "${{ inputs.type }}" = "serve" ]; then

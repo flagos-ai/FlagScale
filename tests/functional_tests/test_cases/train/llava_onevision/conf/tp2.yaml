@@ -13,7 +13,7 @@ experiment:
     ssh_port: null
   shell_cmds: null
   cmds:
-    before_start: cp -r ./third_party/Megatron-Energon/src/megatron/energon ./flagscale/train/megatron && source /root/miniconda3/bin/activate flagscale-train
+    before_start: source /root/miniconda3/bin/activate flagscale-train
   envs:
     HYDRA_FULL_ERROR: 1
     CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"

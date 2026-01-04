@@ -1,20 +1,3 @@
-[submodule "third_party/vllm"]
-	path = third_party/vllm
-	url = https://github.com/vllm-project/vllm.git
-	branch = main
-[submodule "third_party/Megatron-Energon"]
-	path = third_party/Megatron-Energon
-	url = https://github.com/NVIDIA/Megatron-Energon.git
-	branch = develop
-[submodule "third_party/llama.cpp"]
-	path = third_party/llama.cpp
-	url = https://github.com/ggml-org/llama.cpp.git
-[submodule "third_party/sglang"]
-	path = third_party/sglang
-	url = https://github.com/sgl-project/sglang.git
-[submodule "third_party/omniinfer"]
-	path = third_party/omniinfer
-	url = https://gitee.com/omniai/omniinfer.git
 [submodule "third_party/verl"]
 	path = third_party/verl
 	url = https://github.com/volcengine/verl.git

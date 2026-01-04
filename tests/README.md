@@ -32,7 +32,7 @@ flagscale test --unit --backend ${BACKEND} --subset ${SUBSET}
 Please set the following variables:
 
 - `BACKEND`: Specifies the backend for unit testing, either `megatron` or `flagscale`.
-- `SUBSET`: The directory for unit tests. Check the directories within `tests/unit_tests` and `third_party/Megatron-LM/tests/unit_tests` for specific folders. Note: `./` represents the root directory of the above folders.
+- `SUBSET`: The directory for unit tests. Check the directories within `tests/unit_tests` for specific folders. Note: `./` represents the root directory of the above folders.
 
 ### Run All Unit Tests Locally
 
@@ -54,7 +54,7 @@ When you create a PR using your forked repository, the testing workflow will aut
 
 ### Adding Unit Tests
 
-For `flagscale`, the test path is `tests/unit_tests`. For `megatron`, it's `third_party/Megatron-LM/tests/unit_tests`.
+For `flagscale`, the test path is `tests/unit_tests`. For `megatron`, it's the native unit tests of Megatron-LM-FL.
 
 - **Adding a Single Test Function**
 
@@ -78,7 +78,7 @@ For `flagscale`, the test path is `tests/unit_tests`. For `megatron`, it's `thir
          - source /root/miniconda3/etc/profile.d/conda.sh
          - conda activate flagscale-train
          - python tools/patch/unpatch.py --backend Megatron-LM
-         - cd third_party/Megatron-LM
+         - cd flagscale/train
          - export PYTHONPATH=../..:$PYTHONPATH
          - export NVTE_FLASH_ATTN=0
          - export NVTE_FUSED_ATTN=0

@@ -73,13 +73,13 @@ from megatron.energon import (
 from megatron.training.tokenizer.tokenizer import build_tokenizer
 from megatron.training.global_vars import get_tokenizer
 
-from flagscale.models.megatron_models.qwen2_5_vl.tensor_parallel import broadcast_data
+from flagscale.models.megatron.qwen2_5_vl.tensor_parallel import broadcast_data
 
-from flagscale.models.megatron_models.qwen3_vl.layer_specs import (get_gpt_layer_with_transformer_engine_spec,
+from flagscale.models.megatron.qwen3_vl.layer_specs import (get_gpt_layer_with_transformer_engine_spec,
                                                          get_qwen3vl_vision_model_spec,
                                                          get_mlp_module_spec)
-from flagscale.models.megatron_models.qwen3_vl.model import Qwen3VLModel
-from flagscale.models.megatron_models.qwen3_vl.transformer_config import (
+from flagscale.models.megatron.qwen3_vl.model import Qwen3VLModel
+from flagscale.models.megatron.qwen3_vl.transformer_config import (
     Qwen3VLTransformerConfig,
     get_vision_model_config,
     get_vision_projection_config

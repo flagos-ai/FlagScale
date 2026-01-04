@@ -18,23 +18,23 @@ from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.core import mpu, tensor_parallel
 from megatron.core.enums import ModelType
-from flagscale.models.megatron_models.llava_onevision.config import (
+from flagscale.models.megatron.llava_onevision.config import (
     get_language_model_config,
     get_vision_model_config,
     get_vision_projection_config,
 )
-from flagscale.models.megatron_models.llava_onevision.llava_onevision_model import (
+from flagscale.models.megatron.llava_onevision.llava_onevision_model import (
     LLaVAOneVisionModel,
     IGNORE_INDEX,
     IMAGE_TOKEN_INDEX,
 )
-from flagscale.models.megatron_models.llava_onevision.layer_specs import (
+from flagscale.models.megatron.llava_onevision.layer_specs import (
     get_layer_spec,
     get_mlp_module_spec,
     get_layer_spec_te,
 )
 from megatron.training.utils import average_losses_across_data_parallel_group
-from flagscale.models.megatron_models.llava_onevision.dataloader_provider import (
+from flagscale.models.megatron.llava_onevision.dataloader_provider import (
     train_valid_test_dataloaders_provider,
 )
 from flagscale.train.train import pretrain

@@ -8,7 +8,7 @@ experiment:
   task:
     type: inference
     backend: vllm
-    entrypoint: flagscale/inference/inference_aquila.py
+    entrypoint: flagscale/inference/inference_llm.py
   runner:
     hostfile: null
   cmds:
