@@ -7,7 +7,6 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
-    backend: vllm
   runner:
     type: cloud
     nnodes: ${oc.env:LWS_GROUP_SIZE, 1}
