@@ -42,22 +42,7 @@ FlagScale is also a part of [FlagAI-Open](https://flagopen.baai.ac.cn/), an open
 </p>
 
 ## ✏️ Support List
-### Platform
-| Vendors | vllm | megatron |
-| ------- | ---- | -------- |
-| BI V150 | ✅ | ✅ |
-| Cambricon MLU | ✅ | ✅ |
-| Huawei Atlas800 TA3 (Ascend) | ✅ | ✅ |
-| Hygon BW1000 | ✅ | ✅ |
-| Kunlunxin R310p | ✅ | ✅ |
-| Metax C550 | ✅ | ✅ |
-| MUSA S5000 | ✅ | ✅ |
-| Tsing Micro | ✅ | ✅ |
-| NVIDIA+Cambricon MLU | | ✅ |
-
-
-### Model
-#### Training
+### Training
 | Model                                                    | Example config File                        |
 | -------------------------------------------------------- | ------------------------------------------------|
 | [DeepSeek-V3](https://huggingface.co/deepseek-ai)  | [16b_a3b.yaml](examples/deepseek_v3/conf/train/16b_a3b.yaml)  |
@@ -74,7 +59,7 @@ FlagScale is also a part of [FlagAI-Open](https://flagopen.baai.ac.cn/), an open
 | ... | ... |
 
 
-#### Serve/Inference
+### Serve/Inference
 | Model                                                    | Example config File                        |
 | -------------------------------------------------------- | ------------------------------------------------|
 | [DeepSeek-V3](https://huggingface.co/deepseek-ai)  | [671b.yaml](examples/deepseek_v3/conf/serve/671b.yaml)  |
@@ -106,37 +91,18 @@ We recommend using the latest release of [NGC's PyTorch container](https://catal
     git clone https://github.com/FlagOpen/FlagScale.git
     ```
 
-2. Install the requirements:
+2. Install FlagScale requirements
+    ```sh
+    pip install . --verbose 
+    ```
 
-    We offer two installation methods:
-    - Source Installation
-        ```sh
-        PYTHONPATH=./:$PYTHONPATH pip install . --no-build-isolation --verbose \
-        --config-settings=device=<device> \
-        --config-settings=backend=<backend>
+3. Install backends 
 
-        # For vllm:
-        --config-settings=device=gpu
-        --config-settings=backend=vllm
-        # For megatron:
-        --config-settings=device=gpu
-        --config-settings=backend=Megatron-LM
-        # Or specify both:
-        --config-settings=device=gpu
-        --config-settings=backend=vllm,Megatron-LM
-        ```
+    If you want to run a serving/inference task, please install vLLM-FL according to https://github.com/flagos-ai/vllm-FL
 
-    - Whl Installation 
-        ```sh
-        # For vllm backend:
-        PYTHONPATH=./:$PYTHONPATH pip install .[vllm-gpu] --no-build-isolation --verbose
-        flagscale install --backend=vllm --device=gpu
-        # For megatron backend:
-        PYTHONPATH=./:$PYTHONPATH pip install .[megatron-gpu] --no-build-isolation --verbose
-        flagscale install --backend=megatron --device=gpu
-        ```
+    If you want to run a training task, please install Megatron-LM-Fl according to https://github.com/flagos-ai/Megatron-LM-FL
 
-    The installation methods vary greatly in different chip environments, and the above installation methods currently only support GPU. More backends and chips will be supported in the future.
+
 
 ### 🎈 Run a Task
 
@@ -212,11 +178,7 @@ Require vllm env. See details in [Setup](#-setup)
     ```
     
 #### Serve
-1. Setup env
-    ```
-    PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=domain=robotics --config-settings=device=gpu  --verbose --no-build-isolation
-    ```
-2. Download Tokenizer
+1. Download Tokenizer
     ```sh
     mkdir -p /models/physical-intelligence/
     cd /models/physical-intelligence/
@@ -224,7 +186,7 @@ Require vllm env. See details in [Setup](#-setup)
     git clone https://huggingface.co/physical-intelligence/fast
     ```
 
-3. Edit Config
+2. Edit Config
 
     ./examples/robobrain_x0/conf/serve/robobrain_x0.yaml
 
@@ -233,11 +195,11 @@ Require vllm env. See details in [Setup](#-setup)
     - engine_args.port -> A port available in your env, for example: 5001
     - engine_args.tokenizer_path ->/models/physical-intelligence/fast
 
-4. Start the server:
+3. Start the server:
     ```sh
     python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=run
     ```
-5. Stop the server:
+4. Stop the server:
     ```sh
     python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=stop
     ```
@@ -263,7 +225,7 @@ We support the model serving of DeepSeek R1 and have implemented the `flagscale 
 2. **Install FlagScale CLI:**
     ```sh
     cd FlagScale
-    PYTHONPATH=./:$PYTHONPATH pip install . --verbose --no-build-isolation
+    pip install . --verbose --no-build-isolation
     ```
 
 3. **One-click serve:**
@@ -277,14 +239,6 @@ We support the model serving of DeepSeek R1 and have implemented the `flagscale 
     ```
 
 The configuration files allow you to specify the necessary parameters and settings for your deployment, ensuring a smooth and efficient serving process.
-
-## 🎨 Contributing
-Patch the modifications to the specified third_party backend for PR.
-```
-cd FlagScale
-python tools/patch/patch.py --backend Megatron-LM
-python tools/patch/patch.py --backend vllm
-```
 
 
 ## 📄 License
