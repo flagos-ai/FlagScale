@@ -10,7 +10,6 @@ experiment:
     backend: megatron
     entrypoint: flagscale/train/train_gpt.py
   runner:
-    backend: torchrun
     hostfile: <xxxx>
   envs:
     CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"

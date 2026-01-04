@@ -10,7 +10,6 @@ experiment:
     backend: megatron
     entrypoint: flagscale/train/train_llava_onevision.py
   runner:
-    backend: torchrun
     ssh_port: null
   shell_cmds: null
   cmds:

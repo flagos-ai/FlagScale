@@ -11,7 +11,6 @@ experiment:
     entrypoint: ./flagscale/train/train_robobrain_x0.py
 
   runner:
-    backend: torchrun
     nnodes: 1
     nproc_per_node: 4
     rdzv_backend: static

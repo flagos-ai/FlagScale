@@ -10,7 +10,6 @@ experiment:
     backend: megatron
     entrypoint: flagscale/train/train_gpt.py
   runner:
-    backend: torchrun
     ssh_port: null
   shell_cmds: null
   envs:

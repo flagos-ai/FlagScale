@@ -10,7 +10,7 @@ experiment:
     backend: megatron
     entrypoint: ./flagscale/train/train_gpt.py
   runner:
-    hostfile: torchrun # Please replace with your actual hostfile path
+    hostfile: xxx # Please replace with your actual hostfile path
     rdzv_backend: "static" # hetero training only supports static
   cmds:
     before_start: "ulimit -n 1048576"

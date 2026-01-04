@@ -10,7 +10,6 @@ experiment:
     backend: megatron
     entrypoint: ./flagscale/train/train_qwen3_vl.py
   runner:
-    backend: torchrun
     nnodes: 1
     nproc_per_node: 8
     rdzv_backend: static

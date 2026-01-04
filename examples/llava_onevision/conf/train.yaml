@@ -10,7 +10,6 @@ experiment:
     backend: megatron
     entrypoint: ./flagscale/train/train_llava_onevision.py
   runner:
-    backend: torchrun
     nnodes: 1
   envs:
     CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7

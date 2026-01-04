@@ -12,7 +12,6 @@ experiment:
   # cmds:
   #   before_start: source /root/miniconda3/bin/activate flagscale
   runner:
-    backend: torchrun
     nnodes: 1
     nproc_per_node: 1
   envs:

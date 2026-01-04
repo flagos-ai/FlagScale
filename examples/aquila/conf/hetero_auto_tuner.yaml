@@ -12,7 +12,6 @@ experiment:
     backend: megatron
     entrypoint: ./flagscale/train/train_gpt.py
   runner:
-    backend: torchrun
     rdzv_backend: static
     ssh_port: xxx # port
     nnodes: 2

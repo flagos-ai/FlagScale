@@ -11,10 +11,9 @@ experiment:
     backend: megatron
     entrypoint: ./flagscale/train/train_gpt.py
   runner:
-    backend: torchrun
     nnodes: 2
     nproc_per_node: 8
-    hostfile: torchrun # Please replace with your actual hostfile path
+    hostfile: xxx # Please replace with your actual hostfile path
   envs:
     CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
     CUDA_DEVICE_MAX_CONNECTIONS: 1
