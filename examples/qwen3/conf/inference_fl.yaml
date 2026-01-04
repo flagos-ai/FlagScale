@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - inference: 7b
+  - inference: 4b
 
 experiment:
-  exp_name: aquila2
+  exp_name: qwen3
   exp_dir: ./outputs/${experiment.exp_name}
   task:
     type: inference
@@ -14,6 +14,7 @@ experiment:
   cmds:
     before_start: source /root/miniconda3/bin/activate flagscale
   envs:
+    VLLM_PLUGINS: "fl"
     VLLM_USE_FLASHINFER_SAMPLER: 0
     VLLM_LOGGING_LEVEL: "INFO"
     CUDA_VISIBLE_DEVICES: 0

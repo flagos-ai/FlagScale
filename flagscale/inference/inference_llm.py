@@ -43,7 +43,6 @@ def inference(cfg):
         print("*" * 50)
         print(f"{output.prompt=}")
         print(f"{output.outputs[0].text=}")
-        print(f"{output.outputs[0].token_ids=}")
     print("#" * 50)
 
 
