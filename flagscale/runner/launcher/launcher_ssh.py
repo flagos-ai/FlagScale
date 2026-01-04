@@ -115,7 +115,7 @@ def _get_runner_cmd_train(
     runner_args["redirects"] = redirect
     runner_args["tee"] = tee
 
-    runner_cmd = [backend]
+    runner_cmd = ["torchrun"]
     for key, value in runner_args.items():
         if isinstance(value, bool):
             if value:
