@@ -420,7 +420,6 @@ class VisionAttention(Attention):
         inference_params: Optional[BaseInferenceContext] = None,
         rotary_pos_cos_sin = None,
     ) -> Tuple[Tensor, Tensor]:
-        logger.info(f"VisionAttention: {rotary_pos_cos_sin=}")
         """
         Perform a forward pass through the attention module.
 
