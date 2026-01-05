@@ -677,7 +677,6 @@ class VllmBackend(BackendBase):
                     if node_cmd:
                         f.write(f"{node_cmd}\n")
 
-                logger.info(f"in _generate_run_script_serve, write cmd: {cmd}")
                 f.write(f"mkdir -p {logging_config.log_dir}\n")
                 f.write(f"mkdir -p {logging_config.pids_dir}\n")
                 f.write(f"\n")

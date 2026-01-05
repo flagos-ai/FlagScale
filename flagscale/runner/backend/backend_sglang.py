@@ -356,7 +356,6 @@ class SglangBackend(BackendBase):
                         if docker_name:
                             ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
 
-                        logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
                         f.write(f"{ssh_cmd}\n")
                     continue
 

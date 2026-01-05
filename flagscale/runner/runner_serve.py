@@ -634,7 +634,6 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                             ssh_cmd = f'ssh -n -p {ssh_port} {ip} "{node_cmd}"'
                             if docker_name:
                                 ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
-                            logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
                             f.write(f"{ssh_cmd}\n")
                         continue
 
@@ -715,7 +714,6 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
             if node_cmd:
                 f.write(f"{node_cmd}\n")
 
-        logger.info(f"in _generate_run_script_serve, write cmd: {cmd}")
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
         f.write(f"\n")
