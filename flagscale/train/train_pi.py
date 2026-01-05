@@ -19,6 +19,7 @@ import torch.distributed as dist
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.amp import GradScaler
 from accelerate import Accelerator
 from accelerate.utils import DistributedDataParallelKwargs
 
@@ -444,6 +445,7 @@ def update_policy(
     accelerator: Accelerator | None,
     lr_scheduler=None,
     lock=None,
+    scaler: GradScaler | None = None,
 ) -> tuple[MetricsTracker, dict]:
     """
     Performs a single training step to update the policy's weights.
@@ -474,20 +476,33 @@ def update_policy(
         with accelerator.autocast():
             loss, output_dict = policy.forward(batch)
     else:
-        with torch.amp.autocast("cuda"):
+        # For DDP, only use autocast if scaler is provided (which means use_amp=True)
+        if scaler is not None:
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                loss, output_dict = policy.forward(batch)
+        else:
             loss, output_dict = policy.forward(batch)
     # TODO(rcadene): policy.unnormalize_outputs(out_dict)
 
     if accelerator is not None:
         accelerator.backward(loss)
     else:
-        loss.backward()
+        if scaler is not None:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
 
     # Clip gradients if specified
+    # Note: Accelerator's clip_grad_norm_ handles overflow internally before unscaling
+    # For DDP with scaler, we need to unscale before clipping, but scaler.step() will
+    # handle overflow automatically, so we can safely unscale here
     if grad_clip_norm > 0:
         if accelerator is not None:
             grad_norm = accelerator.clip_grad_norm_(policy.parameters(), grad_clip_norm)
         else:
+            # For DDP with scaler, unscale first before clipping
+            if scaler is not None:
+                scaler.unscale_(optimizer)
             # For DDP, get the unwrapped model parameters
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 policy.module.parameters()
@@ -502,6 +517,9 @@ def update_policy(
                 policy.parameters(), float("inf"), error_if_nonfinite=False
             )
         else:
+            # For DDP with scaler, unscale first before computing norm
+            if scaler is not None:
+                scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 policy.module.parameters()
                 if isinstance(policy, DDP)
@@ -510,9 +528,12 @@ def update_policy(
                 error_if_nonfinite=False,
             )
 
-    # Optimizer step
-    with lock if lock is not None else nullcontext():
-        optimizer.step()
+    if scaler is not None:
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        with lock if lock is not None else nullcontext():
+            optimizer.step()
     optimizer.zero_grad()
 
     # Step through pytorch scheduler at every batch instead of epoch
@@ -544,20 +565,6 @@ def main(config: argparse.Namespace):
 
     set_seed(config.seed)
 
-    if use_accelerator:
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-        accelerator = Accelerator(
-            step_scheduler_with_optimizer=False, kwargs_handlers=[ddp_kwargs]
-        )
-        device = accelerator.device
-        rank = accelerator.process_index
-        is_main_process = accelerator.is_main_process
-    else:
-        local_rank = init_ddp()
-        device = torch.device("cuda", local_rank)
-        rank = dist.get_rank()
-        is_main_process = rank == 0 and local_rank == 0
-
     model_variant = config.model_variant.lower()
     if model_variant not in ["pi0", "pi0.5"]:
         raise ValueError(
@@ -569,11 +576,30 @@ def main(config: argparse.Namespace):
     else:
         policy_config = PI0Config.from_pretrained(config.checkpoint_dir)
 
-    # Manually set the required configs
     policy_config.pretrained_path = config.checkpoint_dir
-    policy_config.device = device
     policy_config.n_action_steps = config.action_steps
     policy_config.tokenizer_max_length = config.tokenizer_max_length
+
+    policy_config.use_amp = config.use_amp
+
+    if use_accelerator:
+        mixed_precision = "bf16" if policy_config.use_amp else "no"
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+        accelerator = Accelerator(
+            step_scheduler_with_optimizer=False,
+            kwargs_handlers=[ddp_kwargs],
+            mixed_precision=mixed_precision,
+        )
+        device = accelerator.device
+        rank = accelerator.process_index
+        is_main_process = accelerator.is_main_process
+        policy_config.device = device
+    else:
+        local_rank = init_ddp()
+        device = torch.device("cuda", local_rank)
+        rank = dist.get_rank()
+        is_main_process = rank == 0 and local_rank == 0
+        policy_config.device = device
 
     if is_main_process:
         logger.info(f"Policy config ({model_variant}): {policy_config}")
@@ -726,6 +752,7 @@ def main(config: argparse.Namespace):
         policy, optimizer, dataloader, lr_scheduler = accelerator.prepare(
             policy, optimizer, dataloader, lr_scheduler
         )
+        scaler = None  # Accelerator handles gradient scaling internally
     else:
         policy = DDP(
             policy,
@@ -733,6 +760,11 @@ def main(config: argparse.Namespace):
             find_unused_parameters=True,
             output_device=local_rank,
         )
+        # Only create GradScaler if use_amp is True (matches Accelerator behavior)
+        if policy_config.use_amp:
+            scaler = GradScaler('cuda')
+        else:
+            scaler = None
         dist.barrier()
 
     dl_iter = cycle(dataloader)
@@ -792,6 +824,7 @@ def main(config: argparse.Namespace):
             config.grad_clip_norm,
             accelerator=accelerator,
             lr_scheduler=lr_scheduler,
+            scaler=scaler,
         )
 
         print(f"train_tracker at step {step}: {train_tracker}")
@@ -879,6 +912,7 @@ if __name__ == "__main__":
     parser.add_argument("--scheduler-decay-steps", type=int, default=30000)
     parser.add_argument("--scheduler-decay-lr", type=float, default=2.5e-6)
     parser.add_argument("--grad-clip-norm", type=float, default=1.0)
+    parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--shuffle", action="store_true")
     parser.add_argument("--tensor-model-parallel-size", type=int, default=1)
     parser.add_argument("--pipeline-model-parallel-size", type=int, default=1)
