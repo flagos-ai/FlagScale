@@ -30,27 +30,27 @@ from flagscale.runner.utils import (
 _MAX_CPU_COUNT = multiprocessing.cpu_count()
 
 
-def _get_profile_args(config, model="vllm_model"):
+def _get_profile_args(config, backend="vllm"):
     serve_config = config.get("serve", [])
     if not serve_config:
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
 
     profile_args = {}
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             profile_args = item.get("profile", {})
             break
     return profile_args
 
 
-def _get_serve_engine_args(config, model="vllm_model"):
+def _get_serve_engine_args(config, backend="vllm"):
     serve_config = config.get("serve", [])
     if not serve_config:
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
     engine_args = {}
 
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             engine_args = item.get("engine_args", {})
             break
     if not engine_args:

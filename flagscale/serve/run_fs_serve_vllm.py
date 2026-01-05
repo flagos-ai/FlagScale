@@ -10,8 +10,8 @@ flagscale_serve.load_args()
 TASK_CONFIG = flagscale_serve.task_config
 
 
-# Parse target model configuration from the config file (corresponds to serve_id: vllm_model in original YAML)
-def get_model_config_from_task(serve_id: str = "vllm_model"):
+# Parse target model configuration from the config file (corresponds to serve_id: serve_model in original YAML)
+def get_model_config_from_task(serve_id: str = "serve_model"):
     if not TASK_CONFIG.get("serve"):
         raise ValueError("No 'serve' section found in task config.")
     for item in TASK_CONFIG.serve:
