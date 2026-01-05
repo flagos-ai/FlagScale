@@ -12,8 +12,6 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 from flagscale.runner.auto_tuner.hetero.hetero_theoretical_memory import (
     hetero_report_theoretical_memory,
 )
-
-# from flagscale.runner.auto_tuner.memory_model import calculate_hetero_memory
 from flagscale.runner.auto_tuner.search.algorithm import GridAlgo
 from flagscale.runner.auto_tuner.utils import convert_config_to_megatron_args, divisible
 
@@ -103,6 +101,8 @@ class HeteroSearcher:
         # Calculate Memory Model
         if "hetero_memory_model" in self.config.experiment.auto_tuner:
             self.logger.info("HeteroSearcher: calculating memory estimates...")
+            from flagscale.runner.auto_tuner.memory_model import calculate_hetero_memory
+
             for idx, strategy in enumerate(self.strategies):
                 try:
                     strategy["hetero_memory_model"] = calculate_hetero_memory(strategy, self.config)
