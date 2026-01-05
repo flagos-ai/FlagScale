@@ -4,18 +4,11 @@ import socket
 import subprocess
 import sys
 
-from flagscale.runner.utils import get_free_port, is_ip_addr
-from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
-
-# Compatible with both command-line execution and source code execution.
-try:
-    import flag_scale
-except Exception as e:
-    pass
-
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale import serve
+from flagscale.runner.utils import get_free_port, is_ip_addr
+from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
 from flagscale.utils import flatten_dict_to_args
 
 
