@@ -1,5 +1,7 @@
 import importlib
 
+from pathlib import Path
+
 import yaml
 
 
@@ -33,7 +35,9 @@ class ArgsConverter:
     """
 
     def __init__(self):
-        with open("flagscale/serve/args_mapping/mapping.yaml", "r") as f:
+        base_dir = Path(__file__).resolve().parent
+        yaml_path = base_dir / "mapping.yaml"
+        with open(yaml_path, "r") as f:
             self.mapping = yaml.safe_load(f)
             for backend_name in self.mapping:
                 self.mapping[backend_name]["kv_mapping_func_loaded"] = {}
