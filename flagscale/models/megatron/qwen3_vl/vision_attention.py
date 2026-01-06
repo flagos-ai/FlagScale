@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import NoReturn, Optional, Tuple, Union
 
 import torch
+
 from torch import Tensor
 
 from megatron.core import tensor_parallel
@@ -20,8 +21,11 @@ from megatron.core.parallel_state import (
     get_tensor_model_parallel_world_size,
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.transformer.attention import Attention, SelfAttentionSubmodules
+from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.module import MegatronModule
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
+from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import (
     deprecate_inference_params,
     divide,
@@ -31,10 +35,6 @@ from megatron.core.utils import (
     nvtx_range_pop,
     nvtx_range_push,
 )
-from megatron.core.transformer.attention import (Attention, SelfAttentionSubmodules)
-
-from megatron.core.transformer.enums import AttnMaskType
-from megatron.core.transformer.transformer_config import TransformerConfig
 
 try:
     from einops import rearrange
@@ -42,8 +42,8 @@ except ImportError:
     rearrange = None
 
 try:
-    from flashattn_hopper.flash_attn_interface import _flash_attn_forward
     from flashattn_hopper.flash_attn_interface import (
+        _flash_attn_forward,
         flash_attn_with_kvcache as flash_attn3_with_kvcache,
     )
 
@@ -83,6 +83,7 @@ except ImportError:
 
 # NOTE: The only difference between this and the original SelfAttention is "apply_rotary_pos_emb" where using "float" not the dtype of "hidden_states"
 from flagscale.models.megatron.qwen3_vl.vision_rope_utils import apply_rotary_pos_emb
+
 
 class VisionSelfAttention(Attention):
     """Self-attention layer class
