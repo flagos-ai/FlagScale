@@ -1,3 +1,6 @@
+# Mainly adopted from
+# https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/scripts/lerobot_train.py
+
 import argparse
 import json
 from pathlib import Path
@@ -12,16 +15,12 @@ import math
 import time
 from contextlib import nullcontext
 
-# import etils.epath as epath
 import numpy as np
 import torch
 import torch.distributed as dist
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.amp import GradScaler
-from accelerate import Accelerator
-from accelerate.utils import DistributedDataParallelKwargs
 
 from flagscale.runner.utils import logger
 from flagscale.train.datasets.transforms import ImageTransforms
@@ -117,7 +116,6 @@ def make_dataset(cfg, policy_config):
     ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
     delta_timestamps = resolve_delta_timestamps(policy_config, ds_meta)
 
-    # Create dataset - both pi0 and pi0.5 use the same API
     dataset = LeRobotDataset(
         root=cfg.data_path,
         episodes=None,
@@ -442,16 +440,14 @@ def update_policy(
     batch: Any,
     optimizer: Optimizer,
     grad_clip_norm: float,
-    accelerator: Accelerator | None,
     lr_scheduler=None,
     lock=None,
-    scaler: GradScaler | None = None,
 ) -> tuple[MetricsTracker, dict]:
     """
     Performs a single training step to update the policy's weights.
 
     This function executes the forward and backward passes, clips gradients, and steps the optimizer and
-    learning rate scheduler. Supports both Accelerator and DDP for distributed training.
+    learning rate scheduler.
 
     Args:
         train_metrics: A MetricsTracker instance to record training statistics.
@@ -459,7 +455,6 @@ def update_policy(
         batch: A batch of training data.
         optimizer: The optimizer used to update the policy's parameters.
         grad_clip_norm: The maximum norm for gradient clipping.
-        accelerator: The Accelerator instance for distributed training and mixed precision, or None for DDP.
         lr_scheduler: An optional learning rate scheduler.
         lock: An optional lock for thread-safe optimizer updates.
 
@@ -471,69 +466,37 @@ def update_policy(
     start_time = time.perf_counter()
     policy.train()
 
-    # Handle mixed precision: Accelerator or torch.cuda.amp
-    if accelerator is not None:
-        with accelerator.autocast():
-            loss, output_dict = policy.forward(batch)
-    else:
-        # For DDP, only use autocast if scaler is provided (which means use_amp=True)
-        if scaler is not None:
-            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
-                loss, output_dict = policy.forward(batch)
-        else:
-            loss, output_dict = policy.forward(batch)
+    # Get the policy model (unwrap DDP if needed) to access config
+    policy_model = policy.module if isinstance(policy, DDP) else policy
+    use_amp = getattr(policy_model.config, "use_amp", False)
+
+    autocast_context = torch.amp.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
+    with autocast_context:
+        loss, output_dict = policy.forward(batch)
     # TODO(rcadene): policy.unnormalize_outputs(out_dict)
 
-    if accelerator is not None:
-        accelerator.backward(loss)
-    else:
-        if scaler is not None:
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
+    loss.backward()
 
     # Clip gradients if specified
-    # Note: Accelerator's clip_grad_norm_ handles overflow internally before unscaling
-    # For DDP with scaler, we need to unscale before clipping, but scaler.step() will
-    # handle overflow automatically, so we can safely unscale here
     if grad_clip_norm > 0:
-        if accelerator is not None:
-            grad_norm = accelerator.clip_grad_norm_(policy.parameters(), grad_clip_norm)
-        else:
-            # For DDP with scaler, unscale first before clipping
-            if scaler is not None:
-                scaler.unscale_(optimizer)
-            # For DDP, get the unwrapped model parameters
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                policy.module.parameters()
-                if isinstance(policy, DDP)
-                else policy.parameters(),
-                grad_clip_norm,
-            )
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            policy.module.parameters()
+            if isinstance(policy, DDP)
+            else policy.parameters(),
+            grad_clip_norm,
+        )
     else:
         # Compute grad norm even if not clipping
-        if accelerator is not None:
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                policy.parameters(), float("inf"), error_if_nonfinite=False
-            )
-        else:
-            # For DDP with scaler, unscale first before computing norm
-            if scaler is not None:
-                scaler.unscale_(optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                policy.module.parameters()
-                if isinstance(policy, DDP)
-                else policy.parameters(),
-                float("inf"),
-                error_if_nonfinite=False,
-            )
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            policy.module.parameters()
+            if isinstance(policy, DDP)
+            else policy.parameters(),
+            float("inf"),
+            error_if_nonfinite=False,
+        )
 
-    if scaler is not None:
-        scaler.step(optimizer)
-        scaler.update()
-    else:
-        with lock if lock is not None else nullcontext():
-            optimizer.step()
+    with lock if lock is not None else nullcontext():
+        optimizer.step()
     optimizer.zero_grad()
 
     # Step through pytorch scheduler at every batch instead of epoch
@@ -541,12 +504,6 @@ def update_policy(
         lr_scheduler.step()
 
     # Update internal buffers if policy has update method
-    # Get the unwrapped model for both Accelerator and DDP
-    if accelerator is not None:
-        policy_model = accelerator.unwrap_model(policy, keep_fp32_wrapper=True)
-    else:
-        policy_model = policy.module if isinstance(policy, DDP) else policy
-
     if has_method(policy_model, "update"):
         policy_model.update()
 
@@ -559,10 +516,6 @@ def update_policy(
 
 
 def main(config: argparse.Namespace):
-    # Accelerator or DDP, only for debugging purposes
-    use_accelerator = config.use_accelerator
-    accelerator = None
-
     set_seed(config.seed)
 
     model_variant = config.model_variant.lower()
@@ -582,34 +535,18 @@ def main(config: argparse.Namespace):
 
     policy_config.use_amp = config.use_amp
 
-    if use_accelerator:
-        mixed_precision = "bf16" if policy_config.use_amp else "no"
-        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-        accelerator = Accelerator(
-            step_scheduler_with_optimizer=False,
-            kwargs_handlers=[ddp_kwargs],
-            mixed_precision=mixed_precision,
-        )
-        device = accelerator.device
-        rank = accelerator.process_index
-        is_main_process = accelerator.is_main_process
-        policy_config.device = device
-    else:
-        local_rank = init_ddp()
-        device = torch.device("cuda", local_rank)
-        rank = dist.get_rank()
-        is_main_process = rank == 0 and local_rank == 0
-        policy_config.device = device
+    local_rank = init_ddp()
+    device = torch.device("cuda", local_rank)
+    rank = dist.get_rank()
+    is_main_process = rank == 0 and local_rank == 0
+    policy_config.device = device
 
     if is_main_process:
         logger.info(f"Policy config ({model_variant}): {policy_config}")
 
     dataset = make_dataset(config, policy_config)
 
-    if use_accelerator:
-        accelerator.wait_for_everyone()
-    else:
-        dist.barrier()
+    dist.barrier()
 
     # TODO: (yupu) This is so ugly
     rename_map = None
@@ -638,10 +575,7 @@ def main(config: argparse.Namespace):
         model_variant=model_variant,
     )
 
-    if use_accelerator:
-        accelerator.wait_for_everyone()
-    else:
-        dist.barrier()
+    dist.barrier()
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
@@ -671,9 +605,10 @@ def main(config: argparse.Namespace):
         "tokenizer_processor": {"tokenizer_name": config.tokenizer_path},
     }
 
-    processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
-        "rename_map": rename_map
-    }
+    if rename_map is not None:
+        processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
+            "rename_map": rename_map
+        }
     postprocessor_kwargs["postprocessor_overrides"] = {
         "unnormalizer_processor": {
             "stats": dataset.meta.stats,
@@ -715,57 +650,34 @@ def main(config: argparse.Namespace):
     config.num_workers = 4
     shuffle = config.shuffle
 
-    if not use_accelerator:
-        # DistributedSampler ensures each rank gets different data
-        sampler = torch.utils.data.distributed.DistributedSampler(
-            dataset,
-            num_replicas=dist.get_world_size(),
-            rank=dist.get_rank(),
-            shuffle=shuffle,
-            drop_last=False,
-        )
+    # DistributedSampler ensures each rank gets different data
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset,
+        num_replicas=dist.get_world_size(),
+        rank=dist.get_rank(),
+        shuffle=shuffle,
+        drop_last=False,
+    )
 
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            num_workers=config.num_workers,
-            batch_size=config.batch_size,
-            shuffle=False,  # Must be False when using sampler
-            sampler=sampler,
-            pin_memory=True,  # Assume all data is on GPU
-            drop_last=False,
-            prefetch_factor=2 if config.num_workers > 0 else None,
-        )
-    else:
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            num_workers=config.num_workers,
-            batch_size=config.batch_size,
-            shuffle=shuffle,
-            sampler=None,
-            pin_memory=True,  # Assume all data is on GPU
-            drop_last=False,
-            prefetch_factor=2 if config.num_workers > 0 else None,
-        )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=config.num_workers,
+        batch_size=config.batch_size,
+        shuffle=False,  # Must be False when using sampler
+        sampler=sampler,
+        pin_memory=True,  # Assume all data is on GPU
+        drop_last=False,
+        prefetch_factor=2 if config.num_workers > 0 else None,
+    )
 
-    if use_accelerator:
-        accelerator.wait_for_everyone()
-        policy, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-            policy, optimizer, dataloader, lr_scheduler
-        )
-        scaler = None  # Accelerator handles gradient scaling internally
-    else:
-        policy = DDP(
-            policy,
-            device_ids=[local_rank],
-            find_unused_parameters=True,
-            output_device=local_rank,
-        )
-        # Only create GradScaler if use_amp is True (matches Accelerator behavior)
-        if policy_config.use_amp:
-            scaler = GradScaler('cuda')
-        else:
-            scaler = None
-        dist.barrier()
+    policy = DDP(
+        policy,
+        device_ids=[local_rank],
+        find_unused_parameters=True,
+        output_device=local_rank,
+    )
+
+    dist.barrier()
 
     dl_iter = cycle(dataloader)
 
@@ -779,11 +691,7 @@ def main(config: argparse.Namespace):
         "dataloading_s": AverageMeter("data_s", ":.3f"),
     }
 
-    # Use effective batch size for proper epoch calculation in distributed training
-    if use_accelerator:
-        effective_batch_size = config.batch_size * accelerator.num_processes
-    else:
-        effective_batch_size = config.batch_size * dist.get_world_size()
+    effective_batch_size = config.batch_size * dist.get_world_size()
 
     step = 0
 
@@ -793,38 +701,32 @@ def main(config: argparse.Namespace):
         dataset.num_episodes,
         train_metrics,
         initial_step=step,
-        accelerator=accelerator,
     )
 
     # To ensures proper data shuffling across epochs in distributed training
     epoch = 0
     samples_per_epoch = None
-    if not use_accelerator:
-        dataloader.sampler.set_epoch(epoch)
-        samples_per_epoch = len(dataset) // effective_batch_size
+    dataloader.sampler.set_epoch(epoch)
+    samples_per_epoch = len(dataset) // effective_batch_size
 
     for _ in range(step, config.train_steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
-
-        if not use_accelerator:
-            batch = {
-                k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
+        batch = {
+            k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+            for k, v in batch.items()
+        }
 
         batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
-        train_tracker, output_dict = update_policy(
+        train_tracker, _ = update_policy(
             train_tracker,
             policy,
             batch,
             optimizer,
             config.grad_clip_norm,
-            accelerator=accelerator,
             lr_scheduler=lr_scheduler,
-            scaler=scaler,
         )
 
         print(f"train_tracker at step {step}: {train_tracker}")
@@ -834,20 +736,16 @@ def main(config: argparse.Namespace):
 
         # Update epoch counter for sampler.set_epoch() when we've processed one epoch worth of samples
         # This ensures proper data shuffling across epochs in distributed training
-        if not use_accelerator:
-            if step % samples_per_epoch == 0:
-                epoch += 1
-                dataloader.sampler.set_epoch(epoch)
+        if step % samples_per_epoch == 0:
+            epoch += 1
+            dataloader.sampler.set_epoch(epoch)
 
         if step % config.log_freq == 0 and is_main_process:
             logger.info(f"step: {step} loss: {train_tracker}")
 
         if config.save_checkpoint and step % config.save_freq == 0:
             # Synchronize all processes before checkpoint saving
-            if use_accelerator:
-                accelerator.wait_for_everyone()
-            else:
-                dist.barrier()
+            dist.barrier()
 
             if is_main_process:
                 logger.info(f"Saving checkpoint at step {step}")
@@ -855,11 +753,7 @@ def main(config: argparse.Namespace):
                 checkpoint_dir = get_step_checkpoint_dir(
                     output_dir, config.train_steps, step
                 )
-                policy_to_save = (
-                    accelerator.unwrap_model(policy)
-                    if use_accelerator
-                    else policy.module
-                )
+                policy_to_save = policy.module
                 save_checkpoint(
                     checkpoint_dir=checkpoint_dir,
                     policy=policy_to_save,
@@ -867,33 +761,20 @@ def main(config: argparse.Namespace):
                 update_last_checkpoint(checkpoint_dir)
 
             # Synchronize all processes after checkpoint saving
-            if use_accelerator:
-                accelerator.wait_for_everyone()
-            else:
-                dist.barrier()
+            dist.barrier()
 
     if is_main_process:
         logger.info("Training completed")
 
     # Properly clean up the distributed process group
-    if use_accelerator:
-        accelerator.wait_for_everyone()
-        accelerator.end_training()
-    else:
-        dist.barrier()
-        dist.destroy_process_group()
+    dist.barrier()
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # ============================== System Configs ==============================
-    parser.add_argument(
-        "--use-accelerator",
-        action="store_true",
-        default=False,
-        help="Whether to use HuggingFace Accelerator (like lerobot) or manual DDP",
-    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--train-steps", type=int, default=100000)

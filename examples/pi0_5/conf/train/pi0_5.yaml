@@ -1,6 +1,4 @@
 system:
-  # Whether to use HuggingFace Accelerator or manual DDP
-  use_accelerator: true
   seed: 42
   batch_size: 1
   train_steps: 100000
