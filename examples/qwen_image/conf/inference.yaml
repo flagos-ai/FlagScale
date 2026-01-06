@@ -9,7 +9,7 @@ experiment:
   task:
     type: inference
     backend: vllm # TODO(yupu): Remove this restriction
-    entrypoint: flagscale/inference/diffusion_entrypoint.py
+    entrypoint: flagscale/inference/core/inference_diffusion.py
   runner:
     hostfile: null
   cmds:

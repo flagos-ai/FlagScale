@@ -1,7 +1,6 @@
 import dataclasses
 import importlib
 import os
-import time
 
 from dataclasses import asdict, dataclass
 from typing import Any, List, Tuple, Union
@@ -15,8 +14,6 @@ from omegaconf import DictConfig
 
 from flagscale.inference.runtime_context import RuntimeContext
 from flagscale.inference.utils import parse_torch_dtype
-from flagscale.models.pi0_old.modeling_pi0 import PI0Policy, PI0PolicyConfig
-from flagscale.runner.utils import logger
 from flagscale.transformations import create_transformations_from_config
 
 
@@ -105,7 +102,7 @@ class ModelLoadConfig:
             raise ValueError("'model' is required")
         if not self.loader:
             raise ValueError("'loader' is required")
-        allowed_loaders = {"diffusers", "transformers", "custom", "auto", "pi0"}
+        allowed_loaders = {"diffusers", "transformers", "custom", "auto"}
         if self.loader not in allowed_loaders:
             raise ValueError(f"Unsupported loader: {self.loader}. Allowed: {allowed_loaders}")
 
@@ -178,19 +175,6 @@ class InferenceEngine:
             raise NotImplementedError("Custom loader is not implemented")
         elif loader == "auto":
             raise NotImplementedError("Auto loader is not implemented")
-        elif loader == "pi0":
-            t_s = time.time()
-            config = PI0PolicyConfig.from_pretrained(self.vconfig.model.model)
-            policy = PI0Policy.from_pretrained(
-                model_path=self.vconfig.model.model,
-                tokenizer_path=self.vconfig.model.tokenizer,
-                stat_path=self.vconfig.model.stat_path,
-                config=config,
-            )
-            policy = policy.to(device=self.vconfig.model.device)
-            policy.eval()
-            logger.info(f"PI0 loaded: {time.time() - t_s:.2f}s")
-            return policy, policy.model
         else:
             raise ValueError(f"Unsupported loader: {loader}")
 
