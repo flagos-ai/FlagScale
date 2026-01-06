@@ -117,7 +117,7 @@ class VerlBackend(BackendBase):
             f.write(f"\n")
             f.write(f"cd {root_dir}\n")
             f.write(f"\n")
-            f.write(f"export PYTHONPATH={verl_dir}:{root_dir}:${{PYTHONPATH}}\n")
+            f.write(f"export PYTHONPATH=${{PYTHONPATH}}\n")
             f.write(f"\n")
             f.write(f'cmd="{cmd}"\n')
             f.write(f"\n")

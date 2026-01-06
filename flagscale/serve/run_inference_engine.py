@@ -58,7 +58,7 @@ def llama_cpp_serve(args):
     common_args = args.get("engine_args", {})
     llama_cpp_args = args.get("engine_args_specific", {}).get("llama_cpp", {})
 
-    command = ["./third_party/llama.cpp/build/bin/llama-server"]
+    command = ["llama-server"]
     if common_args.get("model", None):
         converted_args = ARGS_CONVERTER.convert("llama_cpp", common_args)
         command.extend(["--model", converted_args["model"]])

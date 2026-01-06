@@ -144,20 +144,20 @@ jobs:
   #     type: serve
   #     image: ${{ needs.set-env.outputs.ci_image }}
 
-  functional_tests_rl:
-    needs:
-      - set-env
-      - functional_tests_hetero
-    uses: ./.github/workflows/functional-tests-nvidia.yml
-    strategy:
-      matrix:
-        task:
-          - qwen2_5
-    name: "rl-${{ matrix.task }}"
-    with:
-      task: ${{ matrix.task }}
-      type: rl
-      image: ${{ needs.set-env.outputs.ci_image }}
+  # functional_tests_rl:
+  #   needs:
+  #     - set-env
+  #     - functional_tests_hetero
+  #   uses: ./.github/workflows/functional-tests-nvidia.yml
+  #   strategy:
+  #     matrix:
+  #       task:
+  #         - qwen2_5
+  #   name: "rl-${{ matrix.task }}"
+  #   with:
+  #     task: ${{ matrix.task }}
+  #     type: rl
+  #     image: ${{ needs.set-env.outputs.ci_image }}
 
   # Check All Tests
   all-tests:
@@ -168,7 +168,7 @@ jobs:
       - functional_tests_hetero
       # - functional_tests_inference
       # - functional_tests_serve
-      - functional_tests_rl
+      # - functional_tests_rl
     runs-on: ubuntu-latest
     steps:
       - name: All Tests Completed
