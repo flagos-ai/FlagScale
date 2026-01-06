@@ -4,7 +4,7 @@ import os
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
-from flagscale.runner.utils import get_free_port, logger, parse_hostfile, validate_serve_config
+from flagscale.runner.utils import get_free_port, logger, parse_hostfile
 
 
 def _get_args_ray(config: DictConfig):
@@ -114,9 +114,6 @@ class NativeServeBackend(BackendBase):
         self._prepare()
 
     def _prepare(self):
-        # Validate serve configuration
-        validate_serve_config(self.config)
-
         _update_config_serve(self.config)
         self.user_args = _get_args_ray(self.config)
         self.user_envs = self.config.experiment.get("envs", {})

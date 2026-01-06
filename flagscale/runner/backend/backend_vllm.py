@@ -10,7 +10,6 @@ from flagscale.runner.utils import (
     get_free_port,
     logger,
     parse_hostfile,
-    validate_serve_config,
 )
 
 
@@ -216,9 +215,6 @@ class VllmBackend(BackendBase):
             self.user_script = self.config.experiment.task.entrypoint
             self.resources = parse_hostfile(self.config.experiment.runner.get("hostfile", None))
         elif self.task_type == "serve":
-            # Validate serve configuration
-            validate_serve_config(self.config)
-
             _update_config_serve(self.config)
             self.user_envs = self.config.experiment.get("envs", {})
             self.user_args = _get_args_sglang(self.config)
