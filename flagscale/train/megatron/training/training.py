@@ -136,15 +136,15 @@ from megatron.training.extra_valid import extra_evaluate_and_print_results
 from megatron.training.extra_valid import build_extra_valid_data_iterators
 from megatron.training.stablelm2_scheduler import StableLM2SchedulerConfig
 from megatron.training.global_vars import get_spiky_loss_detector
-from flagscale.train.theoretical_memory_usage import report_theoretical_memory as fs_report_theoretical_memory
+from megatron.training.fs_theoretical_memory_usage import report_theoretical_memory as fs_report_theoretical_memory
 from megatron.plugin.hetero.parallel_context import get_parallel_context
 
 stimer = StragglerDetector()
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 
-from flagscale.train.peft.peft import PEFT
-from flagscale.train.peft.lora import LoRA
+# Import PEFT from peft module
+from megatron.training.peft import PEFT
 
 
 def destroy_global_state():

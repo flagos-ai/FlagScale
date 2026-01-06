@@ -1,9 +1,8 @@
 exclude: |
     (?x)^(
-        flagscale/backends/.*|
+        flagscale/train/megatron/.*|
         third_party/.*|
         megatron-energon/.*|
-        hardware/.*\.patch|
         .*\.md|
         .*\.sh|
         .*\.txt|
@@ -33,14 +32,11 @@ repos:
     -   id: black
         exclude: |
             (?x)^(
-                flagscale/backends/.*|
                 third_party/.*|
                 megatron-energon/.*|
-                hardware/.*\.patch|
                 flagscale/inference/processing_emu3.py|
                 flagscale/train/train.*\.py|
                 flagscale/train/models/.*|
-                flagscale/train/hetero/.*|
                 tools/checkpoint/loader.*\.py|
                 tools/checkpoint/saver.*\.py|
                 .*\.md|
@@ -55,14 +51,11 @@ repos:
     -   id: isort
         exclude: |
             (?x)^(
-                flagscale/backends/.*|
                 third_party/.*|
                 megatron-energon/.*|
-                hardware/.*\.patch|
                 flagscale/inference/processing_emu3.py|
                 flagscale/train/train.*\.py|
                 flagscale/train/models/.*|
-                flagscale/train/hetero/.*|
                 tools/checkpoint/loader.*\.py|
                 tools/checkpoint/saver.*\.py|
                 .*\.md|

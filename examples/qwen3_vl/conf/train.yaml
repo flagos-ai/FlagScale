@@ -8,7 +8,7 @@ experiment:
   task:
     type: train
     backend: megatron
-    entrypoint: ./flagscale/train/train_qwen3_vl.py
+    entrypoint: ./flagscale/train/megatron/train_qwen3_vl.py
   runner:
     nnodes: 1
     nproc_per_node: 8

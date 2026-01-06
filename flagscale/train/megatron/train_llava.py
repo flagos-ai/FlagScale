@@ -20,7 +20,7 @@ from megatron.core.models.multimodal.llava_model import LLaVAModel
 from examples.multimodal.layer_specs import get_layer_spec, get_mlp_module_spec, get_layer_spec_te
 from megatron.training.utils import average_losses_across_data_parallel_group
 from examples.multimodal.dataloader_provider import train_valid_test_dataloaders_provider
-from flagscale.train.train import pretrain
+from megatron.training.training import pretrain
 
 
 def model_provider(

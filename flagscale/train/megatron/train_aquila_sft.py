@@ -47,7 +47,7 @@ except ImportError:
 
 from megatron.training.datasets.sft_dataset_fs import SFTDatasetConfig, SFTDataset
 from megatron.training.extra_valid import extra_valid_datasets_provider
-from flagscale.train.train import pretrain
+from megatron.training.training import pretrain
 from megatron.plugin.hetero.parallel_context import get_parallel_context
 
 

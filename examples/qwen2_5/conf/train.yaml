@@ -9,7 +9,7 @@ experiment:
   task:
     type: train
     backend: megatron
-    entrypoint: ./flagscale/train/train_gpt.py
+    entrypoint: ./flagscale/train/megatron/train_gpt.py
   runner:
     nnodes: 2
     nproc_per_node: 8

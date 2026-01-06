@@ -37,7 +37,7 @@ from megatron.training.utils import average_losses_across_data_parallel_group
 from flagscale.models.megatron.llava_onevision.dataloader_provider import (
     train_valid_test_dataloaders_provider,
 )
-from flagscale.train.train import pretrain
+from megatron.training.training import pretrain
 
 
 def model_provider(

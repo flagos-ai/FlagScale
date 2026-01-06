@@ -8,7 +8,7 @@ experiment:
   task:
     type: train
     backend: megatron
-    entrypoint: ./flagscale/train/train_gpt.py
+    entrypoint: ./flagscale/train/megatron/train_gpt.py
   runner:
     hostfile: xxx # Please replace with your actual hostfile path
     rdzv_backend: "static" # hetero training only supports static

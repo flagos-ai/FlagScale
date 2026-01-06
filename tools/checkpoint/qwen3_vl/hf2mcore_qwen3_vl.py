@@ -45,7 +45,7 @@ from tools.checkpoint.qwen2_5_vl.utils import (
     save_state_dict,
 )
 
-from flagscale.train.train_qwen3_vl import add_multimodal_extra_args, model_provider
+from flagscale.train.megatron.train_qwen3_vl import add_multimodal_extra_args, model_provider
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
