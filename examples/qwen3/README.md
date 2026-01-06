@@ -87,12 +87,12 @@ Edit serve config file:
   - key: experiment.exp_name
     - value: qwen3_8b -> qwen3_0.6b_llama.cpp
   - key: experiment.task.backend
-    - remove key and value
-- examples/qwen3/conf/serve/0_6b.yaml
-  - key: [0].engine
     - value: sglang -> llama_cpp
+- examples/qwen3/conf/serve/0_6b.yaml
   - key: [0].engine_args.model
     - value: /tmp/models/Qwen3-0.6B/ -> /tmp/flagscale_test/Qwen/Qwen3-0.6B/
+  - key: [0].engine
+    - remove key and value, deprecated
 
 Start server with FlagScale:
 
