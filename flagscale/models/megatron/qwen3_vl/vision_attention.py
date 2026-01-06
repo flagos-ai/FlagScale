@@ -318,6 +318,7 @@ class VisionSelfAttention(Attention):
         sequence_len_offset: Optional[int] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
+        rotary_pos_cos_sin = None,
     ) -> Tuple[Tensor, Tensor]:
         """
         Perform a forward pass through the attention module.

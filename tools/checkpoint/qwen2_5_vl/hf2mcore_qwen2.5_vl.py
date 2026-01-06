@@ -439,7 +439,7 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
     assert n_params == copied_numel
 
     # 3. llm [just Qwen2]
-    hfllm = hfmodel.model
+    hfllm = hfmodel.language_model
     mgllm = mgmodel.language_model
     copied_numel = 0
     copied_numel += safe_copy(hfllm.embed_tokens.weight, mgllm.embedding.word_embeddings.weight)
