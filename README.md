@@ -7,7 +7,7 @@
 
 ## Overview
 
-FlagCX is part of [FlagOS](https://flagos.io/), a unified, open-source AI system software stack that
+FlagScale is part of [FlagOS](https://flagos.io/), a unified, open-source AI system software stack that
 aims to foster an open technology ecosystem by seamlessly integrating various models, systems and chips.
 By "develop once, migrate across various chips", FlagOS aims to unlock the full computational potential
 of hardware, break down the barriers between different chip software stacks, and effectively reduce
