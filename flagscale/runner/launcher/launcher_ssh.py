@@ -212,8 +212,8 @@ class SshLauncher(LauncherBase):
             node_specific_config = {}
             if device_type is not None:
                 node_specific_config = (
-                    self.device_type_specific.get(device_type, {})
-                    if self.device_type_specific
+                    self.backend.device_type_specific.get(device_type, {})
+                    if self.backend.device_type_specific
                     else {}
                 )
             node_specific_config.update(
