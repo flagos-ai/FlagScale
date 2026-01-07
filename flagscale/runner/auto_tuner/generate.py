@@ -125,20 +125,18 @@ class ServeGenerator(Generator):
         serve_config = config.serve
         model_config = None
         for item in serve_config:
-            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            if item.get("serve_id", None) is not None:
                 model_config = item
                 break
             else:
                 raise ValueError(
-                    f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve_config}"
+                    f"No 'serve_id' configuration found in task config: {serve_config}"
                 )
 
         if not model_config.get("resources", None):
             model_config["resources"] = {}
         if model_config is None:
-            raise ValueError(
-                f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve_config}"
-            )
+            raise ValueError(f"No valid configuration found in task config: {serve_config}")
 
         backend_value = config.get('experiment', {}).get('task', {}).get('backend')
         if backend_value is None:

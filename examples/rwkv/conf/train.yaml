@@ -8,7 +8,7 @@ experiment:
   task:
     type: train
     backend: megatron
-    entrypoint: ./flagscale/train/train_rwkv.py
+    entrypoint: ./flagscale/train/megatron/train_rwkv.py
   # cmds:
   #   before_start: source /root/miniconda3/bin/activate flagscale
   runner:

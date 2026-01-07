@@ -49,7 +49,7 @@ def _reset_serve_port(config):
         config.experiment.runner.deploy.port = cli_args_port
 
     for item in config.serve:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             if deploy_port:
                 model_port = deploy_port
                 item.engine_args["port"] = deploy_port
@@ -88,7 +88,7 @@ def _update_config_serve(config: DictConfig):
 
     if cli_model_path or cli_engine_args:
         for item in config.serve:
-            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            if item.get("serve_id", None) is not None:
                 if cli_model_path:
                     item.engine_args["model"] = cli_model_path
                 if cli_engine_args:
@@ -275,13 +275,11 @@ class SglangBackend(BackendBase):
                         logger.info(f"generate run script args, config: {config}")
                         args = None
                         for item in config.get("serve", []):
-                            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+                            if item.get("serve_id", None) is not None:
                                 args = item
                                 break
                         if args is None:
-                            raise ValueError(
-                                "No 'sglang_model' configuration found in task config."
-                            )
+                            raise ValueError("No sglang model configuration found in task config.")
 
                         common_args = copy.deepcopy(args.get("engine_args", {}))
                         sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
@@ -321,7 +319,7 @@ class SglangBackend(BackendBase):
                             sglang_args_flatten = flatten_dict_to_args(sglang_args, ["model"])
                             command.extend(sglang_args_flatten)
                         else:
-                            raise ValueError("Either model should be specified in sglang_model.")
+                            raise ValueError("Either model should be specified in sglang model.")
 
                         command.extend(["--node-rank", str(index)])
 
@@ -358,7 +356,6 @@ class SglangBackend(BackendBase):
                         if docker_name:
                             ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
 
-                        logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
                         f.write(f"{ssh_cmd}\n")
                     continue
 

@@ -35,9 +35,8 @@ def get_hf_model(dtype, model_path=None, config=None):
 
 
 def get_mg_model(dtype, pre_process, post_process):
-    from gpt_builders import gpt_builder
-
-    from pretrain_gpt import model_provider
+    from flagscale.train.megatron.gpt_builders import gpt_builder
+    from flagscale.train.megatron.model_provider import model_provider
 
     s_time = time.time()
     model = model_provider(gpt_builder, pre_process, post_process).to(dtype)

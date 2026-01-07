@@ -4,18 +4,11 @@ import socket
 import subprocess
 import sys
 
-from flagscale.runner.utils import get_free_port, is_ip_addr
-from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
-
-# Compatible with both command-line execution and source code execution.
-try:
-    import flag_scale
-except Exception as e:
-    pass
-
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale import serve
+from flagscale.runner.utils import get_free_port, is_ip_addr
+from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
 from flagscale.utils import flatten_dict_to_args
 
 
@@ -38,7 +31,7 @@ def vllm_serve(args):
         other_args = flatten_dict_to_args(vllm_args, ["model"])
         command.extend(other_args)
     else:
-        raise ValueError("Either model must be specified in vllm_model.")
+        raise ValueError("Either model must be specified in model config.")
 
     # Start the subprocess
     logger.info(f"[Serve]: Starting vllm serve with command: {' '.join(command)}")
@@ -67,7 +60,7 @@ def llama_cpp_serve(args):
         llama_cpp_args_flatten = flatten_dict_to_args(llama_cpp_args, ["model"])
         command.extend(llama_cpp_args_flatten)
     else:
-        raise ValueError("Either model must be specified in vllm_model.")
+        raise ValueError("Either model must be specified in model config.")
 
     # Start the subprocess
     logger.info(f"[Serve]: Starting llama-cpp serve with command: {' '.join(command)}")
@@ -105,7 +98,7 @@ def sglang_serve(args):
         sglang_args_flatten = flatten_dict_to_args(sglang_args, ["model"])
         command.extend(sglang_args_flatten)
     else:
-        raise ValueError("Either model must be specified in sglang_model.")
+        raise ValueError("Either model must be specified in sglang model.")
 
     # set defualt args align with sglang.launch_server
     command.extend(["--node-rank", str(0)])
@@ -141,14 +134,12 @@ def main():
 
     model_config = None
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             model_config = item
             break
 
     if model_config is None:
-        raise ValueError(
-            f"No 'vllm_model' or 'sglang_model' configuration found in task config: {serve.task_config}"
-        )
+        raise ValueError(f"No valid configuration found in task config: {serve.task_config}")
 
     backend_value = serve.task_config.get('experiment', {}).get('task', {}).get('backend')
     if backend_value is None:
@@ -157,14 +148,12 @@ def main():
         engine = backend_value
 
     if engine == "vllm":
-        if model_config.get("serve_id", None) != "vllm_model":
-            raise ValueError("serve_id in yaml config must be specified in vllm_model.")
         return_code = vllm_serve(model_config)
     elif engine == "llama_cpp":
         return_code = llama_cpp_serve(model_config)
     elif engine == "sglang":
-        if model_config.get("serve_id", None) != "sglang_model":
-            logger.warning("serve_id in yaml config should be specified in sglang_model")
+        if model_config.get("serve_id", None) is None:
+            logger.warning("serve_id in yaml config should be specified in sglang model")
         return_code = sglang_serve(model_config)
     else:
         raise ValueError(

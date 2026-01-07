@@ -5,7 +5,7 @@ vllm/ @zhaoyinglia @ceci3 @aoyulong
 megatron/ @heavyrain-lzy @aoyulong @zhaoyinglia
 megatron-energon/ @caozhou1995
 requirements/ @aoyulong
-docker/ @phoenixdong
+docker/ @aoyulong
 hardware/ @caozhou1995
 
 flagscale/auto_tuner @caozhou1995

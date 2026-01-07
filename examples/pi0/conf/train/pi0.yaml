@@ -1,6 +1,4 @@
 system:
-  # Whether to use HuggingFace Accelerator or manual DDP
-  use_accelerator: false
   seed: 42
   batch_size: 1
   train_steps: 100000
@@ -21,6 +19,7 @@ system:
   # Whether to shuffle the data
   shuffle: false
   grad_clip_norm: 1.0
+  use_amp: false
   # TODO: (yupu) The following configs will be implemented later
   tensor_model_parallel_size: 1
   pipeline_model_parallel_size: 1

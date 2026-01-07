@@ -4,7 +4,7 @@ from typing import Union
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-from flagscale.inference.inference_engine import InferenceEngine
+from flagscale.inference.core.inference_engine import InferenceEngine
 from flagscale.runner.utils import logger
 
 

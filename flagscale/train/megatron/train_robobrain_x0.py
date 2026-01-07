@@ -70,7 +70,7 @@ try:
 except ImportError:
     has_nvidia_modelopt = False
 
-from flagscale.train.train import pretrain
+from megatron.training.training import pretrain
 
 stimer = StragglerDetector()
 
@@ -94,7 +94,10 @@ from megatron.energon import (
 )
 from megatron.training.global_vars import get_tokenizer
 from megatron.training.tokenizer.tokenizer import build_tokenizer
-from tools.datasets.qwenvl.data.dataset_helpers import TaskEncoder, print_error_handler
+
+# from tools.datasets.qwenvl.data.dataset_helpers_action import TaskEncoder, print_error_handler
+# from tools.datasets.qwenvl.data.dataset_helpers_action_unified_plus_sub import TaskEncoder, print_error_handler
+from tools.datasets.vla.data.dataset_helpers_vlm import TaskEncoder, print_error_handler
 
 from flagscale.models.megatron.qwen2_5_vl.layer_specs import (
     get_gpt_layer_with_transformer_engine_spec,
@@ -178,6 +181,46 @@ def model_provider(
         freeze_vision_model=args.freeze_ViT,
         freeze_vision_projection=False,
     )
+    # ========== 打印模型embedding层信息 ==========
+    print_rank_0("=" * 50)
+    print_rank_0("Model Embedding Information:")
+    print_rank_0("=" * 50)
+
+    # 方法1: 直接查看模型结构中的embedding相关信息
+    try:
+        # 语言模型的embedding
+        if hasattr(model, 'language_model') and hasattr(model.language_model, 'embedding'):
+            lang_embedding = model.language_model.embedding
+            print_rank_0(
+                f"Language model embedding shape: {lang_embedding.word_embeddings.weight.shape}"
+            )
+            print_rank_0(f"Language vocab size: {args.padded_vocab_size}")
+            print_rank_0(f"Language hidden size: {config.hidden_size}")
+            print(f"Config vocab_size: {args.padded_vocab_size}")
+            print(
+                f"Actual embedding allocated: {model.language_model.embedding.word_embeddings.weight.shape[0]}"
+            )
+
+        # 视觉模型的embedding
+        if hasattr(model, 'vision_model') and hasattr(model.vision_model, 'embeddings'):
+            vision_embedding = model.vision_model.embeddings
+            print_rank_0(f"Vision model embedding type: {type(vision_embedding)}")
+            if hasattr(vision_embedding, 'patch_embedding'):
+                print_rank_0(
+                    f"Vision patch embedding shape: {vision_embedding.patch_embedding.weight.shape}"
+                )
+
+        # 位置编码信息
+        if hasattr(model, 'language_model') and hasattr(model.language_model, 'rotary_pos_emb'):
+            print_rank_0(f"Language model uses rotary position embedding")
+        elif hasattr(model, 'language_model') and hasattr(
+            model.language_model.embedding, 'position_embeddings'
+        ):
+            pos_emb = model.language_model.embedding.position_embeddings
+            print_rank_0(f"Language position embedding shape: {pos_emb.weight.shape}")
+
+    except Exception as e:
+        print_rank_0(f"Error accessing embedding layers: {e}")
 
     return model
 
@@ -591,6 +634,7 @@ def forward_step(data_iterator, model: Qwen2_5VLModel):
             video_input_mask,
         ) = get_batch(data_iterator)
     timers('batch-generator').stop()
+    # print(f"LZY imags: {imgs.shape}, content: {imgs.sum()}, {imgs}")
     vision_data = torch.cat([imgs, videos], dim=0)
     vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
     with stimer:
@@ -668,17 +712,17 @@ def datasets_provider(worker_config=None):
     return train_dataset, val_datasets_without_source_datasets, None
 
 
-def is_first_or_last_stage(pp_size, transformer_pipeline_model_parallel_size):
+def is_first_or_last_stage(pp_size, encoder_pipeline_model_parallel_size):
     """Check if the current pipeline parallel stage is the first or last stage."""
     if pp_size == 1:  # No pipeline parallelism.
         return True
 
     is_valid_rank = False
     pp_rank = get_pipeline_model_parallel_rank()
-    if transformer_pipeline_model_parallel_size == 0:
+    if encoder_pipeline_model_parallel_size == 0:
         # No separate pipeline stage for the vision model. Run the dataloader on the first and last pipeline stage.
         is_valid_rank = pp_rank in (0, pp_size - 1)
-    elif transformer_pipeline_model_parallel_size == 1:
+    elif encoder_pipeline_model_parallel_size == 1:
         # Separate pipeline stage for the vision model. Run the dataloader on the first vision and LM stage and last LM stage.
         is_valid_rank = pp_rank in (0, 1, pp_size - 1)
     else:
@@ -687,14 +731,14 @@ def is_first_or_last_stage(pp_size, transformer_pipeline_model_parallel_size):
     return is_valid_rank
 
 
-def is_dataloader_rank(transformer_pipeline_model_parallel_size):
+def is_dataloader_rank(encoder_pipeline_model_parallel_size):
     """Check if we should have the dataloader on this tensor and pipeline parallel rank."""
     # Run dataloader only on the first tensor parallel rank (will be broadcasted to others).
     is_first_rank = get_tensor_model_parallel_rank() == 0
 
     # NOTE(lizhiyu): when pp_size > 2
     # pp_size = get_pipeline_model_parallel_world_size()
-    # is_first_rank = is_first_rank and is_first_or_last_stage(pp_size, transformer_pipeline_model_parallel_size)
+    # is_first_rank = is_first_rank and is_first_or_last_stage(pp_size, encoder_pipeline_model_parallel_size)
 
     return is_first_rank
 
@@ -810,35 +854,35 @@ def add_multimodal_extra_args(parser):
         "--max-samples-per-sequence",
         type=int,
         default=2**31 - 1,
-        help="Max sequencial seqence samples in a slice",
+        help="max sequencial seqence samples in a slice",
     )
     group.add_argument(
         "--shuffle-buffer-size",
         type=int,
         default=0,
-        help="The buffer size to shuffle the samples in a seqence",
+        help="the buffer size to shuffle the samples in a seqence",
     )
     # learning rate
     group.add_argument(
         "--vision-ration",
         type=float,
         default=0.1,
-        help="The learning rate ration of vision(inlude merger) compared with llm",
+        help="the learning rate ration of vision(inlude merger) compared with llm",
     )
     group.add_argument(
         "--image-max-pixels",
         type=int,
         default=768 * 768,
-        help="The maximum pixels of a single image",
+        help="the maximum pixels of a single image",
     )
     group.add_argument(
-        "--image-min-pixels", type=int, default=32 * 32, help="The minimum pixels of a single image"
+        "--image-min-pixels", type=int, default=32 * 32, help="the minimum pixels of a single image"
     )
     group.add_argument(
         "--vision-recompute-layer-steps",
         type=int,
         default=0,
-        help="The recmoute layers for vision using uniform method. 0 is disable.",
+        help="the recmoute layers for vision using uniform method. 0 is disable.",
     )
 
     # just for checkpoint conversion

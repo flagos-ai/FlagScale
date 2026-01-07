@@ -12,7 +12,7 @@ experiment:
   task:
     type: train
     backend: robotics
-    entrypoint: flagscale/train/train_robobrain_x0.5_qwengroot.py
+    entrypoint: flagscale/train/megatron/train_robobrain_x0.5_qwengroot.py
   runner:
     per_node_task: false
     no_shared_fs: false

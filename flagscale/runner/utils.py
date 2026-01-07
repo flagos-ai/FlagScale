@@ -18,6 +18,7 @@ import aiohttp
 import numpy as np
 
 from omegaconf import DictConfig, OmegaConf
+from omegaconf.listconfig import ListConfig
 from tqdm.asyncio import tqdm
 
 from flagscale.logger import logger
@@ -34,6 +35,58 @@ class JobStatus(Enum):
 def log_and_raise_error(message):
     logger.error(message)
     raise ValueError(message)
+
+
+def validate_serve_config(config: DictConfig):
+    """Validate that config has serve field with correct structure.
+
+    Requirements:
+    - config must have 'serve' field
+    - config.serve must be ListConfig or list type
+    - Each element in the list must be a dict and contain 'serve_id' field
+
+    Args:
+        config: DictConfig object to validate
+
+    Raises:
+        ValueError: If config doesn't have 'serve' field or elements lack 'serve_id'
+        TypeError: If config.serve is not ListConfig/list or elements are not dicts
+    """
+    if not hasattr(config, "serve"):
+        logger.error(f"Config content:\n{OmegaConf.to_yaml(config)}")
+        raise ValueError("config must have 'serve' field")
+
+    serve_config = config.serve
+
+    # Check if serve_config is ListConfig or list type
+    if not isinstance(serve_config, (ListConfig, list)):
+        logger.error(
+            f"Config validation failed: config.serve must be ListConfig or list type, "
+            f"got {type(serve_config).__name__}"
+        )
+        logger.error(f"Config.serve content: {serve_config}")
+        raise TypeError(
+            f"config.serve must be ListConfig or list type, " f"got {type(serve_config).__name__}"
+        )
+
+    # Check each element is a dict and contains serve_id field
+    for idx, item in enumerate(serve_config):
+        if not isinstance(item, (dict, DictConfig)):
+            logger.error(f"Element at index {idx} content: {item}")
+            raise TypeError(
+                f"Element at index {idx} in serve list must be a dict or DictConfig, "
+                f"got {type(item).__name__}"
+            )
+
+        # Convert DictConfig to dict for checking keys
+        if isinstance(item, DictConfig):
+            item_dict = OmegaConf.to_container(item, resolve=False)
+        else:
+            item_dict = item
+
+        if "serve_id" not in item_dict:
+            logger.error(f"Element at index {idx} content: {item_dict}")
+            raise ValueError(f"Element at index {idx} in serve list must contain 'serve_id' field")
 
 
 def is_ray_master_running(
