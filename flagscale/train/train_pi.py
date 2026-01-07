@@ -472,7 +472,7 @@ def update_policy(
 
     autocast_context = torch.amp.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
     with autocast_context:
-        loss, output_dict = policy.forward(batch)
+        loss, _= policy.forward(batch)
     # TODO(rcadene): policy.unnormalize_outputs(out_dict)
 
     loss.backward()
@@ -512,7 +512,7 @@ def update_policy(
     train_metrics.lr = optimizer.param_groups[0]["lr"]
     train_metrics.update_s = time.perf_counter() - start_time
 
-    return train_metrics, output_dict
+    return train_metrics
 
 
 def main(config: argparse.Namespace):
@@ -720,7 +720,7 @@ def main(config: argparse.Namespace):
         batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
-        train_tracker, _ = update_policy(
+        train_tracker = update_policy(
             train_tracker,
             policy,
             batch,
