@@ -19,33 +19,46 @@ For a complete list of available configurations, please refer to the backend eng
 You can simply copy and modify the existing YAML files in the [examples](./examples)
 folder to get started.
 
-### Setup
-
-We recommend using the latest release of NGC's
-[PyTorch container](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch)
-for setup.
+## 🔧 Setup
+We recommend using the latest release of [NGC's PyTorch container](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch) for setup.
 
 1. Clone the repository:
+    ```sh
+    git clone https://github.com/flagos-ai/FlagScale.git
+    ```
 
-   ```shell
-   git clone https://github.com/flagos-ai/FlagScale.git
-   ```
+2. Install FlagScale requirements
+    ```sh
+    pip install . --verbose 
+    ```
 
-1. Install FlagScale requirements:
+3. Install backends 
 
-   ```shell
-   pip install . --verbose
-   ```
+- **Inference/Serving backend**
+    
+    vLLM-FL: 
+    ```sh
+    git clone https://github.com/flagos-ai/vllm-FL
+    cd vllm-FL
+    pip install -e .
+    ```
+    See more details in [vLLM-FL](https://github.com/flagos-ai/vllm-FL)
 
-1. Install backends:
+    If you need vLLM-plugin-FL, see details in [vLLM-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL)
 
-   If you want to run a *serving*/*inference* task, please install vLLM-FL
-   by following the instructions from the [vLLM-FL](https://github.com/flagos-ai/vllm-FL)
-   project.
 
-   If you want to run a *training* task, please install
-   `Megatron-LM-FL` by following the documentation from the
-   [Megatron-LM-FL](https://github.com/flagos-ai/Megatron-LM-FL) project.
+- **Traning backend**
+    Megatron-LM-FL: 
+    ```sh
+    git clone https://github.com/flagos-ai/Megatron-LM-FL
+    cd Megatron-LM-FL
+    pip install --no-build-isolation .[mlm,dev]
+
+    git clone https://github.com/NVIDIA/apex
+    cd apex
+    APEX_CPP_EXT=1 APEX_CUDA_EXT=1 pip install -v --no-build-isolation .
+    ```
+    See more details in [Megatron-LM-FL](https://github.com/flagos-ai/Megatron-LM-FL)
 
 ## Run a Task
 
@@ -55,121 +68,148 @@ Simply specify the configuration file to run the task with a single command.
 The runner will automatically load the configurations and execute the task.
 The following sections demonstrate how to run a distributed training task.
 
-### Training
+### Train
 
-In this sample scenario, we will run a training task using the
-[Megatron-LM backend](https://github.com/flagos-ai/Megatron-LM-FL).
-After having installed the `Megatron-LM-FL` project, follow the steps below:
+Require Megatron-LM-FL env
 
-1. Prepare the demo dataset:
+1. Prepare dataset demo and tokenizer:
 
-   We provide a small processed data ([bin](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin)
-   and [idx](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx))
-   from the [Pile](https://pile.eleuther.ai/) dataset.
+    - dataset
 
-   ```shell
-   mkdir -p /path/to/data && cd /path/to/data
-   wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx
-   wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin
-   ```
+        We provide a small processed data ([bin](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin) and [idx](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx)) from the [Pile](https://pile.eleuther.ai/) dataset.
+        ```sh
+        mkdir -p ./data && cd ./data
+        wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx
+        wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin
+        ```
 
-1. Edit the configuration:
+    - tokenizer
+        ```sh
+        mkdir -p ./qwentokenizer && cd ./qwentokenizer
+        wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/tokenizer_config.json" -O tokenizer_config.json
+        wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/qwen.tiktoken" -O qwen.tiktoken    
+        wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/qwen_generation_utils.py" -O qwen_generation_utils.py
+        wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/tokenization_qwen.py" -O tokenization_qwen.py
+        ```
 
-   Modify the `data_path` in the [sample configuration file](../examples/aquila/conf/train/7b.yaml)
-   file, as shown below:
+2. Edit config:
 
-   ```yaml
-   data:
-     data_path: /path/to/data  # modify data path here
-     split: 1
-     tokenizer:
-       legacy_tokenizer: true
-       tokenizer_type: AquilaTokenizerFS
-       vocab_file: ./examples/aquila/tokenizer/vocab.json
-       merge_file: ./examples/aquila/tokenizer/merges.txt
-       special_tokens_file: ./examples/aquila/tokenizer/special_tokens.txt
-       vocab_size: 100008
-   ```
+    Modify the data_path and tokenizer_path in ./examples/qwen3/conf/train/0_6b.yaml at line 81 and line 87
+    ```yaml
+    data:
+        data_path: ./data/pile_wikipedia_demo    # modify data_path here
+        split: 1
+        no_mmap_bin_files: true
+        tokenizer:
+            legacy_tokenizer: true
+            tokenizer_type: QwenTokenizerFS
+            tokenizer_path: ./qwentokenizer   # modify tokenizer_path here
+            vocab_size: 151936
+            make_vocab_size_divisible_by: 64
+    ```
 
-1. Start the distributed training job:
+    Modify config in ./examples/qwen3/conf/train.yaml at line 3
+    ```yaml
+    defaults:
+      - _self_
+      - train: 0_6b  # modify: train value must match its corresponding config file name
+    ```
 
-   ```shell
-   python run.py --config-path ./examples/aquila/conf --config-name train action=run
-   ```
 
-1. Stop the distributed training job:
+3. Start the distributed training job:
+    ```sh
+    python run.py --config-path ./examples/qwen3/conf --config-name train action=run
+    ```
 
-   ```shell
-   python run.py --config-path ./examples/aquila/conf --config-name train action=stop
-   ```
+4. Stop the distributed training job:
+    ```sh
+    python run.py --config-path ./examples/qwen3/conf --config-name train action=stop
+    ```
+
 
 ### Inference
 
-In this section, we run an *inference* task using the [vLLM backend](https://github.com/flagos-ai/vllm-FL).
-After having installed the vLLM-FL backend, follow the steps below:
+Require vLLM-FL env
 
-1. Prepare the model:
+1. Prepare model
+    ```sh
+    modelscope download --model Qwen/Qwen3-0.6B --local_dir ./Qwen3-0.6B
+    ```
 
-   ```shell
-   modelscope download --model BAAI/Aquila-7B README.md --local_dir ./
-   ```
+2. Edit config
 
-1. Edit the configuration:
+    Modify model path in ./examples/qwen3/conf/inference/0_6b.yaml at line 2
+    ```yaml
+    llm:
+        model: ./Qwen3-0.6B         # modify: Set model directory
+        trust_remote_code: true
+        tensor_parallel_size: 1
+        pipeline_parallel_size: 1
+        gpu_memory_utilization: 0.9
+        seed: 1234
+    ```
 
-   Change the `llm.model` and the `tokernizer` value in the
-   [sample configuration file](../examples/aquila/conf/inference/7b.yaml),
-   as shown below:
+    Modify config in ./examples/qwen3/conf/inference_fl.yaml at line 3
+    ```yaml
+    defaults:
+      - _self_
+      - inference: 0_6b    # modify: Inference value must match its corresponding config file name
+    ```
 
-   ```yaml
-   llm:
-     model: /path/to/the/model      # e.g. /workspace/models/BAAI/Aquila-7B
-     tokenizer: /path/to/the/model  # e.g. /workspace/models/BAAI/Aquila-7B
-     trust_remote_code: true
-     tensor_parallel_size: 1
-     pipeline_parallel_size: 1
-     gpu_memory_utilization: 0.5
-     seed: 1234
-   ```
+3. Start inference:
+    ```sh
+    python run.py --config-path ./examples/qwen3/conf --config-name inference_fl action=run
+    ```
 
-1. Start the inference task:
+### Serve
+1. Prepare model
+    ```sh
+    modelscope download --model Qwen/Qwen3-0.6B --local_dir ./Qwen3-0.6B
+    ```
 
-   ```shell
-   python run.py --config-path ./examples/aquila/conf --config-name inference action=run
-   ```
+2. Edit Config
 
-### Serving
+    Modify model path in ./examples/qwen3/conf/serve/0_6b.yaml at line 3
+    ```yaml
+    - serve_id: vllm_model
+      engine_args:
+        model: ./Qwen3-0.6B          # modify: Set model directory 
+        host: 0.0.0.0
+        max_model_len: 4096
+        max_num_seqs: 4
+        uvicorn_log_level: warning
+        port: 30000                  # A port available in your env, for example: 30000
+    ```
 
-This section demonstrates how to start a *serving* task.
+    Modify config in ./examples/qwen3/conf/serve.yaml at line 3
+    ```yaml
+    defaults:
+      - _self_
+      - serve: 0_6b         # modify: Serve value must match its corresponding config file name
+    experiment:
+      exp_name: qwen3-0.6b  # modify as needed for test clarity
+      exp_dir: outputs/${experiment.exp_name}
+      task:
+        type: serve
+        backend: vllm
+      runner:
+        hostfile: null
+        deploy:
+        use_fs_serve: false
+      envs:
+        CUDA_VISIBLE_DEVICES: 0
+        CUDA_DEVICE_MAX_CONNECTIONS: 1
+    ```
 
-1. Download the tokenizer:
+3. Start the server:
+    ```sh
+    python run.py --config-path ./examples/qwen3/conf --config-name serve action=run
+    ```
 
-   ```shell
-   mkdir -p /models/physical-intelligence/
-   cd /models/physical-intelligence/
-   git lfs install
-   git clone https://huggingface.co/physical-intelligence/fast
-   ```
-
-1. Edit the configuration:
-
-   Edit the [sample configuration](../examples/robobrain_x0/conf/serve/robobrain_x0.yaml)
-   by changing the following three fields under `engine_args`:
-
-   - set `model_sub_task` to model path, e.g. `/models/BAAI/RoboBrain-X0-Preview`;
-   - set `port` to a port that is available in your environment, e.g. `5001`;
-   - set `tokenizer_path` to the tokernizer path, e.g. `/models/physical-intelligence/fast`.
-
-1. Start the server:
-
-   ```shell
-   python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=run
-   ```
-
-1. To stop the server, run
-
-   ```shell
-   python run.py --config-path ./examples/robobrain_x0/conf --config-name serve action=stop
-   ```
+4. Stop the server:
+    ```sh
+    python run.py --config-path ./examples/qwen3/conf --config-name serve action=stop
+    ```
 
 
 ### Serving DeepSeek-R1 <a name="deepseek-r1-serving"></a>
@@ -195,14 +235,14 @@ you can easily serve the model using the `flagscale serve` command.
    > When a task spans more than one nodes, a [hostfile.txt](./examples/deepseek/conf/hostfile.txt)
    > is required. Its path should be set in the `serve.yaml` configuration file.
 
-1. Install FlagScale CLI:
+2. Install FlagScale CLI:
 
    ```shell
    cd FlagScale
    pip install . --verbose --no-build-isolation
    ```
 
-1. Start serving:
+3. Start serving:
 
    ```shell
    flagscale serve deepseek_r1
