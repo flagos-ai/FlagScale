@@ -53,7 +53,7 @@ try:
 except ImportError:
     has_nvidia_modelopt = False
 
-from flagscale.train.train import pretrain
+from megatron.training.training import pretrain
 stimer = StragglerDetector()
 
 #### especially for qwen2.5-vl ####

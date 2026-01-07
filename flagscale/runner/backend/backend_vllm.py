@@ -4,7 +4,23 @@ import os
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
-from flagscale.runner.utils import flatten_dict_to_args, get_free_port, logger, parse_hostfile
+from flagscale.runner.utils import (
+    ResourceManager,
+    flatten_dict_to_args,
+    get_free_port,
+    logger,
+    parse_hostfile,
+)
+
+
+def _get_multiple_free_ports(num=1, exclude_ports=[]):
+    allocated_ports = []
+    for i in range(num):
+        port = get_free_port()
+        while port in allocated_ports or port in exclude_ports:
+            port = get_free_port()
+        allocated_ports.append(port)
+    return allocated_ports
 
 
 def _get_args_vllm(config: DictConfig):
@@ -46,14 +62,14 @@ def _get_serve_engine(config):
     return engine
 
 
-def _get_serve_engine_args(config, model="vllm_model"):
+def _get_serve_engine_args(config, backend="vllm"):
     serve_config = config.get("serve", [])
     if not serve_config:
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
     engine_args = {}
 
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             engine_args = item.get("engine_args", {})
             break
     if not engine_args:
@@ -125,7 +141,7 @@ def _reset_serve_port(config):
         config.experiment.runner.deploy.port = cli_args_port
 
     for item in config.serve:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             if deploy_port:
                 model_port = deploy_port
                 item.engine_args["port"] = deploy_port
@@ -164,7 +180,7 @@ def _update_config_serve(config: DictConfig):
 
     if cli_model_path or cli_engine_args:
         for item in config.serve:
-            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            if item.get("serve_id", None) is not None:
                 if cli_model_path:
                     item.engine_args["model"] = cli_model_path
                 if cli_engine_args:
@@ -661,7 +677,6 @@ class VllmBackend(BackendBase):
                     if node_cmd:
                         f.write(f"{node_cmd}\n")
 
-                logger.info(f"in _generate_run_script_serve, write cmd: {cmd}")
                 f.write(f"mkdir -p {logging_config.log_dir}\n")
                 f.write(f"mkdir -p {logging_config.pids_dir}\n")
                 f.write(f"\n")

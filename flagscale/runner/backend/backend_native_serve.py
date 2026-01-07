@@ -47,7 +47,7 @@ def _reset_serve_port(config):
         config.experiment.runner.deploy.port = cli_args_port
 
     for item in config.serve:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             if deploy_port:
                 model_port = deploy_port
                 item.engine_args["port"] = deploy_port
@@ -86,7 +86,7 @@ def _update_config_serve(config: DictConfig):
 
     if cli_model_path or cli_engine_args:
         for item in config.serve:
-            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            if item.get("serve_id", None) is not None:
                 if cli_model_path:
                     item.engine_args["model"] = cli_model_path
                 if cli_engine_args:

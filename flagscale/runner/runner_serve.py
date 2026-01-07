@@ -87,7 +87,7 @@ def _reset_serve_port(config):
         config.experiment.runner.deploy.port = cli_args_port
 
     for item in config.serve:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             if deploy_port:
                 model_port = deploy_port
                 item.engine_args["port"] = deploy_port
@@ -111,14 +111,14 @@ def _get_inference_engine(config):
     return engine
 
 
-def _get_engine_args(config, model="vllm_model"):
+def _get_engine_args(config, backend="vllm"):
     serve_config = config.get("serve", [])
     if not serve_config:
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
     engine_args = {}
 
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             engine_args = item.get("engine_args", {})
             break
     if not engine_args:
@@ -127,26 +127,26 @@ def _get_engine_args(config, model="vllm_model"):
     return engine_args
 
 
-def _get_profile_args(config, model="vllm_model"):
+def _get_profile_args(config, backend="vllm"):
     serve_config = config.get("serve", [])
     if not serve_config:
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
 
     profile_args = {}
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             profile_args = item.get("profile", {})
             break
     return profile_args
 
 
-def _update_auto_engine_args(config, model="vllm_model", new_engine_args={}):
+def _update_auto_engine_args(config, backend="vllm", new_engine_args={}):
     serve_config = config.get("serve", [])
     if not serve_config:
         raise ValueError(f"No 'serve' configuration found in task config: {serve_config}")
     engine_args = {}
     for item in serve_config:
-        if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+        if item.get("serve_id", None) is not None:
             engine_args = item.get("engine_args", {})
 
             if new_engine_args.get("tensor_parallel_size", None):
@@ -200,7 +200,7 @@ def _update_config_serve(config: DictConfig):
 
     if cli_model_path or cli_engine_args:
         for item in config.serve:
-            if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+            if item.get("serve_id", None) is not None:
                 if cli_model_path:
                     item.engine_args["model"] = cli_model_path
                 if cli_engine_args:
@@ -562,12 +562,12 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                             logger.info(f"generate run script args, config: {config}")
                             args = None
                             for item in config.get("serve", []):
-                                if item.get("serve_id", None) in ("vllm_model", "sglang_model"):
+                                if item.get("serve_id", None) is not None:
                                     args = item
                                     break
                             if args is None:
                                 raise ValueError(
-                                    f"No 'sglang_model' configuration found in task config: {serve.task_config}"
+                                    f"No sglang model configuration found in task config: {config}"
                                 )
                             common_args = copy.deepcopy(args.get("engine_args", {}))
                             sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
@@ -603,7 +603,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                                 command.extend(sglang_args_flatten)
                             else:
                                 raise ValueError(
-                                    "Either model should be specified in sglang_model."
+                                    "Either model should be specified in sglang model."
                                 )
 
                             command.extend(["--node-rank", str(index)])
@@ -634,7 +634,6 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                             ssh_cmd = f'ssh -n -p {ssh_port} {ip} "{node_cmd}"'
                             if docker_name:
                                 ssh_cmd = f"ssh -n -p {ssh_port} {ip} \"docker exec {docker_name} /bin/bash -c '{node_cmd}'\""
-                            logger.info(f"in _generate_run_script_serve, sglang ssh_cmd: {ssh_cmd}")
                             f.write(f"{ssh_cmd}\n")
                         continue
 
@@ -715,7 +714,6 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
             if node_cmd:
                 f.write(f"{node_cmd}\n")
 
-        logger.info(f"in _generate_run_script_serve, write cmd: {cmd}")
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
         f.write(f"\n")

@@ -22,11 +22,6 @@ import zmq
 from quart import Quart, make_response, request
 from transformers import AutoTokenizer
 
-try:
-    import flag_scale
-except Exception as e:
-    pass
-
 from flagscale import serve
 from flagscale.logger import logger
 from flagscale.utils import flatten_dict_to_args

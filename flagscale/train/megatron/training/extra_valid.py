@@ -232,7 +232,7 @@ def extra_evaluate_and_print_results(
 
     wandb_writer = get_wandb_writer()
 
-    from flagscale.train.train import evaluate  # To avoid the circular import
+    from megatron.training.training import evaluate  # To avoid the circular import
 
     total_loss_dict, collected_non_loss_data, timelimit = evaluate(
         forward_step_func,
