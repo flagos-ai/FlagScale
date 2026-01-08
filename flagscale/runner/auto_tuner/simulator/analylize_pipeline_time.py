@@ -2,7 +2,9 @@ import os
 import re
 import subprocess
 import time
+
 from collections import defaultdict
+
 # from megatron.training import get_args
 
 
@@ -120,18 +122,21 @@ import random
 
 LAYER_RE = re.compile(r"decoder\.layers\.(\d+)\.(.+)")
 
+
 def extract_stage_ops_from_raw_log(log_text: str):
-    layers = defaultdict(lambda: {
-        "has_attention": False,
-        "has_mlp": False,
-        "has_qkv": False,
-        "has_proj": False,
-        "has_fc1": False,
-        "has_fc2": False,
-    })
+    layers = defaultdict(
+        lambda: {
+            "has_attention": False,
+            "has_mlp": False,
+            "has_qkv": False,
+            "has_proj": False,
+            "has_fc1": False,
+            "has_fc2": False,
+        }
+    )
 
     for raw_line in log_text.splitlines():
-        line = raw_line.strip()   
+        line = raw_line.strip()
 
         if "decoder.layers." not in line:
             continue
@@ -163,6 +168,7 @@ def extract_stage_ops_from_raw_log(log_text: str):
 
     return layers
 
+
 def tp_collectives_per_stage(layers, sequence_parallel=False):
     total = 0
     per_layer = {}
@@ -178,11 +184,8 @@ def tp_collectives_per_stage(layers, sequence_parallel=False):
 
     return total, per_layer
 
-def tp_collectives_per_layer(
-    has_attention=True,
-    has_mlp=True,
-    sequence_parallel=False
-):
+
+def tp_collectives_per_layer(has_attention=True, has_mlp=True, sequence_parallel=False):
     cnt = 0
     if has_attention:
         cnt += 1  # qkv backward
@@ -194,25 +197,18 @@ def tp_collectives_per_layer(
         cnt += 4  # ln fwd/bwd rs + ag
     return cnt
 
+
 def ring_allreduce_time(
-    n_bytes,
-    N_ranks,
-    N_nodes,
-    alpha_base,
-    alpha_intra,
-    alpha_inter,
-    hops,
-    alpha_switch,
-    beta,
+    n_bytes, N_ranks, N_nodes, alpha_base, alpha_intra, alpha_inter, hops, alpha_switch, beta
 ):
-    alpha_hw = (
-        2 * (N_ranks - N_nodes) * alpha_intra
-        + 2 * (N_nodes - 1) * (alpha_inter * hops * alpha_switch)
+    alpha_hw = 2 * (N_ranks - N_nodes) * alpha_intra + 2 * (N_nodes - 1) * (
+        alpha_inter * hops * alpha_switch
     )
 
     bw_term = 2 * (N_ranks - 1) / N_ranks * n_bytes * beta
 
     return alpha_base + alpha_hw + bw_term
+
 
 def stage_has_tp_from_process_mesh(process_mesh):
     assert len(process_mesh) % 5 == 0
@@ -221,7 +217,7 @@ def stage_has_tp_from_process_mesh(process_mesh):
     stage_id = 0
 
     for i in range(0, len(process_mesh), 5):
-        device = process_mesh[i:i+5]
+        device = process_mesh[i : i + 5]
         tp = device[0]
         pp = device[4]
 
@@ -243,10 +239,10 @@ def simulator(
 ):
 
     # os.environ["PYTHONPATH"] = "/share/project/heyongzhe/FlagScale/megatron:/share/project/heyongzhe/FlagScale"
-    #os.environ["PYTHONPATH"] = (
+    # os.environ["PYTHONPATH"] = (
     #    "/workspace/single_process_simulator_nd/FlagScale:"
     #    "/workspace/single_process_simulator_nd/FlagScale/third_party/Megatron-LM"
-    #)
+    # )
     os.environ["ENABLE_SIMULATOR"] = "1"
     os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
@@ -311,31 +307,31 @@ def simulator(
     s_out = extract_stage_ops_from_raw_log(output)
     reduce_op_cnt = tp_collectives_per_stage(s_out)[0]
 
-    
     n_bytes = 16.7
-    n_rank  = 2
+    n_rank = 2
     n_nodes = 1
     alpha_base = 5e-6
     alpha_intra = 1e-6
     alpha_inter = 3e-6
     hops = 1 if n_nodes > 1 else 0
     alpha_switch = 1.2
-    beta   = 1 / (25  * 1024**3)
-    
-    time = ring_allreduce_time(n_bytes, n_rank, n_nodes, alpha_base, alpha_intra, alpha_inter, hops, alpha_switch, beta)
-    
+    beta = 1 / (25 * 1024**3)
+
+    time = ring_allreduce_time(
+        n_bytes, n_rank, n_nodes, alpha_base, alpha_intra, alpha_inter, hops, alpha_switch, beta
+    )
+
     fw_cm_time = time * reduce_op_cnt * 0.33
     bw_cm_time = time * reduce_op_cnt * 0.66
     stp = stage_has_tp_from_process_mesh(process_mesh)
-
 
     if match:
         fwd_time = float(match.group(1))
         bwd_time = float(match.group(2))
         # comm_time = float(match.group(3))
         comm_time = estimate_comm_time_between_stages(1, 2048, 4096)
-        if stp[stage]: 
-            fwd_time += fw_cm_time 
+        if stp[stage]:
+            fwd_time += fw_cm_time
             bwd_time += bw_cm_time
         print("forward:", fwd_time)
         print("backward:", bwd_time)

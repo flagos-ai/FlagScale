@@ -8,8 +8,8 @@ from itertools import combinations, product
 import analylize_pipeline_time
 
 # from itertools import product
-#import flagscale.train.theoretical_memory_usage as mem_usg
-import  flagscale.train.megatron.training.theoretical_memory_usage as mem_usg
+# import flagscale.train.theoretical_memory_usage as mem_usg
+import flagscale.train.megatron.training.theoretical_memory_usage as mem_usg
 
 BYTES_OF_GB = 10**9
 
@@ -399,7 +399,7 @@ if __name__ == "__main__":
     # hetero_configs = []
 
     # generate all possible and legal mesh configs, each element of hetero_configs is a mesh list
-    
+
     gen_hetero_configs(
         device_type_list=device_type_list,
         device_num_list=device_num_list,
@@ -409,7 +409,7 @@ if __name__ == "__main__":
         # num_micro_batches=num_micro_batches,
         # hetero_configs=hetero_configs
     )
-    
+
     # assert False
     # simulation
     file_path = "hetero_configs.json"
@@ -419,7 +419,7 @@ if __name__ == "__main__":
         print(hetero_config)
         pp_cost = hetero_config['simulated_time'] = analylize_pipeline_time.analyze_pp_time(
             # pp_cost = hetero_config.simulated_time = analylize_pipeline_time.analyze_pp_time(
-            #scheme="vpp",
+            # scheme="vpp",
             scheme="1F1B",
             num_micro_batches=num_micro_batches,
             process_mesh=hetero_config['mesh'],
