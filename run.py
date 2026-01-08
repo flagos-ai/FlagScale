@@ -68,7 +68,10 @@ def get_runner(config: DictConfig, task_type: str):
         if task_type == "train":
             return CloudTrainRunner(config)
         elif task_type == "serve":
-            return CloudServeRunner(config)
+            if FLAGSCALE_USE_V1:
+                return Runner(config)
+            else:
+                return CloudServeRunner(config)
         else:
             raise NotImplementedError(f"Task type '{task_type}' is not supported by cloud runner")
 
