@@ -27,6 +27,7 @@ establish itself as an indispensable toolkit for optimizing both the speed and e
 
 - [Project change log](./docs/CHANGELOG.md)
 - [Getting started](./docs/getting-started.md)
+- [FlagOS-Robo related](./docs/robo.md)
 
 ## Support List
 
