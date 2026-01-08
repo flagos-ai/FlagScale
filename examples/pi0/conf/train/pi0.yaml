@@ -20,20 +20,13 @@ system:
   shuffle: false
   grad_clip_norm: 1.0
   use_amp: false
-  # TODO: (yupu) The following configs will be implemented later
-  tensor_model_parallel_size: 1
-  pipeline_model_parallel_size: 1
-  context_parallel_size: 1
-  wandb_enabled: false
-  project_name: ${experiment.exp_name}
-  exp_name: ${experiment.exp_name}
 
 model:
   model_variant: pi0
   # Path to the pretrained pi0_base model checkpoint
-  checkpoint_dir: path-to-your-pi0_base-model
+  checkpoint_dir: /workspace/models/lerobot/pi0_base
   # Path to paligemma tokenizer
-  tokenizer_path: path-to-your-paligemma-3b-pt-224-tokenizer
+  tokenizer_path: /workspace/models/google/paligemma-3b-pt-224
   tokenizer_max_length: 48
   action_steps: 50
   # TODO(yupu): Support resuming from checkpoint
@@ -42,7 +35,7 @@ data:
   tolerance_s: 0.0001
   use_imagenet_stats: true
   # Path to the training data
-  data_path: path-to-your-dataset
+  data_path: /workspace/datasets/lerobot/aloha_mobile_cabinet
   # To match the input features naming from the dataset to the policy config
   # For example, for the aloha_mobile_cabinet dataset, the rename_map is:
   # rename_map: '{\"observation.images.cam_high\": \"observation.images.base_0_rgb\", \"observation.images.cam_left_wrist\": \"observation.images.left_wrist_0_rgb\", \"observation.images.cam_right_wrist\": \"observation.images.right_wrist_0_rgb\"}'
