@@ -1427,7 +1427,14 @@ def setup_model_and_optimizer(
     config = None
     para_ctx = get_parallel_context()
     if para_ctx is not None:
-        config, config_overrides = para_ctx.get_optimizer_config()
+        #config, config_overrides = para_ctx.get_optimizer_config()
+        optimizer_cfg = para_ctx.get_optimizer_config()
+
+        if isinstance(optimizer_cfg, tuple):
+            config, config_overrides = optimizer_cfg
+        else:
+            config = optimizer_cfg
+            config_overrides = None
 
     if config is None:
         config, config_overrides = get_megatron_optimizer_config(args)
@@ -1595,6 +1602,9 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                     optim_instance._copy_main_params_to_param_buffer()
 
         # Forward pass.
+        # =================== Forward + Backward timing ===================
+        torch.cuda.synchronize()
+        t_fwd_start = time.time()
         losses_reduced = forward_backward_func(
             forward_step_func=forward_step_func,
             data_iterator=data_iterator,
@@ -1606,6 +1616,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             forward_only=False,
             adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
         )
+        torch.cuda.synchronize()
+        t_fwd_end = time.time()
+        fwd_time = t_fwd_end - t_fwd_start
+        bwd_time = fwd_time * 2.0
+        print(f"[simulatior output] forward: {fwd_time:.2f}, backward: {bwd_time:.2f}", flush=True)
+        # ================================================================
     should_checkpoint, should_exit, exit_code = rerun_state_machine.should_checkpoint_and_exit()
     if should_exit:
         return {}, True, should_checkpoint, should_exit, exit_code, None, None
@@ -2663,7 +2679,7 @@ def train(
                         model, optimizer, iteration, ref_state_dict,
                     )
                 train_data_iterator = buffered_rollouts
-
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
         ft_integration.on_training_step_start()
         (
             loss_dict,
@@ -3280,6 +3296,9 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
     args.do_test = getattr(args, "do_test", False) or flags[2].item()
     if getattr(args, 'perform_rl_step', False):
         args.to_test = False
+        
+    if args.enable_simulator:
+        args.do_train = 1
 
     return train_dataloader, valid_dataloaders, test_dataloader
 
