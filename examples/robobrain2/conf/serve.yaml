@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - serve: 32b
+  - serve: 3b
 experiment:
   exp_name: robobrain2_32b
   exp_dir: outputs/${experiment.exp_name}
@@ -13,6 +13,7 @@ experiment:
     ssh_port: 22
   envs:
     CUDA_DEVICE_MAX_CONNECTIONS: 1
+    CUDA_VISIBLE_DEVICES: 2,3,4,5
 action: run
 hydra:
   run:
