@@ -36,10 +36,11 @@
 
     > **⚠️ Attention**: The robo environment depends on transformers (v4.53.0). Higher version will cause problem on image pre-processing.
 
-## Install vLLM
+## Install vLLM and Transformers
 
 ```sh
 pip install vllm
+pip install transformers==4.57.0
 ```
 
 ## Download Model
@@ -47,9 +48,9 @@ pip install vllm
 ```sh
 git lfs install
 
-mkdir -p /tmp/models/BAAI/
-cd /tmp/models/BAAI/
-git clone https://huggingface.co/BAAI/RoboBrain2.0-3B
+mkdir -p /tmp/models/Qwen/
+cd /tmp/models/Qwen/
+git clone https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct
 ```
 
 If you don't have access to the international internet, download from modelscope.
@@ -57,7 +58,7 @@ If you don't have access to the international internet, download from modelscope
 ```sh
 mkdir -p /tmp/models/
 cd /tmp/models/
-modelscope download --model BAAI/RoboBrain2.0-3B --local_dir BAAI/RoboBrain2.0-3B
+modelscope download --model Qwen/Qwen3-VL-4B-Instruct --local_dir Qwen/Qwen3-VL-4B-Instruct
 ```
 
 ## Inference
@@ -66,25 +67,25 @@ modelscope download --model BAAI/RoboBrain2.0-3B --local_dir BAAI/RoboBrain2.0-3
 
 ```sh
 cd FlagScale/
-vim examples/robobrain2/conf/inference/3b.yaml
+vim examples/robobrain2_5/conf/inference/4b.yaml
 ```
 
 Change 2 fields:
 
-- llm.model: change to "/tmp/models/BAAI/RoboBrain2.0-3B".
+- llm.model: change to "/tmp/models/Qwen/Qwen3-VL-4B-Instruct".
 - generate.prompts: change to your customized input text.
 
 ### Run Inference
 
 ```sh
-python run.py --config-path ./examples/robobrain2/conf --config-name inference action=run
+python run.py --config-path ./examples/robobrain2_5/conf --config-name inference action=run
 ```
 
 ### Check Logs
 
 ```sh
 cd FlagScale/
-tail -f  outputs/robobrain2.0_3b/inference_logs/host_0_localhost.output
+tail -f outputs/robobrain2.5_4b/serve_logs/host_0_localhost.output
 ```
 
 ## Serving
@@ -93,18 +94,18 @@ tail -f  outputs/robobrain2.0_3b/inference_logs/host_0_localhost.output
 
 ```sh
 cd FlagScale/
-vim examples/robobrain2/conf/serve/3b.yaml
+vim examples/robobrain2_5/conf/serve/3b.yaml
 ```
 
 Change 1 fields:
 
-- engine_args.model: change to "/tmp/models/BAAI/RoboBrain2.0-3B"
+- engine_args.model: change to "/tmp/models/Qwen/Qwen3-VL-4B-Instruct".
 
 ## Run Serving
 
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/robobrain2/conf --config-name serve action=run
+python run.py --config-path ./examples/robobrain2_5/conf --config-name serve action=run
 ```
 
 ## Test Server with CURL
@@ -142,4 +143,4 @@ curl http://localhost:9010/v1/chat/completions \
 
 ## Training
 
-Refer to [Qwen2.5-VL](../qwen2_5_vl/README.md)
+Refer to [Qwen3-VL](../qwen3_vl/README.md)
