@@ -20,13 +20,8 @@ num_layers = 4
   a. set PYTHONPATH 
    ```
    export PYTHONPATH=/***/FlagScale:$PYTHONPATH
-   export PYTHONPATH=$PYTHONPATH:/***/FlagScale/third_party/Megatron-LM
-    
-   vim /***/FlagScale/flagscale/runner/auto_tuner/simulator/analylize_pipeline_time.py
-   os.environ["PYTHONPATH"] = (
-        "/***/FlagScale:"
-        "/***/FlagScale/third_party/Megatron-LM"
-    )
+   export PYTHONPATH=/***/FlagScale/flagscale/train:$PYTHONPATH
+  
    ```
   b. run 
   
