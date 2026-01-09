@@ -7,12 +7,6 @@ git clone https://github.com/FlagOpen/FlagScale.git
 cd FlagScale/
 ```
 
-If you don't have access to the international internet, import FlagScale project on [gitee](https://gitee.com/), then clone from gitee.
-
-```sh
-git clone https://gitee.com/flagopen/FlagScale.git
-cd FlagScale/
-```
 
 Install train and inference env according to [README](https://github.com/FlagOpen/FlagScale/blob/main/README.md) 
 

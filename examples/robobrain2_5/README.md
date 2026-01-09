@@ -10,13 +10,6 @@
     cd FlagScale/
     ```
 
-    If you don't have access to the international internet, import FlagScale project on [gitee](https://gitee.com/), then clone from gitee.
-
-    ```sh
-    git clone https://gitee.com/flagopen/FlagScale.git
-    cd FlagScale/
-    ```
-
 2. Install Requirements
 
     We provide two installation methods: source code installation and whl package installation.
