@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import numpy as np
 import pytest
@@ -222,17 +223,21 @@ def test_rl_equal(test_path, test_type, test_task, test_case):
         lines = file.readlines()
 
     result_json = {}
-    result_json["val-core/openai/gsm8k/reward/mean@1"] = []
+    result_json["val-aux/openai/gsm8k/reward/mean@1"] = []
 
     for line in lines:
         if "step" in line:
-            line_split = line.strip().split(" ")
+            line_split = line.strip().split(" - ")
             for key_value in line_split:
-                if key_value.startswith("val-core/openai/gsm8k/reward/mean"):
+                if key_value.startswith("val-aux/openai/gsm8k/reward/mean@1"):
                     # Extract the value after the colon
                     value = key_value.split(":")[-1]
+                    # Handle np.float64(...) format by extracting the number inside parentheses
+                    match = re.search(r'np\.float64\(([\d.eE+-]+)\)', value)
+                    if match:
+                        value = match.group(1)
                     # Convert to float and append to the list
-                    result_json["val-core/openai/gsm8k/reward/mean@1"].append(float(value))
+                    result_json["val-aux/openai/gsm8k/reward/mean@1"].append(float(value))
 
     gold_value_path = os.path.join(
         test_path, test_type, test_task, "results_gold", test_case + ".json"
@@ -248,15 +253,15 @@ def test_rl_equal(test_path, test_type, test_task, test_case):
     print(
         "The results are basically equal: ",
         np.allclose(
-            gold_result_json["val-core/openai/gsm8k/reward/mean@1"],
-            result_json["val-core/openai/gsm8k/reward/mean@1"],
+            gold_result_json["val-aux/openai/gsm8k/reward/mean@1"],
+            result_json["val-aux/openai/gsm8k/reward/mean@1"],
             atol=0.05,
         ),
     )
 
     assert np.allclose(
-        gold_result_json["val-core/openai/gsm8k/reward/mean@1"],
-        result_json["val-core/openai/gsm8k/reward/mean@1"],
+        gold_result_json["val-aux/openai/gsm8k/reward/mean@1"],
+        result_json["val-aux/openai/gsm8k/reward/mean@1"],
         atol=0.05,
     ), "Result not close to gold result"
 

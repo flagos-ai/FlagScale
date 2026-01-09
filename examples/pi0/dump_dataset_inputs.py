@@ -279,7 +279,7 @@ def main():
         sample_names = [f"frame_{args.frame_index}"]
     elif args.episode_index is not None and args.frame_in_episode is not None:
         # Calculate global index
-        episode_info = dataset.meta.episodes.iloc[args.episode_index]
+        episode_info = dataset.meta.episodes[args.episode_index]
         global_idx = episode_info["dataset_from_index"] + args.frame_in_episode
         indices = [global_idx]
         sample_names = [f"episode_{args.episode_index}_frame_{args.frame_in_episode}"]

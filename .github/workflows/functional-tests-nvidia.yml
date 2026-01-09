@@ -160,10 +160,10 @@ jobs:
             echo "================================"
           elif [ "${{ inputs.type }}" = "rl" ]; then
             source /root/miniconda3/bin/activate flagscale-RL
-            python tools/patch/unpatch.py --backend verl
-            cd third_party/verl
+            git clone https://github.com/flagos-ai/verl-FL.git
+            cd verl-FL
             pip install --no-deps -e .
-            cd ../..
+            cd ../
           else
             echo "Unknown backend type: ${{ inputs.type }}"
             exit 1

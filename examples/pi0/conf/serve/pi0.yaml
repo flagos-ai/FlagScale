@@ -2,9 +2,9 @@
   engine_args:
     host: 0.0.0.0
     port: 5000
-    model: path-to-your-pi0_base-model
-    tokenizer: path-to-your-paligemma-3b-pt-224-tokenizer
-    stat_path: path-to-your-dataset/meta/stats.json
+    model: /workspace/models/lerobot/pi0_base
+    tokenizer: /workspace/models/google/paligemma-3b-pt-224
+    stat_path: /workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json
     device: "cuda"
     images_keys:
       - observation.images.base_0_rgb
