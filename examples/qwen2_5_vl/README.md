@@ -1,14 +1,17 @@
+# QuickStart
 
-# 1. Install the FlagScale
+## Train
 
-## 1.1. Downlowd the source code 
+### 1. Install the FlagScale
+
+Download the source code.
 
 ```bash
 git clone https://github.com/FlagOpen/FlagScale.git
 cd FlagScale
 ```
 
-## 1.2. Apply the submodule patch code
+Apply the submodule patch code
 
 
 ```bash
@@ -19,11 +22,12 @@ cd ./third_party/Megatron-Energon/
 pip install -e .
 cp -r src/megatron/energon/ ../Megatron-LM/megatron/
 cd ../Megatron-LM/
-mv tools tools_bk # avoid the tools confict
+mv tools tools_bk # avoid the tools conflict
 ```
 
-You can also refered the readme in `https://github.com/FlagOpen/FlagScale.git`
-# 2. Prepare checkpoint
+You can also refer to the readme in `https://github.com/FlagOpen/FlagScale.git`
+
+### 2. Prepare checkpoint
 
 Reference [convert.md](../../../../tools/checkpoint/qwen2_5_vl/convert.md)
 ```bash
@@ -42,7 +46,7 @@ bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct
 ```
 
-# 3. Preprocess dataset
+### 3. Preprocess dataset
 
 Reference [dataset_preparation.md](../../../../tools/datasets/qwenvl/dataset_preparation.md)
 
@@ -71,10 +75,11 @@ python convert_custom_dataset_to_wds_chatml_str.py \
     --dp-size 1 \
     --num-workers 20
 ```
+
 The preprocessed dataset will be stored at the output-root path `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1`.
 The configuration of `data-path` is `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1` and the configuration of `vision-path` is `/mnt/LLaVA-Pretrain` in the step 4.
 
-# 4. Add your configuration
+### 4. Add your configuration
 
 Add the data path and checkpoint path in ./examples/qwen2_5_vl/conf/train/7b.yaml as shown below:
 
@@ -98,7 +103,7 @@ Stop training.
 python run.py --config-path ./examples/qwen2_5_vl/conf  --config-name train action=stop
 ```
 
-# 5. Convert the checkpoint to HuggingFace
+### 5. Convert the checkpoint to HuggingFace
 
 Reference [convert.md](../../../../tools/checkpoint/qwen2_5_vl/convert.md)
 
@@ -110,7 +115,68 @@ bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
 2 1 true bf16  \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct
 ```
-The converved checkpoint is stored in `/mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct-fs2hf-tp2`
+The converted checkpoint is stored in `/mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct-fs2hf-tp2`
 
-# PS
+## Evaluation
+
+Our evaluation process leverages the capabilities of [FlagEval](https://flageval.baai.ac.cn/#/home) platform. Currently, it supports both LLM and VLM, but does not support VLA at this time.
+
+More details about [Auto-Evaluation](https://github.com/flageval-baai/Auto-Evaluation/blob/main/README_en.md) tools.
+
+### 1. Start the server
+
+    ```sh
+    python run.py --config-path ./examples/robobrain2/conf --config-name serve action=run
+    ```
+
+### 2. Start evaluation
+
+    ```sh
+    IP=$(ip addr show | grep -E 'inet ([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '127.0.0.1' | grep -v '::1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
+    MODEL_NAME=$(curl -s http://localhost:9010/v1/models | jq -r '.data[].id')
+    curl http://120.92.17.239:5050/evaluation \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{
+        "eval_infos": [
+            {
+                "eval_model": "'$MODEL_NAME'",
+                "model": "'$MODEL_NAME'",
+                "eval_url": "http://'$IP':9010/v1/chat/completions",
+                "tokenizer": "BAAI/RoboBrain2.0-3B",
+                "base_model_name": "BAAI/RoboBrain2.0-3B",
+                "num_concurrent": 4,
+                "batch_size": 8
+            }
+        ],
+        "domain": "MM"
+    }'
+    ```
+
+### 3. Check Progress
+
+   `request_id` is in response of `Start evaluation`.
+    ```sh
+    curl http://120.92.17.239:5050/evaluation_progress \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{
+        "request_id": "4c32ee2b-5d21-41c1-beea-3c4f6f8f2c20",
+        "domain": "MM"
+    }'
+    ```
+
+### 4. Check result
+
+    ```sh
+    curl -X GET http://120.92.17.239:5050/evaldiffs \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer no-key" \
+    -d '{
+        "request_id": "4c32ee2b-5d21-41c1-beea-3c4f6f8f2c20"
+    }'
+    ```
+
+## PS
+
 The path `./` represents the path of `FlagScale` that you download.

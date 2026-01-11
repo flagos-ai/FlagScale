@@ -16,6 +16,9 @@ on:
 jobs:
   functional-test:
     runs-on: [self-hosted, Linux, X64, nvidia-0, gpus-8]
+    defaults:
+      run:
+        shell: bash
     container:
       image: ${{ inputs.image }}
       ports:
@@ -45,131 +48,80 @@ jobs:
           set-safe-directory: true
           retry-on-intr: fail=5,delay=180000
 
-      - name: Run Functional Test
-        timeout-minutes: 90  # Automatically terminate the current step after 90 minutes
+      - name: Install FlagScale training dependencies
+        timeout-minutes: 30
+        if: ${{ inputs.type == 'train' || inputs.type == 'hetero_train' }}
         run: |
-          git config --global --add safe.directory /__w/FlagScale/FlagScale
+          echo "Current type: ${{ inputs.type }}"
+          echo "📌 GitHub Actions default workspace: $GITHUB_WORKSPACE"
 
-          TMP_DIR=/tmp/flagscale_tmp
-          echo "Copying source to temporary directory: $TMP_DIR"
-          rm -rf $TMP_DIR
-          mkdir -p $TMP_DIR
-          cp -r /__w/FlagScale/FlagScale/. $TMP_DIR
-          cd $TMP_DIR
-          trap 'echo "Cleaning up temporary directory..."; rm -rf "$TMP_DIR"' EXIT
+          source /root/miniconda3/bin/activate flagscale-train
+          source .github/workflows/scripts/retry_functions.sh
 
-          if [ "${{ inputs.type }}" = "train" ] || [ "${{ inputs.type }}" = "hetero_train" ]; then
-            source /root/miniconda3/bin/activate flagscale-train
-            git clone https://github.com/flagos-ai/Megatron-LM-FL.git
-            cd Megatron-LM-FL
-            pip install --no-build-isolation .
-            cd ../
-            pip install httpx multi-storage-client boto3 google-cloud-storage fastapi uvicorn griffe
-            if [ "${{ inputs.task }}" = "llava_onevision" ]; then
-              git clone https://github.com/flagos-ai/Megatron-LM-FL.git
-              cd Megatron-LM-FL
-              pip install --no-build-isolation .
-              cd ../
-              pip install httpx multi-storage-client boto3 google-cloud-storage fastapi uvicorn griffe
-            fi
-          elif [ "${{ inputs.type }}" = "inference" ] || [ "${{ inputs.type }}" = "serve" ]; then
-            source /root/miniconda3/bin/activate flagscale-inference
-            export SCCACHE_DIR=/root/.cache/sccache
-            sccache --start-server
-            sccache --show-stats
+          COMMANDS=(
+            "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
+            "git clone https://github.com/flagos-ai/Megatron-LM-FL.git"
+            "pip install httpx multi-storage-client boto3 google-cloud-storage fastapi uvicorn griffe"
+            "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL"
+            "pip install --no-build-isolation . -vvv"
+          )
 
-            #modify for support 0.5b_multiple_instance ci test because of ray version issue
-            pip install ray==2.49.1
-            pip install gymnasium
-            pip install dm-tree
+          retry_commands 3 "${COMMANDS[@]}"
 
-            echo "[INFO] Install VLLM and its dependencies ..."
-            MAX_RETRIES=5
-            DELAYS=(1 1.5 2 2.5 3)
-            COMMANDS=(
-              "pip install scikit-build scikit-build-core"
-              "pip install git+https://github.com/FlagOpen/FlagGems.git@v3.0"
-              "PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=backend="vllm" --verbose --no-build-isolation"
-            )
+      - name:  Install FlagScale inference dependencies
+        timeout-minutes: 90
+        if: ${{ inputs.type == 'inference' || inputs.type == 'serve' }}
+        env:
+          SCCACHE_DIR: /root/.cache/sccache
+        run: |
+          echo "Current type: ${{ inputs.type }}"
+          echo "📌 GitHub Actions default workspace: $GITHUB_WORKSPACE"
 
-            # Initialize state array
-            declare -A command_status
-            declare -A retry_count
-            declare -A delay_index
+          source /root/miniconda3/bin/activate flagscale-inference
+          source .github/workflows/scripts/retry_functions.sh
 
-            # Traverse all commands and initialize variables
-            for i in "${!COMMANDS[@]}"; do
-              command_status[$i]=false
-              retry_count[$i]=0
-              delay_index[$i]=0
-            done
+          # install FlagGems
+          INSTALL_FLAGGEMS=(
+            "pip install scikit-build scikit-build-core"
+            "pip install git+https://github.com/FlagOpen/FlagGems.git@v3.0"
+          )
+          retry_commands 3 "${INSTALL_FLAGGEMS[@]}"
 
-            # Continuously check if there are any unsuccessful commands that need to be retried
-            while true; do
-              all_successful=true
+          # modify for support 0.5b_multiple_instance ci test because of ray version issue
+          Additional_dependencies=(
+            "pip install ray==2.49.1"
+            "pip install gymnasium"
+            "pip install dm-tree"
+          )
+          retry_commands 3 "${Additional_dependencies[@]}"
 
-              for i in "${!COMMANDS[@]}"; do
-                cmd="${COMMANDS[$i]}"
+          # install vllm
+          INSTALL_VLLM=(
+            "rm -rf ${GITHUB_WORKSPACE}/vllm-FL"
+            "git clone https://github.com/flagos-ai/vllm-FL.git"
+            "cd ${GITHUB_WORKSPACE}/vllm-FL"
+            "sccache --start-server"
+            "sccache --show-stats"
+            "pip install --no-build-isolation . -vvv"
+            "sccache --show-stats"
+          )
+          retry_commands 3 "${INSTALL_VLLM[@]}"
 
-                if ! ${command_status[$i]} && [ ${retry_count[$i]} -lt $MAX_RETRIES ]; then
-                  echo "Attempt to execute command (${retry_count[$i]}/$MAX_RETRIES times): ${cmd}"
-
-                  START_TIME=$(date +%s.%N)
-
-                  if ! eval "$cmd"; then
-                    echo "Command execution failed! We will retry in ${DELAYS[delay_index[$i]} minutes ..."
-                    sleep $((${DELAYS[delay_index[$i]]} * 60))
-                    ((retry_count[$i]++))
-                    ((delay_index[$i]++))
-                  else
-                    command_status[$i]=true
-                  fi
-                  END_TIME=$(date +%s.%N)
-                  all_successful=false
-                else
-                  echo "Skip commands that have been successfully/have reached the maximum retry count: ${cmd}"
-                fi
-              done
-              if [ "$all_successful" = true ]; then
-                echo "All commands have been executed"
-                break
-              fi
-            done
-
-            if [ "$all_successful" = false ]; then
-              exit 1
-            fi
-
-            # computation time
-            ELAPSED_SECONDS=$(awk "BEGIN {print $END_TIME - $START_TIME}")
-            ELAPSED_MINUTES=$(awk "BEGIN {print int($ELAPSED_SECONDS / 60)}")
-            REMAINING_SECONDS=$(awk "BEGIN {print $ELAPSED_SECONDS - $ELAPSED_MINUTES * 60}")
-
-            # Format time display
-            FORMATTED_START=$(date -d "@$START_TIME" "+%Y-%m-%d %H:%M:%S")
-            FORMATTED_END=$(date -d "@$END_TIME" "+%Y-%m-%d %H:%M:%S")
-
-            sccache --show-stats
-
-            echo "================================"
-            echo "Build time statistics"
-            echo "================================"
-            echo "Start time: ${FORMATTED_START}"
-            echo "End time: ${FORMATTED_END}"
-            echo "Total time taken: ${ELAPSED_MINUTES} minutes ${REMAINING_SECONDS} seconds"
-            echo "================================"
-          elif [ "${{ inputs.type }}" = "rl" ]; then
-            source /root/miniconda3/bin/activate flagscale-RL
-            git clone https://github.com/flagos-ai/verl-FL.git
-            cd verl-FL
-            pip install --no-deps -e .
-            cd ../
-          else
-            echo "Unknown backend type: ${{ inputs.type }}"
-            exit 1
-          fi
+      - name: Run Functional Test
+        id: functional_test
+        timeout-minutes: 30
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           tests/scripts/functional_tests/test_task.sh --type ${{ inputs.type }} --task ${{ inputs.task }}
           exit_code=$?
           echo "Exit code: $exit_code"
           exit $exit_code
-        shell: bash
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-logs-${{ github.run_id }}
+          path: tests/functional_tests/test_cases/${{ inputs.type }}/${{ inputs.task }}/results_test
+          retention-days: 7
+          if-no-files-found: warn

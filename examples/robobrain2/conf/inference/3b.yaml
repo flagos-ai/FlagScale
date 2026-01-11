@@ -1,0 +1,20 @@
+llm:
+  # path to checkpoint
+  model: /nfs/hcr/models/BAAI/RoboBrain2.0-3B
+  trust_remote_code: true
+  tensor_parallel_size: 1
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.9
+  max_model_len: 128000
+  seed: 42
+
+generate:
+  prompts: [
+    "Hello, my name is",
+    "The president of the United States is",
+    "The capital of France is",
+    "The future of AI is",
+  ]
+  sampling:
+    max_tokens: 10
+    temperature: 0.0

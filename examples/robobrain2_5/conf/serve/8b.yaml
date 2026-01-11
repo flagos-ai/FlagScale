@@ -1,0 +1,14 @@
+- serve_id: vllm_model
+  engine_args:
+    model: /tmp/models/Qwen/Qwen3-VL-8B-Instruct # should be customized
+    served_model_name: robobrain2_7b-nv-flagos
+    tensor_parallel_size: 1
+    max_model_len: 32768
+    pipeline_parallel_size: 1
+    max_num_seqs: 8 # Even at full 32,768 context usage, 8 concurrent operations won't trigger OOM
+    gpu_memory_utilization: 0.9
+    limit_mm_per_prompt: '{"image": 18}' # should be customized, 18 images/request is enough for most scenarios
+    port: 9010
+    trust_remote_code: true
+    enforce_eager: false # set true if use FlagGems 
+    enable_chunked_prefill: true
