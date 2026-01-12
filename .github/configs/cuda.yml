@@ -1,0 +1,40 @@
+# CUDA Hardware Configuration
+# This file defines settings for CUDA-based testing
+
+hardware_name: cuda
+display_name: "CUDA Tests"
+
+# Docker image for this hardware
+ci_image: localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515
+
+# Runner labels for this hardware
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - nvidia-0
+  - gpus-8
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /home/flagscale_cicd/flask/static:/workspace/report
+  - /home/flagscale_cicd/flask/config:/workspace/config
+  - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+  - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
+  - /home/flagscale_cicd/sccache:/root/.cache/sccache
+
+# Container options (hardware-specific settings)
+container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"
+
+# Test configuration
+test_config:
+  unit_backend: train_flagscale
+  unit_subsets:
+    - "runner"
+    - "./"
+  functional_train_tasks:
+    - "aquila"
+    - "deepseek"
+    - "mixtral"
+  functional_hetero_tasks:
+    - "aquila"

@@ -23,10 +23,14 @@ while maximizing computational resource efficiency and enhancing model performan
 By offering essential components for model development, training, and deployment, FlagScale seeks to
 establish itself as an indispensable toolkit for optimizing both the speed and effectiveness of large model workflows.
 
+## ⚠️ Important: Major Refactoring (2026/01)
+- Refactored the codebase since [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0) by moving hardware-specific (multi-chip) support into plugin repositories such as [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) and [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL). These plugins build on top of [FlagOS](https://github.com/flagos-ai), a unified open-source AI system software stack. If you are using or upgrading from a version earlier than v1.0.0-alpha.0, please use the [main-legacy](https://github.com/flagos-ai/FlagScale/tree/main-legacy) branch. It will continue to receive critical bug fixes and minor updates for a period of time.
+
 ## Resources
 
 - [Project change log](./docs/CHANGELOG.md)
 - [Getting started](./docs/getting-started.md)
+- [FlagOS-Robo related](./docs/robo.md)
 
 ## Support List
 

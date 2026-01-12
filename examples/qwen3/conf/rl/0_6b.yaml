@@ -19,7 +19,7 @@ data:
 
 actor_rollout_ref:
   model:
-    path: /workspace/models/Qwen/Qwen2.5-0.5B-Instruct
+    path: /workspace/data/ckpt/Qwen3-0.6B
     use_remove_padding: true
     enable_gradient_checkpointing: true
     trust_remote_code: true
@@ -50,7 +50,7 @@ trainer:
   critic_warmup: 0
   logger: ["console"]
   project_name: "verl_grpo_example_gsm8k"
-  experiment_name: "qwen2_5-0_5b"
+  experiment_name: "qwen3-0_6b"
   n_gpus_per_node: 8
   nnodes: 1
   save_freq: 200

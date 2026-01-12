@@ -1,0 +1,111 @@
+name: Common Functional Tests
+
+on:
+  workflow_call:
+    inputs:
+      type:
+        required: true
+        type: string
+      tasks_json:
+        required: true
+        type: string
+        description: JSON array of tasks to run
+      image:
+        required: true
+        type: string
+      runs_on:
+        required: true
+        type: string
+      container_volumes:
+        required: true
+        type: string
+      container_options:
+        required: true
+        type: string
+
+jobs:
+  functional_test:
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ${{ fromJson(inputs.tasks_json) }}
+    name: ${{ inputs.type }}-${{ matrix.task }}
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: true
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
+
+      - name: Run functional test
+        id: functional_test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /__w/FlagScale/FlagScale
+          git config --global --add safe.directory /__w/FlagScale/FlagScale
+          
+          TASK='${{ matrix.task }}'
+          TYPE='${{ inputs.type }}'
+          PROJECT_ROOT="/__w/FlagScale/FlagScale"
+          
+          echo "Running functional test ($TYPE) for task: $TASK"
+          echo "Project root: $PROJECT_ROOT"
+          
+          # Load retry functions
+          source "$PROJECT_ROOT/.github/workflows/scripts/retry_functions.sh"
+          
+          # Setup backend
+          source /root/miniconda3/bin/activate flagscale-train
+          
+          COMMANDS=(
+            "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
+            "git clone https://github.com/flagos-ai/Megatron-LM-FL.git"
+            "pip install httpx multi-storage-client boto3 google-cloud-storage fastapi uvicorn griffe"
+            "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL && pip install --no-build-isolation . -vvv"
+          )
+          retry_commands 3 "${COMMANDS[@]}"
+          
+          # Ensure we're back in the project root
+          cd "$PROJECT_ROOT"
+          
+          # Run test for this task
+          "$PROJECT_ROOT/tests/scripts/functional_tests/test_task.sh" --type "$TYPE" --task "$TASK"
+          exit_code=$?
+          
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Functional test passed for $TYPE/$TASK"
+          else
+            echo "❌ Functional test failed for $TYPE/$TASK (exit code: $exit_code)"
+          fi
+          
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit $exit_code
+        timeout-minutes: 90
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-logs-${{ github.run_id }}-${{ inputs.type }}-${{ matrix.task }}
+          path: tests/functional_tests/test_cases/${{ inputs.type }}/${{ matrix.task }}/results_test
+          retention-days: 7
+          if-no-files-found: warn

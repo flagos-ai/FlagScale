@@ -9,24 +9,6 @@ if [ -d "/workspace/report/0/cov-temp-flagscale" ]; then rm -r /workspace/report
 
 # Run each command and capture its return value
 commands=(
-    # unit tests -> train_megatron
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset data"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset dist_checkpointing"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset distributed"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset export"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset fusions"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset inference"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset models"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset pipeline_parallel"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset post_training"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset ssm"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset tensor_parallel"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset transformer/moe"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset transformer"
-    # "tests/scripts/unit_tests/test_subset.sh --backend train_megatron --subset ./"
-    # # coverage test -> train_megatron
-    # "tests/scripts/unit_tests/test_coverage.sh --backend train_megatron --status offline"
-
     # unit tests -> train_flagscale
     "tests/scripts/unit_tests/test_subset.sh --backend train_flagscale --subset runner"
     "tests/scripts/unit_tests/test_subset.sh --backend train_flagscale --subset ./"

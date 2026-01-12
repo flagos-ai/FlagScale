@@ -1,0 +1,130 @@
+name: Common All Tests
+
+on:
+  workflow_call:
+    inputs:
+      hardware:
+        required: true
+        type: string
+        description: Hardware name (e.g., cuda, amd, intel)
+
+jobs:
+  load_config:
+    runs-on: ubuntu-latest
+    outputs:
+      ci_image: ${{ steps.config.outputs.ci_image }}
+      runs_on: ${{ steps.config.outputs.runs_on }}
+      container_volumes: ${{ steps.config.outputs.container_volumes }}
+      container_options: ${{ steps.config.outputs.container_options }}
+      unit_backend: ${{ steps.config.outputs.unit_backend }}
+      unit_subsets: ${{ steps.config.outputs.unit_subsets }}
+      functional_train_tasks: ${{ steps.config.outputs.functional_train_tasks }}
+      functional_hetero_tasks: ${{ steps.config.outputs.functional_hetero_tasks }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Load hardware configuration
+        id: config
+        run: |
+          set -euo pipefail
+          CONFIG_FILE=".github/configs/${{ inputs.hardware }}.yml"
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "❌ Error: Hardware configuration file not found: $CONFIG_FILE"
+            echo "Available configs:"
+            ls -la .github/configs/
+            exit 1
+          fi
+          
+          # Install mikefarah/yq (v4) for YAML parsing.
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          /usr/local/bin/yq --version
+          
+          # Extract configuration
+          CI_IMAGE=$(/usr/local/bin/yq -r '.ci_image' "$CONFIG_FILE")
+          RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
+          VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
+          CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
+          UNIT_BACKEND=$(/usr/local/bin/yq -r '.test_config.unit_backend' "$CONFIG_FILE")
+          UNIT_SUBSETS=$(/usr/local/bin/yq -o=json -I=0 '.test_config.unit_subsets' "$CONFIG_FILE")
+          TRAIN_TASKS=$(/usr/local/bin/yq -o=json -I=0 '.test_config.functional_train_tasks' "$CONFIG_FILE")
+          HETERO_TASKS=$(/usr/local/bin/yq -o=json -I=0 '.test_config.functional_hetero_tasks' "$CONFIG_FILE")
+          
+          # Validate required fields
+          if [ -z "$CI_IMAGE" ] || [ "$CI_IMAGE" = "null" ]; then
+            echo "❌ Error: ci_image not found in $CONFIG_FILE"
+            exit 1
+          fi
+          if [ -z "$RUNNER_LABELS" ] || [ "$RUNNER_LABELS" = "null" ]; then
+            echo "❌ Error: runner_labels not found in $CONFIG_FILE"
+            exit 1
+          fi
+          
+          echo "✅ Loaded config for hardware: ${{ inputs.hardware }}"
+          
+          # Output using heredoc for JSON values
+          echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
+          echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
+          echo "unit_backend=$UNIT_BACKEND" >> $GITHUB_OUTPUT
+          
+          { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT
+          { echo 'container_volumes<<EOFVOLUMES'; echo "$VOLUMES"; echo 'EOFVOLUMES'; } >> $GITHUB_OUTPUT
+          { echo 'unit_subsets<<EOFUNITSUBSETS'; echo "$UNIT_SUBSETS"; echo 'EOFUNITSUBSETS'; } >> $GITHUB_OUTPUT
+          { echo 'functional_train_tasks<<EOFTRAINTASKS'; echo "$TRAIN_TASKS"; echo 'EOFTRAINTASKS'; } >> $GITHUB_OUTPUT
+          { echo 'functional_hetero_tasks<<EOFHETEROTASKS'; echo "$HETERO_TASKS"; echo 'EOFHETEROTASKS'; } >> $GITHUB_OUTPUT
+
+  unit_tests:
+    needs: load_config
+    uses: ./.github/workflows/unit_tests_common.yml
+    with:
+      backend: ${{ needs.load_config.outputs.unit_backend }}
+      subsets_json: ${{ needs.load_config.outputs.unit_subsets }}
+      image: ${{ needs.load_config.outputs.ci_image }}
+      runs_on: ${{ needs.load_config.outputs.runs_on }}
+      container_volumes: ${{ needs.load_config.outputs.container_volumes }}
+      container_options: ${{ needs.load_config.outputs.container_options }}
+
+  functional_tests_train:
+    needs:
+      - load_config
+      - unit_tests
+    uses: ./.github/workflows/functional_tests_common.yml
+    with:
+      type: train
+      tasks_json: ${{ needs.load_config.outputs.functional_train_tasks }}
+      image: ${{ needs.load_config.outputs.ci_image }}
+      runs_on: ${{ needs.load_config.outputs.runs_on }}
+      container_volumes: ${{ needs.load_config.outputs.container_volumes }}
+      container_options: ${{ needs.load_config.outputs.container_options }}
+
+  functional_tests_hetero_train:
+    needs:
+      - load_config
+      - functional_tests_train
+    uses: ./.github/workflows/functional_tests_common.yml
+    with:
+      type: hetero_train
+      tasks_json: ${{ needs.load_config.outputs.functional_hetero_tasks }}
+      image: ${{ needs.load_config.outputs.ci_image }}
+      runs_on: ${{ needs.load_config.outputs.runs_on }}
+      container_volumes: ${{ needs.load_config.outputs.container_volumes }}
+      container_options: ${{ needs.load_config.outputs.container_options }}
+
+  all_tests_complete:
+    needs:
+      - load_config
+      - unit_tests
+      - functional_tests_train
+      - functional_tests_hetero_train
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify all tests passed
+        run: |
+          if [ "${{ needs.unit_tests.result }}" != "success" ] || \
+             [ "${{ needs.functional_tests_train.result }}" != "success" ] || \
+             [ "${{ needs.functional_tests_hetero_train.result }}" != "success" ]; then
+            echo "❌ Some tests failed"
+            exit 1
+          fi
+          echo "✅ All tests completed successfully!"

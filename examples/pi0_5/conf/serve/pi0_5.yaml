@@ -4,9 +4,9 @@
     port: 5000
     # Model variant: "pi0" or "pi0.5"
     model_variant: "pi0.5"
-    model: path-to-your-pi05_base-model
-    tokenizer: path-to-your-paligemma-3b-pt-224-tokenizer
-    stat_path: path-to-your-dataset/meta/stats.json
+    model: /workspace/models/lerobot/pi05_base
+    tokenizer: /workspace/models/google/paligemma-3b-pt-224
+    stat_path: /workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json
     device: "cuda"
     # By default, Pi0.5 uses quantiles for state and action normalization, if false, it uses mean and std instead
     use_quantiles: false

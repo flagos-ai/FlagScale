@@ -1,0 +1,30 @@
+name: All Tests (CUDA)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
+  cancel-in-progress: true
+
+jobs:
+  run_tests:
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      hardware: cuda
+
+  all_tests:
+    needs: run_tests
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify workflow status
+        run: |
+          if [ "${{ needs.run_tests.result }}" != "success" ]; then
+            echo "❌ Tests workflow failed"
+            exit 1
+          fi
+          echo "✅ All tests passed!"

@@ -795,12 +795,6 @@ if __name__ == "__main__":
     parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--shuffle", action="store_true")
-    parser.add_argument("--tensor-model-parallel-size", type=int, default=1)
-    parser.add_argument("--pipeline-model-parallel-size", type=int, default=1)
-    parser.add_argument("--context-parallel-size", type=int, default=1)
-    parser.add_argument("--wandb-enabled", action="store_true")
-    parser.add_argument("--project-name", type=str, default="default_project")
-    parser.add_argument("--exp-name", type=str, default="default_exp")
 
     # ============================== Model Configs ==============================
     parser.add_argument(
