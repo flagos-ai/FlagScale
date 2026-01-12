@@ -472,6 +472,7 @@ def add_decive_extra_config(config, device_type):
                 cur_node_config.update(value)
             else:
                 cur_node_config[key] = value
+    return cur_node_config
 
 
 def update_cmd_with_node_specific_config(cmd, node_specific_config=None):

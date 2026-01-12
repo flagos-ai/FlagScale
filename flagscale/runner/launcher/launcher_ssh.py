@@ -180,6 +180,12 @@ class SshLauncher(LauncherBase):
         self.user_args = self.backend.user_args
         self.user_envs = self.backend.user_envs
         self.user_script = self.backend.user_script
+        self.gpu_health_check_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "runner",
+            "elastic",
+            "gpu_health_check.py",
+        )
 
     def _run_each(
         self,
@@ -832,9 +838,6 @@ class SshLauncher(LauncherBase):
         """Run GPU health check on a specific node"""
         import subprocess
 
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        gpu_health_check_path = os.path.join(root_dir, "runner", "elastic", "gpu_health_check.py")
-
         # Get parallel configuration
         tp_size = self.config.train.system.get("tensor_model_parallel_size", 1)
         pp_size = self.config.train.system.get("pipeline_model_parallel_size", 1)
@@ -849,7 +852,7 @@ class SshLauncher(LauncherBase):
                 f"--node_rank={node_rank}",  # Use the correct node rank for this node
                 f"--master_addr={master_addr}",
                 f"--master_port={master_port}",
-                gpu_health_check_path,
+                self.gpu_health_check_path,
                 "--tensor-model-parallel-size",
                 str(tp_size),
                 "--pipeline-model-parallel-size",
@@ -863,7 +866,7 @@ class SshLauncher(LauncherBase):
             # Single GPU mode
             cmd = [
                 "python",
-                gpu_health_check_path,
+                self.gpu_health_check_path,
                 "--tensor-model-parallel-size",
                 str(tp_size),
                 "--pipeline-model-parallel-size",
@@ -882,17 +885,16 @@ class SshLauncher(LauncherBase):
             logger.info(f"Running GPU health check on {host} (node_rank={node_rank})")
 
             try:
-                # Use background=False to wait for the health check to complete
-                # and get the actual return code
+                # Waiting for the health check to complete and get the actual return code
                 result = run_ssh_command(host, cmd_str, ssh_port, query=True)
                 success = result.returncode == 0 if hasattr(result, 'returncode') else False
                 if not success:
                     logger.error(
                         f"GPU health check failed on {host}: returncode={result.returncode}"
                     )
-                    if hasattr(result, 'stdout') and result.stdout:
+                    if result.stdout:
                         logger.error(f"stdout: {result.stdout}")
-                    if hasattr(result, 'stderr') and result.stderr:
+                    if result.stderr:
                         logger.error(f"stderr: {result.stderr}")
                 return success
             except Exception as e:
@@ -912,12 +914,8 @@ class SshLauncher(LauncherBase):
 
     def _run_gpu_health_check(self):
         """Run GPU health check across all nodes"""
-        # Check if the health check script exists
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        gpu_health_check_path = os.path.join(root_dir, "runner", "elastic", "gpu_health_check.py")
-
-        if not os.path.exists(gpu_health_check_path):
-            logger.error(f"GPU health check script not found at {gpu_health_check_path}")
+        if not os.path.exists(self.gpu_health_check_path):
+            logger.error(f"GPU health check script not found at {self.gpu_health_check_path}")
             return False
         runner_config = self.config.experiment.runner
 
