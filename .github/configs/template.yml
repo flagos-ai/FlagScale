@@ -1,0 +1,36 @@
+# Template for adding new hardware
+
+# IMPORTANT: Fill in all fields below for your new hardware
+# Then create: workflows/hardware_name/all_tests.yml that uses this config
+
+hardware_name: my_hardware  # Change this to your hardware name
+display_name: "My Hardware Tests"  # Display name for GitHub Actions
+
+# Docker image for this hardware (change image tag if needed)
+ci_image: localhost:5000/flagscale:my-hardware-image
+
+# Runner labels for this hardware (CRITICAL - update these for your runners)
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - my-runner-label  # Update: change to your runner's labels
+  - gpus-8
+
+# Container volumes (hardware-specific paths - update as needed)
+container_volumes:
+  - /home/flagscale_cicd/flask/static:/workspace/report
+  - /home/flagscale_cicd/flask/config:/workspace/config
+  - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+  - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
+  # Add hardware-specific volumes here if needed (e.g., cache locations)
+
+# Container options (hardware-specific settings - update as needed)
+container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"
+
+# Test configuration (customize per hardware)
+test_config:
+  unit_backend: train_flagscale                          # Backend to test: train_flagscale, vllm, inference_flagscale
+  unit_subsets: ["runner", "./"]                         # Unit test subsets to run
+  functional_train_tasks: ["aquila", "deepseek", "mixtral"]  # Training tasks to validate
+  functional_hetero_tasks: ["aquila"]                    # Hetero training tasks to validate
