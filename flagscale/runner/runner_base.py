@@ -23,11 +23,14 @@ class Runner(ABC):
         hostfile = self.config.experiment.runner.get("hostfile", None)
         self.resources = parse_hostfile(hostfile) if hostfile else None
         self.task_type = getattr(self.config.experiment.task, "type", None)
+        self.launcher_type = self.config.experiment.runner.get("type", "ssh")
         assert self.task_type in TASK_TO_BACKEND_MAP, f"Unsupported task type: {self.task_type}"
 
         backend_attr = getattr(self.config.experiment.task, "backend", None)
         if self.task_type == "serve":
-            if backend_attr is None and not self.config.experiment.task.get("entrypoint", None):
+            if self.launcher_type == "cloud":
+                backend_attr = "vllm"  # do not surpport other backend
+            elif backend_attr is None and not self.config.experiment.task.get("entrypoint", None):
                 backend_attr = self.config.serve[0]["engine"]
 
         # backend is required for train / inference / rl
@@ -55,9 +58,7 @@ class Runner(ABC):
         )
 
         self.backend = RunnerFactory.get_backend(self.backend_type)(self.config)
-        self.launcher = RunnerFactory.get_launcher("ssh")(
-            self.config, self.backend
-        )  # TODO add cloud launcher_type
+        self.launcher = RunnerFactory.get_launcher(self.launcher_type)(self.config, self.backend)
 
     def run(self, *args, **kwargs):
         return self.launcher.run(*args, **kwargs)

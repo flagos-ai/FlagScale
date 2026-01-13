@@ -10,7 +10,7 @@ from flagscale.runner.backend import (
     VerlBackend,
     VllmBackend,
 )
-from flagscale.runner.launcher import LauncherBase, SshLauncher
+from flagscale.runner.launcher import CloudLauncher, LauncherBase, SshLauncher
 
 BackendType = TypeVar("BackendType", bound=BackendBase)
 LauncherType = TypeVar("LauncherType", bound=LauncherBase)
@@ -60,4 +60,4 @@ RunnerFactory.register_backend("native_serve", NativeServeBackend)
 
 # launchers
 RunnerFactory.register_launcher("ssh", SshLauncher)
-# RunnerFactory.register_launcher("cloud", CloudLauncher)
+RunnerFactory.register_launcher("cloud", CloudLauncher)
