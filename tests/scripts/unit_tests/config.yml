@@ -14,6 +14,9 @@ train_flagscale:
       depth: all
       ignore:
         - test_parse_hostfile.py
+    train:
+      type: batch
+      depth: all
     ./:
       deselect:
         - test_spiky_loss_detector.py::test_spiky_loss_detector
