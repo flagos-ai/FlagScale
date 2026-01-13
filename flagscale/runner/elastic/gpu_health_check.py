@@ -40,7 +40,6 @@ _PARALLEL_STATE = {
     "gloo_world": None,
 }
 
-
 # Check tracking
 _CHECK_RESULTS = {
     'tensor_parallel': {'status': 'pending', 'error': None},
@@ -75,12 +74,6 @@ def safe_check_execution(check_func, check_name, timeout_seconds=120) -> bool:
     except Exception as e:
         log_check_result(check_name, 'failed', f"Exception: {str(e)}")
         return False
-
-
-def get_args():
-    """Return arguments."""
-    assert _GLOBAL_ARGS is not None, 'arguments not yet initialized.'
-    return _GLOBAL_ARGS
 
 
 # -------------------------
