@@ -14,8 +14,6 @@ TASK_CONFIG = flagscale_serve.task_config
 def get_model_config_from_task(serve_id: str = "serve_model"):
     if not TASK_CONFIG.get("serve"):
         raise ValueError("No 'serve' section found in task config.")
-    if not serve_id:
-        raise ValueError("No serve_id in YAML config file")
     for item in TASK_CONFIG.serve:
         if "serve_id" in item and item.get("serve_id") is not None:
             return item
