@@ -3,9 +3,8 @@
 import json
 import pickle
 import re
-
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
 from webdataset.autodecode import Decoder
 
@@ -18,10 +17,10 @@ from megatron.energon.flavors.webdataset import DefaultDecoderWebdatasetFactory
 class ChatMLSample(Sample):
     """multi-turn complex samples with images and videos"""
 
-    imgs: List[str]
-    videos: List[List[str]]
+    imgs: list[str]
+    videos: list[list[str]]
     conversation: str  # JSON string of GPT-format conversations
-    metadata: Dict[str, Any] = None
+    metadata: dict[str, Any] = None
 
 
 class NestedImagesPathHandler:
@@ -49,7 +48,7 @@ class NestedImagesPathHandler:
                 return None
         elif extension.lower() == "metadata":
             try:
-                return json.loads(data.decode('utf-8'))
+                return json.loads(data.decode("utf-8"))
             except Exception as e:
                 print(f"Warning: Failed to decode metadata json: {e}")
                 return None

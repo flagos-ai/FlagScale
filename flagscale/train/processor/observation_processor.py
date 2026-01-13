@@ -20,7 +20,6 @@ from dataclasses import dataclass
 import einops
 import numpy as np
 import torch
-
 from torch import Tensor
 
 from .pipeline import ObservationProcessorStep, ProcessorStepRegistry

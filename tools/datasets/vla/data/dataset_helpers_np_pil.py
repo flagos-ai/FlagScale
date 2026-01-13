@@ -1,8 +1,6 @@
 import json
 import logging
 
-from typing import List
-
 import numpy as np
 import PIL
 
@@ -33,33 +31,33 @@ class TaskEncoder(DefaultTaskEncoder[ChatMLSample, ChatMLSample, ChatMLSample, C
             image = PIL.Image.open(i)
             imgs.append(image)
 
-        state_paths = sample.metadata['state'][self.config.state_key]
+        state_paths = sample.metadata["state"][self.config.state_key]
         state = np.load(state_paths)[0]
         if state.shape[0] < self.config.action_horizon:
             pad_width = self.config.action_horizon - state.shape[0]
-            state = np.pad(state, (0, pad_width), mode='constant')
+            state = np.pad(state, (0, pad_width), mode="constant")
         elif state.shape[0] > self.config.action_horizon:
             state = state[: self.config.action_horizon]
 
-        action_paths = sample.metadata['action'][self.config.action_key]
+        action_paths = sample.metadata["action"][self.config.action_key]
         action = np.load(action_paths)
         if action.shape[1] < self.config.action_horizon:
             pad_width = self.config.action_horizon - action.shape[1]
-            action = np.pad(action, ((0, 0), (0, pad_width)), mode='constant')
+            action = np.pad(action, ((0, 0), (0, pad_width)), mode="constant")
         elif action.shape[1] > self.config.action_horizon:
             action = action[:, : self.config.action_horizon]
 
         batch = {
-            'task': task,
-            'observation.images.camera0': imgs[0],
-            'observation.images.camera1': imgs[1],
-            'observation.images.camera2': imgs[2],
-            'observation.state': state.astype(np.float16),
-            'action': action.astype(np.float16),
+            "task": task,
+            "observation.images.camera0": imgs[0],
+            "observation.images.camera1": imgs[1],
+            "observation.images.camera2": imgs[2],
+            "observation.state": state.astype(np.float16),
+            "action": action.astype(np.float16),
         }
         return batch
 
-    def batch(self, samples: List[dict]) -> dict:
+    def batch(self, samples: list[dict]) -> dict:
         return samples
 
     def encode_batch(self, samples: dict) -> dict:

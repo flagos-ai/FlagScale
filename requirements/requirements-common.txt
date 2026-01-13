@@ -25,7 +25,7 @@ flask
 flask_cors
 tqdm_loggable
 types_boto3_s3
-qwen_vl_utils 
+qwen_vl_utils
 scipy
 pynvml
 webdataset
@@ -40,4 +40,3 @@ pytest-cov
 pytest_mock
 pytest-random-order
 wandb
-

@@ -1,7 +1,6 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch
-
 from torch import nn
 
 from flagscale.runner.utils import logger
@@ -30,7 +29,7 @@ class LogIOHook(ModelHook):
             raise ValueError(f"Invalid log level: {log_level}")
         self._logger_func = getattr(logger, log_level)
 
-    def pre_forward(self, module: nn.Module, *args, **kwargs) -> Tuple[Tuple[Any], Dict[str, Any]]:
+    def pre_forward(self, module: nn.Module, *args, **kwargs) -> tuple[tuple[Any], dict[str, Any]]:
         """Log the input shapes of the module."""
 
         shapes = tuple(_shape_of(a) for a in args)

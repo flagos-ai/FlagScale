@@ -3,7 +3,6 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 from sklearn.decomposition import PCA
 
 
@@ -23,8 +22,8 @@ def visualize_2d(latents_list, identifiers, output):
     # --- Prepare for plotting ---
     plt.figure(figsize=(12, 10))
 
-    marker_list = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'H', '+', 'x']
-    cmap = plt.get_cmap('tab10')
+    marker_list = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h", "H", "+", "x"]
+    cmap = plt.get_cmap("tab10")
 
     for i, (latents, identifier) in enumerate(zip(latents_list, identifiers)):
         n_samples = latents.shape[0]
@@ -60,28 +59,28 @@ def visualize_2d(latents_list, identifiers, output):
                     str(j),
                     (x, y),
                     xytext=(5, 5),
-                    textcoords='offset points',
+                    textcoords="offset points",
                     fontsize=8,
                     color=color,
-                    weight='bold',
+                    weight="bold",
                 )
 
-    plt.xlabel('Principal Component 1 (PC1)')
-    plt.ylabel('Principal Component 2 (PC2)')
-    plt.title('2D PCA Visualization of Latent Vectors (Per-Dataset PCA)')
-    legend = plt.legend(title="Datasets", bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xlabel("Principal Component 1 (PC1)")
+    plt.ylabel("Principal Component 2 (PC2)")
+    plt.title("2D PCA Visualization of Latent Vectors (Per-Dataset PCA)")
+    legend = plt.legend(title="Datasets", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
     output_file_base = "2d_pca_visualization_multi_separate"
 
-    if output != '' and not os.path.exists(output):
+    if output != "" and not os.path.exists(output):
         os.makedirs(output, exist_ok=True)
 
     output_path = os.path.join(output, output_file_base)
 
-    plt.savefig(f"{output_path}.png", dpi=300, bbox_extra_artists=(legend,), bbox_inches='tight')
-    plt.savefig(f"{output_path}.pdf", bbox_extra_artists=(legend,), bbox_inches='tight')
+    plt.savefig(f"{output_path}.png", dpi=300, bbox_extra_artists=(legend,), bbox_inches="tight")
+    plt.savefig(f"{output_path}.pdf", bbox_extra_artists=(legend,), bbox_inches="tight")
     print(f"Plots saved as {output_path}.png and {output_path}.pdf")
     plt.show()
 
@@ -89,13 +88,13 @@ def visualize_2d(latents_list, identifiers, output):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        'files', nargs='+', help='Paths to the .npy files containing latent vectors.'
+        "files", nargs="+", help="Paths to the .npy files containing latent vectors."
     )
     parser.add_argument(
-        '--output',
+        "--output",
         type=str,
-        default='pca_output',
-        help='Base name (without extension) for the output plot files. Default: %(default)s',
+        default="pca_output",
+        help="Base name (without extension) for the output plot files. Default: %(default)s",
     )
     args = parser.parse_args()
 
@@ -106,7 +105,7 @@ def main():
         if not os.path.exists(file_path):
             print(f"Warning: File not found {file_path}. Skipping.")
             continue
-        if not file_path.endswith('.npy'):
+        if not file_path.endswith(".npy"):
             print(f"Warning: File {file_path} is not a .npy file. Skipping.")
             continue
 

@@ -12,18 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import json
-import logging
 import os
 import re
 import sys
-
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import torch
-
-from transformers import AutoConfig, AutoTokenizer, Qwen3VLForConditionalGeneration
+from transformers import AutoConfig, Qwen3VLForConditionalGeneration
 
 path_dir = os.path.abspath(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
@@ -56,7 +51,6 @@ torch.backends.cuda.enable_flash_sdp(False)
 
 
 def add_model_args(parser):
-
     parser.add_argument("--target-tensor-model-parallel-size", type=int, default=1)
 
     parser.add_argument("--target-pipeline-model-parallel-size", type=int, default=1)
@@ -226,7 +220,6 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
     hidden_size = args.hidden_size
     # pre_qkv_dim = hidden_size // args.num_attention_heads
     pre_qkv_dim = args.kv_channels
-    use_te = args.transformer_impl == "transformer_engine"
     value_num_per_group = args.num_attention_heads // num_query_groups
 
     # 1. vision model
@@ -319,9 +312,9 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
             if isinstance(t, torch.Tensor) and "extra_state" not in k
         ]
     )
-    assert (
-        n_params == copied_numel
-    ), f"vision model param num mismatch: {n_params}, but only copied {copied_numel}"
+    assert n_params == copied_numel, (
+        f"vision model param num mismatch: {n_params}, but only copied {copied_numel}"
+    )
 
     # 3. llm [just Qwen2]
     hfllm = hfmodel.language_model
@@ -383,9 +376,9 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
             if isinstance(t, torch.Tensor) and "extra_state" not in k
         ]
     )
-    assert (
-        n_params == copied_numel
-    ), f"llm param num mismatch: {n_params}, but only copied {copied_numel}"
+    assert n_params == copied_numel, (
+        f"llm param num mismatch: {n_params}, but only copied {copied_numel}"
+    )
 
 
 @torch.inference_mode()
@@ -399,7 +392,6 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
 
     # assert args.num_query_groups >= args.target_tensor_model_parallel_size
 
-    num_attention_heads = args.num_attention_heads
     num_query_groups = args.num_query_groups
     hidden_size = args.hidden_size
 
@@ -411,9 +403,9 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
     mgvision = mgmodel.vision_model
     vision_hidden_size = mgvision.config.hidden_size
     vision_num_query_groups = mgvision.config.num_query_groups
-    assert (
-        mgvision.config.num_attention_heads == vision_num_query_groups
-    ), f"expect num_attention_heads == num_query_groups but got {mgvision.config.num_attention_heads} vs {vision_num_query_groups}"
+    assert mgvision.config.num_attention_heads == vision_num_query_groups, (
+        f"expect num_attention_heads == num_query_groups but got {mgvision.config.num_attention_heads} vs {vision_num_query_groups}"
+    )
     vision_head_dim = vision_hidden_size // mgvision.config.num_attention_heads
     copied_numel = 0
     # rotary_pos_emb.inv_freq is buffer not parameter
@@ -507,9 +499,9 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
             hfdeepstack_merger.linear_fc2.bias, mgdeepstack_merger.encoder.linear_fc2.bias
         )
     n_params = sum([t.numel() for t in hfvision.state_dict().values()])
-    assert (
-        n_params == copied_numel
-    ), f"vision model param num mismatch: {n_params}, but only copied {copied_numel}"
+    assert n_params == copied_numel, (
+        f"vision model param num mismatch: {n_params}, but only copied {copied_numel}"
+    )
 
     # 3. llm [just Qwen3]
     hfllm = hfmodel.language_model
@@ -561,9 +553,9 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
         safe_copy(hfmodel.lm_head.weight, mgllm.output_layer.weight)
 
     n_params = sum([t.numel() for t in hfllm.state_dict().values()])
-    assert (
-        n_params == copied_numel
-    ), f"llm param num mismatch: {n_params}, but only copied {copied_numel}"
+    assert n_params == copied_numel, (
+        f"llm param num mismatch: {n_params}, but only copied {copied_numel}"
+    )
 
 
 def check_layer(layers_to_copy, k):
@@ -574,7 +566,7 @@ def check_layer(layers_to_copy, k):
     return res and int(res[0]) in layers_to_copy.keys()
 
 
-def split_vision_model(mgvision, args, prefix="vision_model") -> Dict[Tuple, Dict]:
+def split_vision_model(mgvision, args, prefix="vision_model") -> dict[tuple, dict]:
     state_dicts = {}
     tp = args.tensor_model_parallel_size
     ENCODER_NUM_ATTENTION_HEADS = 16
@@ -621,7 +613,7 @@ def split_vision_model(mgvision, args, prefix="vision_model") -> Dict[Tuple, Dic
                 target_v = viewed[:, seg * etp_rank : seg * (etp_rank + 1), :].reshape(
                     -1, vision_hidden_size
                 )
-            # CollumParallel split bias
+            # ColumnParallel split bias
             elif "linear_fc1" in k and "norm" not in k:
                 seg = v.shape[0] // tp
                 target_v = v[seg * etp_rank : seg * (etp_rank + 1)]
@@ -779,8 +771,8 @@ def save_mgmodel(mgmodel, args):
                     layers_to_copy = {}
                     local_id = 0
                     while (pp_rank, vpp_id, local_id) in ltog:
-                        gloabl_layer_id = ltog[(pp_rank, vpp_id, local_id)]
-                        layers_to_copy[gloabl_layer_id] = local_id
+                        global_layer_id = ltog[(pp_rank, vpp_id, local_id)]
+                        layers_to_copy[global_layer_id] = local_id
                         local_id += 1
                     model_part = {}
                     for k, v in full_model.items():

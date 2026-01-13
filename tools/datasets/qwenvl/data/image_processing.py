@@ -4,12 +4,10 @@
 import math
 import random
 
-import numpy as np
 import torch
-
-from PIL import Image, ImageDraw
+from PIL import Image
 from torchvision import transforms as T
-from torchvision.transforms import Compose, RandAugment, RandomResizedCrop, Resize, ToPILImage
+from torchvision.transforms import Compose, RandAugment, Resize, ToPILImage
 
 # config :https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/blob/main/preprocessor_config.json
 # Imagenet's mean and std.
@@ -23,7 +21,7 @@ pixel_std = torch.Tensor(pixel_std).view(-1, 1, 1)
 
 # https://github.com/QwenLM/Qwen2.5-VL/blob/477fd9d4317266508705366ce36cac5b68d70936/qwen-vl-utils/src/qwen_vl_utils/vision_process.py#L89C1-L95C40
 def convert_to_rgb(pil_image: Image.Image) -> Image.Image:
-    if pil_image.mode == 'RGBA':
+    if pil_image.mode == "RGBA":
         white_background = Image.new("RGB", pil_image.size, (255, 255, 255))
         white_background.paste(pil_image, mask=pil_image.split()[3])  # Use alpha channel as mask
         return white_background

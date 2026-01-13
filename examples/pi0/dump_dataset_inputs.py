@@ -37,7 +37,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from pathlib import Path
 
 import torch
-
 from PIL import Image
 from torchvision.transforms import ToPILImage
 

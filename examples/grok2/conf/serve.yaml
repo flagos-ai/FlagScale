@@ -21,4 +21,3 @@ action: run
 hydra:
   run:
     dir: ${experiment.exp_dir}/hydra
-

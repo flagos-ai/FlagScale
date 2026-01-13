@@ -1,8 +1,7 @@
 import torch
 
-from tests.unit_tests.test_utilities import Utils
-
 from megatron.training.spiky_loss import SpikyLossDetector
+from tests.unit_tests.test_utilities import Utils
 
 
 def test_spiky_loss_detector(pp_size=2, threshold=0.2):

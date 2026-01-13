@@ -84,4 +84,3 @@ data:
     tokenizer_path: xxx xxxx # Please replace with your actual tokenizer path
     vocab_size: xxx # Please replace with your actual vocab size
     make_vocab_size_divisible_by: 64
-

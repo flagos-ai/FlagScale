@@ -13,7 +13,7 @@ experiment:
     nnodes: 1
     nproc_per_node: 8
     rdzv_backend: static
-  cmds:  
+  cmds:
     before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
   envs:
     # NCCL_DEBUG: INFO

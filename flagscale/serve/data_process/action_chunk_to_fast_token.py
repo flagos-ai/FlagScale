@@ -1,9 +1,7 @@
 # Adopted from FlagOpen/RoboBrain-X0 (https://github.com/FlagOpen/RoboBrain-X0/blob/main/data_process/action_token/action_chunk_to_fast_token.py)
 
-from typing import List
 
 import numpy as np
-
 from scipy.fft import idct
 from transformers import AutoProcessor
 
@@ -18,11 +16,11 @@ class ActionChunkProcessor:
         )
 
     def extract_actions_from_tokens(
-        self, action_tokens: List[List[int]], action_horizon: int, action_dim: int
+        self, action_tokens: list[list[int]], action_horizon: int, action_dim: int
     ) -> np.ndarray:
-        assert (
-            action_horizon is not None and action_dim is not None
-        ), "Tokenizer not initialized, call encode() once or pass in time_horizon and action_dim."
+        assert action_horizon is not None and action_dim is not None, (
+            "Tokenizer not initialized, call encode() once or pass in time_horizon and action_dim."
+        )
 
         decoded_actions = []
         output_dims = []
@@ -38,7 +36,9 @@ class ActionChunkProcessor:
                 assert decoded_dct_coeff.shape == (
                     action_horizon,
                     action_dim,
-                ), f"Decoded DCT coefficients have shape {decoded_dct_coeff.shape}, expected ({action_horizon}, {action_dim})"
+                ), (
+                    f"Decoded DCT coefficients have shape {decoded_dct_coeff.shape}, expected ({action_horizon}, {action_dim})"
+                )
             except Exception as e:
                 logger.info(f"Error decoding tokens: {e}")
                 logger.info(f"Tokens: {token}")

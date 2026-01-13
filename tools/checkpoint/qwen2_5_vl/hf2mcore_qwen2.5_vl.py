@@ -12,18 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import json
-import logging
 import os
 import re
 import sys
-
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import torch
-
-from transformers import AutoConfig, AutoTokenizer, Qwen2_5_VLForConditionalGeneration
+from transformers import AutoConfig, Qwen2_5_VLForConditionalGeneration
 
 path_dir = os.path.abspath(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
@@ -56,7 +51,6 @@ torch.backends.cuda.enable_flash_sdp(False)
 
 
 def add_model_args(parser):
-
     parser.add_argument("--target-tensor-model-parallel-size", type=int, default=1)
 
     parser.add_argument("--target-pipeline-model-parallel-size", type=int, default=1)
@@ -224,7 +218,6 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
     num_query_groups = args.num_query_groups
     hidden_size = args.hidden_size
     head_dim = hidden_size // args.num_attention_heads
-    use_te = args.transformer_impl == "transformer_engine"
     value_num_per_group = args.num_attention_heads // num_query_groups
     q_dim_per_group = hidden_size // num_query_groups
     kv_dim_per_group = head_dim
@@ -497,7 +490,7 @@ def check_layer(layers_to_copy, k):
     return res and int(res[0]) in layers_to_copy.keys()
 
 
-def split_vision_model(mgvision, args, prefix="vision_model") -> Dict[Tuple, Dict]:
+def split_vision_model(mgvision, args, prefix="vision_model") -> dict[tuple, dict]:
     state_dicts = {}
     tp = args.tensor_model_parallel_size
     ENCODER_NUM_ATTENTION_HEADS = 16
@@ -698,8 +691,8 @@ def save_mgmodel(mgmodel, args):
                     layers_to_copy = {}
                     local_id = 0
                     while (pp_rank, vpp_id, local_id) in ltog:
-                        gloabl_layer_id = ltog[(pp_rank, vpp_id, local_id)]
-                        layers_to_copy[gloabl_layer_id] = local_id
+                        global_layer_id = ltog[(pp_rank, vpp_id, local_id)]
+                        layers_to_copy[global_layer_id] = local_id
                         local_id += 1
                     model_part = {}
                     for k, v in full_model.items():

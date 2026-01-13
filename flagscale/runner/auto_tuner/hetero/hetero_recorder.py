@@ -1,12 +1,11 @@
 import csv
 import json
-import logging
 import os
 import re
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Any, Optional
-
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from flagscale.runner.auto_tuner.record.recorder import Recorder
@@ -55,7 +54,7 @@ class HeteroRecorder(Recorder):
                 resources = parse_hostfile(hostfile_path)
                 if resources:
                     self.host_to_type_map = {
-                        host: res.get('type', 'default') for host, res in resources.items()
+                        host: res.get("type", "default") for host, res in resources.items()
                     }
                 self.logger.info(f"Loaded host-to-type map: {self.host_to_type_map}")
             except Exception as e:
@@ -102,7 +101,7 @@ class HeteroRecorder(Recorder):
         if platform_cfg.get("airs_switch", False) and strategy.get("performance"):
             self.pass_back_to_platform(strategy)
 
-    def grep_max_memory(self, path, pattern=None) -> Dict[str, Any]:
+    def grep_max_memory(self, path, pattern=None) -> dict[str, Any]:
         """
         Scans logs for peak memory usage, aggregating by device type.
         Returns: Dict[device_type, max_memory_float]
@@ -120,7 +119,7 @@ class HeteroRecorder(Recorder):
                 continue
 
             try:
-                parts = host_dir.split('_', 2)
+                parts = host_dir.split("_", 2)
                 if len(parts) < 3:
                     continue
                 hostname = parts[2]
@@ -243,18 +242,18 @@ class HeteroRecorder(Recorder):
         # 3. Column Management
         # Drop irrelevant columns
         drop_cols = [
-            'pruned',
-            'prune_reason',
-            'pruned_idx',
-            'hetero_memory_model_calibrated',
-            'stopped_by_tuner',
-            'max_mem',
+            "pruned",
+            "prune_reason",
+            "pruned_idx",
+            "hetero_memory_model_calibrated",
+            "stopped_by_tuner",
+            "max_mem",
         ]
         df.drop(columns=[c for c in drop_cols if c in df.columns], inplace=True)
 
         # Reorder 'idx' to front
-        if 'idx' in df.columns:
-            cols = ['idx'] + [c for c in df.columns if c != 'idx']
+        if "idx" in df.columns:
+            cols = ["idx"] + [c for c in df.columns if c != "idx"]
             df = df.reindex(columns=cols)
 
         # 4. Serialize

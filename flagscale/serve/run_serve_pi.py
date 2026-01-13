@@ -4,11 +4,8 @@ import io
 import json
 import time
 
-from typing import Union
-
 import numpy as np
 import torch
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from omegaconf import DictConfig, ListConfig, OmegaConf
@@ -306,7 +303,7 @@ def infer_api():
     return jsonify({"success": True, "actions": actions.cpu().tolist()})
 
 
-def parse_config() -> Union[DictConfig, ListConfig]:
+def parse_config() -> DictConfig | ListConfig:
     """Parse the configuration file"""
 
     parser = argparse.ArgumentParser()

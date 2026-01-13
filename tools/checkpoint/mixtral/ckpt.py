@@ -48,7 +48,7 @@ def get_hf_attn_ckpt(message, model, layer_id, args):
                 ],
                 dim=1,
             )
-            .reshape((-1))
+            .reshape(-1)
             .data
         )
     if args.add_bias_linear:

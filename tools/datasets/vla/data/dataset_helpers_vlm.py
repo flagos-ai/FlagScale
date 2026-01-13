@@ -20,18 +20,14 @@ import logging
 import math
 import os
 import re
-import sys
 import time
 import traceback
-
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 import PIL
 import torch
-
 from PIL import Image
 
 from megatron.energon import Batch, DefaultTaskEncoder, VQASample
@@ -47,17 +43,17 @@ FIRST_MAX_PADDING_FLAG = True
 LAST_LARGE_IMG = False
 CLEAR_CACHE_ITERATION = 200000
 IGNORE_IDX = -100
-MAX_IMG_THRESHHOLD = 5000
+MAX_IMG_THRESHOLD = 5000
 
 
 # Type for intermediate batch, after batch()
 @dataclass
 class ImageTaskSample:
     __key__: str
-    __subflavors__: Dict
+    __subflavors__: dict
 
-    imgs: List[np.ndarray]  # (c, h, w)
-    videos: List[np.ndarray]  # (c, h, w)
+    imgs: list[np.ndarray]  # (c, h, w)
+    videos: list[np.ndarray]  # (c, h, w)
 
     image_thw_grids: np.ndarray
     video_thw_grids: np.ndarray
@@ -72,8 +68,8 @@ class ImageTaskSample:
 # Typing for the resulting batch data after encode_batch()
 @dataclass
 class VQATaskBatch(Batch):
-    __keys__: List[str]
-    __subflavors__: List[Dict]
+    __keys__: list[str]
+    __subflavors__: list[dict]
     # (num_tiles, c, h, w)
     imgs: torch.Tensor
     videos: torch.Tensor
@@ -127,7 +123,7 @@ def convert_to_qwen2vl_content(
 
 
 class TaskEncoder(
-    DefaultTaskEncoder[Union[VQASample, ChatMLSample], ImageTaskSample, VQATaskBatch, dict]
+    DefaultTaskEncoder[VQASample | ChatMLSample, ImageTaskSample, VQATaskBatch, dict]
 ):
     """A simple task encoder for captioning."""
 
@@ -156,7 +152,7 @@ class TaskEncoder(
 
         assert self.vision_root is not None, "Please specify the vision root."
 
-    def encode_sample(self, sample: Union[VQASample, ChatMLSample]):
+    def encode_sample(self, sample: VQASample | ChatMLSample):
         if isinstance(sample, VQASample):
             is_llava_training = (
                 sample.__subflavors__["is_llava_training"]
@@ -252,28 +248,28 @@ class TaskEncoder(
         logger.info("=== Text recover: first {} tokens ===".format(max_tokens))
 
         result_text = ""
-        boa_id = self._token_cache.get('boa')
-        EOA_id = self._token_cache.get('EOA')
+        boa_id = self._token_cache.get("boa")
+        EOA_id = self._token_cache.get("EOA")
         for i, token_id in enumerate(token_ids[:max_tokens]):
-            if token_id == self._token_cache['im_start']:
+            if token_id == self._token_cache["im_start"]:
                 result_text += "\n<|im_start|>"
-            elif token_id == self._token_cache['im_end']:
+            elif token_id == self._token_cache["im_end"]:
                 result_text += "<|im_end|>\n"
             elif boa_id is not None and token_id == boa_id:
                 result_text += "<boa>"
             elif EOA_id is not None and token_id == EOA_id:
                 result_text += "<EOA>"
-            elif token_id == self._token_cache['image_pad']:
+            elif token_id == self._token_cache["image_pad"]:
                 result_text += "<|image_pad|>"
-            elif token_id == self._token_cache['newline']:
+            elif token_id == self._token_cache["newline"]:
                 result_text += "\\n"
-            elif token_id == self._token_cache['space']:
+            elif token_id == self._token_cache["space"]:
                 result_text += " "
-            elif token_id == self._token_cache['user']:
+            elif token_id == self._token_cache["user"]:
                 result_text += "user"
-            elif token_id == self._token_cache['assistant']:
+            elif token_id == self._token_cache["assistant"]:
                 result_text += "assistant"
-            elif token_id == self._token_cache['system']:
+            elif token_id == self._token_cache["system"]:
                 result_text += "system"
             else:
                 found_token = None
@@ -294,20 +290,20 @@ class TaskEncoder(
         cache_start = time.time()
 
         token_cache = {
-            'im_start': self.tokenizer.vocab["<|im_start|>"],
-            'im_end': self.tokenizer.vocab["<|im_end|>"],
-            'user': self.tokenizer.vocab["user"],
-            'assistant': self.tokenizer.vocab["assistant"],
-            'system': self.tokenizer.vocab["system"],
-            'vision_start': self.tokenizer.vocab.get("<|vision_start|>"),
-            'vision_end': self.tokenizer.vocab.get("<|vision_end|>"),
-            'image_pad': self.tokenizer.vocab.get("<|image_pad|>"),
-            'video_pad': self.tokenizer.vocab.get("<|video_pad|>"),
-            'newline': self._safe_encode("\n")[0],
-            'space': self._safe_encode(" ")[0],
-            'boa': self.tokenizer.vocab.get("<boa>", 151665),
-            'EOA': self.tokenizer.vocab.get("<EOA>", 151666),
-            'action_split': self.tokenizer.vocab.get("<action_split>", 151667),
+            "im_start": self.tokenizer.vocab["<|im_start|>"],
+            "im_end": self.tokenizer.vocab["<|im_end|>"],
+            "user": self.tokenizer.vocab["user"],
+            "assistant": self.tokenizer.vocab["assistant"],
+            "system": self.tokenizer.vocab["system"],
+            "vision_start": self.tokenizer.vocab.get("<|vision_start|>"),
+            "vision_end": self.tokenizer.vocab.get("<|vision_end|>"),
+            "image_pad": self.tokenizer.vocab.get("<|image_pad|>"),
+            "video_pad": self.tokenizer.vocab.get("<|video_pad|>"),
+            "newline": self._safe_encode("\n")[0],
+            "space": self._safe_encode(" ")[0],
+            "boa": self.tokenizer.vocab.get("<boa>", 151665),
+            "EOA": self.tokenizer.vocab.get("<EOA>", 151666),
+            "action_split": self.tokenizer.vocab.get("<action_split>", 151667),
         }
 
         cache_end = time.time()
@@ -332,21 +328,18 @@ class TaskEncoder(
         return action_cache
 
     def build_conversation_tokens(self, conversation, action_tokens_list):
-        build_start = time.time()
-
         final_token_ids = []
 
-        im_start_id = self._token_cache['im_start']
-        im_end_id = self._token_cache['im_end']
-        newline_id = self._token_cache['newline']
-        user_id = self._token_cache['user']
-        assistant_id = self._token_cache['assistant']
-        system_id = self._token_cache['system']
-        image_pad_id = self._token_cache['image_pad']
-        vision_start_id = self._token_cache['vision_start']
-        vision_end_id = self._token_cache.get('vision_end')
+        im_start_id = self._token_cache["im_start"]
+        im_end_id = self._token_cache["im_end"]
+        newline_id = self._token_cache["newline"]
+        user_id = self._token_cache["user"]
+        assistant_id = self._token_cache["assistant"]
+        system_id = self._token_cache["system"]
+        image_pad_id = self._token_cache["image_pad"]
+        vision_start_id = self._token_cache["vision_start"]
+        vision_end_id = self._token_cache.get("vision_end")
 
-        conversation_loop_start = time.time()
         for turn_idx, turn in enumerate(conversation):
             role = turn["role"]
             content = turn["content"]
@@ -389,9 +382,9 @@ class TaskEncoder(
                     text_ids = self._safe_encode(content)
                     final_token_ids.extend(text_ids)
                 if action_tokens and len(action_tokens) > 0:
-                    boa_id = self._token_cache['boa']
-                    EOA_id = self._token_cache['EOA']
-                    action_split_id = self._token_cache['action_split']
+                    boa_id = self._token_cache["boa"]
+                    EOA_id = self._token_cache["EOA"]
+                    action_split_id = self._token_cache["action_split"]
                     if content.strip():
                         final_token_ids.append(boa_id)
                     for i, action_id in enumerate(action_tokens):
@@ -519,10 +512,10 @@ class TaskEncoder(
                     current_action_tokens = []
                     action_tokens_loaded = False
                     action_token_paths = None
-                    if hasattr(sample, 'metadata') and isinstance(sample.metadata, dict):
-                        action_token_data = sample.metadata.get('action_eepose_token')
+                    if hasattr(sample, "metadata") and isinstance(sample.metadata, dict):
+                        action_token_data = sample.metadata.get("action_eepose_token")
                         if action_token_data is None:
-                            action_token_data = sample.metadata.get('action_token')
+                            action_token_data = sample.metadata.get("action_token")
                         if action_token_data is not None:
                             action_token_count = action_part.count("<action_token>")
                             if (
@@ -607,9 +600,9 @@ class TaskEncoder(
                         )
                     else:
                         should_have_action_tokens = (
-                            hasattr(sample, 'metadata')
+                            hasattr(sample, "metadata")
                             and isinstance(sample.metadata, dict)
-                            and 'action_eepose_token' in sample.metadata
+                            and "action_eepose_token" in sample.metadata
                         )
 
                         if should_have_action_tokens:
@@ -625,7 +618,7 @@ class TaskEncoder(
                         content = content.replace("<action_token>", "").replace(
                             "<action_split>", ""
                         )
-                        content = re.sub(r'\s+', ' ', content).strip()
+                        content = re.sub(r"\s+", " ", content).strip()
                         if not content:
                             content = "I understand the task."
 
@@ -679,15 +672,16 @@ class TaskEncoder(
         image_token_id, video_token_id = self.tokenizer.encode(["<|image_pad|>", "<|video_pad|>"])
 
         image_token_indices = np.where(input_ids == image_token_id)[0]
-        assert len(image_token_indices) == len(
-            image_thw_grids
-        ), f"The sample [{sample.__key__}] has {len(image_thw_grids)} images, but {len(image_token_indices)} image placeholders!"
+        assert len(image_token_indices) == len(image_thw_grids), (
+            f"The sample [{sample.__key__}] has {len(image_thw_grids)} images, but {len(image_token_indices)} image placeholders!"
+        )
         video_token_indices = np.where(input_ids == video_token_id)[0]
-        assert len(video_token_indices) == len(
-            video_thw_grids
-        ), f"The sample [{sample.__key__}] has {len(video_thw_grids)} videos, but {len(video_token_indices)} video placeholders!"
-        image_thw_grids, video_thw_grids = np.array(image_thw_grids, dtype=np.int64), np.array(
-            video_thw_grids, dtype=np.int64
+        assert len(video_token_indices) == len(video_thw_grids), (
+            f"The sample [{sample.__key__}] has {len(video_thw_grids)} videos, but {len(video_token_indices)} video placeholders!"
+        )
+        image_thw_grids, video_thw_grids = (
+            np.array(image_thw_grids, dtype=np.int64),
+            np.array(video_thw_grids, dtype=np.int64),
         )
 
         target_length = (
@@ -749,7 +743,7 @@ class TaskEncoder(
                 prev_input_token = final_input_ids[idx - 1]
                 target_for_prev_token = target[idx - 1]
 
-                logger.info(f"  - At index {idx-1}:")
+                logger.info(f"  - At index {idx - 1}:")
                 logger.info(f"      Input Token: {prev_input_token}")
                 logger.info(
                     f"      Target:      {target_for_prev_token}  <-- This should be the token to predict"
@@ -787,11 +781,6 @@ class TaskEncoder(
         )
 
     def encode_vqa(self, sample: VQASample):
-        augment = (
-            sample.__subflavors__["augmentation"]
-            if "augmentation" in sample.__subflavors__
-            else False
-        )
         has_video = (
             sample.__subflavors__["has_video"] if "has_video" in sample.__subflavors__ else False
         )
@@ -840,11 +829,11 @@ class TaskEncoder(
         if len(input_ids) > self.seq_len:
             raise InternalWarning(f"Long sequence with length {len(input_ids)} found, dropped...")
 
-        target = np.array(input_ids[1:] + [IGNORE_IDX])
+        target = np.array([*input_ids[1:], IGNORE_IDX])
         if len(user_input_ids) >= len(input_ids):
-            raise InternalWarning(f"Sample not supported, dropped...")
+            raise InternalWarning("Sample not supported, dropped...")
         if not (np.array(user_input_ids) == np.array(input_ids[: len(user_input_ids)])).all():
-            raise InternalWarning(f"Sample not supported, dropped...")
+            raise InternalWarning("Sample not supported, dropped...")
         target[: len(user_input_ids) - 1] = IGNORE_IDX
 
         img_token_id = self.tokenizer.image_token_id
@@ -864,7 +853,7 @@ class TaskEncoder(
             target=target,
         )
 
-    def batch(self, samples: List[ImageTaskSample]) -> VQATaskBatch:
+    def batch(self, samples: list[ImageTaskSample]) -> VQATaskBatch:
         imgs = [s.imgs for s in samples if isinstance(s.imgs, np.ndarray) and s.imgs.size > 0]
         if len(imgs) > 0:
             imgs = torch.cat([torch.from_numpy(img) for img in imgs])
@@ -907,13 +896,13 @@ class TaskEncoder(
         else:
             video_thw_grids = torch.empty([0, 3], dtype=torch.long)
 
-        global FIRST_MAX_PADDING_FLAG, LAST_LARGE_IMG, MAX_IMG_THRESHHOLD
+        global FIRST_MAX_PADDING_FLAG, LAST_LARGE_IMG, MAX_IMG_THRESHOLD
         # MODIFIED START: Restore original cache clearing logic
         if self.args.curr_iteration > 0 and self.args.curr_iteration % CLEAR_CACHE_ITERATION == 0:
             FIRST_MAX_PADDING_FLAG = True
 
-        if image_thw_grids.prod(axis=-1).sum() // 4 > MAX_IMG_THRESHHOLD:
-            MAX_IMG_THRESHHOLD = image_thw_grids.prod(axis=-1).sum() // 4
+        if image_thw_grids.prod(axis=-1).sum() // 4 > MAX_IMG_THRESHOLD:
+            MAX_IMG_THRESHOLD = image_thw_grids.prod(axis=-1).sum() // 4
             FIRST_MAX_PADDING_FLAG = True
             LAST_LARGE_IMG = True
 
@@ -966,7 +955,7 @@ class TaskEncoder(
         return raw
 
 
-def print_error_handler(exc: Exception, key: Optional[str], debug=False):
+def print_error_handler(exc: Exception, key: str | None, debug=False):
     if not debug and isinstance(exc, InternalWarning):
         return
     logger.info(f"Exception occurred in the dataloader for sample {key} and is skipped")

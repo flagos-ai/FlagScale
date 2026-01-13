@@ -31,7 +31,7 @@ python convert_custom_dataset_to_wds_chatml_str.py \
     --dp-size 1 \
     --num-workers 20
 ```
-The preprocessed datas will stored at the output-root path `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1`.
+The preprocessed data will stored at the output-root path `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1`.
 
 ## Prepare Multimodal Datasets Based on ShareGPT Format
 

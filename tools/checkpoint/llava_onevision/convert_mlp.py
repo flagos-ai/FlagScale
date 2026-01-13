@@ -6,14 +6,11 @@ import torch
 
 
 def convert(input_path, output_path, tensor_parallel_size):
-    device = "cuda"
-
     state_dict = torch.load(input_path, weights_only=False)
 
     new_state_dicts = [{"model": dict()} for _ in range(tensor_parallel_size)]
 
     for name, tensor in state_dict.items():
-
         # Map parameter names to ones used in megatron.
         new_name = ""
         new_tensor = tensor

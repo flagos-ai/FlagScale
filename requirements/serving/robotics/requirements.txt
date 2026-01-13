@@ -1,6 +1,6 @@
-diffusers 
-qwen_vl_utils 
-flask 
-flask_cors 
+diffusers
+qwen_vl_utils
+flask
+flask_cors
 scipy
 pynvml

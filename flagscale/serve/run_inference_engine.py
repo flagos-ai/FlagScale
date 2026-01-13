@@ -4,10 +4,10 @@ import socket
 import subprocess
 import sys
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from flagscale import serve
-from flagscale.runner.utils import get_free_port, is_ip_addr
+from flagscale.runner.utils import get_free_port
 from flagscale.serve.args_mapping.mapping import ARGS_CONVERTER
 from flagscale.utils import flatten_dict_to_args
 
@@ -17,7 +17,7 @@ def check_port_occupied(ip_addr, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind((ip_addr, port))
             return False
-    except socket.error as e:
+    except OSError:
         return True
 
 
@@ -81,7 +81,7 @@ def sglang_serve(args):
     sglang_args = args.get("engine_args_specific", {}).get("sglang", {})
     if sglang_args.get("dist-init-addr", None):
         logger.warning(
-            f"sglang dist-init-addr:{ sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
+            f"sglang dist-init-addr:{sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
         )
         was_struct = OmegaConf.is_struct(sglang_args)
         OmegaConf.set_struct(sglang_args, False)
@@ -100,7 +100,7 @@ def sglang_serve(args):
     else:
         raise ValueError("Either model must be specified in sglang model.")
 
-    # set defualt args align with sglang.launch_server
+    # set default args align with sglang.launch_server
     command.extend(["--node-rank", str(0)])
     nnodes = serve.task_config.experiment.runner.get("nnodes", 1)
     command.extend(["--nnodes", str(nnodes)])
@@ -141,7 +141,7 @@ def main():
     if model_config is None:
         raise ValueError(f"No valid configuration found in task config: {serve.task_config}")
 
-    backend_value = serve.task_config.get('experiment', {}).get('task', {}).get('backend')
+    backend_value = serve.task_config.get("experiment", {}).get("task", {}).get("backend")
     if backend_value is None:
         engine = model_config.get("engine", None)
     else:

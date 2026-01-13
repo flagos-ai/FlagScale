@@ -1,7 +1,6 @@
 import argparse
 
 import yaml
-
 from omegaconf import OmegaConf
 
 _g_ignore_fields = ["experiment", "action"]

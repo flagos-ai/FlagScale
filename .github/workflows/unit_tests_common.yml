@@ -61,27 +61,27 @@ jobs:
           set -euo pipefail
           cd /__w/FlagScale/FlagScale
           git config --global --add safe.directory /__w/FlagScale/FlagScale
-          
+
           BACKEND='${{ inputs.backend }}'
           SUBSET='${{ matrix.subset }}'
           SHA='${{ github.sha }}'
           PROJECT_ROOT="/__w/FlagScale/FlagScale"
-          
+
           echo "Running unit tests for subset: $SUBSET"
           echo "Backend: $BACKEND"
           echo "Project root: $PROJECT_ROOT"
-          
+
           # Setup backend if needed
           if [ "$BACKEND" = "train_flagscale" ]; then
             echo "Setting up training backend dependencies..."
             source /root/miniconda3/bin/activate flagscale-train
             source "$PROJECT_ROOT/.github/workflows/scripts/retry_functions.sh"
-            
+
             # For megatron unit tests
             mkdir -p /opt/data
             cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
             cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
-            
+
             # Install megatron.core with retry
             COMMANDS=(
               "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
@@ -89,21 +89,21 @@ jobs:
               "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL && pip install --no-build-isolation . -vvv"
             )
             retry_commands 3 "${COMMANDS[@]}"
-            
+
             # Ensure we're back in the project root
             cd "$PROJECT_ROOT"
           fi
-          
+
           # Run tests for this subset
           "$PROJECT_ROOT/tests/scripts/unit_tests/test_subset.sh" --backend "$BACKEND" --subset "$SUBSET" --id "$SHA"
           exit_code=$?
-          
+
           if [ $exit_code -eq 0 ]; then
             echo "✅ Unit test passed for subset: $SUBSET"
           else
             echo "❌ Unit test failed for subset: $SUBSET (exit code: $exit_code)"
           fi
-          
+
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
         timeout-minutes: 90

@@ -17,11 +17,7 @@
 # limitations under the License.
 from pathlib import Path
 
-from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LRScheduler
-
 # from lerobot.configs.train import TrainPipelineConfig
-from flagscale.models.pi0.configuration_pi0 import PI0Config
 from flagscale.models.pi0.modeling_pi0 import PI0Policy
 
 # from lerobot.optim.optimizers import load_optimizer_state, save_optimizer_state
@@ -32,7 +28,7 @@ from flagscale.models.utils.constants import (
     CHECKPOINTS_DIR,
     LAST_CHECKPOINT_LINK,
     PRETRAINED_MODEL_DIR,
-    TRAINING_STATE_DIR,
+    # TRAINING_STATE_DIR,
     TRAINING_STEP,
 )
 from flagscale.train.datasets.utils import load_json, write_json
@@ -112,60 +108,60 @@ def save_checkpoint(
     # save_training_state(checkpoint_dir, step, optimizer, scheduler)
 
 
-def save_training_state(
-    checkpoint_dir: Path,
-    train_step: int,
-    optimizer: Optimizer | None = None,
-    scheduler: LRScheduler | None = None,
-) -> None:
-    """
-    Saves the training step, optimizer state, scheduler state, and rng state.
+# def save_training_state(
+#     checkpoint_dir: Path,
+#     train_step: int,
+#     optimizer: Optimizer | None = None,
+#     scheduler: LRScheduler | None = None,
+# ) -> None:
+#     """
+#     Saves the training step, optimizer state, scheduler state, and rng state.
 
-    Args:
-        save_dir (Path): The directory to save artifacts to.
-        train_step (int): Current training step.
-        optimizer (Optimizer | None, optional): The optimizer from which to save the state_dict.
-            Defaults to None.
-        scheduler (LRScheduler | None, optional): The scheduler from which to save the state_dict.
-            Defaults to None.
-    """
-    save_dir = checkpoint_dir / TRAINING_STATE_DIR
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_training_step(train_step, save_dir)
-    save_rng_state(save_dir)
-    if optimizer is not None:
-        save_optimizer_state(optimizer, save_dir)
-    if scheduler is not None:
-        save_scheduler_state(scheduler, save_dir)
+#     Args:
+#         save_dir (Path): The directory to save artifacts to.
+#         train_step (int): Current training step.
+#         optimizer (Optimizer | None, optional): The optimizer from which to save the state_dict.
+#             Defaults to None.
+#         scheduler (LRScheduler | None, optional): The scheduler from which to save the state_dict.
+#             Defaults to None.
+#     """
+#     save_dir = checkpoint_dir / TRAINING_STATE_DIR
+#     save_dir.mkdir(parents=True, exist_ok=True)
+#     save_training_step(train_step, save_dir)
+#     save_rng_state(save_dir)
+#     if optimizer is not None:
+#         save_optimizer_state(optimizer, save_dir)
+#     if scheduler is not None:
+#         save_scheduler_state(scheduler, save_dir)
 
 
-def load_training_state(
-    checkpoint_dir: Path, optimizer: Optimizer, scheduler: LRScheduler | None
-) -> tuple[int, Optimizer, LRScheduler | None]:
-    """
-    Loads the training step, optimizer state, scheduler state, and rng state.
-    This is used to resume a training run.
+# def load_training_state(
+#     checkpoint_dir: Path, optimizer: Optimizer, scheduler: LRScheduler | None
+# ) -> tuple[int, Optimizer, LRScheduler | None]:
+#     """
+#     Loads the training step, optimizer state, scheduler state, and rng state.
+#     This is used to resume a training run.
 
-    Args:
-        checkpoint_dir (Path): The checkpoint directory. Should contain a 'training_state' dir.
-        optimizer (Optimizer): The optimizer to load the state_dict to.
-        scheduler (LRScheduler | None): The scheduler to load the state_dict to (can be None).
+#     Args:
+#         checkpoint_dir (Path): The checkpoint directory. Should contain a 'training_state' dir.
+#         optimizer (Optimizer): The optimizer to load the state_dict to.
+#         scheduler (LRScheduler | None): The scheduler to load the state_dict to (can be None).
 
-    Raises:
-        NotADirectoryError: If 'checkpoint_dir' doesn't contain a 'training_state' dir
+#     Raises:
+#         NotADirectoryError: If 'checkpoint_dir' doesn't contain a 'training_state' dir
 
-    Returns:
-        tuple[int, Optimizer, LRScheduler | None]: training step, optimizer and scheduler with their
-            state_dict loaded.
-    """
-    training_state_dir = checkpoint_dir / TRAINING_STATE_DIR
-    if not training_state_dir.is_dir():
-        raise NotADirectoryError(training_state_dir)
+#     Returns:
+#         tuple[int, Optimizer, LRScheduler | None]: training step, optimizer and scheduler with their
+#             state_dict loaded.
+#     """
+#     training_state_dir = checkpoint_dir / TRAINING_STATE_DIR
+#     if not training_state_dir.is_dir():
+#         raise NotADirectoryError(training_state_dir)
 
-    load_rng_state(training_state_dir)
-    step = load_training_step(training_state_dir)
-    optimizer = load_optimizer_state(optimizer, training_state_dir)
-    if scheduler is not None:
-        scheduler = load_scheduler_state(scheduler, training_state_dir)
+#     load_rng_state(training_state_dir)
+#     step = load_training_step(training_state_dir)
+#     optimizer = load_optimizer_state(optimizer, training_state_dir)
+#     if scheduler is not None:
+#         scheduler = load_scheduler_state(scheduler, training_state_dir)
 
-    return step, optimizer, scheduler
+#     return step, optimizer, scheduler

@@ -11,14 +11,12 @@ Qwen-GR00T Framework
 A lightweight implementation that Qwen-VL + Flow-matching head to directly predict continuous actions
 Flow-matching header is copyright from GR00T N1.5,
 """
-import os
 
-from typing import List, Optional, Tuple
+import os
 
 import numpy as np
 import omegaconf
 import torch
-
 from omegaconf import OmegaConf
 from PIL import Image
 from transformers import PretrainedConfig, PreTrainedModel
@@ -45,7 +43,7 @@ class Qwen_GR00T(PreTrainedModel):
     Focus: Predict future continuous actions conditioned on images + instruction.
     """
 
-    def __init__(self, config: Optional[dict] = None, **kwargs) -> None:
+    def __init__(self, config: dict | None = None, **kwargs) -> None:
         """
         Construct all submodules and cache key configuration values.
 
@@ -67,7 +65,7 @@ class Qwen_GR00T(PreTrainedModel):
         self.past_action_window_size = config.framework.action_model.past_action_window_size
         self.chunk_len = self.past_action_window_size + 1 + self.future_action_window_size
 
-    def forward(self, examples: List[dict] = None, **kwargs) -> Tuple:
+    def forward(self, examples: list[dict] | None = None, **kwargs) -> tuple:
         batch_images = [example["image"] for example in examples]  #  [B，[PLT]]
         instructions = [example["lang"] for example in examples]  # [B, str]
         actions = [example["action"] for example in examples]  # label [B， len, 7]
@@ -112,7 +110,6 @@ class Qwen_GR00T(PreTrainedModel):
 
             state_repeated = None
             if state is not None:
-
                 if isinstance(state[0], torch.Tensor):
                     state = torch.stack(state, dim=0).to(
                         device=last_hidden.device, dtype=last_hidden.dtype
@@ -132,9 +129,9 @@ class Qwen_GR00T(PreTrainedModel):
     @torch.inference_mode()
     def predict_action(
         self,
-        batch_images: List[List[Image.Image]],  # Batch of PIL Image list as [view1, view2]
-        instructions: List[str],
-        state: Optional[np.ndarray] = None,
+        batch_images: list[list[Image.Image]],  # Batch of PIL Image list as [view1, view2]
+        instructions: list[str],
+        state: np.ndarray | None = None,
         **kwargs: str,
     ) -> np.ndarray:
         """
@@ -235,10 +232,10 @@ def get_batch(batch):
     rsp_batch = []
     for i_batch in batch:
         ab = {
-            "action": i_batch['action'][:16, :7],
-            "image": [i_batch['observation.images.camera0'], i_batch['observation.images.camera1']],
-            "lang": i_batch['task'],
-            "state": i_batch['observation.state'][:7][None,],
+            "action": i_batch["action"][:16, :7],
+            "image": [i_batch["observation.images.camera0"], i_batch["observation.images.camera1"]],
+            "lang": i_batch["task"],
+            "state": i_batch["observation.state"][:7][None,],
         }
         rsp_batch.append(ab)
     return rsp_batch
@@ -289,12 +286,12 @@ def dryrun_with_random_sample(cfg):
             instructions=[batch[0]["lang"]],
             state=[batch[0]["state"]],
         )
-        normalized_actions = predict_output['normalized_actions']
+        normalized_actions = predict_output["normalized_actions"]
         print(f"Unnormalized Action: {normalized_actions.shape}")
         print(f"{normalized_actions[0,0,:]=}")
 
     forward_output = model(batch)
-    action_loss = forward_output['action_loss']
+    action_loss = forward_output["action_loss"]
     print(f"Action Loss: {action_loss.item()}")
 
     model.save_pretrained()
@@ -325,7 +322,7 @@ def dryrun_with_dataloader(cfg):
     model = model.to(device)
     model(batch)
     forward_output = model(batch)
-    action_loss = forward_output['action_loss']
+    action_loss = forward_output["action_loss"]
     print(f"Action Loss: {action_loss.item()}")
 
     action = model.predict_action(batch_images=[batch[0]["image"]], instructions=[batch[0]["lang"]])

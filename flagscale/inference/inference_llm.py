@@ -1,6 +1,3 @@
-import os
-import sys
-
 from transformers import AutoTokenizer
 
 from vllm import LLM
@@ -27,9 +24,9 @@ def inference(cfg):
     # step 3: initialize the sampling parameters
     # TODO(zhaoyinglia): support config logits processor
     sampling_cfg = cfg.generate.get("sampling", {})
-    assert not sampling_cfg.get(
-        "logits_processors", None
-    ), "logits_processors is not supported yet."
+    assert not sampling_cfg.get("logits_processors", None), (
+        "logits_processors is not supported yet."
+    )
     sampling_params = SamplingParams(**sampling_cfg)
     print(f"=> {sampling_params=}")
 

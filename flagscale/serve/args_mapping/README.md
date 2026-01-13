@@ -24,7 +24,7 @@ output file: ./template_conf.yaml
 Possible choices are:
 1. Delete, if no need for mapping
 2. Update, if there is a key mapping
-3. Move from "key_mapping" ot "kv_mapping_func", if there is a kv mapping
+3. Move from "key_mapping" to "kv_mapping_func", if there is a kv mapping
 
 ## 3. Merge the updates to mapping.yaml.
 Add a new key to mapping.yaml with backend name.

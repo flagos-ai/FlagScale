@@ -21,10 +21,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
-
 from torch import Tensor
 
 from .converters import from_tensor_to_numpy, to_tensor
@@ -37,7 +36,9 @@ from flagscale.models.configs.types import (
     PolicyFeature,
 )
 from flagscale.models.utils.constants import ACTION
-from flagscale.train.datasets.lerobot_dataset import LeRobotDataset
+
+if TYPE_CHECKING:
+    from flagscale.train.datasets.lerobot_dataset import LeRobotDataset
 
 
 @dataclass

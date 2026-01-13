@@ -1,12 +1,9 @@
 import json
 import logging
 
-from typing import List
-
 import numpy as np
 import PIL
 import torch
-
 from torchvision import transforms
 
 from megatron.energon import DefaultTaskEncoder
@@ -37,35 +34,35 @@ class TaskEncoder(DefaultTaskEncoder[ChatMLSample, ChatMLSample, ChatMLSample, C
             image_tensor = transforms.ToTensor()(image)
             imgs.append(image_tensor)
 
-        state_paths = sample.metadata['state'][self.config.state_key]
+        state_paths = sample.metadata["state"][self.config.state_key]
         state = np.load(state_paths)[0]
         if state.shape[0] < self.config.action_horizon:
             pad_width = self.config.action_horizon - state.shape[0]
-            state = np.pad(state, (0, pad_width), mode='constant')
+            state = np.pad(state, (0, pad_width), mode="constant")
         elif state.shape[0] > self.config.action_horizon:
             state = state[: self.config.action_horizon]
         state = torch.from_numpy(state)
 
-        action_paths = sample.metadata['action'][self.config.action_key]
+        action_paths = sample.metadata["action"][self.config.action_key]
         action = np.load(action_paths)
         if action.shape[1] < self.config.action_horizon:
             pad_width = self.config.action_horizon - action.shape[1]
-            action = np.pad(action, ((0, 0), (0, pad_width)), mode='constant')
+            action = np.pad(action, ((0, 0), (0, pad_width)), mode="constant")
         elif action.shape[1] > self.config.action_horizon:
             action = action[:, : self.config.action_horizon]
         action = torch.from_numpy(action)
 
         batch = {
-            'task': task,
-            'observation.images.camera0': imgs[0].unsqueeze(0).to(torch.float32),
-            'observation.images.camera1': imgs[1].unsqueeze(0).to(torch.float32),
-            'observation.images.camera2': imgs[2].unsqueeze(0).to(torch.float32),
-            'observation.state': state[None,].to(torch.float32),
-            'action': action[None].to(torch.float32),
+            "task": task,
+            "observation.images.camera0": imgs[0].unsqueeze(0).to(torch.float32),
+            "observation.images.camera1": imgs[1].unsqueeze(0).to(torch.float32),
+            "observation.images.camera2": imgs[2].unsqueeze(0).to(torch.float32),
+            "observation.state": state[None,].to(torch.float32),
+            "action": action[None].to(torch.float32),
         }
         return batch
 
-    def batch(self, samples: List[dict]) -> dict:
+    def batch(self, samples: list[dict]) -> dict:
         rsp = samples[0]
         for s in samples[1:]:
             rsp["task"].extend(s["task"])

@@ -8,7 +8,7 @@ cd FlagScale/
 ```
 
 
-Install train and inference env according to [README](https://github.com/FlagOpen/FlagScale/blob/main/README.md) 
+Install train and inference env according to [README](https://github.com/FlagOpen/FlagScale/blob/main/README.md)
 
 # Download Model
 
@@ -114,7 +114,7 @@ The directory structure of demo_0913_n2 is as follows:
 Generate Data in webdataset format (DP=2) to ./demo_0913_n2/wds-2:
 
 ```sh
-python tools/datasets/vla/convert.py \    
+python tools/datasets/vla/convert.py \
     --dataset-root=./demo_0913_n2 \
     --output-root=./demo_0913_n2 \
     --json=demo_0913_n2.jsonl \

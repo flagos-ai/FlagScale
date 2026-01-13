@@ -26,29 +26,27 @@ class TestModel(torch.nn.Module):
 
 
 class Utils:
-
-    world_size = int(os.environ['WORLD_SIZE'])
-    rank = int(os.environ['LOCAL_RANK'])
+    world_size = int(os.environ["WORLD_SIZE"])
+    rank = int(os.environ["LOCAL_RANK"])
     inited = False
     store = None
 
     @staticmethod
     def initialize_distributed():
-
-        os.environ.pop('NVTE_FLASH_ATTN', None)
-        os.environ.pop('NVTE_FUSED_ATTN', None)
-        os.environ.pop('NVTE_UNFUSED_ATTN', None)
+        os.environ.pop("NVTE_FLASH_ATTN", None)
+        os.environ.pop("NVTE_FUSED_ATTN", None)
+        os.environ.pop("NVTE_UNFUSED_ATTN", None)
 
         if not torch.distributed.is_initialized() and Utils.rank >= 0:
             print(
-                f'Initializing torch.distributed with rank: {Utils.rank}, '
-                f'world_size: {Utils.world_size}'
+                f"Initializing torch.distributed with rank: {Utils.rank}, "
+                f"world_size: {Utils.world_size}"
             )
             torch.cuda.set_device(Utils.rank % torch.cuda.device_count())
-            init_method = 'tcp://'
-            master_ip = os.getenv('MASTER_ADDR', 'localhost')
-            master_port = os.getenv('MASTER_PORT', '6000')
-            init_method += master_ip + ':' + master_port
+            init_method = "tcp://"
+            master_ip = os.getenv("MASTER_ADDR", "localhost")
+            master_port = os.getenv("MASTER_PORT", "6000")
+            init_method += master_ip + ":" + master_port
             rendezvous_iterator = rendezvous(
                 init_method, Utils.rank, Utils.world_size, timeout=timedelta(minutes=1)
             )
@@ -61,7 +59,7 @@ class Utils:
             Utils.store = store
 
             torch.distributed.init_process_group(
-                backend='nccl', world_size=Utils.world_size, rank=Utils.rank, store=store
+                backend="nccl", world_size=Utils.world_size, rank=Utils.rank, store=store
             )
 
             torch.distributed.barrier()
@@ -77,7 +75,7 @@ class Utils:
             torch.distributed.destroy_process_group()
 
         if rank is None:
-            Utils.rank = int(os.environ['LOCAL_RANK'])
+            Utils.rank = int(os.environ["LOCAL_RANK"])
             if Utils.rank >= Utils.world_size:
                 Utils.rank = -1
         else:
@@ -85,9 +83,9 @@ class Utils:
 
     @staticmethod
     def destroy_model_parallel():
-        os.environ.pop('NVTE_FLASH_ATTN', None)
-        os.environ.pop('NVTE_FUSED_ATTN', None)
-        os.environ.pop('NVTE_UNFUSED_ATTN', None)
+        os.environ.pop("NVTE_FLASH_ATTN", None)
+        os.environ.pop("NVTE_FUSED_ATTN", None)
+        os.environ.pop("NVTE_UNFUSED_ATTN", None)
         if not Utils.inited:
             return
         torch.distributed.barrier()
@@ -103,9 +101,9 @@ class Utils:
     ):
         # Need to unset these variables to make sure previous
         # tests setting them doesn't interfere current test.
-        os.environ.pop('NVTE_FLASH_ATTN', None)
-        os.environ.pop('NVTE_FUSED_ATTN', None)
-        os.environ.pop('NVTE_UNFUSED_ATTN', None)
+        os.environ.pop("NVTE_FLASH_ATTN", None)
+        os.environ.pop("NVTE_FUSED_ATTN", None)
+        os.environ.pop("NVTE_UNFUSED_ATTN", None)
 
         ps.destroy_model_parallel()
         Utils.initialize_distributed()
@@ -124,7 +122,7 @@ class Utils:
         virtual_pipeline_model_parallel_size=None,
         expert_model_parallel_size=1,
     ):
-        """Used for layer-wise UT as a proxy for NeMo-style intialization."""
+        """Used for layer-wise UT as a proxy for NeMo-style initialization."""
         ps.set_tensor_model_parallel_world_size(tensor_model_parallel_size)
         ps.set_tensor_model_parallel_rank(0)
 

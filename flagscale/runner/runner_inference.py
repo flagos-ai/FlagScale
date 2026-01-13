@@ -1,7 +1,5 @@
-import importlib
 import os
 import shlex
-import sys
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -34,7 +32,7 @@ def _get_args_vllm(config: DictConfig):
     # step3: dict -> yaml
     logging_config = config.inference.logging
     new_config = OmegaConf.create(config_dict)
-    new_conf_file = os.path.join(logging_config.scripts_dir, f"inference.yaml")
+    new_conf_file = os.path.join(logging_config.scripts_dir, "inference.yaml")
 
     # step4: write the new yaml file to `outputs_dir/inference_logs/scripts/inference.yaml`
     with open(new_conf_file, "w") as f:
@@ -57,7 +55,7 @@ def _update_config_inference(config: DictConfig):
     if config.get("logging", None) is None:
         config.inference.logging = DictConfig({})
 
-    log_dir = os.path.join(exp_dir, f"inference_logs")
+    log_dir = os.path.join(exp_dir, "inference_logs")
     scripts_dir = os.path.join(log_dir, "scripts")
     pids_dir = os.path.join(log_dir, "pids")
 
@@ -74,7 +72,7 @@ def _generate_run_script_inference(config, host, node_rank, cmd, background=True
 
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
     if no_shared_fs:
-        host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+        host_output_file = os.path.join(logging_config.log_dir, "host.output")
     else:
         host_output_file = os.path.join(logging_config.log_dir, f"host_{node_rank}_{host}.output")
     host_run_script_file = os.path.join(
@@ -96,13 +94,13 @@ def _generate_run_script_inference(config, host, node_rank, cmd, background=True
         f.write(f"{before_start}\n")
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write(f"cd {root_dir}\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write(f"export PYTHONPATH={root_dir}:${{PYTHONPATH}}\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write(f'cmd="{cmd}"\n')
-        f.write(f"\n")
+        f.write("\n")
         if with_test:
             f.write(f'bash -c "$cmd; sync"  >> {host_output_file} \n')
         else:
@@ -186,7 +184,7 @@ class SSHInferenceRunner(RunnerBase):
         for k, v in self.user_envs.items():
             export_cmd += [f"{k}={v}"]
 
-        cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
+        cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         logging_config = self.config.inference.logging
         host_run_script_file = _generate_run_script_inference(
@@ -224,7 +222,7 @@ class SSHInferenceRunner(RunnerBase):
             nnodes_from_hostfile = len(self.resources.keys())
             nnodes_from_args = runner_config.get("nnodes", None)
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
-            available_ip = list(self.resources.keys())[0]
+            available_ip = next(iter(self.resources.keys()))
             available_port = get_free_port()
             for node_rank, (host, resource_info) in enumerate(self.resources.items()):
                 if node_rank >= nnodes:

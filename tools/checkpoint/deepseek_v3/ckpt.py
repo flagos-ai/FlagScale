@@ -3,7 +3,11 @@ import sys
 import torch
 
 sys.path.append("..")
-from mixtral.ckpt import set_hf_embedding_ckpt, set_hf_final_norm_ckpt, set_hf_output_layer_ckpt
+from mixtral.ckpt import (  # noqa: F401
+    set_hf_embedding_ckpt,
+    set_hf_final_norm_ckpt,
+    set_hf_output_layer_ckpt,
+)
 from utils import padding_vocab_size
 
 
@@ -20,7 +24,6 @@ def _get_parallel_size(args):
 def get_hf_attn_ckpt(message, model, layer_id, args):
     nh = args.num_attention_heads
     ng = args.num_query_groups if args.group_query_attention else args.num_attention_heads
-    dim = args.hidden_size
     assert nh % ng == 0
 
     tf_layer = model.model.layers[layer_id]

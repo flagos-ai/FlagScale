@@ -62,20 +62,20 @@ jobs:
           set -euo pipefail
           cd /__w/FlagScale/FlagScale
           git config --global --add safe.directory /__w/FlagScale/FlagScale
-          
+
           TASK='${{ matrix.task }}'
           TYPE='${{ inputs.type }}'
           PROJECT_ROOT="/__w/FlagScale/FlagScale"
-          
+
           echo "Running functional test ($TYPE) for task: $TASK"
           echo "Project root: $PROJECT_ROOT"
-          
+
           # Load retry functions
           source "$PROJECT_ROOT/.github/workflows/scripts/retry_functions.sh"
-          
+
           # Setup backend
           source /root/miniconda3/bin/activate flagscale-train
-          
+
           COMMANDS=(
             "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
             "git clone https://github.com/flagos-ai/Megatron-LM-FL.git"
@@ -83,20 +83,20 @@ jobs:
             "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL && pip install --no-build-isolation . -vvv"
           )
           retry_commands 3 "${COMMANDS[@]}"
-          
+
           # Ensure we're back in the project root
           cd "$PROJECT_ROOT"
-          
+
           # Run test for this task
           "$PROJECT_ROOT/tests/scripts/functional_tests/test_task.sh" --type "$TYPE" --task "$TASK"
           exit_code=$?
-          
+
           if [ $exit_code -eq 0 ]; then
             echo "✅ Functional test passed for $TYPE/$TASK"
           else
             echo "❌ Functional test failed for $TYPE/$TASK (exit code: $exit_code)"
           fi
-          
+
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
         timeout-minutes: 90

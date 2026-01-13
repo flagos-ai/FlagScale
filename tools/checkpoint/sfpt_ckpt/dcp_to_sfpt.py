@@ -1,17 +1,13 @@
 import argparse
 import os
 
-from datetime import timedelta
-
 import torch
-
 from torch.distributed.checkpoint import (
     BytesStorageMetadata,
     FileSystemReader,
     Metadata,
     TensorStorageMetadata,
 )
-from torch.distributed.checkpoint.metadata import Metadata
 
 from megatron.core.dist_checkpointing import ShardedTensor, load
 from megatron.core.dist_checkpointing.mapping import ShardedObject

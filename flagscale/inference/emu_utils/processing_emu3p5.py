@@ -2,7 +2,6 @@ import os.path as osp
 
 import numpy as np
 import torch
-
 from omegaconf import OmegaConf
 from PIL import Image
 from transformers import AutoTokenizer
@@ -79,7 +78,7 @@ def build_image(image, image_area, tokenizer, vq_model):
     w, h = image.size
     device = next(vq_model.parameters()).device
     dtype = next(vq_model.parameters()).dtype
-    image = torch.tensor((np.array(image) / 127.5 - 1.0)).to(device, dtype).permute(2, 0, 1)
+    image = torch.tensor(np.array(image) / 127.5 - 1.0).to(device, dtype).permute(2, 0, 1)
     _, _, token = vq_model.encode(image[None])
     token = token[-1].view(h // 16, w // 16).detach().cpu().numpy()
     return format_image_string(tokenizer, token)
@@ -170,7 +169,6 @@ class Emu3p5Processor:
             self.resolution_map[self.text_tokenizer.encode(digit_str)[0]] = digit_str
 
     def process_inputs(self, question):
-
         reference_image = []
         if not isinstance(question, str):
             if isinstance(question["reference_image"], list):
@@ -178,12 +176,12 @@ class Emu3p5Processor:
                 for img in question["reference_image"]:
                     reference_image.append(Image.open(img).convert("RGB"))
             else:
-                print(f"[INFO] 1 reference image is provided")
+                print("[INFO] 1 reference image is provided")
                 img = question["reference_image"]
                 reference_image.append(Image.open(img).convert("RGB"))
             question = question["prompt"]
         else:
-            print(f"[INFO] No reference image is provided")
+            print("[INFO] No reference image is provided")
 
         prompt_1 = PROMPT_TEMPLATE_1.format(type=self.task_type)
         prompt_2 = PROMPT_TEMPLATE_2.format(question=question)
@@ -201,7 +199,7 @@ class Emu3p5Processor:
         torch.cuda.empty_cache()
 
         if input_ids[0] != self.special_token_ids["BOS"]:
-            input_ids = [self.special_token_ids["BOS"]] + input_ids
+            input_ids = [self.special_token_ids["BOS"], *input_ids]
 
         return input_ids, uncond_input_ids
 

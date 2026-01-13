@@ -42,7 +42,6 @@ error_types = {
     "no space left on device": "StorageError: Insufficient disk space.",
     # Timeout errors
     "operation timed out": "TimeoutError: Operation timed out.",
-    "connection timeout": "TimeoutError: Connection timed out.",
     "hanging": "HangError: Process appears to be hanging.",
 }
 
@@ -107,7 +106,7 @@ def generate_diagnostic_report(config, host, node_rank, log_file, return_content
             logger.debug(f"Log file {log_file} is empty or does not exist")
             return diagnostic_file if not return_content else ""
         # Read all lines of the log file
-        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
             all_lines = f.readlines()
 
         # Get the number of rows analyzed last time
@@ -122,7 +121,7 @@ def generate_diagnostic_report(config, host, node_rank, log_file, return_content
             )
             header_content += "Analysis:\n"
 
-            with open(diagnostic_file, 'w', encoding='utf-8') as f:
+            with open(diagnostic_file, "w", encoding="utf-8") as f:
                 f.write(header_content)
 
         # Only analyze the newly added rows
@@ -132,7 +131,7 @@ def generate_diagnostic_report(config, host, node_rank, log_file, return_content
             return diagnostic_file if not return_content else ""
 
         # Analyze the errors in the new lines
-        current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         new_errors = []
         error_lines_by_type = {key: [] for key in error_types}
 
@@ -157,7 +156,7 @@ def generate_diagnostic_report(config, host, node_rank, log_file, return_content
         # If there are new errors, append them to the diagnostic file
         if new_errors:
             os.makedirs(os.path.dirname(diagnostic_file), exist_ok=True)
-            with open(diagnostic_file, 'a', encoding='utf-8') as f:
+            with open(diagnostic_file, "a", encoding="utf-8") as f:
                 for error in new_errors:
                     f.write(f"{error}\n")
 
@@ -166,7 +165,7 @@ def generate_diagnostic_report(config, host, node_rank, log_file, return_content
             )
 
         if return_content:
-            return '\n'.join(new_errors) if new_errors else ""
+            return "\n".join(new_errors) if new_errors else ""
         else:
             return diagnostic_file
     except Exception as e:

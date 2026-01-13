@@ -1,7 +1,5 @@
 import inspect
 
-from typing import Dict, Optional, Union
-
 import torch
 import torch.nn as nn
 
@@ -22,7 +20,7 @@ class TimestepTrackerHook(ModelHook):
     def __init__(self):
         """Initialize the hook."""
         super().__init__()
-        self._cached_parameter_indices: Optional[Dict[str, int]] = None
+        self._cached_parameter_indices: dict[str, int] | None = None
 
     # Modified from:
     # https://github.com/huggingface/diffusers/blob/310fdaf5561d1b20240a2b66e978edb66175ad5c/src/diffusers/hooks/_helpers.py#L33
@@ -62,7 +60,7 @@ class TimestepTrackerHook(ModelHook):
 
     def pre_forward(self, module: nn.Module, *args, **kwargs):
         """Update RuntimeContext with the current timestep before forward."""
-        ts: Optional[Union[torch.Tensor, float, int]] = self._get_parameter_from_args_kwargs(
+        ts: torch.Tensor | float | int | None = self._get_parameter_from_args_kwargs(
             unwrap_module(module), "timestep", args, kwargs
         )
         ctx = current_ctx()

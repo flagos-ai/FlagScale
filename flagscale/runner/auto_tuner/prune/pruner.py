@@ -6,7 +6,6 @@ from flagscale.runner.auto_tuner.prune.memory import (
 
 
 class Pruner:
-
     def __init__(self, config):
         self.config = config
         self.pruned_count = 0

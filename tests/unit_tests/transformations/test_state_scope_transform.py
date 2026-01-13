@@ -1,9 +1,7 @@
 import unittest
-
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch
-
 from torch import nn
 
 from flagscale.inference.runtime_context import RuntimeContext
@@ -24,7 +22,7 @@ class DummyHook(ModelHook):
     def __init__(self) -> None:
         super().__init__()
 
-    def pre_forward(self, module: nn.Module, *args, **kwargs) -> Tuple[Tuple[Any], Dict[str, Any]]:
+    def pre_forward(self, module: nn.Module, *args, **kwargs) -> tuple[tuple[Any], dict[str, Any]]:
         if self._stateful:
             self._stateful[0].get_or_create_state()
         return args, kwargs

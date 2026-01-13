@@ -16,15 +16,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
-
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-
 from torchvision.transforms import v2
-from torchvision.transforms.v2 import Transform, functional as F  # noqa: N812
+from torchvision.transforms.v2 import Transform, functional as F
 
 
 class RandomSubsetApply(Transform):
@@ -140,9 +138,9 @@ class SharpnessJitter(Transform):
         sharpness_factor = torch.empty(1).uniform_(self.sharpness[0], self.sharpness[1]).item()
         return {"sharpness_factor": sharpness_factor}
 
-    def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
+    def transform(self, input: Any, params: dict[str, Any]) -> Any:
         sharpness_factor = params["sharpness_factor"]
-        return self._call_kernel(F.adjust_sharpness, inpt, sharpness_factor=sharpness_factor)
+        return self._call_kernel(F.adjust_sharpness, input, sharpness_factor=sharpness_factor)
 
 
 @dataclass

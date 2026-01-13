@@ -2,8 +2,8 @@ import datetime
 import json
 import threading
 import time
-
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 from redis import ConnectionPool, Redis
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
@@ -16,7 +16,7 @@ class Collaborator:
         port: int = 6379,
         db: int = 0,
         clear: bool = False,
-        password: Optional[str] = None,
+        password: str | None = None,
     ):
         """
         Initialize Redis with individual parameters.
@@ -51,7 +51,7 @@ class Collaborator:
             self._clear_db()
 
     @classmethod
-    def from_config(cls, config: Dict[str, Union[str, int, bool]]) -> "Collaborator":
+    def from_config(cls, config: dict[str, str | int | bool]) -> "Collaborator":
         """
         Alternative constructor that initializes from a configuration dictionary.
 
@@ -73,7 +73,7 @@ class Collaborator:
             ...     "port": 6380,
             ...     "db": 1,
             ...     "password": "secret",
-            ...     "clear": True
+            ...     "clear": True,
             ... }
             >>> coll = Collaborator.from_config(config)
         """
@@ -111,8 +111,8 @@ class Collaborator:
     def listen(
         self,
         channel: str,
-        callback: Callable[[Dict[str, Any]], None],
-        stop_event: Optional[threading.Event] = None,
+        callback: Callable[[dict[str, Any]], None],
+        stop_event: threading.Event | None = None,
     ) -> None:
         """Subscribe to a Redis channel and call the callback function with the message.
         The callback function should accept a single argument, which is the message.
@@ -130,7 +130,7 @@ class Collaborator:
                 callback(message["data"])
 
     # ----------------- data -----------------
-    def record_agent_status(self, name: str, value: str, _: Optional[float] = None) -> bool:
+    def record_agent_status(self, name: str, value: str, _: float | None = None) -> bool:
         """Append a member to short-term status list (score parameter is ignored)."""
         try:
             redis_client = self._get_conn()
@@ -139,7 +139,7 @@ class Collaborator:
             print(f"Error while appending to short-term status list: {e}")
             return False
 
-    def read_agent_status(self, name: str) -> List[str]:
+    def read_agent_status(self, name: str) -> list[str]:
         """Get all members from short-term status list."""
         try:
             redis_client = self._get_conn()
@@ -158,7 +158,7 @@ class Collaborator:
             return False
 
     def register_agent(
-        self, agent_name: str, agent_data: Dict[str, str], expire_second: Optional[int] = None
+        self, agent_name: str, agent_data: dict[str, str], expire_second: int | None = None
     ) -> bool:
         """Register agent in Redis under AGENT_INFO hash.
 
@@ -194,7 +194,7 @@ class Collaborator:
             print(f"Failed to register agent {agent_name}: {e}")
             return False
 
-    def read_agent_info(self, agent_name: str) -> Optional[Dict[str, str]]:
+    def read_agent_info(self, agent_name: str) -> dict[str, str] | None:
         """Read agent info from AGENT_INFO hash."""
         try:
             redis_client = self._get_conn()
@@ -203,7 +203,7 @@ class Collaborator:
             print(f"Error retrieving agent {agent_name}: {e}")
             return None
 
-    def read_all_agents_info(self) -> Dict[str, Dict[str, str]]:
+    def read_all_agents_info(self) -> dict[str, dict[str, str]]:
         """Read all agents info from AGENT_INFO hash."""
         try:
             redis_client = self._get_conn()
@@ -212,7 +212,7 @@ class Collaborator:
             print(f"Error retrieving agent registry: {e}")
             return {}
 
-    def read_all_agents_name(self) -> List[str]:
+    def read_all_agents_name(self) -> list[str]:
         """Read all agent names (keys) from AGENT_INFO hash.
 
         Returns:
@@ -262,7 +262,7 @@ class Collaborator:
 
         Example:
             >>> coll.update_agent_busy("agent_1", True)  # Set busy
-            >>> coll.update_agent_busy("agent_1", False) # Set available
+            >>> coll.update_agent_busy("agent_1", False)  # Set available
         """
         try:
             redis_client = self._get_conn()
@@ -271,7 +271,7 @@ class Collaborator:
             print(f"Error updating busy status for {agent_name}: {e}")
             return False
 
-    def agent_is_busy(self, agent_name: str) -> Optional[bool]:
+    def agent_is_busy(self, agent_name: str) -> bool | None:
         """Get current busy status of an agent.
 
         Args:
@@ -292,7 +292,7 @@ class Collaborator:
             return None
 
     def wait_agents_free(
-        self, agents_name: list[str], check_interval: float = 0.5, timeout: Optional[float] = None
+        self, agents_name: list[str], check_interval: float = 0.5, timeout: float | None = None
     ) -> bool:
         """Wait until all specified agents become free (busy=False).
 
@@ -342,7 +342,7 @@ class Collaborator:
             print(f"Error while waiting for agent status: {e}")
             return False
 
-    def record_environment(self, name: str, value: Dict[str, str]) -> Optional[bool]:
+    def record_environment(self, name: str, value: dict[str, str]) -> bool | None:
         """
         Store environment information into Redis as a hash field.
 
@@ -376,7 +376,7 @@ class Collaborator:
             )
             return False
 
-    def read_environment(self, name: str) -> Optional[Union[Dict[str, str], str]]:
+    def read_environment(self, name: str) -> dict[str, str] | str | None:
         """
         read environment information from Redis hash storage.
 

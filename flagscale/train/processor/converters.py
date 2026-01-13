@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from functools import singledispatch
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 import numpy as np
 import torch
@@ -199,7 +201,7 @@ def create_transition(
 
 
 def robot_action_observation_to_transition(
-    action_observation: tuple[RobotAction, RobotObservation]
+    action_observation: tuple[RobotAction, RobotObservation],
 ) -> EnvTransition:
     """
     Convert a raw robot action and observation dictionary into a standardized `EnvTransition`.

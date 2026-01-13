@@ -1,6 +1,6 @@
 - serve_id: A
   module: examples/emu3.5/conf/serve/emu3p5.py
-  name: Emu3_5InferencePipeline 
+  name: Emu3_5InferencePipeline
   resources:
     max_ongoing_requests: 1
     target_ongoing_requests: 1

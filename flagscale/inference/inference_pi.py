@@ -2,7 +2,6 @@ import argparse
 import json
 
 import torch
-
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from torchvision import transforms

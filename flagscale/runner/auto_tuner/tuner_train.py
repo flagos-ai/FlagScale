@@ -8,8 +8,6 @@ import shutil
 import sys
 import time
 
-from abc import ABC, abstractmethod
-
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.auto_tuner.generate import Generator
@@ -102,7 +100,7 @@ class TrainAutoTuner(AutoTunerBase):
                 raise ValueError(
                     "Heterogeneous tuning requires a valid hostfile, but none was found or it was empty."
                 )
-            total_cards = sum(info['slots'] for info in resources.values())
+            total_cards = sum(info["slots"] for info in resources.values())
             self.config.experiment.auto_tuner.cards = total_cards
             self.searcher = HeteroSearcher(self.config, resources)
             self.pruner = HeteroPruner(self.config)
@@ -120,9 +118,9 @@ class TrainAutoTuner(AutoTunerBase):
         if os.path.isfile(config_path):
             with open(config_path, "r", encoding="utf-8") as f:
                 load_config = json.load(f)
-            assert (
-                load_config == self.config
-            ), f"The configuration file has changed and cannot be resumed from breakpoint"
+            assert load_config == self.config, (
+                "The configuration file has changed and cannot be resumed from breakpoint"
+            )
         else:
             with open(config_path, "w", encoding="utf-8") as f:
                 pure = OmegaConf.to_container(copy.deepcopy(self.config), resolve=True)
@@ -174,7 +172,7 @@ class TrainAutoTuner(AutoTunerBase):
         except FileNotFoundError:
             return
         except PermissionError:
-            self.logger.error(f"no permission to clear breakpoint task log")
+            self.logger.error("no permission to clear breakpoint task log")
             sys.exit()
         except OSError as e:
             self.logger.info(f"cannot clear breakpoint task log, due {e}")
@@ -183,20 +181,20 @@ class TrainAutoTuner(AutoTunerBase):
     # get pruned num from log
     def find_pruned_num_value(self, file_path):
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                matches = re.findall(r'Pruned (.*?) strategy', file.read())
-                return matches[-1] if matches else '0'
-        except (FileNotFoundError, IndexError, IOError):
-            return '0'
+            with open(file_path, "r", encoding="utf-8") as file:
+                matches = re.findall(r"Pruned (.*?) strategy", file.read())
+                return matches[-1] if matches else "0"
+        except (OSError, FileNotFoundError, IndexError):
+            return "0"
 
     # get serarch num from log
     def find_search_num_value(self, file_path):
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                matches = re.findall(r'Searching (.*?) /', file.read())
-                return matches[-1] if matches else '0'
-        except (FileNotFoundError, IndexError, IOError):
-            return '0'
+            with open(file_path, "r", encoding="utf-8") as file:
+                matches = re.findall(r"Searching (.*?) /", file.read())
+                return matches[-1] if matches else "0"
+        except (OSError, FileNotFoundError, IndexError):
+            return "0"
 
     def tune(self):
         """
@@ -233,7 +231,7 @@ class TrainAutoTuner(AutoTunerBase):
                     f"Best strategy tuned so far: {best_strategy}, and performance is {best_strategy['performance']}."
                 )
             else:
-                self.logger.info(f"No strategy can run so far.")
+                self.logger.info("No strategy can run so far.")
         tuner_end_time = time.time()
         self.logger.info(f"AutoTuner Ended in {tuner_end_time - tuner_start_time} seconds.")
 
@@ -243,7 +241,7 @@ class TrainAutoTuner(AutoTunerBase):
             if best_strategy:
                 self.logger.info(f"Run best Strategy: {best_strategy}")
             else:
-                raise ValueError(f"No strategy can run.")
+                raise ValueError("No strategy can run.")
             best_task = self.generator.gen_best_task(best_strategy, self.orig_config)
             best_task.action = "run"
             runner = SSHTrainRunner(best_task)
@@ -330,9 +328,7 @@ class TrainAutoTuner(AutoTunerBase):
         self.cur_strategy["start_time"] = readable_task_start_time
 
         self.logger.info(
-            "task_{} monitor time: {:.2f}s".format(
-                self.cur_strategy["idx"], self.cur_strategy["elapsed_time"]
-            )
+            f"task_{self.cur_strategy['idx']} monitor time: {self.cur_strategy['elapsed_time']:.2f}s"
         )
 
     def record(self):

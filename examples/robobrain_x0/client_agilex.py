@@ -1,19 +1,15 @@
 # Adopted from FlagOpen/RoboBrain-X0 (https://github.com/FlagOpen/RoboBrain-X0/blob/main/agilex/client_agilex.py)
 import argparse
 import base64
-import io
 import json
 import random
 import sys
 import time
-
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 import requests
-
-from PIL import Image
 
 IMG_WIDTH = 640
 IMG_HEIGHT = 480
@@ -38,7 +34,7 @@ def check_health(base_url: str) -> None:
     print(f"[√] Server healthy - GPU: {data['gpu_info']['device_name']}")
 
 
-def build_payload(args) -> Dict[str, Any]:
+def build_payload(args) -> dict[str, Any]:
     """Construct JSON payload for /infer."""
     # 1. Dummy robot state (batch=1, dim=args.state_dim)
     state = np.random.uniform(-1, 1, size=(1, args.state_dim)).tolist()

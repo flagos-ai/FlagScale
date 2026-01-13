@@ -5,10 +5,9 @@ from omegaconf import OmegaConf
 
 
 class Generator:
-
     def __init__(self, config):
         self.config = config
-        # TODO: Just a temporary solution, need to be configurated by user
+        # TODO: Just a temporary solution, need to be configured by user
         if "args_mapping" in config.experiment.auto_tuner:
             self.args_mapping = config.experiment.auto_tuner.args_mapping
         else:
@@ -49,7 +48,7 @@ class Generator:
         # Logging interval should be 1
         config.train.system.logging.log_interval = 1
 
-        # Set redict and tee
+        # Set redirect and tee
         config.experiment.runner.tee = 3
         config.experiment.runner.redirects = 3
 
@@ -138,7 +137,7 @@ class ServeGenerator(Generator):
         if model_config is None:
             raise ValueError(f"No valid configuration found in task config: {serve_config}")
 
-        backend_value = config.get('experiment', {}).get('task', {}).get('backend')
+        backend_value = config.get("experiment", {}).get("task", {}).get("backend")
         if backend_value is None:
             engine = model_config.get("engine", None)
         else:

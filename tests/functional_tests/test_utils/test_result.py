@@ -5,8 +5,7 @@ import re
 import numpy as np
 import pytest
 import requests
-
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 
 def find_directory(start_path, target_dir_name):
@@ -62,9 +61,9 @@ def test_train_equal(test_path, test_type, test_task, test_case):
         np.allclose(gold_result_json["lm loss:"]["values"], result_json["lm loss:"]["values"]),
     )
 
-    assert np.allclose(
-        gold_result_json["lm loss:"]["values"], result_json["lm loss:"]["values"]
-    ), "Result not close to gold result"
+    assert np.allclose(gold_result_json["lm loss:"]["values"], result_json["lm loss:"]["values"]), (
+        "Result not close to gold result"
+    )
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
@@ -88,7 +87,7 @@ def test_inference_equal(test_path, test_type, test_task, test_case):
             output = True
         if line == "##################################################\n":
             output = False
-        if output == True:
+        if output:
             result_lines.append(line)
 
     gold_value_path = os.path.join(test_path, test_type, test_task, "results_gold", test_case)
@@ -116,7 +115,7 @@ def test_inference_equal(test_path, test_type, test_task, test_case):
 
     for result_line, gold_value_line in zip(result_lines, gold_value_lines):
         print(result_line, gold_value_line)
-        assert result_line.rstrip('\n') == gold_value_line.rstrip('\n')
+        assert result_line.rstrip("\n") == gold_value_line.rstrip("\n")
 
 
 @pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
@@ -140,7 +139,7 @@ def test_inference_pipeline(test_path, test_type, test_task, test_case):
             output = True
         if line == "##################################################\n":
             output = False
-        if output == True:
+        if output:
             result_lines.append(line)
 
     gold_value_path = os.path.join(test_path, test_type, test_task, "results_gold", test_case)
@@ -163,44 +162,44 @@ def test_inference_pipeline(test_path, test_type, test_task, test_case):
         gold_group = gold_value_lines[i : i + 4]
 
         # Check the first line for strict equality
-        assert (
-            result_group[0] == gold_group[0]
-        ), f"First line mismatch:\nResult: {result_group[0]}\nGold: {gold_group[0]}"
+        assert result_group[0] == gold_group[0], (
+            f"First line mismatch:\nResult: {result_group[0]}\nGold: {gold_group[0]}"
+        )
 
         # Check the next three lines for equality before the '=' character
         for j in range(1, 4):
-            result_parts = result_group[j].split('=')
-            gold_parts = gold_group[j].split('=')
+            result_parts = result_group[j].split("=")
+            gold_parts = gold_group[j].split("=")
 
             # Check if both lines have an '=' and compare the keys (before '=')
             if len(result_parts) == 2 and len(gold_parts) == 2:
                 result_key = result_parts[0].strip()
                 gold_key = gold_parts[0].strip()
 
-                assert (
-                    result_key == gold_key
-                ), f"Line {j+1} keys mismatch:\nResult: {result_group[j]}\nGold: {gold_group[j]}"
+                assert result_key == gold_key, (
+                    f"Line {j + 1} keys mismatch:\nResult: {result_group[j]}\nGold: {gold_group[j]}"
+                )
             else:
                 print(
                     f"Warning: One of the lines doesn't have an '=' character: \nResult: {result_group[j]}\nGold: {gold_group[j]}"
                 )
 
-        result_parts = result_group[1].split('=')
-        assert len(result_parts) >= 2, f"len(result_parts) should be 2"
+        result_parts = result_group[1].split("=")
+        assert len(result_parts) >= 2, "len(result_parts) should be 2"
         result_value = result_parts[1].strip()
-        assert (
-            result_value[0] == "'" and result_value[-1] == "'" and result_value[1:-1]
-        ), f"String {result_value} should be wrapped in '' and not empty inside"
+        assert result_value[0] == "'" and result_value[-1] == "'" and result_value[1:-1], (
+            f"String {result_value} should be wrapped in '' and not empty inside"
+        )
 
-        result_parts = result_group[2].split('=')
-        assert len(result_parts) >= 2, f"len(result_parts) should be 2"
+        result_parts = result_group[2].split("=")
+        assert len(result_parts) >= 2, "len(result_parts) should be 2"
         result_value = result_parts[1].strip()
-        assert (
-            result_value[0] == "'" and result_value[-1] == "'" and result_value[1:-1]
-        ), f"String {result_value} should be wrapped in '' and not empty inside"
+        assert result_value[0] == "'" and result_value[-1] == "'" and result_value[1:-1], (
+            f"String {result_value} should be wrapped in '' and not empty inside"
+        )
 
-        result_parts = result_group[3].split('=')
-        assert len(result_parts) >= 2, f"len(result_parts) should be 2"
+        result_parts = result_group[3].split("=")
+        assert len(result_parts) >= 2, "len(result_parts) should be 2"
         result_value = result_parts[1].strip()
         assert (
             (result_value[0] == "[" and result_value[-1] == "]")
@@ -233,7 +232,7 @@ def test_rl_equal(test_path, test_type, test_task, test_case):
                     # Extract the value after the colon
                     value = key_value.split(":")[-1]
                     # Handle np.float64(...) format by extracting the number inside parentheses
-                    match = re.search(r'np\.float64\(([\d.eE+-]+)\)', value)
+                    match = re.search(r"np\.float64\(([\d.eE+-]+)\)", value)
                     if match:
                         value = match.group(1)
                     # Convert to float and append to the list

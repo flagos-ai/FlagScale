@@ -24,7 +24,6 @@ supports in-place slicing and mutation which is very handy for a dynamic buffer.
 """
 
 import os
-
 from pathlib import Path
 from typing import Any
 

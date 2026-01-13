@@ -1,6 +1,5 @@
 import os
 import time
-
 from abc import ABC, abstractmethod
 
 FLAGSCALE_USE_V1 = os.environ.get("FLAGSCALE_USE_V1", "1").lower() in ("1", "true")
@@ -32,11 +31,11 @@ class AutoTunerBase(ABC):
             )
             if "memory_model" in self.config.experiment.auto_tuner:
                 self.logger.info(
-                    f"Searching {self.idx+pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy, {pruned_by_memory_model} by memory model."
+                    f"Searching {self.idx + pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy, {pruned_by_memory_model} by memory model."
                 )
             else:
                 self.logger.info(
-                    f"Searching {self.idx+pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy."
+                    f"Searching {self.idx + pruned_count} / {len(self.searcher.strategies)} strategy, Pruned {pruned_count} strategy."
                 )
             self.logger.info(f"Generate task_{self.idx}")
             self.cur_strategy = strategy
@@ -53,9 +52,4 @@ class AutoTunerBase(ABC):
                 return True
 
         # If no task to tune, stop
-        if self.searcher.has_done():
-            return True
-
-        # TODO: Add task limits to control the tuner
-
-        return False
+        return bool(self.searcher.has_done())

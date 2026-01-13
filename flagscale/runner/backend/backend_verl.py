@@ -74,7 +74,7 @@ class VerlBackend(BackendBase):
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
         if no_shared_fs:
-            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+            host_output_file = os.path.join(logging_config.log_dir, "host.output")
         else:
             host_output_file = os.path.join(
                 logging_config.log_dir, f"host_{node_rank}_{host}.output"
@@ -89,7 +89,6 @@ class VerlBackend(BackendBase):
         root_dir = os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         )
-        verl_dir = os.path.join(root_dir, "third_party", "verl")
         cmds_config = config.experiment.get("cmds", None)
         if cmds_config:
             before_start = cmds_config.get("before_start", "")
@@ -99,13 +98,13 @@ class VerlBackend(BackendBase):
             f.write("#!/bin/bash\n\n")
             f.write(f"{before_start}\n")
             if resources is not None:
-                available_ip = list(resources.keys())[0]
+                available_ip = next(iter(resources.keys()))
                 ray_port = config.experiment.runner.get("ray_port", 6379)
                 ray_dashboard_port = config.experiment.runner.get("ray_dashboard_port", 8265)
                 for node_rank, (host, resource_info) in enumerate(resources.items()):
                     if node_rank == 0:
                         f.write(
-                            f'ray start --head --port={ray_port} --dashboard-host=0.0.0.0 --dashboard-port={ray_dashboard_port} --num-gpus={resource_info["slots"]}\n'
+                            f"ray start --head --port={ray_port} --dashboard-host=0.0.0.0 --dashboard-port={ray_dashboard_port} --num-gpus={resource_info['slots']}\n"
                         )
                     else:
                         f.write(
@@ -114,13 +113,13 @@ class VerlBackend(BackendBase):
 
             f.write(f"mkdir -p {system_config.logging.log_dir}\n")
             f.write(f"mkdir -p {system_config.logging.pids_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"cd {root_dir}\n")
-            f.write(f"\n")
-            f.write(f"export PYTHONPATH=${{PYTHONPATH}}\n")
-            f.write(f"\n")
+            f.write("\n")
+            f.write("export PYTHONPATH=${PYTHONPATH}\n")
+            f.write("\n")
             f.write(f'cmd="{cmd}"\n')
-            f.write(f"\n")
+            f.write("\n")
             if with_test:
                 f.write(f'bash -c "$cmd; sync"  >> {host_output_file} \n')
             else:

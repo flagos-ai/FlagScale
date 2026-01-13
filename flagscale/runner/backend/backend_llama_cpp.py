@@ -23,7 +23,7 @@ def _get_args_llamacpp(config: DictConfig):
     # step3: dict -> yaml
     logging_config = config.logging
     new_config = OmegaConf.create(config_dict)
-    new_conf_file = os.path.join(logging_config.scripts_dir, f"serve.yaml")
+    new_conf_file = os.path.join(logging_config.scripts_dir, "serve.yaml")
 
     # step4: write the new yaml file to `outputs_dir/serve_logs/scripts/serve.yaml`
     with open(new_conf_file, "w") as f:
@@ -92,7 +92,7 @@ def _update_config_serve(config: DictConfig):
                 if cli_engine_args:
                     item.engine_args.update(cli_engine_args)
 
-    log_dir = os.path.join(exp_dir, f"serve_logs")
+    log_dir = os.path.join(exp_dir, "serve_logs")
     scripts_dir = os.path.join(log_dir, "scripts")
     pids_dir = os.path.join(log_dir, "pids")
 
@@ -145,7 +145,7 @@ class LlamaCppBackend(BackendBase):
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
         if no_shared_fs:
-            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+            host_output_file = os.path.join(logging_config.log_dir, "host.output")
         else:
             host_output_file = os.path.join(
                 logging_config.log_dir, f"host_{node_rank}_{host}.output"
@@ -174,29 +174,29 @@ class LlamaCppBackend(BackendBase):
         with open(host_run_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             f.write("set -x\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"{before_start_cmd}\n")
-            f.write(f"\n")
+            f.write("\n")
 
-            f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
+            f.write('if [ -z "$PYTHONPATH" ]; then\n')
             f.write(f"    export PYTHONPATH={root_dir}\n")
-            f.write(f"else\n")
+            f.write("else\n")
             f.write(f'    export PYTHONPATH="$PYTHONPATH:{root_dir}"\n')
-            f.write(f"fi\n")
-            f.write(f"\n")
+            f.write("fi\n")
+            f.write("\n")
 
             envs_str = " && ".join(
-                f"export {key}={value}" for key, value in envs.items() if key != 'nodes_envs'
+                f"export {key}={value}" for key, value in envs.items() if key != "nodes_envs"
             )
             f.write(f"{envs_str}\n")
 
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"cd {root_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f'cmd="{cmd}"\n')
-            f.write(f"\n")
+            f.write("\n")
             f.write("echo '=========== launch task (LlamaCpp) ==========='\n")
 
             if with_test:

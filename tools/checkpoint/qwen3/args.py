@@ -3,7 +3,6 @@ import os
 
 
 def load_args_hf2mg(args):
-
     # Read transformers args.
     hf_args_path = os.path.join(args.load, "config.json")
     with open(hf_args_path) as f:
@@ -40,7 +39,7 @@ def load_args_hf2mg(args):
     args.tokenizer_type = "Qwen2TokenizerFS"
     args.use_rotary_position_embeddings = True
     args.add_bias_linear = False
-    args.add_qkv_bias = False  # hf_args["attention_bias"] -> flase
+    args.add_qkv_bias = False  # hf_args["attention_bias"] -> false
     args.make_vocab_size_divisible_by = 64
     args.consumed_train_samples = 0
     args.consumed_valid_samples = 0
@@ -72,8 +71,8 @@ def save_args_mg2hf(args):
     )
     config.architectures = ["Qwen3ForCausalLM"]
     auto_map = dict()
-    auto_map['AutoConfig'] = 'configuration_qwen3.Qwen3Config'
-    auto_map['AutoModelForCausalLM'] = 'modeling_qwen3.Qwen3ForCausalLM'
+    auto_map["AutoConfig"] = "configuration_qwen3.Qwen3Config"
+    auto_map["AutoModelForCausalLM"] = "modeling_qwen3.Qwen3ForCausalLM"
     config.auto_map = auto_map
     config.save_pretrained(args.save)
 

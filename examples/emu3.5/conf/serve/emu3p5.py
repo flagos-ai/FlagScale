@@ -2,18 +2,12 @@
 
 import os
 import sys
-import time
 import uuid
-
-from typing import Any, Dict, List, Optional, Tuple
-from uuid import uuid4
+from typing import Any
 
 import torch
 
-from PIL import Image
-
 from vllm import LLM
-from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 
 from flagscale.inference.emu_utils import Emu3p5Processor
@@ -59,12 +53,10 @@ DEFAULT_CONFIG = {
 
 
 class Emu3_5InferencePipeline:
-
-    def __init__(self, config: Dict[str, Any] = DEFAULT_CONFIG):
-
+    def __init__(self, config: dict[str, Any] = DEFAULT_CONFIG):
         self.cfg = config
-        self.processor: Optional[Emu3p5Processor] = None
-        self.llm: Optional[LLM] = None
+        self.processor: Emu3p5Processor | None = None
+        self.llm: LLM | None = None
 
         self.task_type = self.cfg["task_type"]
         assert self.task_type in [
@@ -79,15 +71,14 @@ class Emu3_5InferencePipeline:
         self._load_models()
 
     def _load_models(self):
-
         cfg = self.cfg
         llm_cfg = cfg.get("llm", {})
 
         tokenizer_path = llm_cfg.get("tokenizer", None)
         vq_model_path = llm_cfg.pop("vq_model", None)
-        assert (
-            tokenizer_path and vq_model_path
-        ), "Please set the tokenzier and vq_model in llm config."
+        assert tokenizer_path and vq_model_path, (
+            "Please set the tokenzier and vq_model in llm config."
+        )
 
         image_area = cfg["image_area"]
 
@@ -117,7 +108,7 @@ class Emu3_5InferencePipeline:
                 **llm_cfg,
                 max_num_batched_tokens=26000,
                 max_num_seqs=2,
-                generation_config='vllm',
+                generation_config="vllm",
                 scheduler_cls="vllm.v1.core.sched.batch_scheduler.Scheduler",
                 compilation_config={
                     "full_cuda_graph": True,
@@ -140,9 +131,8 @@ class Emu3_5InferencePipeline:
 
     @torch.no_grad()
     def forward(
-        self, prompt: str, reference_image: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
-
+        self, prompt: str, reference_image: list[str] | None = None
+    ) -> list[dict[str, Any]]:
         question_data: Any
         if reference_image and len(reference_image) > 0:
             question_data = {"prompt": prompt, "reference_image": reference_image}
@@ -206,7 +196,6 @@ class Emu3_5InferencePipeline:
 
 
 def main(task_type: str = "x2i"):
-
     DEFAULT_CONFIG["task_type"] = task_type
 
     pipeline = Emu3_5InferencePipeline(DEFAULT_CONFIG)
@@ -221,7 +210,6 @@ def main(task_type: str = "x2i"):
 
 
 if __name__ == "__main__":
-
     task_type = "t2i"  # task_type should be in (x2i, t2i, howto, story)
 
     main(task_type)

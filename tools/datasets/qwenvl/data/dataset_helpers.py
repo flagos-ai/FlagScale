@@ -20,19 +20,15 @@ import os
 import re
 import sys
 import traceback
-
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import PIL
 import torch
 import transformers
-
 from packaging.version import Version as PkgVersion
 from PIL import Image
-from torchvision import transforms as T
 
 from megatron.energon import Batch, DefaultTaskEncoder, VQASample
 from megatron.training import get_args
@@ -43,17 +39,17 @@ from tools.datasets.qwenvl.data.image_processing import get_visual_transform
 dataset_logger = logging.getLogger(__name__)
 FIRST_MAX_PADDING_FLAG = True
 IGNORE_IDX = -100
-MAX_IMG_THRESHHOLD = 5000
+MAX_IMG_THRESHOLD = 5000
 
 
 # Type for intermediate batch, after batch()
 @dataclass
 class ImageTaskSample:
     __key__: str
-    __subflavors__: Dict
+    __subflavors__: dict
 
-    imgs: List[np.ndarray]  # (c, h, w)
-    videos: List[np.ndarray]  # (c, h, w)
+    imgs: list[np.ndarray]  # (c, h, w)
+    videos: list[np.ndarray]  # (c, h, w)
 
     image_thw_grids: np.ndarray
     video_thw_grids: np.ndarray
@@ -68,8 +64,8 @@ class ImageTaskSample:
 # Typing for the resulting batch data after encode_batch()
 @dataclass
 class VQATaskBatch(Batch):
-    __keys__: List[str]
-    __subflavors__: List[Dict]
+    __keys__: list[str]
+    __subflavors__: list[dict]
     # (num_tiles, c, h, w)
     imgs: torch.Tensor
     videos: torch.Tensor
@@ -121,7 +117,7 @@ def convert_to_qwen2vl_content(
 
 
 class TaskEncoder(
-    DefaultTaskEncoder[Union[VQASample, ChatMLSample], ImageTaskSample, VQATaskBatch, dict]
+    DefaultTaskEncoder[VQASample | ChatMLSample, ImageTaskSample, VQATaskBatch, dict]
 ):
     """A simple task encoder for captioning."""
 
@@ -148,7 +144,7 @@ class TaskEncoder(
         # NOTE: Qwen3-VL don't use system prompt by default
         self.use_system_prompt = getattr(self.args, "use_system_prompt", True)
 
-    def encode_sample(self, sample: Union[VQASample, ChatMLSample]):
+    def encode_sample(self, sample: VQASample | ChatMLSample):
         if isinstance(sample, VQASample):
             is_llava_training = (
                 sample.__subflavors__["is_llava_training"]
@@ -274,10 +270,10 @@ class TaskEncoder(
                     imgs.append(image)
                 except Exception as e:
                     raise ValueError(
-                        f"Failed to open image: {img_path}. Error: {e} of smaple[{sample.__key__}]"
+                        f"Failed to open image: {img_path}. Error: {e} of sample[{sample.__key__}]"
                     )
                     # raise InternalWarning(
-                    #     f"Failed to open image: {img_path}. Error: {e} of smaple[{sample.__key__}]"
+                    #     f"Failed to open image: {img_path}. Error: {e} of sample[{sample.__key__}]"
                     # )
             if PkgVersion(transformers.__version__) < PkgVersion("4.57.0"):
                 imgs_info = self.tokenizer.processor.image_processor(imgs, return_tensors="np")
@@ -343,7 +339,7 @@ class TaskEncoder(
                 )
         else:
             dataset_logger.warning(
-                f"The sample [{sample.__key__}] has odd number of conversation turns, and we will use the first turn as system prompt. BUT this may be wrong. Pelase check the sample."
+                f"The sample [{sample.__key__}] has odd number of conversation turns, and we will use the first turn as system prompt. BUT this may be wrong. Please check the sample."
             )
             converted_conversation.append(
                 {"role": "system", "content": conversation[0][content_key]}
@@ -417,15 +413,16 @@ class TaskEncoder(
 
         # get the indices of the origin <|image_pad|> and <|video_pad|>
         image_token_indices = np.where(input_ids == image_token_id)[0]
-        assert len(image_token_indices) == len(
-            image_thw_grids
-        ), f"With {len(image_thw_grids)} images in the sample, but {len(image_token_indices)} image placeholders!"
+        assert len(image_token_indices) == len(image_thw_grids), (
+            f"With {len(image_thw_grids)} images in the sample, but {len(image_token_indices)} image placeholders!"
+        )
         video_token_indices = np.where(input_ids == video_token_id)[0]
-        assert len(video_token_indices) == len(
-            video_thw_grids
-        ), f"With {len(video_thw_grids)} images in the sample, but {len(video_token_indices)} video placeholders!"
-        image_thw_grids, video_thw_grids = np.array(image_thw_grids, dtype=np.int64), np.array(
-            video_thw_grids, dtype=np.int64
+        assert len(video_token_indices) == len(video_thw_grids), (
+            f"With {len(video_thw_grids)} images in the sample, but {len(video_token_indices)} video placeholders!"
+        )
+        image_thw_grids, video_thw_grids = (
+            np.array(image_thw_grids, dtype=np.int64),
+            np.array(video_thw_grids, dtype=np.int64),
         )
 
         # video_thw_grids shape: [n, 3]
@@ -440,7 +437,7 @@ class TaskEncoder(
         if target_length > self.seq_len:
             # raise InternalWarning(f"Long sequence with length {target_length} found, dropped...")
             dataset_logger.warning(
-                f"Samle id [{sample.__key__}] has long sequence with length {target_length}, cutoff to max [self.seq_len={self.seq_len}] in batch function..."
+                f"Sample id [{sample.__key__}] has long sequence with length {target_length}, cutoff to max [self.seq_len={self.seq_len}] in batch function..."
             )
         final_input_ids = np.zeros(target_length, dtype=input_ids.dtype)
         final_input_masks = final_input_ids.copy()
@@ -501,11 +498,6 @@ class TaskEncoder(
         )
 
     def encode_vqa(self, sample: VQASample):
-        augment = (
-            sample.__subflavors__["augmentation"]
-            if "augmentation" in sample.__subflavors__
-            else False
-        )
         has_video = (
             sample.__subflavors__["has_video"] if "has_video" in sample.__subflavors__ else False
         )
@@ -518,7 +510,7 @@ class TaskEncoder(
             flatten_patches, thw_grids = self._flatten_visual_inputs(imgs, is_image=True)
 
         assert "<image>" in sample.context  # ?
-        # NOTE: we expect a context is a string with <image> conetnt
+        # NOTE: we expect a context is a string with <image> content
         if isinstance(sample.answers, list):
             answer_list = sample.answers
             weight_list = np.array(sample.answer_weights).astype(np.float32)
@@ -558,12 +550,12 @@ class TaskEncoder(
         if len(input_ids) > self.seq_len:
             raise InternalWarning(f"Long sequence with length {len(input_ids)} found, dropped...")
 
-        target = np.array(input_ids[1:] + [IGNORE_IDX])
+        target = np.array([*input_ids[1:], IGNORE_IDX])
         if len(user_input_ids) >= len(input_ids):
-            raise InternalWarning(f"Sample not supported, dropped...")
+            raise InternalWarning("Sample not supported, dropped...")
         # ensure user inputs is a prefix of full text
         if not (np.array(user_input_ids) == np.array(input_ids[: len(user_input_ids)])).all():
-            raise InternalWarning(f"Sample not supported, dropped...")
+            raise InternalWarning("Sample not supported, dropped...")
         # mask input
         target[: len(user_input_ids) - 1] = IGNORE_IDX
 
@@ -585,7 +577,7 @@ class TaskEncoder(
             target=target,
         )
 
-    def batch(self, samples: List[ImageTaskSample]) -> VQATaskBatch:
+    def batch(self, samples: list[ImageTaskSample]) -> VQATaskBatch:
         # Stack images to [num_tiles, c, h, w]. If there are no images (text-only), then use a dummy image.
         # imgs = [img for s in samples for img in s.imgs]
 
@@ -604,9 +596,9 @@ class TaskEncoder(
         image_thw_grids = [thw_grids for s in samples for thw_grids in s.image_thw_grids]
         if len(image_thw_grids) > 0:
             image_thw_grids = torch.from_numpy(np.array(image_thw_grids)).long()
-            assert (
-                image_thw_grids.prod(dim=-1).sum() == imgs.shape[0]
-            ), f"{image_thw_grids.prod(dim=-1).sum()} vs {imgs.shape[0]}"
+            assert image_thw_grids.prod(dim=-1).sum() == imgs.shape[0], (
+                f"{image_thw_grids.prod(dim=-1).sum()} vs {imgs.shape[0]}"
+            )
         else:
             image_thw_grids = torch.empty([0, 3], dtype=torch.long)
 
@@ -642,10 +634,10 @@ class TaskEncoder(
         else:
             video_thw_grids = torch.empty([0, 3], dtype=torch.long)
 
-        global FIRST_MAX_PADDING_FLAG, MAX_IMG_THRESHHOLD
+        global FIRST_MAX_PADDING_FLAG, MAX_IMG_THRESHOLD
         # NOTE(lizhiyu): Clear the cache only when the current image length is longer than the past maxisum length.
-        if image_thw_grids.prod(axis=-1).sum() // 4 > MAX_IMG_THRESHHOLD:
-            MAX_IMG_THRESHHOLD = image_thw_grids.prod(axis=-1).sum() // 4
+        if image_thw_grids.prod(axis=-1).sum() // 4 > MAX_IMG_THRESHOLD:
+            MAX_IMG_THRESHOLD = image_thw_grids.prod(axis=-1).sum() // 4
             FIRST_MAX_PADDING_FLAG = True
 
         if not self.args.enable_variable_seq_lengths:
@@ -704,7 +696,7 @@ class TaskEncoder(
         return raw
 
 
-def print_error_handler(exc: Exception, key: Optional[str], debug=False):
+def print_error_handler(exc: Exception, key: str | None, debug=False):
     if not debug and isinstance(exc, InternalWarning):
         return
     print(

@@ -16,7 +16,7 @@ isort==5.13.2
 flake8==7.1.0
 pylint==3.2.6
 
-pre-commit>=2.20.0
+pre-commit>=4.2.0
 diff-cover
 
 # serving
@@ -33,7 +33,7 @@ flask
 flask_cors
 tqdm_loggable
 types_boto3_s3
-qwen_vl_utils 
+qwen_vl_utils
 scipy
 pynvml
 webdataset

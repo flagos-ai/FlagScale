@@ -21,7 +21,6 @@ import logging
 import shutil
 import tempfile
 import warnings
-
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -32,7 +31,6 @@ import fsspec
 import pyarrow as pa
 import torch
 import torchvision
-
 from datasets.features.features import register_feature
 from PIL import Image
 
@@ -438,7 +436,7 @@ def concatenate_video_files(
     ) as tmp_concatenate_file:
         tmp_concatenate_file.write("ffconcat version 1.0\n")
         for input_path in input_video_paths:
-            tmp_concatenate_file.write(f"file '{str(input_path.resolve())}'\n")
+            tmp_concatenate_file.write(f"file '{input_path.resolve()!s}'\n")
         tmp_concatenate_file.flush()
         tmp_concatenate_path = tmp_concatenate_file.name
 

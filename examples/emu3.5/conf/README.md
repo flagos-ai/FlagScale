@@ -18,7 +18,7 @@ MAX_JOBS=32 pip install --no-build-isolation -v .
 ### Prepare Emu3.5
 ```bash
 pip install flash_attn==2.8.3 --no-build-isolation
-cd FalgScale
+cd FlagScale
 git clone --no-checkout https://github.com/baaivision/Emu3.5.git tmp_repo
 cd tmp_repo
 git sparse-checkout init --cone
@@ -46,7 +46,7 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   vq_model: BAAI/Emu3.5-VisionTokenizer
   model: BAAI/Emu3.5-image
-  tokenizer: src/tokenizer_emu3_ibq/ # from Emu3.5 repo, please prepare Emu3.5's src&assers
+  tokenizer: src/tokenizer_emu3_ibq/ # from Emu3.5 repo, please prepare Emu3.5's src&assets
   cmds:
     before_start: source /root/miniconda3/bin/activate flagscale-inference # a conda env with vllm installed
 ```

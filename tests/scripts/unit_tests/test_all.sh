@@ -35,5 +35,5 @@ for cmd in "${commands[@]}"; do
         # Throw an exception by exiting the script with a non-zero status
         exit 1
     fi
-    echo "Success: Command '$cmd' successed"
+    echo "Success: Command '$cmd' succeeded"
 done

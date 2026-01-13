@@ -1,6 +1,5 @@
 import argparse
 import threading
-
 from functools import wraps
 
 from omegaconf import OmegaConf

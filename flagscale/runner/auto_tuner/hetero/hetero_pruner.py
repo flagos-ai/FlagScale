@@ -2,10 +2,10 @@ import csv
 import json
 import logging
 import os
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any, Tuple, Optional
-
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from flagscale.runner.auto_tuner.prune.history import (
@@ -31,7 +31,7 @@ class HeteroPruner(Pruner):
         super().__init__(config)
         self.logger = logging.getLogger("FlagScale-AutoTuner")
 
-        self.pruned_strategies: List[Dict[str, Any]] = []
+        self.pruned_strategies: list[dict[str, Any]] = []
         self.pruned_idx_counter = 1
 
         # Robustly determine the path for the pruned history log
@@ -44,7 +44,7 @@ class HeteroPruner(Pruner):
         except OSError as e:
             self.logger.error(f"Failed to create directory for pruned history: {e}")
 
-    def prune(self, strategy: Dict[str, Any], history: List[Dict[str, Any]] = None) -> bool:
+    def prune(self, strategy: dict[str, Any], history: list[dict[str, Any]] | None = None) -> bool:
         """
         Main entry point for pruning logic.
         Returns True if the strategy should be pruned (skipped), False otherwise.
@@ -61,7 +61,7 @@ class HeteroPruner(Pruner):
         # 2. Hetero-specific History Checks (Type B)
         # Check if an identical hardware/batch-size configuration failed OOM in the past.
         if self._check_hetero_history_oom(strategy, history):
-            reason = strategy.get('prune_reason', 'OOM predicted by identical hetero history')
+            reason = strategy.get("prune_reason", "OOM predicted by identical hetero history")
             return self._apply_prune(strategy, reason, "OOM_PREDICTED_HETERO")
 
         # 3. Theoretical Memory Model Checks (Type C)
@@ -90,8 +90,8 @@ class HeteroPruner(Pruner):
 
             if should_prune:
                 # Retrieve reason/status potentially set by the heuristic function
-                reason = strategy.get('prune_reason', f"Pruned by heuristic: {func.__name__}")
-                status = strategy.get('max_mem_per_device', 'OOM_PREDICTED_HISTORY')
+                reason = strategy.get("prune_reason", f"Pruned by heuristic: {func.__name__}")
+                status = strategy.get("max_mem_per_device", "OOM_PREDICTED_HISTORY")
                 return self._apply_prune(strategy, reason, status)
 
         # 5. Valid Strategy
@@ -100,7 +100,9 @@ class HeteroPruner(Pruner):
 
     # Core Helper: Centralized Pruning Side-Effects
 
-    def _apply_prune(self, strategy: Dict[str, Any], reason: str, status_code: str = None) -> bool:
+    def _apply_prune(
+        self, strategy: dict[str, Any], reason: str, status_code: str | None = None
+    ) -> bool:
         """
         Handles all side effects of pruning a strategy:
         - Marks the strategy dictionary.
@@ -109,23 +111,23 @@ class HeteroPruner(Pruner):
         - Stores the strategy for CSV export.
         """
         # Update Strategy State
-        strategy['pruned'] = True
-        strategy['prune_reason'] = reason
-        strategy['pruned_idx'] = self.pruned_idx_counter
+        strategy["pruned"] = True
+        strategy["prune_reason"] = reason
+        strategy["pruned_idx"] = self.pruned_idx_counter
 
         if status_code:
-            strategy['max_mem_per_device'] = status_code
+            strategy["max_mem_per_device"] = status_code
             # Ensure compatibility with older components expecting 'max_mem'
-            if strategy.get('max_mem') != 'OOM':
-                strategy['max_mem'] = 'OOM'
-            strategy['performance'] = None
+            if strategy.get("max_mem") != "OOM":
+                strategy["max_mem"] = "OOM"
+            strategy["performance"] = None
 
         # Update Counters
         self.pruned_idx_counter += 1
         self.pruned_count += 1
 
         # Log
-        idx = strategy.get('idx', 'N/A')
+        idx = strategy.get("idx", "N/A")
         self.logger.info(f"Pruning Strategy {idx}. Reason: {reason}")
         self.logger.debug(f"Full details for pruned strategy {idx}: {strategy}")
 
@@ -136,7 +138,7 @@ class HeteroPruner(Pruner):
 
     # Logic: Architectural Checks
 
-    def _check_architectural_validity(self, strategy: Dict[str, Any]) -> Tuple[bool, str]:
+    def _check_architectural_validity(self, strategy: dict[str, Any]) -> tuple[bool, str]:
         """Validates structural integrity of the strategy."""
         required_keys = [
             "pipeline_model_parallel_size",
@@ -193,28 +195,27 @@ class HeteroPruner(Pruner):
     # Logic: Hetero History Checks
 
     def _check_hetero_history_oom(
-        self, strategy: Dict[str, Any], history: List[Dict[str, Any]]
+        self, strategy: dict[str, Any], history: list[dict[str, Any]]
     ) -> bool:
         """Checks if an identical hardware assignment + MBS failed OOM in history."""
-        current_meshes = strategy.get('hetero_process_meshes')
-        current_mbs = strategy.get('micro_batch_size')
+        current_meshes = strategy.get("hetero_process_meshes")
+        current_mbs = strategy.get("micro_batch_size")
 
         if not current_meshes:
             return False
 
         for item in history:
             # Only look at failed items
-            if item.get('max_mem_per_device') == 'OOM' or item.get('max_mem') == 'OOM':
+            if item.get("max_mem_per_device") == "OOM" or item.get("max_mem") == "OOM":
                 # Check for identical hardware and batch configuration
                 if (
-                    item.get('hetero_process_meshes') == current_meshes
-                    and item.get('micro_batch_size') == current_mbs
+                    item.get("hetero_process_meshes") == current_meshes
+                    and item.get("micro_batch_size") == current_mbs
                 ):
-
                     # Check if the failed item had less or equal recompute usage.
                     # If a strategy with MORE recompute OOM'd, the current one (with less) will definitely OOM.
                     if compare_by_recompute(strategy, item):
-                        strategy['prune_reason'] = (
+                        strategy["prune_reason"] = (
                             f"History task {item.get('idx')} OOM'd with same meshes/mbs."
                         )
                         return True
@@ -242,7 +243,7 @@ class HeteroPruner(Pruner):
             # Heuristic: If SP=True (memory saving) failed OOM, then SP=False (higher memory) will fail.
             if item.get("sequence_parallel") and not sp:
                 if item.get("max_mem") == "OOM" or item.get("max_mem_per_device") == "OOM":
-                    strategy['prune_reason'] = (
+                    strategy["prune_reason"] = (
                         "Pruned by SP history: SP=True OOM'd, implying SP=False will OOM."
                     )
                     return True
@@ -251,7 +252,7 @@ class HeteroPruner(Pruner):
 
     # Logic: Memory Model Checks
 
-    def _check_memory_model_utilization(self, strategy: Dict[str, Any]) -> Tuple[bool, str]:
+    def _check_memory_model_utilization(self, strategy: dict[str, Any]) -> tuple[bool, str]:
         """
         Compares predicted per-mesh memory against device capacity limits.
         Returns (is_oom, reason).
@@ -260,7 +261,7 @@ class HeteroPruner(Pruner):
 
         # Validate input
         if not isinstance(memory_per_mesh_list, list):
-            if memory_per_mesh_list == float('inf'):
+            if memory_per_mesh_list == float("inf"):
                 return True, "Memory calculation failed (returned infinity)."
             return False, ""  # No valid data
 
@@ -291,7 +292,7 @@ class HeteroPruner(Pruner):
         for i, pred_mem in enumerate(memory_per_mesh_list):
             dtype = device_types[i]
 
-            if pred_mem == float('inf'):
+            if pred_mem == float("inf"):
                 return True, f"Mesh {i} predicted infinite memory."
 
             if dtype in limits:
@@ -338,21 +339,21 @@ class HeteroPruner(Pruner):
 
             # Remove operational columns that are irrelevant for the report
             cols_to_drop = [
-                'pruned',
-                'idx',
-                'max_mem',
-                'max_mem_per_device',
-                'performance',
-                'error',
-                'stopped_by_tuner',
-                'elapsed_time',
-                'start_time',
-                'hetero_memory_model_calibrated',
+                "pruned",
+                "idx",
+                "max_mem",
+                "max_mem_per_device",
+                "performance",
+                "error",
+                "stopped_by_tuner",
+                "elapsed_time",
+                "start_time",
+                "hetero_memory_model_calibrated",
             ]
             df.drop(columns=[c for c in cols_to_drop if c in df.columns], inplace=True)
 
             # Reorder columns to put reason first
-            front_cols = ['pruned_idx', 'prune_reason']
+            front_cols = ["pruned_idx", "prune_reason"]
             cols = front_cols + [c for c in df.columns if c not in front_cols]
             df = df.reindex(columns=cols)
 
@@ -363,4 +364,4 @@ class HeteroPruner(Pruner):
             df.to_csv(self.pruned_history_path, index=False, quoting=csv.QUOTE_ALL)
             self.logger.info("Pruned history saved successfully.")
         except Exception as e:
-            self.logger.error(f"Failed to save pruned history: {e}", exc_info=True)
+            self.logger.exception(f"Failed to save pruned history: {e}")

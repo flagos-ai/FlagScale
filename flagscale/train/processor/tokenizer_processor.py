@@ -26,10 +26,9 @@ token IDs and attention masks, which are then added to the observation dictionar
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import torch
-
 from transformers import AutoTokenizer
 
 from .core import EnvTransition, TransitionKey

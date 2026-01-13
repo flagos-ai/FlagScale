@@ -3,7 +3,7 @@
 
 def add_patches_module(path: str, module_dict: dict):
     if len(module_dict) == 0:
-        raise Exception(f"module dict is None")
+        raise Exception("module dict is None")
     import sys
 
     print(f"{path} is being instead, using module {module_dict}")

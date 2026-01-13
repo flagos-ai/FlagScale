@@ -5,7 +5,6 @@ import shlex
 import subprocess
 import threading
 import time
-
 from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
@@ -77,13 +76,13 @@ def _get_runner_cmd_train(
     log_dir = os.path.abspath(log_dir)
     no_shared_fs = runner_config.get("no_shared_fs", False)
     if no_shared_fs:
-        log_dir = os.path.join(log_dir, f"host")
+        log_dir = os.path.join(log_dir, "host")
     else:
         log_dir = os.path.join(log_dir, f"host_{node_rank}_{host}")
     log_dir = os.path.join(log_dir, datetime.now().strftime("%Y%m%d_%H%M%S.%f"))
     rdzv_backend = runner_config.get("rdzv_backend", "c10d")
     rdzv_endpoint = runner_config.get("rdzv_endpoint", f"{master_addr}:{master_port}")
-    redirect = runner_config.get("redirects", "3")
+    # redirect = runner_config.get("redirects", "3")
     tee = runner_config.get("tee", "3")
 
     runner_args = OmegaConf.to_container(runner_config, resolve=True)
@@ -204,7 +203,7 @@ class SshLauncher(LauncherBase):
         export_cmd = []
         if cur_envs:
             for k, v in cur_envs.items():
-                if k != 'nodes_envs':
+                if k != "nodes_envs":
                     export_cmd += [f"{k}={v}"]
         if self.task_type == "train":
             runner_cmd = _get_runner_cmd_train(
@@ -234,23 +233,23 @@ class SshLauncher(LauncherBase):
             ray_cmd = []
             if self.resources is not None:
                 runtime_env = self.config.experiment.runner.get(
-                    "runtime_env", 'third_party/verl/verl/trainer/runtime_env.yaml'
+                    "runtime_env", "third_party/verl/verl/trainer/runtime_env.yaml"
                 )
                 ray_dashboard_port = self.config.experiment.runner.get("ray_dashboard_port", 8265)
                 ray_cmd = [
-                    'ray',
-                    'job',
-                    'submit',
-                    f'--address=http://{host}:{ray_dashboard_port}',
-                    f'--runtime-env={runtime_env}',
-                    '--no-wait',
-                    '--',
+                    "ray",
+                    "job",
+                    "submit",
+                    f"--address=http://{host}:{ray_dashboard_port}",
+                    f"--runtime-env={runtime_env}",
+                    "--no-wait",
+                    "--",
                 ]
             cmd = shlex.join(
-                ray_cmd + export_cmd + ['python3', '-m'] + [self.user_script] + self.user_args
+                [*ray_cmd, *export_cmd, "python3", "-m", self.user_script, *self.user_args]
             )
         else:
-            cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
+            cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         if self.task_type == "inference":
             logging_config = self.config.inference.logging
@@ -345,11 +344,11 @@ class SshLauncher(LauncherBase):
             nnodes_from_hostfile = len(self.resources.keys())
             nnodes_from_args = runner_config.get("nnodes", None)
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
-            available_ip = list(self.resources.keys())[0]
+            available_ip = next(iter(self.resources.keys()))
             if self.task_type == "rl":
                 available_port = 6379
                 self._run_each(
-                    'localhost',
+                    "localhost",
                     available_ip,
                     available_port,
                     1,
@@ -773,8 +772,8 @@ class SshLauncher(LauncherBase):
         try:
             client = OpenAI(api_key=api_key, base_url=api_url)
             messages = [{"role": "user", "content": "who are you?"}]
-            response = client.chat.completions.create(model=model_name, messages=messages)
-        except Exception as e:
+            client.chat.completions.create(model=model_name, messages=messages)
+        except Exception:
             # logger.info(f"API {api_url} is not ready, please wait a moment")
             return False
 

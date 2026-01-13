@@ -1,10 +1,8 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 import argparse
-import json
 import os
 
 import torch
-
 from safetensors.torch import load_file
 
 

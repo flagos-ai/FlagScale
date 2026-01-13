@@ -5,18 +5,12 @@ import json
 import os
 import random
 import re
-import shutil
-import sys
 import warnings
 
 import torch
 import transformers
-import yaml
-
-from adapter import LLMCompressorAdapter
 from llava.model.builder import load_pretrained_model
-from llava.train.train import DataArguments, LLaVATrainer, make_supervised_data_module
-from omegaconf import OmegaConf
+from llava.train.train import DataArguments, make_supervised_data_module
 from torch.utils.data import Dataset
 
 from flagscale.compress.compressor import compress, prepare_config
@@ -99,7 +93,7 @@ def prepare_dataset(cfg, model, tokenizer):
         ):
             try:
                 patch_size = data_args.image_processor.size[0]
-            except Exception as e:
+            except Exception:
                 patch_size = data_args.image_processor.size["shortest_edge"]
 
             assert patch_size in [

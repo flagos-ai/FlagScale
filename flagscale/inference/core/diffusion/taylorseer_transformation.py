@@ -2,11 +2,10 @@
 # https://github.com/vipshop/cache-dit/blob/v0.3.0/src/cache_dit/cache_factory/cache_contexts/taylorseer.py
 
 import math
-
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import Any
 
 import torch
-
 from omegaconf import DictConfig
 from torch import nn
 
@@ -42,7 +41,7 @@ class TaylorSeerState(BaseState):
 
         # Taylor-series divided differences buffer
         # Each inner list contains derivatives for one output (for tuple outputs).
-        self.derivatives: List[List[torch.Tensor]] = [[None] * (self.order + 1)]
+        self.derivatives: list[list[torch.Tensor]] = [[None] * (self.order + 1)]
         # Last timestep where the model actually did inference
         self.previous_forward_step: int = -1
         # Last actual scheduler timestep value (float) when we last did exact forward.
@@ -54,8 +53,8 @@ class TaylorSeerState(BaseState):
         assert self.order > 0 and self.warmup_steps > 0 and self.skip_interval_steps > 0
 
     def approximate_derivative(
-        self, output: torch.Tensor, step: int, timestep: float, previous: List[torch.Tensor]
-    ) -> List[torch.Tensor]:
+        self, output: torch.Tensor, step: int, timestep: float, previous: list[torch.Tensor]
+    ) -> list[torch.Tensor]:
         """Update divided differences for the Taylor series.
 
         Args:
@@ -81,7 +80,7 @@ class TaylorSeerState(BaseState):
             else:
                 distance = step - self.previous_forward_step
 
-        current: List[torch.Tensor] = [None] * (self.order + 1)
+        current: list[torch.Tensor] = [None] * (self.order + 1)
         current[0] = output
         for i in range(self.order):
             if previous[i] is not None and distance not in (None, 0):
@@ -91,7 +90,7 @@ class TaylorSeerState(BaseState):
 
         return current
 
-    def update(self, output: Union[torch.Tensor, Tuple[torch.Tensor, ...]]) -> None:
+    def update(self, output: torch.Tensor | tuple[torch.Tensor, ...]) -> None:
         """Ingest an exact-forward output and refresh series terms.
 
         Args:
@@ -110,9 +109,9 @@ class TaylorSeerState(BaseState):
             if len(self.derivatives) != num_outputs:
                 # Output has more than one element; only expected on the first full
                 # computation step
-                assert (
-                    self.previous_forward_step == -1
-                ), "derivatives should have the same number of elements as output"
+                assert self.previous_forward_step == -1, (
+                    "derivatives should have the same number of elements as output"
+                )
                 self.derivatives = [[None] * (self.order + 1) for _ in range(num_outputs)]
             for i, o in enumerate(output):
                 previous = self.derivatives[i]
@@ -128,7 +127,7 @@ class TaylorSeerState(BaseState):
         self.previous_forward_step = timestep_index
         self.previous_forward_time = timestep
 
-    def approximate_output(self) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
+    def approximate_output(self) -> torch.Tensor | tuple[torch.Tensor, ...]:
         """Approximate the module output using the Taylor series.
 
         Returns:
@@ -154,7 +153,7 @@ class TaylorSeerState(BaseState):
 
         outputs = []
         for derivatives in self.derivatives:
-            acc: Optional[torch.Tensor] = None
+            acc: torch.Tensor | None = None
             for i, derivative in enumerate(derivatives):
                 if derivative is None:
                     break
@@ -187,8 +186,8 @@ class TaylorSeerState(BaseState):
 
     def reset(self, *args, **kwargs):
         """Reset the state of the TaylorSeer."""
-        # TODO(yupu): Is offloading possbile and necessary?
-        self.derivatives: List[List[torch.Tensor]] = [[None] * (self.order + 1)]
+        # TODO(yupu): Is offloading possible and necessary?
+        self.derivatives: list[list[torch.Tensor]] = [[None] * (self.order + 1)]
         self.previous_forward_step: int = -1
         self.previous_forward_time: float = -1.0
 
@@ -240,7 +239,7 @@ class TaylorSeerTransformation(Transformation):
         order: int,
         warmup_steps: int,
         skip_interval_steps: int,
-        targets: Optional[DictConfig] = None,
+        targets: DictConfig | None = None,
         use_timestep_delta: bool = False,
     ):
         """Initialize the transformation.
@@ -266,7 +265,7 @@ class TaylorSeerTransformation(Transformation):
         self._selector: Selector = build_selector(targets)
         self._use_timestep_delta: bool = use_timestep_delta
 
-    def targets(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]:
+    def targets(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]:
         """Enumerate target modules for this transformation.
 
         Args:

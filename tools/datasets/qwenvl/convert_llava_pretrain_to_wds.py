@@ -4,12 +4,10 @@ import os
 import sys
 
 import webdataset as wds
-
 from tqdm import tqdm
 
 
 def convert(llava_pretrain_dir):
-
     # Paths to the dataset files
     json_file = os.path.join(llava_pretrain_dir, "blip_laion_cc_sbu_558k.json")
     output = os.path.join(llava_pretrain_dir, "wds")
@@ -32,7 +30,7 @@ def convert(llava_pretrain_dir):
             }
             shard_writer.write(sample)
 
-    print(f"Dataset successfully converted to wds")
+    print("Dataset successfully converted to wds")
 
 
 if __name__ == "__main__":

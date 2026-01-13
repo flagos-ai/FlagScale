@@ -4,8 +4,6 @@ import json
 import logging
 import time
 
-from functools import reduce
-
 from omegaconf import OmegaConf
 
 from flagscale.runner.auto_tuner.memory_model import default_model
@@ -42,7 +40,7 @@ _BUILT_IN_SERVE_STRATEGY_DIMS = {
     "sglang": [
         "tensor_model_parallel_size",
         "pipeline_model_parallel_size",
-        "instace",
+        "instance",
         "chunked_prefill_size",
         "max_prefill_tokens",
         "page_size",
@@ -90,7 +88,6 @@ def get_first_last_num_layers_for_pp(num_layers, pp_size):
 
 
 class Searcher:
-
     def __init__(self, config):
         # Build search space and set value of each dim
         self.logger = logging.getLogger("FlagScale-AutoTuner")
@@ -101,9 +98,7 @@ class Searcher:
         self.space = self.build_space(self.config)
         end_time = time.time()
         self.logger.info(
-            "Searcher: build search space in {:.2f} seconds and space is {}".format(
-                end_time - start_time, self.space
-            )
+            f"Searcher: build search space in {end_time - start_time:.2f} seconds and space is {self.space}"
         )
 
         # Build strategies by Cartesian product search space
@@ -111,9 +106,7 @@ class Searcher:
         self.strategies = self.build_strategies(self.space, self.config)
         end_time = time.time()
         self.logger.info(
-            "Searcher: build {} candidate strategies in {:.2f} seconds.".format(
-                len(self.strategies), end_time - start_time
-            )
+            f"Searcher: build {len(self.strategies)} candidate strategies in {end_time - start_time:.2f} seconds."
         )
 
         if "memory_model" in self.config.experiment.auto_tuner:
@@ -130,9 +123,7 @@ class Searcher:
                     "gpu_utilization", [0.2, 0.8]
                 )
                 self.logger.info(
-                    "Searcher: strategy is {}, memory model is {} MB".format(
-                        strategy, strategy["memory_model"]
-                    )
+                    f"Searcher: strategy is {strategy}, memory model is {strategy['memory_model']} MB"
                 )
 
         # Build search algorithm to explore strategies
@@ -604,10 +595,9 @@ class Searcher:
 
 class ServeSearcher(Searcher):
     def __init__(self, config):
-
         self._init_engines(config)
         self._init_nodes_aware_dims()
-        super(ServeSearcher, self).__init__(config)
+        super().__init__(config)
 
         self.logger.info(f"ServeSearcher.space: {self.space}")
         self.logger.info(f"ServeSearcher.strategies: {json.dumps(self.strategies)}")
@@ -644,7 +634,7 @@ class ServeSearcher(Searcher):
         )
         if not nodes_aware_strategies:
             raise ValueError(
-                f"the num of strategies should not be 0,please check the tensor_model_parallel_size or pipeline_model_parallel_size in config"
+                "the num of strategies should not be 0,please check the tensor_model_parallel_size or pipeline_model_parallel_size in config"
             )
         for key_idx, key in enumerate(self._nodes_aware_dims[engine]):
             space[key] = list(set([v[key_idx] for v in nodes_aware_strategies]))
@@ -669,7 +659,7 @@ class ServeSearcher(Searcher):
         for i in candidates:
             if target % i == 0:
                 results.extend(
-                    self._find_combinations(target // i, num_dims - 1, fixed_dims, current + [i])
+                    self._find_combinations(target // i, num_dims - 1, fixed_dims, [*current, i])
                 )
         final_results = []
         for combination in results:
@@ -746,7 +736,7 @@ class ServeSearcher(Searcher):
                     tuple(tuple(a) + b) for a, b in cartesian_product_values
                 ]
             else:
-                # TDOO: llama.cpp support multi-instance
+                # TODO: llama.cpp support multi-instance
                 cartesian_product_values = list(cartesian_product_unaware_values)
 
             strategies = [

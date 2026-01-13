@@ -21,9 +21,7 @@ Usage:
 
 import argparse
 import sys
-
 from pathlib import Path
-from typing import Optional
 
 
 def _prepare_download(repo_id: str, output_dir: Path, repo_type: str, source_name: str) -> Path:
@@ -59,8 +57,8 @@ def download_from_huggingface(
     repo_id: str,
     output_dir: Path,
     repo_type: str = "model",
-    revision: Optional[str] = None,
-    token: Optional[str] = None,
+    revision: str | None = None,
+    token: str | None = None,
 ) -> Path:
     """Download model or dataset from HuggingFace Hub.
 
@@ -102,7 +100,7 @@ def download_from_huggingface(
 
 
 def download_from_modelscope(
-    repo_id: str, output_dir: Path, repo_type: str = "model", revision: Optional[str] = None
+    repo_id: str, output_dir: Path, repo_type: str = "model", revision: str | None = None
 ) -> Path:
     """Download model or dataset from ModelScope.
 

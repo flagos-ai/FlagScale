@@ -1,5 +1,4 @@
 import os
-
 from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
@@ -54,7 +53,7 @@ class MegatronBackend(BackendBase):
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
         if no_shared_fs:
-            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+            host_output_file = os.path.join(logging_config.log_dir, "host.output")
         else:
             host_output_file = os.path.join(
                 logging_config.log_dir, f"host_{node_rank}_{host}.output"
@@ -88,37 +87,37 @@ class MegatronBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.details_dir}\n")
             f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
             f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"cd {root_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f'cmd="{cmd}"\n')
-            f.write(f"\n")
+            f.write("\n")
             if enable_monitoring:
                 monitor_launcher_path = os.path.join(
                     root_dir, "flagscale", "runner", "elastic", "monitor_launcher.py"
                 )
                 ssh_port = config.experiment.runner.get("ssh_port", 22)
-                f.write(f'# Start monitoring service in background\n')
-                f.write(f'python {monitor_launcher_path} \\\n')
+                f.write("# Start monitoring service in background\n")
+                f.write(f"python {monitor_launcher_path} \\\n")
                 f.write(f'  --log-dir "{logging_config.log_dir}" \\\n')
                 f.write(f'  --pid-file "{host_pid_file}" \\\n')
                 f.write(f'  --host "{host}" \\\n')
-                f.write(f'  --node-rank {node_rank} \\\n')
-                f.write(f'  {"--no-shared-fs" if no_shared_fs else ""} \\\n')
-                f.write(f'  --ssh-port {ssh_port} \\\n')
-                f.write(f'  --interval 5 \\\n')
-                f.write(f'  --enable-log-collection \\\n')
-                f.write(f'  --enable-diagnostic \\\n')
-                f.write(f'  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n')
+                f.write(f"  --node-rank {node_rank} \\\n")
+                f.write(f"  {'--no-shared-fs' if no_shared_fs else ''} \\\n")
+                f.write(f"  --ssh-port {ssh_port} \\\n")
+                f.write("  --interval 5 \\\n")
+                f.write("  --enable-log-collection \\\n")
+                f.write("  --enable-diagnostic \\\n")
+                f.write(f"  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n")
                 f.write(
                     f'echo "Monitor service started in background for {host} (node {node_rank})"\n'
                 )
-            f.write(f'\n')
+            f.write("\n")
 
             if with_test:
-                f.write(f'bash -c "$cmd; sync" \n')
+                f.write('bash -c "$cmd; sync" \n')
             else:
                 # TODO: need a option to control whether to append or overwrite the output file
                 # Now, it always appends to the output file

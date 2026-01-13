@@ -1,11 +1,9 @@
 # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
 
 import argparse
-import json
 import os
 
 import torch
-
 from safetensors.torch import load_file, save_file
 
 convert_count = 0
@@ -356,10 +354,10 @@ def convert(input_path, output_path, use_te, tensor_parallel_size=2):
                 raise ValueError(f"{name} is not converted.")
 
     # vision_projection
-    check_model(f"model.mm_projector.0.weight", hf_model)
-    check_model(f"model.mm_projector.0.bias", hf_model)
-    check_model(f"model.mm_projector.2.weight", hf_model)
-    check_model(f"model.mm_projector.2.bias", hf_model)
+    check_model("model.mm_projector.0.weight", hf_model)
+    check_model("model.mm_projector.0.bias", hf_model)
+    check_model("model.mm_projector.2.weight", hf_model)
+    check_model("model.mm_projector.2.bias", hf_model)
     hf_model["model.mm_projector.0.weight"] = mc_model[
         "vision_projection.encoder.linear_fc1.weight"
     ]

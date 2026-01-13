@@ -9,7 +9,6 @@ import pandas as pd
 
 
 class Recorder:
-
     def __init__(self, config):
         self.config = config
         self.path = os.path.join(config.experiment.exp_dir, "auto_tuner", "history.csv")
@@ -39,7 +38,7 @@ class Recorder:
     def record(self, task, strategy):
         """Record the performance and max memory of task"""
         self.cur_strategy = strategy
-        peformance_path, host_path = self.get_all_performance_and_host_paths(task)
+        performance_path, host_path = self.get_all_performance_and_host_paths(task)
 
         errors = self.grep_error(host_path)
         if errors:
@@ -51,24 +50,24 @@ class Recorder:
 
             # If task is stopped by autotuner, task may not be failed,just hang or too slow.
             elif self.cur_strategy.get("stopped_by_tuner", False):
-                performace = self.grep_performance(peformance_path, self.metric)
-                strategy["performance"] = performace
+                performance = self.grep_performance(performance_path, self.metric)
+                strategy["performance"] = performance
                 strategy["max_mem"] = self.grep_max_memory(host_path)
                 strategy["error"] = None
 
             # Task failed and the code may have logical errors
             else:
                 # HACK: record the performance when task exits in the last allreduce of training
-                performace = self.grep_performance(peformance_path, self.metric)
-                strategy["performance"] = performace
+                performance = self.grep_performance(performance_path, self.metric)
+                strategy["performance"] = performance
                 strategy["max_mem"] = self.grep_max_memory(host_path)
                 strategy["error"] = "|".join(list(errors))
 
         # Task ended properly
         else:
             strategy["max_mem"] = self.grep_max_memory(host_path)
-            performace = self.grep_performance(peformance_path, self.metric)
-            strategy["performance"] = performace
+            performance = self.grep_performance(performance_path, self.metric)
+            strategy["performance"] = performance
             strategy["error"] = None
 
         # Pass back to platform if need
@@ -209,8 +208,6 @@ class Recorder:
 
                         log_path = os.path.join(rank_path, "stdout.log")
                         if os.path.exists(log_path):
-                            host_rank = int(host_item.split("_")[1])
-                            rank = int(rank_item)
                             all_log_paths.append(log_path)
         return all_log_paths, logs
 
@@ -341,7 +338,7 @@ class Recorder:
             pass
         try:
             # Check for JSON string start/end characters as a heuristic
-            if (s.startswith('[') and s.endswith(']')) or (s.startswith('{') and s.endswith('}')):
+            if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
                 return json.loads(s)
         except (json.JSONDecodeError, TypeError):
             pass

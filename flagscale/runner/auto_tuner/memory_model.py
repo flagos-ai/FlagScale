@@ -24,7 +24,7 @@ def calculate_hetero_memory(strategy, config):
     base_args = convert_config_to_megatron_args(config, strategy)
 
     # Add global batch size to base_args if not present
-    if not hasattr(base_args, 'global_batch_size'):
+    if not hasattr(base_args, "global_batch_size"):
         base_args.global_batch_size = config.train.model.global_batch_size
 
     # Call the dedicated hetero memory calculation function

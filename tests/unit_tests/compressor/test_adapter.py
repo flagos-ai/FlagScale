@@ -1,17 +1,15 @@
 import os
 
 import torch
-
 from transformers import AutoImageProcessor, AutoModel, AutoModelForCausalLM, AutoTokenizer
 
 from flagscale.compress.adapter import LLMCompressorAdapter
 from flagscale.inference.processing_emu3 import (
-    CachedPrefixConstrainedLogitsProcessor,
     Emu3Processor,
 )
 
 
-def test_llmcompressor_adpter_without_dataset():
+def test_llmcompressor_adapter_without_dataset():
     model_path = "BAAI/Emu3-Gen"
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
@@ -27,7 +25,7 @@ def test_llmcompressor_adpter_without_dataset():
     os.remove("test_output")
 
 
-def test_llmcompressor_adpter_with_dataset():
+def test_llmcompressor_adapter_with_dataset():
     EMU_HUB = "BAAI/Emu3-Gen"
     VQ_HUB = "BAAI/Emu3-VisionTokenizer"
     # prepare model and processor
@@ -48,7 +46,7 @@ def test_llmcompressor_adpter_with_dataset():
 
     # prepare input
     POSITIVE_PROMPT = " masterpiece, film grained, best quality."
-    NEGATIVE_PROMPT = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry."
+    # NEGATIVE_PROMPT = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry."
     prompt = ["a portrait of young girl.", "a shiba inu"]
     prompt = [p + POSITIVE_PROMPT for p in prompt]
     kwargs = dict(
@@ -59,7 +57,7 @@ def test_llmcompressor_adpter_with_dataset():
         padding="longest",
     )
     pos_inputs = processor(text=prompt, **kwargs)
-    neg_inputs = processor(text=[NEGATIVE_PROMPT] * len(prompt), **kwargs)
+    # neg_inputs = processor(text=[NEGATIVE_PROMPT] * len(prompt), **kwargs)
     quant_args = {
         "targets": ["Linear"],
         "scheme": "W4A16",

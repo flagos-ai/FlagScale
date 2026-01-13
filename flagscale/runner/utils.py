@@ -9,14 +9,11 @@ import subprocess
 import sys
 import time
 import traceback
-
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Tuple
 
 import aiohttp
 import numpy as np
-
 from omegaconf import DictConfig, OmegaConf
 from omegaconf.listconfig import ListConfig
 from tqdm.asyncio import tqdm
@@ -66,7 +63,7 @@ def validate_serve_config(config: DictConfig):
         )
         logger.error(f"Config.serve content: {serve_config}")
         raise TypeError(
-            f"config.serve must be ListConfig or list type, " f"got {type(serve_config).__name__}"
+            f"config.serve must be ListConfig or list type, got {type(serve_config).__name__}"
         )
 
     # Check each element is a dict and contains serve_id field
@@ -91,7 +88,7 @@ def validate_serve_config(config: DictConfig):
 
 def is_ray_master_running(
     master_ip: str, port: int = 6379, timeout: float = 5.0
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
@@ -99,14 +96,14 @@ def is_ray_master_running(
             result = s.connect_ex((master_ip, port))
 
             if result != 0:
-                return False, f"waitting for master node {master_ip}:{port}"
+                return False, f"waiting for master node {master_ip}:{port}"
             else:
-                return True, f"master node is ready"
+                return True, "master node is ready"
 
-    except socket.timeout:
+    except TimeoutError:
         return False, f"connect {master_ip}:{port} timeout"
     except Exception as e:
-        return False, f"check the error: {str(e)}"
+        return False, f"check the error: {e!s}"
 
 
 def wait_for_ray_master(
@@ -157,8 +154,8 @@ def parse_hostfile(hostfile_path):
         else:
             log_and_raise_error(f"Invalid entry in hostfile: {line}.")
 
-    assert all(info["type"] == None for _, info in resources.items()) or all(
-        info["type"] != None for _, info in resources.items()
+    assert all(info["type"] is None for _, info in resources.items()) or all(
+        info["type"] is not None for _, info in resources.items()
     ), "All hosts must have the a machine type or no machine type specified."
 
     if len(resources) == 0:
@@ -350,13 +347,13 @@ def flatten_dict_to_args_verl(config_dict, pre_str=""):
     for key, value in config_dict.items():
         if isinstance(value, dict):
             if key == "append_kargs":
-                target_str = f"+"
+                target_str = "+"
             else:
                 target_str = f"{key}."
             args.extend(flatten_dict_to_args_verl(value, pre_str + target_str))
         elif isinstance(value, list):
             json_str = json.dumps(value)
-            args.append(f"{pre_str+key}={json_str}")
+            args.append(f"{pre_str + key}={json_str}")
         elif isinstance(value, bool):
             args.append(f"{pre_str + key}={value}")
         else:
@@ -441,7 +438,7 @@ def update_nodes_envs(env_config, ip_addr, resource_info):
     nodes_envs = cur_node_config.pop("node_specific", None)
     if device_types_envs is None and nodes_envs is None:
         logger.warning(
-            f"type in hostfile is not specified. All the nodes use the same arguments inlucding evnironment variables."
+            "type in hostfile is not specified. All the nodes use the same arguments inlucding evnironment variables."
         )
         return cur_node_config
 
@@ -519,10 +516,7 @@ def is_ip_addr(master):
         return False
     pattern = r"^((25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)$"
     result = re.match(pattern, master)
-    if result:
-        return True
-    else:
-        return False
+    return bool(result)
 
 
 def is_master_node(lws_leader_address):
@@ -559,7 +553,7 @@ def is_master(config, resources=None):
         raise ValueError("In the multi-node mode, please set the hostfile")
 
     if resources:
-        master = list(resources.keys())[0]
+        master = next(iter(resources.keys()))
         if is_ip_addr(master):
             return get_ip_addr() in [master, "127.0.0.1"]
         else:
@@ -579,11 +573,11 @@ class RequestFuncInput:
     prompt_len: int
     output_len: int
     model: str
-    model_name: Optional[str] = None
+    model_name: str | None = None
     best_of: int = 1
-    logprobs: Optional[int] = None
-    extra_body: Optional[dict] = None
-    multi_modal_content: Optional[dict] = None
+    logprobs: int | None = None
+    extra_body: dict | None = None
+    multi_modal_content: dict | None = None
     ignore_eos: bool = False
 
 
@@ -594,7 +588,7 @@ class RequestFuncOutput:
     latency: float = 0.0
     output_tokens: int = 0
     ttft: float = 0.0  # Time to first token
-    itl: List[float] = field(default_factory=list)  # List of inter-token latencies
+    itl: list[float] = field(default_factory=list)  # List of inter-token latencies
     tpot: float = 0.0  # avg next-token latencies
     prompt_len: int = 0
     error: str = ""
@@ -621,12 +615,12 @@ def dummy_random_input(
 
 
 async def async_request_openai_chat_completions(
-    request_func_input: RequestFuncInput, pbar: Optional[tqdm] = None
+    request_func_input: RequestFuncInput, pbar: tqdm | None = None
 ) -> RequestFuncOutput:
     api_url = request_func_input.api_url
-    assert api_url.endswith(
-        ("chat/completions", "profile")
-    ), "OpenAI Chat Completions API URL must end with 'chat/completions'."
+    assert api_url.endswith(("chat/completions", "profile")), (
+        "OpenAI Chat Completions API URL must end with 'chat/completions'."
+    )
 
     async with aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_TIMEOUT) as session:
         content = [{"type": "text", "text": request_func_input.prompt}]

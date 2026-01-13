@@ -6,7 +6,7 @@ data:
   data_path: null
   max_calib_data: null
   max_seq_len: null
-  tokenzier_args: 
+  tokenzier_args:
 
 compress_args:
   quantization:

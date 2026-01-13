@@ -12,8 +12,6 @@ import os
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
-
-from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 
 try:
@@ -47,12 +45,12 @@ def save_3d_animation(
         embed_limit_mb (float): Max size (MB) for embedded HTML animation. Defaults to 50.
                                 Set to None to not modify the default limit.
     """
-    original_limit = plt.rcParams.get('animation.embed_limit', 20.0)
+    original_limit = plt.rcParams.get("animation.embed_limit", 20.0)
     if embed_limit_mb is not None:
         print(
             f"Temporarily increasing animation embed limit from {original_limit} MB to {embed_limit_mb} MB."
         )
-        plt.rcParams['animation.embed_limit'] = embed_limit_mb
+        plt.rcParams["animation.embed_limit"] = embed_limit_mb
 
     def _animate(angle):
         ax.view_init(elev=20, azim=angle)
@@ -73,7 +71,7 @@ def save_3d_animation(
         # --- Restore original animation embed limit ---
         if embed_limit_mb is not None:
             print(f"Restoring original animation embed limit to {original_limit} MB.")
-            plt.rcParams['animation.embed_limit'] = original_limit
+            plt.rcParams["animation.embed_limit"] = original_limit
 
 
 def visualize_3d(latent_datasets, output, html_embed_limit=50):
@@ -94,14 +92,14 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
         return
 
     fig = plt.figure(figsize=(14, 10))
-    ax = fig.add_subplot(111, projection='3d')
+    ax = fig.add_subplot(111, projection="3d")
 
     fig.suptitle(
-        '3D PCA Trajectory Visualization of Latent Spaces', fontsize=16, fontweight='bold', y=0.98
+        "3D PCA Trajectory Visualization of Latent Spaces", fontsize=16, fontweight="bold", y=0.98
     )
 
     explanation_lines = []
-    start_end_colors = get_cmap('tab10', max(1, len(latent_datasets) * 2))
+    start_end_colors = get_cmap("tab10", max(1, len(latent_datasets) * 2))
     start_end_color_indices = iter(range(max(1, len(latent_datasets) * 2)))
 
     for i, (_, _, label, _) in enumerate(latent_datasets):
@@ -126,8 +124,8 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
         0.5,
         0.92,
         explanation_text,
-        ha='center',
-        va='top',
+        ha="center",
+        va="top",
         fontsize=10,
         bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.7),
     )
@@ -136,7 +134,7 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
     start_end_color_indices_plot = iter(range(max(1, len(latent_datasets) * 2)))
 
     # Get fixed colors for each series
-    series_colors = get_cmap('tab10', len(latent_datasets))
+    series_colors = get_cmap("tab10", len(latent_datasets))
     if len(latent_datasets) == 1:
         series_colors_list = [series_colors(0)]
     else:
@@ -147,16 +145,16 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
 
         # --- Plot main scatter points (fixed color) ---
         # Removed c= and cmap=, used color= parameter
-        scatter = ax.scatter(
-            latents_3d[:, 0],
-            latents_3d[:, 1],
-            latents_3d[:, 2],
-            color=series_color,
-            alpha=0.7,
-            s=50,
-            label=label,
-            picker=True,
-        )
+        # scatter = ax.scatter(
+        #     latents_3d[:, 0],
+        #     latents_3d[:, 1],
+        #     latents_3d[:, 2],
+        #     color=series_color,
+        #     alpha=0.7,
+        #     s=50,
+        #     label=label,
+        #     picker=True,
+        # )
 
         # Plot connecting lines (same fixed color)
         for j in range(n_steps - 1):
@@ -187,8 +185,8 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
             latents_3d[0, 2],
             c=[start_color],
             s=120,
-            marker='o',
-            edgecolors='black',
+            marker="o",
+            edgecolors="black",
             linewidth=0.8,
             zorder=5,
         )
@@ -198,17 +196,17 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
             latents_3d[-1, 2],
             c=[end_color],
             s=120,
-            marker='s',
-            edgecolors='black',
+            marker="s",
+            edgecolors="black",
             linewidth=0.8,
             zorder=5,
         )
 
-    ax.set_xlabel('Principal Component 1 (PC1)', fontsize=12)
-    ax.set_ylabel('Principal Component 2 (PC2)', fontsize=12)
-    ax.set_zlabel('Principal Component 3 (PC3)', fontsize=12)
+    ax.set_xlabel("Principal Component 1 (PC1)", fontsize=12)
+    ax.set_ylabel("Principal Component 2 (PC2)", fontsize=12)
+    ax.set_zlabel("Principal Component 3 (PC3)", fontsize=12)
 
-    ax.legend(loc='center left', bbox_to_anchor=(1.05, 0.5), fontsize=10)
+    ax.legend(loc="center left", bbox_to_anchor=(1.05, 0.5), fontsize=10)
 
     # --- Adjust layout ---
     plt.tight_layout(rect=[0, 0, 0.85, 0.90])
@@ -218,7 +216,7 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
     # Adjust elev and azim as needed for best visual.
     ax.view_init(elev=20, azim=-90)
 
-    if output != '' and not os.path.exists(output):
+    if output != "" and not os.path.exists(output):
         os.makedirs(output, exist_ok=True)
 
     save_3d_animation(
@@ -233,8 +231,8 @@ def visualize_3d(latent_datasets, output, html_embed_limit=50):
         embed_limit_mb=html_embed_limit,
     )
 
-    plt.savefig(f"{output}/3d_pca_visualization_multiple_latents.png", dpi=300, bbox_inches='tight')
-    plt.savefig(f"{output}/3d_pca_visualization_multiple_latents.pdf", bbox_inches='tight')
+    plt.savefig(f"{output}/3d_pca_visualization_multiple_latents.png", dpi=300, bbox_inches="tight")
+    plt.savefig(f"{output}/3d_pca_visualization_multiple_latents.pdf", bbox_inches="tight")
 
     plt.show()
 
@@ -246,39 +244,39 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,  # To preserve newlines in help
     )
     parser.add_argument(
-        'files',
-        metavar='FILE',
+        "files",
+        metavar="FILE",
         type=str,
-        nargs='+',
-        help='Paths to the .npy files containing latent vectors.',
+        nargs="+",
+        help="Paths to the .npy files containing latent vectors.",
     )
     parser.add_argument(
-        '--output',
+        "--output",
         type=str,
-        default='pca_output',
-        help='Base name (without extension) for the output plot files. Default: %(default)s',
+        default="pca_output",
+        help="Base name (without extension) for the output plot files. Default: %(default)s",
     )
     parser.add_argument(
-        '--html-embed-limit',
+        "--html-embed-limit",
         type=float,
         default=50,
-        help='Maximum size (in MB) for the embedded HTML animation. Default is 50.',
+        help="Maximum size (in MB) for the embedded HTML animation. Default is 50.",
     )
 
     args = parser.parse_args()
 
     latent_datasets = []
     predefined_colors = [
-        'tab:blue',
-        'tab:orange',
-        'tab:green',
-        'tab:red',
-        'tab:purple',
-        'tab:brown',
-        'tab:pink',
-        'tab:gray',
-        'tab:olive',
-        'tab:cyan',
+        "tab:blue",
+        "tab:orange",
+        "tab:green",
+        "tab:red",
+        "tab:purple",
+        "tab:brown",
+        "tab:pink",
+        "tab:gray",
+        "tab:olive",
+        "tab:cyan",
     ]
 
     for i, file_path in enumerate(args.files):

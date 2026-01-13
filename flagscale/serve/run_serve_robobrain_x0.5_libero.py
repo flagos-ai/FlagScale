@@ -6,7 +6,6 @@ import time
 
 import numpy as np
 import torch
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from PIL import Image
@@ -25,11 +24,11 @@ TASK_CONFIG = serve.task_config
 ENGINE_CONFIG = TASK_CONFIG.serve[0].engine_args
 MODEL_PATH = ENGINE_CONFIG["model"]
 SERVICE_CONFIG = {
-    'host': ENGINE_CONFIG["host"],
-    'port': ENGINE_CONFIG["port"],
-    'debug': ENGINE_CONFIG["debug"],
-    'threaded': ENGINE_CONFIG["threaded"],
-    'max_content_length': 16 * 1024 * 1024,
+    "host": ENGINE_CONFIG["host"],
+    "port": ENGINE_CONFIG["port"],
+    "debug": ENGINE_CONFIG["debug"],
+    "threaded": ENGINE_CONFIG["threaded"],
+    "max_content_length": 16 * 1024 * 1024,
 }
 
 
@@ -50,7 +49,7 @@ class RobobrainX05Server:
 
     def warmup(self):
         for i in range(3):
-            logger.info(f"Warming up RobobrainX05Server, step {i+1}/3")
+            logger.info(f"Warming up RobobrainX05Server, step {i + 1}/3")
             self.infer(self.build_input())
 
     def load_model(self):
@@ -82,7 +81,7 @@ class RobobrainX05Server:
                 instructions=[batch[0]["lang"]],
                 state=[batch[0]["state"]],
             )
-            normalized_actions = predict_output['normalized_actions']
+            normalized_actions = predict_output["normalized_actions"]
             logger.info(f"Unnormalized Action: {normalized_actions.shape}")
             logger.info(f"{normalized_actions[0,0,:]=}")
 
@@ -91,15 +90,15 @@ class RobobrainX05Server:
 
     def serve(self):
         logger.info(f"Serve URL: http://{self.host}:{self.port}")
-        logger.info(f"Available API:")
-        logger.info(f"  - POST /infer   - inference api")
+        logger.info("Available API:")
+        logger.info("  - POST /infer   - inference api")
         app.run(host=self.host, port=self.port, debug=False, threaded=True)
 
 
 def decode_image_base64(image_base64):
     try:
         image_data = base64.b64decode(image_base64)
-        image = Image.open(io.BytesIO(image_data)).convert('RGB')
+        image = Image.open(io.BytesIO(image_data)).convert("RGB")
         # image = np.array(image).astype(np.float32) / 255.0
         # shape to: [C, H, W]
         # image = torch.from_numpy(image).permute(2, 0, 1)
@@ -124,26 +123,26 @@ def process_images(images_json):
     return processed
 
 
-@app.route('/infer', methods=['POST'])
+@app.route("/infer", methods=["POST"])
 def infer_api():
     if SERVER is None:
         return jsonify({"success": False, "error": "Model not loaded"}), 503
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "Request format error"}), 400
-    if 'qpos' not in data:
+    if "qpos" not in data:
         return jsonify({"success": False, "error": "Request requires: qpos"}), 400
-    if 'eef_pose' not in data:
+    if "eef_pose" not in data:
         return jsonify({"success": False, "error": "Request requires: eef_pose"}), 400
     return infer(data)
 
 
 def infer(data):
     try:
-        qpos = data['qpos']
-        eef_pose = data['eef_pose']
-        instruction = data.get('instruction')
-        images = data.get('images')
+        qpos = data["qpos"]
+        eef_pose = data["eef_pose"]
+        instruction = data.get("instruction")
+        images = data.get("images")
     except Exception as e:
         return (
             jsonify({"success": False, "error": f"State parameters processing error: {e}"}),

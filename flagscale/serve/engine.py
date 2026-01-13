@@ -1,27 +1,18 @@
 import ast
-import builtins
 import importlib
 import importlib.util
 import inspect
-import json
 import logging
 import os
-import subprocess
 import sys
 import threading
-
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, get_args, get_origin
+from typing import Any, Optional, Union, get_origin
 
 import matplotlib.pyplot as plt
 import numpy as np
 import omegaconf
 import ray
-import uvicorn
-import yaml
-
-from dag_utils import check_and_get_port
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, create_model
 from ray import serve
@@ -102,10 +93,10 @@ _ALLOWED_BASES = {
     tuple,
     set,
     Any,
-    List,
-    Dict,
-    Tuple,
-    Set,
+    list,
+    dict,
+    tuple,
+    set,
     Union,
     Optional,
 }
@@ -219,7 +210,7 @@ def make_deployment(logic_cls, **deploy_kwargs):
 @serve.deployment
 class FinalModel:
     def __init__(
-        self, graph_config: Dict[str, Any], handles: Dict[str, DeploymentHandle], config: DictConfig
+        self, graph_config: dict[str, Any], handles: dict[str, DeploymentHandle], config: DictConfig
     ):
         self.graph_config = graph_config
         self.handles = handles
@@ -492,9 +483,9 @@ class ServeEngine:
         serve.start(http_options={"host": "0.0.0.0", "port": port})
         manager_prefix_name = "/manager"
         serve_prefix_name = self.exp_config.runner.deploy.get("name", "/")
-        assert (
-            manager_prefix_name != serve_prefix_name
-        ), "router /manager exists, use another router name instead"
+        assert manager_prefix_name != serve_prefix_name, (
+            "router /manager exists, use another router name instead"
+        )
         serve.run(
             task_manager, name="task_manager", route_prefix=manager_prefix_name, blocking=False
         )
