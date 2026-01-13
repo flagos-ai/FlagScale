@@ -886,7 +886,7 @@ class SshLauncher(LauncherBase):
             try:
                 # Waiting for the health check to complete and get the actual return code
                 result = run_ssh_command(host, cmd_str, ssh_port, query=True)
-                success = result.returncode == 0 if hasattr(result, 'returncode') else False
+                success = result.returncode == 0 if hasattr(result, "returncode") else False
                 if not success:
                     logger.error(
                         f"GPU health check failed on {host}: returncode={result.returncode}"
@@ -927,7 +927,7 @@ class SshLauncher(LauncherBase):
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
 
             # Get master address and port
-            available_ip = list(self.resources.keys())[0]
+            available_ip = next(iter(self.resources.keys()))
             master_addr = runner_config.get("master_addr", available_ip)
             master_port = runner_config.get("master_port", 29500)
 
@@ -955,7 +955,7 @@ class SshLauncher(LauncherBase):
                     nproc_from_hostfile, nproc_from_args, num_visible_devices
                 )
                 node_configs.append(
-                    {'host': host, 'node_rank': node_rank, 'nproc_per_node': nproc_per_node}
+                    {"host": host, "node_rank": node_rank, "nproc_per_node": nproc_per_node}
                 )
                 logger.info(f"Preparing node {node_rank} ({host}) with {nproc_per_node} GPUs")
 
@@ -964,19 +964,19 @@ class SshLauncher(LauncherBase):
             threads = []
 
             def run_health_check_thread(node_config):
-                host = node_config['host']
-                node_rank = node_config['node_rank']
-                nproc_per_node = node_config['nproc_per_node']
+                host = node_config["host"]
+                node_rank = node_config["node_rank"]
+                nproc_per_node = node_config["nproc_per_node"]
                 try:
                     result = self._run_gpu_health_check_on_node(
                         host, node_rank, master_addr, master_port, nnodes, nproc_per_node
                     )
-                    results[node_rank] = {'host': host, 'success': result}
+                    results[node_rank] = {"host": host, "success": result}
                 except Exception as e:
                     logger.error(
                         f"Exception in health check thread for node {node_rank} ({host}): {e}"
                     )
-                    results[node_rank] = {'host': host, 'success': False}
+                    results[node_rank] = {"host": host, "success": False}
 
             # Start all threads simultaneously
             for node_config in node_configs:
@@ -992,8 +992,8 @@ class SshLauncher(LauncherBase):
             all_passed = True
             for node_rank in sorted(results.keys()):
                 result_info = results[node_rank]
-                host = result_info['host']
-                success = result_info['success']
+                host = result_info["host"]
+                success = result_info["success"]
                 if success:
                     logger.info(f"GPU health check PASSED on node {node_rank} ({host})")
                 else:

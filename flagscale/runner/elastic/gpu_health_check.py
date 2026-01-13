@@ -18,9 +18,6 @@ Features:
 
 import argparse
 import os
-import time
-
-from contextlib import contextmanager
 from datetime import timedelta
 
 import torch
@@ -42,24 +39,24 @@ _PARALLEL_STATE = {
 
 # Check tracking
 _CHECK_RESULTS = {
-    'tensor_parallel': {'status': 'pending', 'error': None},
-    'data_parallel': {'status': 'pending', 'error': None},
-    'pipeline_parallel': {'status': 'pending', 'error': None},
+    "tensor_parallel": {"status": "pending", "error": None},
+    "data_parallel": {"status": "pending", "error": None},
+    "pipeline_parallel": {"status": "pending", "error": None},
 }
 
 
 def log_check_result(check_name, status, error=None):
     """Log check result"""
-    _CHECK_RESULTS[check_name]['status'] = status
-    _CHECK_RESULTS[check_name]['error'] = error
+    _CHECK_RESULTS[check_name]["status"] = status
+    _CHECK_RESULTS[check_name]["error"] = error
 
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank == 0:
-        if status == 'passed':
+        if status == "passed":
             print(f"✓ {check_name}: PASSED")
-        elif status == 'failed':
+        elif status == "failed":
             print(f"✗ {check_name}: FAILED - {error}")
-        elif status == 'skipped':
+        elif status == "skipped":
             print(f"⚠ {check_name}: SKIPPED - {error}")
 
 
@@ -69,10 +66,10 @@ def safe_check_execution(check_func, check_name, timeout_seconds=120) -> bool:
         check_func()
         return True
     except TimeoutError as e:
-        log_check_result(check_name, 'failed', str(e))
+        log_check_result(check_name, "failed", str(e))
         return False
     except Exception as e:
-        log_check_result(check_name, 'failed', f"Exception: {str(e)}")
+        log_check_result(check_name, "failed", f"Exception: {e!s}")
         return False
 
 
@@ -100,7 +97,7 @@ def control_barrier(group=None, timeout_s: int = 300):
 # -------------------------
 def initialize_distributed(rank: int, world_size: int):
     """initialize distributed"""
-    assert _GLOBAL_ARGS is not None, 'arguments not yet initialized.'
+    assert _GLOBAL_ARGS is not None, "arguments not yet initialized."
     args = _GLOBAL_ARGS
 
     if torch.cuda.is_available():
@@ -197,9 +194,9 @@ def _init_model_parallel_groups(rank, all_data_parallel_group_ranks, data_parall
 def _init_tensor_model_parallel_groups(rank, world_size, tensor_model_parallel_size):
     global _PARALLEL_STATE
     num_tensor_model_parallel_groups = world_size // tensor_model_parallel_size
-    assert (
-        _PARALLEL_STATE["tensor"]["nccl"] is None
-    ), "tensor model parallel group already initialized"
+    assert _PARALLEL_STATE["tensor"]["nccl"] is None, (
+        "tensor model parallel group already initialized"
+    )
     for i in range(num_tensor_model_parallel_groups):
         r = list(range(i * tensor_model_parallel_size, (i + 1) * tensor_model_parallel_size))
         g_nccl = _maybe_new_group(r, backend=dist.get_backend())
@@ -214,9 +211,9 @@ def _init_tensor_model_parallel_groups(rank, world_size, tensor_model_parallel_s
 
 def _init_pipeline_and_embedding_groups(rank, world_size, pipeline_model_parallel_size):
     global _PARALLEL_STATE
-    assert (
-        _PARALLEL_STATE["pipeline"]["nccl"] is None
-    ), "pipeline model parallel group already initialized"
+    assert _PARALLEL_STATE["pipeline"]["nccl"] is None, (
+        "pipeline model parallel group already initialized"
+    )
     assert _PARALLEL_STATE["embedding"]["nccl"] is None, "embedding group already initialized"
     num_pipeline_model_parallel_groups = world_size // pipeline_model_parallel_size
 
@@ -264,8 +261,6 @@ def initialize_model_parallel(tensor_model_parallel_size, pipeline_model_paralle
         rank, world_size, tensor_model_parallel_size, pipeline_model_parallel_size
     )
 
-    num_pipeline_model_parallel_groups = world_size // pipeline_model_parallel_size
-
     # -------------------------
     # Model-parallel groups
     # -------------------------
@@ -288,7 +283,7 @@ def initialize_model_parallel(tensor_model_parallel_size, pipeline_model_paralle
 # Communication Checks
 # -------------------------
 def check_tensor_parallel_group():
-    assert _GLOBAL_ARGS is not None, 'arguments not yet initialized.'
+    assert _GLOBAL_ARGS is not None, "arguments not yet initialized."
     args = _GLOBAL_ARGS
     rank = dist.get_rank()
     tp_size = args.tensor_model_parallel_size
@@ -296,13 +291,13 @@ def check_tensor_parallel_group():
 
     if rank == 0:
         print(f"Checking tensor parallel communication (TP size: {tp_size})")
-    control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=120)
+    control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=60)
     print(f"[Rank {rank}] TP group ranks: {tp_ranks}", flush=True)
 
     if tp_size <= 1 or len(tp_ranks) <= 1 or _PARALLEL_STATE["tensor"]["nccl"] is None:
         # Nothing to communicate; treat as pass.
         print(f"[Rank {rank}] TP size is 1; skipping NCCL all_reduce.", flush=True)
-        control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=120)
+        control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=60)
         return
 
     device = torch.device(f"cuda:{args.local_rank}")
@@ -317,11 +312,11 @@ def check_tensor_parallel_group():
         )
 
     torch.cuda.synchronize()
-    control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=120)
+    control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=60)
 
 
 def check_data_parallel_group():
-    assert _GLOBAL_ARGS is not None, 'arguments not yet initialized.'
+    assert _GLOBAL_ARGS is not None, "arguments not yet initialized."
     args = _GLOBAL_ARGS
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -334,12 +329,12 @@ def check_data_parallel_group():
 
     if rank == 0:
         print(f"Checking data parallel communication (DP group size: {dp_group_size})")
-    control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=120)
+    control_barrier(group=_PARALLEL_STATE["tensor"]["gloo"], timeout_s=60)
     print(f"[Rank {rank}] DP group ranks: {dp_ranks}", flush=True)
 
     if dp_group_size <= 1 or len(dp_ranks) <= 1 or _PARALLEL_STATE["data"]["nccl"] is None:
         print(f"[Rank {rank}] DP size is 1; skipping NCCL all_reduce.", flush=True)
-        control_barrier(group=_PARALLEL_STATE["data"]["gloo"], timeout_s=120)
+        control_barrier(group=_PARALLEL_STATE["data"]["gloo"], timeout_s=60)
         return
 
     device = torch.device(f"cuda:{args.local_rank}")
@@ -353,11 +348,11 @@ def check_data_parallel_group():
         )
 
     torch.cuda.synchronize()
-    control_barrier(group=_PARALLEL_STATE["data"]["gloo"], timeout_s=120)
+    control_barrier(group=_PARALLEL_STATE["data"]["gloo"], timeout_s=60)
 
 
 def check_pipeline_parallel_group():
-    assert _GLOBAL_ARGS is not None, 'arguments not yet initialized.'
+    assert _GLOBAL_ARGS is not None, "arguments not yet initialized."
     args = _GLOBAL_ARGS
     rank = dist.get_rank()
 
@@ -368,12 +363,12 @@ def check_pipeline_parallel_group():
 
     if rank == 0:
         print(f"Checking pipeline parallel communication (PP size: {pp_size})")
-    control_barrier(group=pp_group_gloo, timeout_s=180)
+    control_barrier(group=pp_group_gloo, timeout_s=60)
     print(f"[Rank {rank}] PP group ranks: {pp_ranks}", flush=True)
 
     if pp_size <= 1 or len(pp_ranks) <= 1 or pp_group_nccl is None:
         print(f"[Rank {rank}] PP size is 1; skipping P2P.", flush=True)
-        control_barrier(group=pp_group_gloo, timeout_s=120)
+        control_barrier(group=pp_group_gloo, timeout_s=60)
         return
 
     # Determine local pp_rank without calling dist.get_rank(group=...) (avoid edge cases)
@@ -413,7 +408,7 @@ def check_pipeline_parallel_group():
             )
 
     torch.cuda.synchronize()
-    control_barrier(group=pp_group_gloo, timeout_s=180)
+    control_barrier(group=pp_group_gloo, timeout_s=60)
 
     # -------- Backward: recv from next, send to prev --------
     print(f"[Rank {rank}] PP backward: prev={prev_rank}, next={next_rank}", flush=True)
@@ -440,10 +435,10 @@ def check_pipeline_parallel_group():
             )
 
     torch.cuda.synchronize()
-    control_barrier(group=pp_group_gloo, timeout_s=180)
+    control_barrier(group=pp_group_gloo, timeout_s=60)
 
     print(f"[Rank {rank}] Pipeline parallel check completed", flush=True)
-    control_barrier(group=pp_group_gloo, timeout_s=180)
+    control_barrier(group=pp_group_gloo, timeout_s=60)
 
 
 # -------------------------
@@ -451,8 +446,6 @@ def check_pipeline_parallel_group():
 # -------------------------
 def check_communication():
     """Check all parallel communication with progressive execution"""
-    assert _GLOBAL_ARGS is not None, 'arguments not yet initialized.'
-    args = _GLOBAL_ARGS
     rank = dist.get_rank()
     print(f"[Rank {rank}] Entered check_communication()", flush=True)
     if rank == 0:
@@ -461,37 +454,37 @@ def check_communication():
         print("=" * 60)
 
     # Always use gloo world control barrier
-    control_barrier(timeout_s=120)
+    control_barrier(timeout_s=60)
 
     # TP
-    ok = safe_check_execution(check_tensor_parallel_group, "tensor_parallel", timeout_seconds=180)
-    control_barrier(timeout_s=120)
+    ok = safe_check_execution(check_tensor_parallel_group, "tensor_parallel", timeout_seconds=60)
+    control_barrier(timeout_s=60)
     if not ok and rank == 0:
         print("⚠ Warning: TP check failed, continuing...")
     elif rank == 0:
-        log_check_result("tensor_parallel", 'passed')
+        log_check_result("tensor_parallel", "passed")
         print("Tensor parallel communication check completed successfully")
         print("\n" + "-" * 60)
 
     # DP
-    ok = safe_check_execution(check_data_parallel_group, "data_parallel", timeout_seconds=180)
-    control_barrier(timeout_s=120)
+    ok = safe_check_execution(check_data_parallel_group, "data_parallel", timeout_seconds=60)
+    control_barrier(timeout_s=60)
     if not ok and rank == 0:
         print("⚠ Warning: DP check failed, continuing...")
     elif rank == 0:
-        log_check_result("data_parallel", 'passed')
+        log_check_result("data_parallel", "passed")
         print("Data parallel communication check completed successfully")
         print("\n" + "-" * 60)
 
     # PP
     ok = safe_check_execution(
-        check_pipeline_parallel_group, "pipeline_parallel", timeout_seconds=240
+        check_pipeline_parallel_group, "pipeline_parallel", timeout_seconds=120
     )
-    control_barrier(timeout_s=120)
+    control_barrier(timeout_s=60)
     if not ok and rank == 0:
         print("⚠ Warning: PP check failed, continuing...")
     elif rank == 0:
-        log_check_result("pipeline_parallel", 'passed')
+        log_check_result("pipeline_parallel", "passed")
         print("Pipeline parallel communication check completed successfully")
         print("\n" + "-" * 60)
     # TODO: Check Expert Parallel
@@ -501,39 +494,38 @@ def check_communication():
 
 
 def parse_args():
-
     parser = argparse.ArgumentParser(description="GPU Health Check arguments")
     parser.add_argument(
-        '--tensor-model-parallel-size',
+        "--tensor-model-parallel-size",
         type=int,
         default=1,
-        help='Degree of tensor model parallelism (will be auto-detected if not optimal).',
+        help="Degree of tensor model parallelism (will be auto-detected if not optimal).",
     )
     parser.add_argument(
-        '--pipeline-model-parallel-size',
+        "--pipeline-model-parallel-size",
         type=int,
         default=1,
-        help='Degree of pipeline model parallelism.',
+        help="Degree of pipeline model parallelism.",
     )
     parser.add_argument(
-        '--distributed-backend',
-        default='nccl',
-        choices=['nccl', 'gloo'],
-        help='Which backend to use for distributed training.',
+        "--distributed-backend",
+        default="nccl",
+        choices=["nccl", "gloo"],
+        help="Which backend to use for distributed training.",
     )
     parser.add_argument(
-        '--distributed-timeout-minutes',
+        "--distributed-timeout-minutes",
         type=int,
         default=10,
-        help='Timeout minutes for torch.distributed.',
+        help="Timeout minutes for torch.distributed.",
     )
 
     args = parser.parse_args()
 
     # Args from environment
-    args.rank = int(os.getenv('RANK', '0'))
-    args.world_size = int(os.getenv('WORLD_SIZE', '1'))
-    args.local_rank = int(os.getenv('LOCAL_RANK', '0'))
+    args.rank = int(os.getenv("RANK", "0"))
+    args.world_size = int(os.getenv("WORLD_SIZE", "1"))
+    args.local_rank = int(os.getenv("LOCAL_RANK", "0"))
 
     return args
 
@@ -549,17 +541,17 @@ def print_check_summary():
     print("=" * 60)
 
     total_checks = len(_CHECK_RESULTS)
-    passed_checks = sum(1 for result in _CHECK_RESULTS.values() if result['status'] == 'passed')
-    failed_checks = sum(1 for result in _CHECK_RESULTS.values() if result['status'] == 'failed')
-    skipped_checks = sum(1 for result in _CHECK_RESULTS.values() if result['status'] == 'skipped')
-    pending_checks = sum(1 for result in _CHECK_RESULTS.values() if result['status'] == 'pending')
+    passed_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "passed")
+    failed_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "failed")
+    skipped_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "skipped")
+    pending_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "pending")
 
     for check_name, result in _CHECK_RESULTS.items():
         status_icon = (
-            "✓" if result['status'] == 'passed' else "✗" if result['status'] == 'failed' else "⚠"
+            "✓" if result["status"] == "passed" else "✗" if result["status"] == "failed" else "⚠"
         )
         print(f"{status_icon} {check_name.replace('_', ' ').title()}: {result['status'].upper()}")
-        if result['error']:
+        if result["error"]:
             print(f"   └─ {result['error']}")
 
     print(
