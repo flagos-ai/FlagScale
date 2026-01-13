@@ -22,6 +22,7 @@ Install FlagScale and robotics dependencies:
 cd FlagScale/
 pip install . --verbose
 pip install -r requirements/train/robotics/requirements.txt
+pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226
 ```
 
 ## Training
