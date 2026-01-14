@@ -15,9 +15,9 @@ def get_model_config_from_task(serve_id: str = "serve_model"):
     if not TASK_CONFIG.get("serve"):
         raise ValueError("No 'serve' section found in task config.")
     for item in TASK_CONFIG.serve:
-        if item.get("serve_id") == serve_id:
+        if "serve_id" in item and item.get("serve_id") is not None:
             return item
-    raise ValueError(f"Model config with serve_id={serve_id} not found.")
+    raise ValueError("serve_id in YAML config file is null")
 
 
 model_config = get_model_config_from_task()

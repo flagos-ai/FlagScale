@@ -107,8 +107,10 @@ def execute_action(runner, action: str, task_type: str, config: DictConfig) -> N
     if action == "run":
         if task_type == "train":
             enable_monitoring = config.experiment.runner.get("enable_monitoring", False)
-            runner.run(enable_monitoring=enable_monitoring)
-
+            enable_gpu_health_check = config.experiment.runner.get("enable_gpu_health_check", False)
+            runner.run(
+                enable_monitoring=enable_monitoring, enable_gpu_health_check=enable_gpu_health_check
+            )
             if enable_monitoring:
                 logger.info("Monitor service will be started automatically when training begins.")
         else:
