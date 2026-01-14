@@ -30,7 +30,9 @@ class Runner(ABC):
             if self.launcher_type == "cloud":
                 backend_attr = "vllm"  # do not support other backend
             elif backend_attr is None and not self.config.experiment.task.get("entrypoint", None):
-                backend_attr = self.config.serve[0]["engine"]
+                backend_attr = self.config.serve[0].get("engine", None)
+        if backend_attr is None:
+            backend_attr = "native"
 
         # backend is required for train / inference / rl
         if self.task_type in ("train", "inference", "rl"):
