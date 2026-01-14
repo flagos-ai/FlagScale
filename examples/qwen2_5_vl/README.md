@@ -32,9 +32,11 @@ pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226
 mkdir -p /tmp
 cd /tmp
 git clone https://github.com/flagos-ai/Megatron-LM-FL.git
+cd Megatron-LM-FL
+pip install --no-build-isolation .[mlm,dev]
 
 # add your path of FlagScale and the Megatron in FlagScale to PYTHONPATH
-export PYTHONPATH=$PYTHONPATH:/xxx/FlagScale:/xxx/FlagScale/flagscale/train/:/tmp/Megatron-LM-FL/
+export PYTHONPATH=$PYTHONPATH:/xxx/FlagScale:/xxx/FlagScale/flagscale/train/
 ```
 
 ## Train
