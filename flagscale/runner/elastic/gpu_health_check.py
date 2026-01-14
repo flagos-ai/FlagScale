@@ -569,14 +569,14 @@ def check_hardware():
     if args.local_rank == 0:
         check_hardware_single()
     if rank == 0:
-        print("\nGPU hardware testing phase completed")
+        print("\nGPU hardware checking phase completed")
         print("=" * 60)
 
 
 def check_computation_for_different_dtype(dtype, name):
     args = _GLOBAL_ARGS
-    test_tensor = torch.randn(4096, 4096, dtype=dtype).to(f"cuda:{args.local_rank}")
-    result = torch.matmul(test_tensor, test_tensor)
+    check_tensor = torch.randn(4096, 4096, dtype=dtype).to(f"cuda:{args.local_rank}")
+    result = torch.matmul(check_tensor, check_tensor)
     if torch.any(torch.isnan(result)):
         print(f"{name} failed: nan is detected in result")
         return False
@@ -616,7 +616,7 @@ def check_ecc_error():
         rank = dist.get_rank()
         device = f"cuda:{args.local_rank}"
 
-        # Perform multiple matrix operations to stress test memory
+        # Perform multiple matrix operations to stress check memory
         for i in range(5):
             # Create large tensors to stress GPU memory
             tensor_a = torch.randn(2048, 2048, dtype=torch.float32, device=device)
@@ -654,26 +654,26 @@ def check_ecc_error():
 
 
 def check_computation_single():
-    """Single GPU computation test without distributed calls"""
+    """Single GPU computation check"""
     print("Checking GPU computation capabilities...")
-    tests = [
+    checks = [
         ("Float", torch.float32),
         ("Double", torch.double),
         ("Half", torch.half),
     ]
     all_pass = True
-    for display_name, dtype in tests:
+    for display_name, dtype in checks:
         ok = check_computation_for_different_dtype(
             dtype=dtype, name=f"check_calculation_{display_name.lower()}"
         )
         print(f"{display_name} computation: {'PASS' if ok else 'FAIL'}")
         if not ok:
             all_pass = False
-    print("Starting 60-second endurance test...")
+    print("Starting 60-second endurance check...")
     endurance_result = check_computation_endurance()
     if not endurance_result:
         all_pass = False
-    print(f"Endurance test: {'PASS' if endurance_result else 'FAIL'}")
+    print(f"Endurance check: {'PASS' if endurance_result else 'FAIL'}")
     ecc_error_result = check_ecc_error()
     if not ecc_error_result:
         all_pass = False
@@ -697,38 +697,38 @@ def check_computation():
         print("=" * 60)
 
     # Check individual computation capabilities
-    test_functions = [
+    check_functions = [
         ("Float computation", torch.float32, "check_computation_float"),
         ("Double computation", torch.double, "check_computation_double"),
         ("Half computation", torch.half, "check_computation_half"),
-        ("Endurance test (60s)", check_computation_endurance),
+        ("Endurance check (60s)", check_computation_endurance),
         ("ECC Error Detection", check_ecc_error),
     ]
 
     all_passed = True
-    failed_tests = []
+    failed_checks = []
 
-    for test_name, *rest in test_functions:
+    for check_name, *rest in check_functions:
         if rank == 0:
-            print(f"\nTesting {test_name}...")
+            print(f"\nTesting {check_name}...")
 
         try:
             if isinstance(rest[0], torch.dtype):
-                _, dtype, report_name = test_name, rest[0], rest[1]
+                _, dtype, report_name = check_name, rest[0], rest[1]
                 result = check_computation_for_different_dtype(dtype, report_name)
             else:
-                test_func = rest[0]
-                result = test_func()
+                check_func = rest[0]
+                result = check_func()
             if not result:
                 all_passed = False
-                failed_tests.append(test_name)
+                failed_checks.append(check_name)
 
         except Exception as e:
             result = False
             all_passed = False
-            failed_tests.append(test_name)
+            failed_checks.append(check_name)
             if rank == 0:
-                print(f"✗ {test_name} failed with exception: {e}")
+                print(f"✗ {check_name} failed with exception: {e}")
 
         try:
             result_tensor = torch.zeros(args.world_size).to(f"cuda:{args.local_rank}")
@@ -738,27 +738,27 @@ def check_computation():
             if args.rank == 0:
                 expected_tensor = torch.ones_like(result_tensor).to(f"cuda:{args.local_rank}")
                 if torch.allclose(result_tensor, expected_tensor, atol=1e-6):
-                    print(f"{test_name} passed")
+                    print(f"{check_name} passed")
                 else:
-                    print(f"{test_name} failed")
+                    print(f"{check_name} failed")
         except Exception as e:
             if rank == 0:
-                print(f"⚠ Warning: Failed to gather {test_name} results: {e}")
+                print(f"⚠ Warning: Failed to gather {check_name} results: {e}")
 
         try:
             dist.barrier()
         except Exception as e:
             if rank == 0:
-                print(f"⚠ Warning: Calculation test barrier failed: {e}")
+                print(f"⚠ Warning: Calculation check barrier failed: {e}")
 
     if all_passed:
         log_check_result("gpu_computation", "passed")
     else:
-        error_msg = f"Failed tests: {', '.join(failed_tests)}"
+        error_msg = f"Failed checks: {', '.join(failed_checks)}"
         log_check_result("gpu_computation", "failed", error_msg)
 
     if rank == 0:
-        print("\nGPU computation testing phase completed")
+        print("\nGPU computation checking phase completed")
         print("=" * 60)
 
 
@@ -880,7 +880,7 @@ def main():
         # PHASE 2: Check gpu computation capabilities
         safe_check_execution(
             check_computation_single, "gpu_computation", timeout_seconds=300
-        )  # 5 minutes for endurance test
+        )  # 5 minutes for endurance check
         # Print final summary
         if rank == 0:
             print_check_summary()
