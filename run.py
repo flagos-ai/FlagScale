@@ -76,7 +76,7 @@ def get_runner(config: DictConfig, task_type: str):
 
     if FLAGSCALE_USE_V1 and config.experiment.task.get("backend", None) not in {
         "robotics",
-        "flagos-robo",
+        "native",
     }:
         return Runner(config)
 

@@ -91,7 +91,7 @@ class ModelConfig(BaseModel):
 
 
 class TrainConfig(BaseModel):
-    """Top-level training configuration for flagos-robo backend"""
+    """Top-level training configuration for native backend"""
 
     system: SystemConfig
     model: ModelConfig

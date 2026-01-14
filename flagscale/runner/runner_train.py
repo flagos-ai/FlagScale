@@ -61,13 +61,11 @@ def _get_args_robotics(config: DictConfig):
     return args
 
 
-def _get_args_flagos_robo(config: DictConfig):
+def _get_args_native(config: DictConfig):
     """
-    Use Hydra-generated config.yaml for flagos-robo backend.
+    Use Hydra-generated config.yaml for native backend.
     """
-    assert config.experiment.task.backend == "flagos-robo", (
-        "This function only supports flagos-robo backend."
-    )
+    assert config.experiment.task.backend == "native", "This function only supports native backend."
 
     # Use Hydra's generated config.yaml (same pattern as backend_native_compress.py)
     # See: https://github.com/facebookresearch/hydra/discussions/2750
@@ -388,8 +386,8 @@ class SSHTrainRunner(RunnerBase):
             self.user_args = _get_args_megatron(self.config)
         elif self.config.experiment.task.backend == "robotics":
             self.user_args = _get_args_robotics(self.config)
-        elif self.config.experiment.task.backend == "flagos-robo":
-            self.user_args = _get_args_flagos_robo(self.config)
+        elif self.config.experiment.task.backend == "native":
+            self.user_args = _get_args_native(self.config)
         else:
             raise ValueError(f"Unsupported backend: {self.config.experiment.task.backend}")
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
@@ -470,8 +468,15 @@ class SSHTrainRunner(RunnerBase):
         else:
             run_local_command(f"bash {host_run_script_file}", dryrun)
 
+    # FIXME: (yupu) Fix SSHTrainRunner.run() got an unexpected keyword argument 'enable_gpu_health_check'
     def run(
-        self, with_test=False, dryrun=False, monitor=False, interval=10, enable_monitoring=None
+        self,
+        with_test=False,
+        dryrun=False,
+        monitor=False,
+        interval=10,
+        enable_monitoring=None,
+        **kwargs,
     ):
         # Read from config if not explicitly provided
         if enable_monitoring is None:

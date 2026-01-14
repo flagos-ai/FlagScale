@@ -783,7 +783,7 @@ if __name__ == "__main__":
 
     # Extract experiment config (seed, exp_dir, etc.)
     experiment_config = OmegaConf.to_container(config.experiment, resolve=True)
-    seed = experiment_config['seed']
+    seed = experiment_config.get('seed', 42)
 
     logger.info("=" * 100)
     logger.info(f"Experiment: {experiment_config}")
