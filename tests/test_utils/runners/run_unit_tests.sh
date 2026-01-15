@@ -15,9 +15,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$PROJECT_ROOT"
+
+# Set up PYTHONPATH for megatron imports
+export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/flagscale/train:${PYTHONPATH:-}"
+
 echo "=========================================="
 echo "Running Unit Tests"
 echo "Platform: $PLATFORM"
+echo "PYTHONPATH: $PYTHONPATH"
 echo "=========================================="
 
 # Get unit test patterns from platform configuration
