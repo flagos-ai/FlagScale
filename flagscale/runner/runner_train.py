@@ -471,7 +471,6 @@ class SSHTrainRunner(RunnerBase):
         else:
             run_local_command(f"bash {host_run_script_file}", dryrun)
 
-    # FIXME: (yupu) Fix SSHTrainRunner.run() got an unexpected keyword argument 'enable_gpu_health_check'
     def run(
         self,
         with_test=False,
@@ -479,7 +478,6 @@ class SSHTrainRunner(RunnerBase):
         monitor=False,
         interval=10,
         enable_monitoring=None,
-        **kwargs,
     ):
         # Read from config if not explicitly provided
         if enable_monitoring is None:
