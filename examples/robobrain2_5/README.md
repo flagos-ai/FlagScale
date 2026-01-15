@@ -1,38 +1,38 @@
 
 # Quick Start
 
-## Install FlagScale
+## Installation
 
-1. Clone FlagScale code from github.
-
-    ```sh
-    git clone https://github.com/FlagOpen/FlagScale.git
-    cd FlagScale/
-    ```
-
-2. Install Requirements
-
-    We provide two installation methods: source code installation and whl package installation.
-    - Source Installation
-
-        ```sh
-        cd FlagScale
-        PYTHONPATH=./:$PYTHONPATH pip install . --config-settings=domain=robotics --config-settings=device=gpu  --verbose --no-build-isolation
-        ```
-
-    - Whl Installation
-
-        ```sh
-        pip install flag-scale[robotics-gpu]
-        flagscale install --domain=robotics --device=gpu
-        ```
-
-    > **⚠️ Attention**: The robo environment depends on transformers (v4.53.0). Higher version will cause problem on image pre-processing.
-
-## Install vLLM and Transformers
+### Clone Repository
 
 ```sh
-pip install vllm
+git clone https://github.com/FlagOpen/FlagScale.git
+cd FlagScale/
+```
+
+### Setup Conda Environment
+
+Create a new conda environment:
+
+```sh
+conda create -n flagscale-inference python=3.12
+conda activate flagscale-inference
+```
+
+Install FlagScale:
+
+```sh
+cd FlagScale/
+pip install . --verbose
+```
+
+### Install vLLM and Transformers
+
+```sh
+git clone https://github.com/flagos-ai/vllm-FL.git
+cd vllm-FL
+pip install packaging==24.2
+pip install --no-build-isolation .
 pip install transformers==4.57.0
 ```
 

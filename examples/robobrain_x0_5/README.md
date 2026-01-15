@@ -47,7 +47,7 @@ modelscope download --model Qwen/Qwen2.5-VL-3B-Instruct --local_dir Qwen/Qwen2.5
 
 ### Prepare Dataset
 
-FlagScale uses WebDataset format and Megatraon.Energon data loader, you need process your data first.
+FlagScale uses WebDataset format and Megatraon.Energon data loader, you need to process your data first.
 
 There is a dataset processed: [demo_0913_n2](https://gitee.com/hchnr/flag-scale/tree/robotics_dataset/demo_0913_n2/wds-1).
 

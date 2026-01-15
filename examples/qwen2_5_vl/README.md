@@ -63,7 +63,7 @@ bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
 
 #### Demo dataset
 
-FlagScale uses WebDataset format and Megatraon.Energon data loader, you need process your data first.
+FlagScale uses WebDataset format and Megatraon.Energon data loader, you need to process your data first.
 
 There is a dataset processed: [demo_0913_n2_vlm](https://gitee.com/hchnr/flag-scale/tree/robotics_dataset/demo_0913_n2_vlm/wds-1).
 

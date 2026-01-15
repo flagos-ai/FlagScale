@@ -60,7 +60,7 @@ modelscope download --model BAAI/RoboBrain-X0-Preview --local_dir BAAI/RoboBrain
 
 ### Prepare Dataset
 
-FlagScale uses WebDataset format and Megatraon.Energon data loader, you need process your data first.
+FlagScale uses WebDataset format and Megatraon.Energon data loader, you need to process your data first.
 
 There is a dataset processed: [demo_0913_n2](https://gitee.com/hchnr/flag-scale/tree/robotics_dataset/demo_0913_n2/wds-256).
 
