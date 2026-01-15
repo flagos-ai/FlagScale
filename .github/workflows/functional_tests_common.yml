@@ -86,7 +86,7 @@ jobs:
 
           # Ensure we're back in the project root
           cd "$PROJECT_ROOT"
-          
+
           # Run functional tests using the test runner
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_functional_tests.sh" --task "$TYPE" --model "$TASK"
           exit_code=$?

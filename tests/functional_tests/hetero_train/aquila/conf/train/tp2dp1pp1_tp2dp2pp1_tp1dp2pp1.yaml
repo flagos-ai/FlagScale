@@ -85,4 +85,3 @@ model:
       lr_warmup_samples: 0
       lr_warmup_fraction: 0.01
       lr_decay_style: cosine
-

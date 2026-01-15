@@ -1,5 +1,6 @@
 import pytest
 
+
 def pytest_addoption(parser):
     """Register pytest options for test configuration and environment."""
     opts = [
@@ -12,21 +13,26 @@ def pytest_addoption(parser):
     for opt, name, help_text in opts:
         parser.addoption(opt, action="store", default="none", help=help_text)
 
+
 @pytest.fixture
 def test_path(request):
     return request.config.getoption("--test_path")
+
 
 @pytest.fixture
 def test_type(request):
     return request.config.getoption("--test_type")
 
+
 @pytest.fixture
 def test_task(request):
     return request.config.getoption("--test_task")
 
+
 @pytest.fixture
 def test_case(request):
     return request.config.getoption("--test_case")
+
 
 @pytest.fixture
 def platform(request):

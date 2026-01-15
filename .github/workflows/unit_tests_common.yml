@@ -93,7 +93,7 @@ jobs:
             # Ensure we're back in the project root
             cd "$PROJECT_ROOT"
           fi
-          
+
           # Run tests
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_unit_tests.sh" --platform "$BACKEND"
           exit_code=$?

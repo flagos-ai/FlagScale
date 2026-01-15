@@ -20,7 +20,7 @@ def test_spiky_loss_detector(pp_size=2, threshold=0.2):
     losses = [
         {"lm loss": torch.tensor([10.23, 100.0], device="cuda")},
         {"lm loss": torch.tensor([10.32, 100.0], device="cuda")},
-        {"lm loss": torch.tensor([10.30, 100.0], device="cuda")}
+        {"lm loss": torch.tensor([10.30, 100.0], device="cuda")},
     ]
     reduced_loss = detector.reduce_losses(losses)
     is_spiky_loss = detector.is_spkiy_loss(reduced_loss)
@@ -33,7 +33,7 @@ def test_spiky_loss_detector(pp_size=2, threshold=0.2):
     losses = [
         {"lm loss": torch.tensor([14.23, 100.0], device="cuda")},
         {"lm loss": torch.tensor([14.32, 100.0], device="cuda")},
-        {"lm loss": torch.tensor([14.30, 100.0], device="cuda")}
+        {"lm loss": torch.tensor([14.30, 100.0], device="cuda")},
     ]
     reduced_loss = detector.reduce_losses(losses)
     is_spiky_loss = detector.is_spkiy_loss(reduced_loss)

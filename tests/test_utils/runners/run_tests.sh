@@ -18,17 +18,17 @@ Run FlagScale tests with platform-specific configurations.
 USAGE SCENARIOS:
   1. Run all tests for a platform:
      $(basename "$0") --platform default
-     
+
   2. Run specific test type for a platform:
      $(basename "$0") --platform default --type unit
      $(basename "$0") --platform default --type functional
-     
+
   3. Run specific task within functional tests:
      $(basename "$0") --platform default --type functional --task train
-     
+
   4. Run specific model within a task:
      $(basename "$0") --platform default --type functional --task train --model aquila
-     
+
   5. Run specific test cases from a model:
      $(basename "$0") --platform default --type functional --task train --model aquila --list tp2_pp2,tp4_pp2
 
@@ -96,7 +96,7 @@ if [ "$TEST_TYPE" = "functional" ] || [ -n "$TASK" ]; then
     [ -n "$TASK" ] && args="$args --task $TASK"
     [ -n "$MODEL" ] && args="$args --model $MODEL"
     [ -n "$TEST_LIST" ] && args="$args --list $TEST_LIST"
-    
+
     echo "[INFO] Running functional tests"
     "$SCRIPT_DIR/run_functional_tests.sh" $args
     exit 0

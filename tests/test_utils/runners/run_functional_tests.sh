@@ -22,13 +22,13 @@ Run functional test cases with platform filtering.
 SCENARIOS:
   1. Run all tasks with all models/configs:
      $(basename "$0") --platform default
-     
+
   2. Run all models/configs in a task:
      $(basename "$0") --task train --platform default
-     
+
   3. Run specific model in a task:
      $(basename "$0") --task train --model aquila --platform default
-     
+
   4. Run specific test cases from a model:
      $(basename "$0") --task train --model aquila --list tp2_pp2,tp4_pp2 --platform default
 
@@ -47,9 +47,9 @@ run_test() {
     local task="$1" model="$2" config="$3"
     local test_dir="tests/functional_tests/$task/$model"
     local conf_dir="$test_dir/conf"
-    
+
     [ -d "$conf_dir" ] || { echo "Error: Config dir not found: $conf_dir" >&2; return 1; }
-    
+
     # Check config file exists
     local config_file=""
     if [ -f "$conf_dir/$config.yaml" ]; then
@@ -60,10 +60,10 @@ run_test() {
         echo "Error: Config not found: $conf_dir/$config.{yaml,yml}" >&2
         return 1
     fi
-    
+
     echo "[INFO] Running: $task/$model/$config"
     wait_for_gpu
-    
+
     # Clean old results from exp_dir defined in the yaml config
     # Extract exp_dir from yaml (handles format like "exp_dir: path/to/dir")
     local exp_dir=$(grep -E '^\s*exp_dir:' "$config_file" | head -1 | sed 's/.*exp_dir:\s*//' | tr -d '"' | tr -d "'")
@@ -71,20 +71,20 @@ run_test() {
         echo "[INFO] Cleaning previous results in: $exp_dir"
         rm -rf "$exp_dir"/* 2>/dev/null || true
     fi
-    
+
     # Clean old results (legacy path)
     rm -rf "$test_dir/results_test/$config" 2>/dev/null || true
-    
+
     # Run test
     python run.py --config-path "$conf_dir" --config-name "$config" action=test || return 1
-    
+
     # Validate results (if validator exists)
     if [ -f "$PROJECT_ROOT/tests/test_utils/runners/check_results.py" ]; then
         python -m pytest "$PROJECT_ROOT/tests/test_utils/runners/check_results.py::test_train_equal" \
             --test_path=tests/functional_tests --test_type="$task" --test_task="$model" \
             --test_case="$config" --platform="$PLATFORM" 2>/dev/null || true
     fi
-    
+
     echo "[OK] Test completed: $task/$model/$config"
 }
 
@@ -107,20 +107,20 @@ if [ -z "$TASK" ]; then
     for task_dir in tests/functional_tests/*/; do
         task_name=$(basename "$task_dir")
         [ -d "$task_dir" ] || continue
-        
+
         echo "[INFO] Processing task: $task_name"
-        
+
         # Get test configuration from platform YAML for this task
         tests_json=$(get_test_configs "$task_name" "$MODEL" "$TEST_LIST") || {
             echo "Warning: Failed to get test configuration for task=$task_name" >&2
             continue
         }
-        
+
         if [ -z "$tests_json" ]; then
             echo "Warning: No tests found for task=$task_name, model=$MODEL, list=$TEST_LIST in platform=$PLATFORM" >&2
             continue
         fi
-        
+
         # Parse JSON and run tests
         cat > /tmp/parse_json_tests.py << 'EOF'
 import json, sys
@@ -137,7 +137,7 @@ EOF
             [ -n "$task" ] && [ -n "$model" ] && [ -n "$config" ] && run_test "$task" "$model" "$config"
         done
     done
-    
+
     rm -f /tmp/parse_json_tests.py
 else
     # Task specified, run only that task
