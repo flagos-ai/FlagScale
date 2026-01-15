@@ -31,8 +31,7 @@ class Runner(ABC):
                 backend_attr = "vllm"  # do not support other backend
             elif backend_attr is None and not self.config.experiment.task.get("entrypoint", None):
                 backend_attr = self.config.serve[0].get("engine", None)
-        if backend_attr is None:
-            backend_attr = "native"
+            backend_attr = backend_attr or "native"
 
         # backend is required for train / inference / rl
         if self.task_type in ("train", "inference", "rl"):
@@ -48,6 +47,11 @@ class Runner(ABC):
         # normalize native → native_{task_type}
         if backend_type == "native":
             backend_type = f"native_{self.task_type}"
+            if (
+                self.config.experiment.runner.get("deploy", None) is None
+                or self.config.experiment.runner.deploy.get("use_fs_serve", False) is False
+            ):
+                raise ValueError("config.experiment.deploy.use_fs_serve in YAML should be true")
 
         self.backend_type = backend_type
 
