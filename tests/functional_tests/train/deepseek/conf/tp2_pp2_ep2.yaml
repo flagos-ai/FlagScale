@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: tp2_pp2_ep2
-  exp_dir: tests/functional_tests/test_cases/train/deepseek/gold_values/tp2_pp2_ep2
+  exp_dir: tests/functional_tests/test_cases/train/deepseek/test_results/tp2_pp2_ep2
   task:
     type: train
     backend: megatron

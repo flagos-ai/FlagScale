@@ -142,7 +142,7 @@ def test_train_equal(test_path, test_type, test_task, test_case):
     against pre-recorded gold values using numpy.allclose for tolerance.
     """
     # Construct the test_result_path using the provided fixtures
-    test_result_path = os.path.join(test_path, test_type, test_task, "gold_values", test_case)
+    test_result_path = os.path.join(test_path, test_type, test_task, "test_results", test_case)
     start_path = os.path.join(test_result_path, "logs/details/host_0_localhost")
 
     # Find the latest stdout.log
@@ -158,7 +158,7 @@ def test_train_equal(test_path, test_type, test_task, test_case):
 
     # Load gold values first to determine which metrics to extract
     gold_value_path = os.path.join(
-        test_path, test_type, test_task, "gold_values", test_case + ".json"
+        test_path, test_type, test_task, "test_results", test_case + ".json"
     )
     assert os.path.exists(gold_value_path), f"Failed to find gold result JSON at {gold_value_path}"
 

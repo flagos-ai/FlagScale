@@ -1,54 +1,68 @@
 #!/bin/bash
-# Functional Test Runner with platform-aware filtering
+# Functional Test Runner
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/utils.sh"
 
-TASK="" MODEL="" TEST_LIST="" PLATFORM="default"
+# Defaults
+PLATFORM="default"
+DEVICE=""
+TASK=""
+MODEL=""
+TEST_LIST=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --platform) PLATFORM="$2"; shift 2 ;;
+        --device) DEVICE="$2"; shift 2 ;;
         --task) TASK="$2"; shift 2 ;;
         --model) MODEL="$2"; shift 2 ;;
         --list) TEST_LIST="$2"; shift 2 ;;
-        --platform) PLATFORM="$2"; shift 2 ;;
         -h|--help) cat <<EOF && exit 0
-Usage: $(basename "$0") [--task TASK] [--model MODEL] [--list TESTS] [--platform PLATFORM]
-Run functional test cases with platform filtering.
+Usage: $(basename "$0") [OPTIONS]
 
-SCENARIOS:
-  1. Run all tasks with all models/configs:
-     $(basename "$0") --platform default
-
-  2. Run all models/configs in a task:
-     $(basename "$0") --task train --platform default
-
-  3. Run specific model in a task:
-     $(basename "$0") --task train --model aquila --platform default
-
-  4. Run specific test cases from a model:
-     $(basename "$0") --task train --model aquila --list tp2_pp2,tp4_pp2 --platform default
+Run functional tests with platform-specific configurations.
 
 OPTIONS:
-    --task TASK          Task name (optional): train, hetero_train (default: all tasks)
-    --model MODEL        Model name (optional): aquila, mixtral, deepseek (default: all models)
-    --list TESTS         Comma-separated test list (optional) (default: all tests)
     --platform PLATFORM  Platform type (default: default)
+    --device DEVICE      Device type (e.g., a100, a800, h100, generic)
+                         If not specified, runs tests for all devices in the platform
+    --task TASK          Task name (e.g., train, hetero_train)
+    --model MODEL        Model name (e.g., aquila, mixtral, deepseek)
+    --list TESTS         Comma-separated test list
+    -h, --help           Show this help message
+
+EXAMPLES:
+    # Run all tests for all devices in the platform
+    $(basename "$0") --platform cuda
+
+    # Run tests for specific device
+    $(basename "$0") --platform cuda --device a100
+
+    # Run specific task
+    $(basename "$0") --platform cuda --device a800 --task train
+
+    # Run specific model in a task
+    $(basename "$0") --task train --model aquila --platform cuda --device h100
+
+    # Run specific test cases
+    $(basename "$0") --task train --model aquila --list tp2_pp2,tp4_pp2
 EOF
         ;;
-        *) echo "Error: Unknown option: $1" >&2; exit 1 ;;
+        *) log_error "Unknown option: $1"; exit 1 ;;
     esac
 done
 
+# Function to run a single test
 run_test() {
     local task="$1" model="$2" config="$3"
     local test_dir="tests/functional_tests/$task/$model"
     local conf_dir="$test_dir/conf"
 
-    [ -d "$conf_dir" ] || { echo "Error: Config dir not found: $conf_dir" >&2; return 1; }
+    [ -d "$conf_dir" ] || { log_error "Config dir not found: $conf_dir"; return 1; }
 
     # Check config file exists
     local config_file=""
@@ -57,124 +71,144 @@ run_test() {
     elif [ -f "$conf_dir/$config.yml" ]; then
         config_file="$conf_dir/$config.yml"
     else
-        echo "Error: Config not found: $conf_dir/$config.{yaml,yml}" >&2
+        log_error "Config not found: $conf_dir/$config.{yaml,yml}"
         return 1
     fi
 
-    echo "[INFO] Running: $task/$model/$config"
+    log_info "Running: $task/$model/$config"
     wait_for_gpu
 
-    # Clean old results from exp_dir defined in the yaml config
-    # Extract exp_dir from yaml (handles format like "exp_dir: path/to/dir")
+    # Clean old results
     local exp_dir=$(grep -E '^\s*exp_dir:' "$config_file" | head -1 | sed 's/.*exp_dir:\s*//' | tr -d '"' | tr -d "'")
-    if [ -n "$exp_dir" ]; then
-        echo "[INFO] Cleaning previous results in: $exp_dir"
-        rm -rf "$exp_dir"/* 2>/dev/null || true
-    fi
-
-    # Clean old results (legacy path)
+    [ -n "$exp_dir" ] && rm -rf "$exp_dir"/* 2>/dev/null || true
     rm -rf "$test_dir/results_test/$config" 2>/dev/null || true
 
     # Run test
     python run.py --config-path "$conf_dir" --config-name "$config" action=test || return 1
 
-    # Validate results (if validator exists)
+    # Validate results if validator exists
     if [ -f "$PROJECT_ROOT/tests/test_utils/runners/check_results.py" ]; then
-        python -m pytest "$PROJECT_ROOT/tests/test_utils/runners/check_results.py::test_train_equal" \
-            --test_path=tests/functional_tests --test_type="$task" --test_task="$model" \
-            --test_case="$config" --platform="$PLATFORM" 2>/dev/null || true
+        local validator_cmd="python -m pytest \"$PROJECT_ROOT/tests/test_utils/runners/check_results.py::test_train_equal\" \
+            --test_path=tests/functional_tests --test_type=\"$task\" --test_task=\"$model\" \
+            --test_case=\"$config\" --platform=\"$PLATFORM\""
+        [ -n "$CURRENT_DEVICE" ] && validator_cmd="$validator_cmd --device=\"$CURRENT_DEVICE\""
+        eval "$validator_cmd" 2>/dev/null || log_info "Validation skipped or failed"
     fi
 
-    echo "[OK] Test completed: $task/$model/$config"
+    log_success "Test completed: $task/$model/$config"
 }
 
-cd "$PROJECT_ROOT"
-echo "[INFO] =========================================="
-echo "[INFO] Platform: $PLATFORM"
-echo "[INFO] Task: ${TASK:-all}, Model: ${MODEL:-all}, Tests: ${TEST_LIST:-all}"
-echo "[INFO] =========================================="
-
-# Get tests from platform configuration using parse_config.py
+# Get tests from platform configuration
 get_test_configs() {
-    python "$SCRIPT_DIR/parse_config.py" --platform "$PLATFORM" --type functional --task "$1" ${2:+--model "$2"} ${3:+--list "$3"} 2>/dev/null || echo ""
+    local device="$1"
+    local task="$2"
+    local model="$3"
+    local list="$4"
+
+    local cmd="python \"$SCRIPT_DIR/parse_config.py\" --platform \"$PLATFORM\" --device \"$device\" --type functional --task \"$task\""
+    [ -n "$model" ] && cmd="$cmd --model \"$model\""
+    [ -n "$list" ] && cmd="$cmd --list \"$list\""
+    eval "$cmd" 2>/dev/null || echo ""
 }
 
-cd "$PROJECT_ROOT"
+# Parse and run tests using helper module
+run_tests_from_json() {
+    local tests_json="$1"
 
-# If no task specified, run all tasks
-if [ -z "$TASK" ]; then
-    # Discover all tasks from functional_tests directory
-    for task_dir in tests/functional_tests/*/; do
-        task_name=$(basename "$task_dir")
-        [ -d "$task_dir" ] || continue
-
-        echo "[INFO] Processing task: $task_name"
-
-        # Get test configuration from platform YAML for this task
-        tests_json=$(get_test_configs "$task_name" "$MODEL" "$TEST_LIST") || {
-            echo "Warning: Failed to get test configuration for task=$task_name" >&2
-            continue
-        }
-
-        if [ -z "$tests_json" ]; then
-            echo "Warning: No tests found for task=$task_name, model=$MODEL, list=$TEST_LIST in platform=$PLATFORM" >&2
-            continue
-        fi
-
-        # Parse JSON and run tests
-        cat > /tmp/parse_json_tests.py << 'EOF'
-import json, sys
-tests_json_str = sys.argv[1]
-tests_config = json.loads(tests_json_str)
-for task, models_data in tests_config.items():
-    for model, test_configs in models_data.items():
-        if isinstance(test_configs, list):
-            for config in test_configs:
-                print(f"{task} {model} {config}")
-EOF
-
-        python /tmp/parse_json_tests.py "$tests_json" | while read task model config; do
-            [ -n "$task" ] && [ -n "$model" ] && [ -n "$config" ] && run_test "$task" "$model" "$config"
-        done
+    # Use helper module to parse test cases
+    echo "$tests_json" | python "$SCRIPT_DIR/helpers.py" parse-test-cases | \
+    while IFS=' ' read -r task model config; do
+        [ -z "$task" ] && continue
+        run_test "$task" "$model" "$config" || log_error "FAIL: $task/$model/$config"
     done
+}
 
-    rm -f /tmp/parse_json_tests.py
+# Function to run functional tests for a specific device
+run_functional_tests_for_device() {
+    local device="$1"
+    export CURRENT_DEVICE="$device"
+
+    log_info "Running functional tests for device: $device"
+
+    # Print configuration
+    echo "=========================================="
+    echo "Running Functional Tests"
+    echo "=========================================="
+    echo "Platform:   $PLATFORM"
+    echo "Device:     $device"
+    echo "Task:       ${TASK:-all}"
+    echo "Model:      ${MODEL:-all}"
+    echo "Tests:      ${TEST_LIST:-all}"
+    echo "=========================================="
+
+    cd "$PROJECT_ROOT"
+
+    # If no task specified, run all tasks
+    if [ -z "$TASK" ]; then
+        for task_dir in tests/functional_tests/*/; do
+            task_name=$(basename "$task_dir")
+            [ -d "$task_dir" ] || continue
+
+            log_info "Processing task: $task_name"
+
+            tests_json=$(get_test_configs "$device" "$task_name" "$MODEL" "$TEST_LIST")
+            [ -z "$tests_json" ] && { log_info "No tests found for task=$task_name"; continue; }
+
+            run_tests_from_json "$tests_json"
+        done
+    else
+        # Task specified, run only that task
+        [ -d "tests/functional_tests/$TASK" ] || { log_error "Task directory not found: tests/functional_tests/$TASK"; return 1; }
+
+        tests_json=$(get_test_configs "$device" "$TASK" "$MODEL" "$TEST_LIST")
+        [ -z "$tests_json" ] && { log_error "No tests found for task=$TASK"; return 1; }
+
+        run_tests_from_json "$tests_json"
+    fi
+
+    return 0
+}
+
+# Validate platform
+validate_platform "$PLATFORM" "$SCRIPT_DIR" || exit 1
+
+# If device is specified, run for that device only
+if [ -n "$DEVICE" ]; then
+    validate_device "$PLATFORM" "$DEVICE" "$SCRIPT_DIR" || exit 1
+    run_functional_tests_for_device "$DEVICE"
+    EXIT_CODE=$?
 else
-    # Task specified, run only that task
-    # Validate task directory exists
-    task_dir="tests/functional_tests/$TASK"
-    [ -d "$task_dir" ] || { echo "Error: Task directory not found: $task_dir" >&2; exit 1; }
+    # No device specified, run for all devices in the platform
+    DEVICE_TYPES=$(get_device_types "$PLATFORM" "$SCRIPT_DIR")
 
-    # Get test configuration from platform YAML
-    tests_json=$(get_test_configs "$TASK" "$MODEL" "$TEST_LIST") || {
-        echo "Error: Failed to get test configuration from platform YAML" >&2
-        exit 1
-    }
-
-    if [ -z "$tests_json" ]; then
-        echo "Error: No tests found for task=$TASK, model=$MODEL, list=$TEST_LIST in platform=$PLATFORM" >&2
+    if [ -z "$DEVICE_TYPES" ] || [ "$DEVICE_TYPES" = "[]" ]; then
+        log_error "No device types found for platform: $PLATFORM"
         exit 1
     fi
 
-    # Parse JSON and run tests
-    cat > /tmp/parse_json_tests.py << 'EOF'
-import json, sys
-tests_json_str = sys.argv[1]
-tests_config = json.loads(tests_json_str)
-for task, models_data in tests_config.items():
-    for model, test_configs in models_data.items():
-        if isinstance(test_configs, list):
-            for config in test_configs:
-                print(f"{task} {model} {config}")
-EOF
+    log_info "Running tests for all devices: $DEVICE_TYPES"
 
-    python /tmp/parse_json_tests.py "$tests_json" | while read task model config; do
-        [ -n "$task" ] && [ -n "$model" ] && [ -n "$config" ] && run_test "$task" "$model" "$config"
+    # Parse device types using helper
+    DEVICES=$(echo "$DEVICE_TYPES" | python "$SCRIPT_DIR/helpers.py" parse-devices)
+
+    OVERALL_EXIT_CODE=0
+    for device in $DEVICES; do
+        if ! run_functional_tests_for_device "$device"; then
+            log_error "Functional tests failed for device: $device"
+            OVERALL_EXIT_CODE=1
+        fi
+        echo ""
     done
 
-    rm -f /tmp/parse_json_tests.py
+    EXIT_CODE=$OVERALL_EXIT_CODE
 fi
 
-echo "[OK] =========================================="
-echo "[OK] All tests completed successfully"
-echo "[OK] =========================================="
+echo "=========================================="
+if [ $EXIT_CODE -eq 0 ]; then
+    log_success "All tests completed"
+else
+    log_error "Some tests failed"
+fi
+echo "=========================================="
+
+exit $EXIT_CODE

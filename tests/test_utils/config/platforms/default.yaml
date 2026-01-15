@@ -1,6 +1,7 @@
 # Default Platform Configuration
 # Flexible test selection mechanism for CPU and other hardware environments
 #
+# This platform configuration supports generic device type
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
 #   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
@@ -8,6 +9,11 @@
 #   Example: include: "*" or ["test_basic.py", "runner/*"]
 #            exclude: [] or ["test_spiky_loss_detector.py"]
 
+# Define device types available for this platform
+device_types:
+  - generic
+
+# Device-specific test configurations
 generic:
   name: "generic"
   tests:

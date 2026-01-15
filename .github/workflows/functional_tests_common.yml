@@ -3,13 +3,14 @@ name: Common Functional Tests
 on:
   workflow_call:
     inputs:
-      type:
+      platform:
         required: true
         type: string
-      tasks_json:
+        description: Platform name (e.g., cuda, default)
+      device:
         required: true
         type: string
-        description: JSON array of tasks to run
+        description: Device type (e.g., a100, a800, h100, generic)
       image:
         required: true
         type: string
@@ -26,11 +27,7 @@ on:
 jobs:
   functional_test:
     runs-on: ${{ fromJson(inputs.runs_on) }}
-    strategy:
-      fail-fast: false
-      matrix:
-        task: ${{ fromJson(inputs.tasks_json) }}
-    name: ${{ inputs.type }}-${{ matrix.task }}
+    name: functional-${{ inputs.device }}
     container:
       image: ${{ inputs.image }}
       ports:
@@ -55,7 +52,7 @@ jobs:
           submodules: false
           set-safe-directory: true
 
-      - name: Run functional test
+      - name: Run functional tests
         id: functional_test
         shell: bash
         run: |
@@ -63,11 +60,13 @@ jobs:
           cd /__w/FlagScale/FlagScale
           git config --global --add safe.directory /__w/FlagScale/FlagScale
 
-          TASK='${{ matrix.task }}'
-          TYPE='${{ inputs.type }}'
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ inputs.device }}'
           PROJECT_ROOT="/__w/FlagScale/FlagScale"
 
-          echo "Running functional test ($TYPE) for task: $TASK"
+          echo "Running functional tests"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
           echo "Project root: $PROJECT_ROOT"
 
           # Load retry functions
@@ -87,25 +86,28 @@ jobs:
           # Ensure we're back in the project root
           cd "$PROJECT_ROOT"
 
-          # Run functional tests using the test runner
-          bash "$PROJECT_ROOT/tests/test_utils/runners/run_functional_tests.sh" --task "$TYPE" --model "$TASK"
+          # Run all functional tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type functional
           exit_code=$?
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Functional test passed for $TYPE/$TASK"
+            echo "✅ Functional tests passed for $PLATFORM/$DEVICE"
           else
-            echo "❌ Functional test failed for $TYPE/$TASK (exit code: $exit_code)"
+            echo "❌ Functional tests failed for $PLATFORM/$DEVICE (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 90
+        timeout-minutes: 180
 
       - name: Upload Functional Test Logs
         if: always() && steps.functional_test.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: functional_tests-logs-${{ github.run_id }}-${{ inputs.type }}-${{ matrix.task }}
-          path: tests/functional_tests/${{ inputs.type }}/${{ matrix.task }}/gold_values/*/logs
+          name: functional_tests-logs-${{ github.run_id }}-${{ inputs.platform }}-${{ inputs.device }}
+          path: tests/functional_tests/**/test_results/*/logs
           retention-days: 7
           if-no-files-found: warn

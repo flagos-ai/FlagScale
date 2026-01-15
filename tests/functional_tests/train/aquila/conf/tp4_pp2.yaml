@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: tp4_pp2
-  exp_dir: tests/functional_tests/train/aquila/gold_values/tp4_pp2
+  exp_dir: tests/functional_tests/train/aquila/test_results/tp4_pp2
   task:
     type: train
     backend: megatron

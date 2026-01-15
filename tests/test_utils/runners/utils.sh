@@ -1,68 +1,83 @@
 #!/bin/bash
+# Shared Utility Functions for FlagScale Test Runners
 
-# GPU Detection and Memory Monitoring
-# Supports nvidia-smi and mx-smi based GPUs
+# Logging
+log_info() {
+    echo "[INFO] $*" >&2
+}
 
-wait_for_gpu_nvidia() {
-    local gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+log_error() {
+    echo "[ERROR] $*" >&2
+}
+
+log_success() {
+    echo "[SUCCESS] $*" >&2
+}
+
+# Validation
+validate_platform() {
+    local platform="$1"
+    local script_dir="$2"
+    local config_file="${script_dir}/../config/platforms/${platform}.yaml"
+
+    if [ ! -f "$config_file" ]; then
+        log_error "Platform configuration not found: $config_file"
+        log_info "Available platforms:"
+        ls -1 "${script_dir}/../config/platforms/" 2>/dev/null | sed 's/.yaml$//' | sed 's/^/  - /' >&2
+        return 1
+    fi
+    return 0
+}
+
+validate_device() {
+    local platform="$1"
+    local device="$2"
+    local script_dir="$3"
+
+    local available_devices=$(python "${script_dir}/parse_config.py" --platform "$platform" --type device_types 2>/dev/null)
+
+    if [ $? -ne 0 ] || [ -z "$available_devices" ]; then
+        log_error "Failed to query device types for platform '$platform'"
+        return 1
+    fi
+
+    if ! echo "$available_devices" | grep -q "\"$device\""; then
+        log_error "Device '$device' not found in platform '$platform'"
+        log_info "Available devices: $available_devices"
+        return 1
+    fi
+
+    return 0
+}
+
+get_device_types() {
+    local platform="$1"
+    local script_dir="$2"
+
+    python "${script_dir}/parse_config.py" --platform "$platform" --type device_types 2>/dev/null
+}
+
+# GPU Management
+wait_for_gpu() {
+    command -v nvidia-smi &>/dev/null || return 0
+
+    local gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
+    [ "$gpu_count" -eq 0 ] && return 0
+
     while true; do
         mapfile -t mem_used < <(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null)
         mapfile -t mem_total < <(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null)
+
         local need_wait=false max_pct=0
         for ((i=0; i<gpu_count; i++)); do
             local pct=$(( mem_used[i] * 100 / mem_total[i] ))
             [ $pct -gt $max_pct ] && max_pct=$pct
             [ $pct -gt 50 ] && { need_wait=true; break; }
         done
+
         [ "$need_wait" = false ] && break
         echo "Waiting for GPU memory (current: ${max_pct}%)..."
-        sleep 1m
+        sleep 60
     done
     echo "GPU ready (${max_pct}% usage)"
-}
-
-wait_for_gpu_metax() {
-    command -v mx-smi &>/dev/null || { echo "Error: mx-smi not found"; exit 1; }
-    while true; do
-        mapfile -t mem_used < <(mx-smi --show-memory 2>/dev/null | grep -oP 'vram used\s*:\s*\K\d+')
-        mapfile -t mem_total < <(mx-smi --show-memory 2>/dev/null | grep -oP 'vram total\s*:\s*\K\d+')
-        [ ${#mem_used[@]} -eq 0 ] && { echo "Warning: Failed to get mx-smi data"; sleep 1m; continue; }
-        local need_wait=false max_pct=0
-        for ((i=0; i<${#mem_used[@]}; i++)); do
-            local pct=$(( mem_used[i] * 100 / mem_total[i] ))
-            [ $pct -gt $max_pct ] && max_pct=$pct
-            [ $pct -gt 50 ] && { need_wait=true; break; }
-        done
-        [ "$need_wait" = false ] && break
-        echo "Waiting for Metax GPU memory (current: ${max_pct}%)..."
-        sleep 1m
-    done
-    echo "Metax GPU ready (${max_pct}% usage)"
-}
-
-wait_for_gpu() {
-    if command -v nvidia-smi &>/dev/null; then
-        wait_for_gpu_nvidia
-    elif command -v mx-smi &>/dev/null; then
-        wait_for_gpu_metax
-    else
-        echo "Error: Neither nvidia-smi nor mx-smi found"; exit 1
-    fi
-}
-
-# Process Management
-stop_all() {
-    for pattern in pytest python torchrun; do
-        pgrep -f "$pattern" | xargs kill -9 2>/dev/null || true
-    done
-    echo "Terminated all test processes"
-}
-
-# Logging Functions
-print_log() {
-    echo "------------------ serve log begin -----------------------"
-    [ -z "$1" ] || [ ! -f "$1" ] && { echo "No log file at $1"; } || { echo "Log file: $1"; cat "$1"; }
-    echo "------------------ env ----------------------"
-    env; pip list
-    echo "------------------ serve log end   -----------------------"
 }
