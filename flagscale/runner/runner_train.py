@@ -65,7 +65,10 @@ def _get_args_native(config: DictConfig):
     """
     Use Hydra-generated config.yaml for native backend.
     """
-    assert config.experiment.task.backend == "native", "This function only supports native backend."
+    assert config.experiment.task.backend in (
+        "native",
+        "native_train",
+    ), "This function only supports native train backend."
 
     # Use Hydra's generated config.yaml (same pattern as backend_native_compress.py)
     # See: https://github.com/facebookresearch/hydra/discussions/2750

@@ -8,7 +8,7 @@ from flagscale.runner.utils import parse_hostfile
 # None --> native
 # native --> native_{task_type} in inner Factory registry
 TASK_TO_BACKEND_MAP = {
-    "train": ["megatron"],  # TODO: add "pi0", "robotics"
+    "train": ["megatron", "native"],
     "inference": ["vllm"],
     "compress": ["native", None],
     "serve": ["vllm", "sglang", "llama_cpp", "native", None],
