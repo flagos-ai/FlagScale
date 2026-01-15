@@ -94,8 +94,8 @@ jobs:
             cd "$PROJECT_ROOT"
           fi
           
-          # Run tests for this subset
-          "$PROJECT_ROOT/tests/scripts/unit_tests/test_subset.sh" --backend "$BACKEND" --subset "$SUBSET" --id "$SHA"
+          # Run tests
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_unit_tests.sh" --platform "$BACKEND"
           exit_code=$?
           
           if [ $exit_code -eq 0 ]; then

@@ -1,0 +1,10 @@
+data:
+  data_path: /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo
+  split: 1
+  no_mmap_bin_files: true
+  tokenizer:
+    legacy_tokenizer: true
+    tokenizer_type: QwenTokenizerFS
+    tokenizer_path: /home/gitlab-runner/tokenizers/qwentokenizer
+    vocab_size: 151851
+    make_vocab_size_divisible_by: 64
