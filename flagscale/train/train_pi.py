@@ -24,7 +24,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from flagscale.runner.utils import logger
-from flagscale.train.configs.train_config import TrainConfig, DataConfig
+from flagscale.train.train_config import TrainConfig, DataConfig
 from flagscale.train.datasets.transforms import ImageTransforms
 from flagscale.train.datasets.lerobot_dataset import (
     LeRobotDataset,

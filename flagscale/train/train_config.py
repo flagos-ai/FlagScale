@@ -106,3 +106,4 @@ class TrainConfig(BaseModel):
     class Config:
         # Allow arbitrary types for complex objects
         arbitrary_types_allowed = True
+

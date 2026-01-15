@@ -3,7 +3,7 @@ import unittest
 from omegaconf import OmegaConf
 from pydantic import ValidationError
 
-from flagscale.train.configs.train_config import (
+from flagscale.train.train_config import (
     CheckpointConfig,
     DataConfig,
     ModelConfig,
