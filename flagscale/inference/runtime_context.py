@@ -1,8 +1,8 @@
 import contextlib
 import contextvars
 import itertools
-
-from typing import Callable, ContextManager, List, Optional, Union
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 
@@ -17,16 +17,16 @@ class RuntimeContext:
     `Transformation`s could write/read information from this context.
     """
 
-    def __init__(self, state_scopes: Optional[List[str]] = None):
+    def __init__(self, state_scopes: list[str] | None = None):
         if state_scopes is not None and len(state_scopes) > 0:
             # A provider of state scope names.
             # If set, the scope names would be used by `Transformation`s to access
             # different streams of the `StateStore`. The scope names will be cycled
             # through in order indefinitely.
             provider = itertools.cycle(state_scopes).__next__
-            self.state_scope_provider: Optional[Callable[[], str | None]] = provider
+            self.state_scope_provider: Callable[[], str | None] | None = provider
         else:
-            self.state_scope_provider: Optional[Callable[[], str | None]] = None
+            self.state_scope_provider: Callable[[], str | None] | None = None
 
         # ==========================================
         #           DIFFUSION MODEL SETTINGS
@@ -37,10 +37,10 @@ class RuntimeContext:
         self.timestep_index: int = -1
 
         # Callbacks invoked at session exit (LIFO order)
-        self._on_exit_callbacks: List[Callable[[], None]] = []
+        self._on_exit_callbacks: list[Callable[[], None]] = []
 
     @contextlib.contextmanager
-    def session(self) -> ContextManager["RuntimeContext"]:
+    def session(self) -> contextlib.AbstractContextManager["RuntimeContext"]:
         """Activate this context for the current call stack (process-local).
         Use once around the model call in each worker/rank.
         """
@@ -72,7 +72,7 @@ class RuntimeContext:
         return _current_ctx.get()
 
     @property
-    def state_scope(self) -> Optional[str]:
+    def state_scope(self) -> str | None:
         """Get the current state context name.
 
         Returns:
@@ -82,14 +82,14 @@ class RuntimeContext:
         p = self.state_scope_provider
         return p() if callable(p) else None
 
-    def update_timestep(self, t: Union[torch.Tensor, int, float]) -> None:
+    def update_timestep(self, t: torch.Tensor | int | float) -> None:
         """Update the current timestep only when a new timestep arrives.
 
         Args:
             t (Union[torch.Tensor, int, float]): The new timestep.
         """
 
-        scalar_t: Optional[float] = None
+        scalar_t: float | None = None
         if isinstance(t, torch.Tensor):
             if t.ndim == 0:
                 scalar_t = float(t.item())
@@ -119,7 +119,7 @@ class RuntimeContext:
         self._on_exit_callbacks.append(callback)
 
 
-def current_ctx() -> Optional[RuntimeContext]:
+def current_ctx() -> RuntimeContext | None:
     """Optional module-level alias for convenience."""
 
     return RuntimeContext.current()

@@ -12,7 +12,7 @@ from flagscale.transformations.hook import ModuleHookRegistry
 
 
 class TrackerModule(nn.Module):
-    def forward(self, x, timestep):  # noqa: D401  (signature required by hook)
+    def forward(self, x, timestep):
         return x
 
 
@@ -64,6 +64,5 @@ class TestTimestepTrackerTransformation(unittest.TestCase):
         TimestepTrackerTransformation().apply(module)
 
         ctx = RuntimeContext()
-        with ctx.session():
-            with self.assertRaises(ValueError):
-                _ = module(torch.zeros(1))
+        with ctx.session(), self.assertRaises(ValueError):
+            _ = module(torch.zeros(1))

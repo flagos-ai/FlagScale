@@ -1,7 +1,6 @@
 import argparse
 import random
 import time
-
 from datetime import datetime
 
 error_keys_list = [
@@ -54,7 +53,7 @@ def simulated_fault_loop(log_file="", error_keys=None, interval=5, iterations=1,
 
     for i in range(iterations):
         with open(log_file, mode) as f:
-            f.write(f"--- Simulated log at {datetime.now()} (iteration {i+1}) ---\n")
+            f.write(f"--- Simulated log at {datetime.now()} (iteration {i + 1}) ---\n")
 
             # choose errors to write
             if error_keys:

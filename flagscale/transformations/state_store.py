@@ -1,7 +1,7 @@
 # Modified from
 # https://github.com/huggingface/diffusers/blob/4a7556eaecc9872dea50ce161301edfa6392693c/src/diffusers/hooks/hooks.py
 
-from typing import Dict, Generic, Optional, Type, TypeVar
+from typing import Generic, TypeVar
 
 S = TypeVar("S")
 
@@ -19,16 +19,16 @@ class BaseState:
 class StateStore(Generic[S]):
     """A state store that manages states for different contexts."""
 
-    def __init__(self, state_cls: Type[S], init_args=None, init_kwargs=None) -> None:
-        self._state_cls: Type[S] = state_cls
+    def __init__(self, state_cls: type[S], init_args=None, init_kwargs=None) -> None:
+        self._state_cls: type[S] = state_cls
         # TODO(yupu): Fixed args/kwargs?
         self._init_args = init_args if init_args is not None else ()
         self._init_kwargs = init_kwargs if init_kwargs is not None else {}
         # Mapping: state scope name -> state.
         # State can be shared across modules or by a single module.
-        self._state_by_scope: Dict[str, S] = {}
+        self._state_by_scope: dict[str, S] = {}
         # The state scope name that is currently in use.
-        self._active_scope: Optional[str] = None
+        self._active_scope: str | None = None
 
     def get_or_create_state(self) -> S:
         """Get or create a state for the current scope.

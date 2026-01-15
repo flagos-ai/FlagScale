@@ -28,12 +28,12 @@ def test_parse_hostfile_correctly_formatted(mock_os_path_isfile, mock_open):
         "worker3 slots=16 type=A100",
         "# comment line",
     ]
-    expected_result = {
-        "worker0": {"slots": 16, "type": "A100"},
-        "worker1": {"slots": 8, "type": "V100"},
-        "worker2": {"slots": 32, "type": None},
-        "worker3": {"slots": 16, "type": "A100"},
-    }
+    # expected_result = {
+    #     "worker0": {"slots": 16, "type": "A100"},
+    #     "worker1": {"slots": 8, "type": "V100"},
+    #     "worker2": {"slots": 32, "type": None},
+    #     "worker3": {"slots": 16, "type": "A100"},
+    # }
 
     with pytest.raises(
         AssertionError, match="All hosts must have the a machine type or no machine type specified."

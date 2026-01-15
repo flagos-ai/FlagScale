@@ -17,13 +17,11 @@
 import json
 import os
 import tempfile
-
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import draccus
-
 from huggingface_hub.constants import CONFIG_NAME
 
 # from lerobot.configs.policies import PreTrainedConfig
@@ -143,13 +141,15 @@ class PI0Config(HubMixin):
 
         if "observation.state" not in self.input_features:
             state_feature = PolicyFeature(
-                type=FeatureType.STATE, shape=(self.max_state_dim,)  # Padded to max_state_dim
+                type=FeatureType.STATE,
+                shape=(self.max_state_dim,),  # Padded to max_state_dim
             )
             self.input_features["observation.state"] = state_feature
 
         if "action" not in self.output_features:
             action_feature = PolicyFeature(
-                type=FeatureType.ACTION, shape=(self.max_action_dim,)  # Padded to max_action_dim
+                type=FeatureType.ACTION,
+                shape=(self.max_action_dim,),  # Padded to max_action_dim
             )
             self.output_features["action"] = action_feature
 

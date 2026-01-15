@@ -29,14 +29,14 @@ We recommend using the latest release of [NGC's PyTorch container](https://catal
 
 2. Install FlagScale requirements
     ```sh
-    pip install . --verbose 
+    pip install . --verbose
     ```
 
-3. Install backends 
+3. Install backends
 
 - **Inference/Serving backend**
-    
-    vLLM-FL: 
+
+    vLLM-FL:
     ```sh
     git clone https://github.com/flagos-ai/vllm-FL
     cd vllm-FL
@@ -47,8 +47,8 @@ We recommend using the latest release of [NGC's PyTorch container](https://catal
     If you need vLLM-plugin-FL, see details in [vLLM-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL)
 
 
-- **Traning backend**
-    Megatron-LM-FL: 
+- **Training backend**
+    Megatron-LM-FL:
     ```sh
     git clone https://github.com/flagos-ai/Megatron-LM-FL
     cd Megatron-LM-FL
@@ -62,7 +62,7 @@ We recommend using the latest release of [NGC's PyTorch container](https://catal
 
 
 - **RL backend**
-    verl-FL: 
+    verl-FL:
     ```sh
     git clone https://github.com/flagos-ai/verl-FL.git
     cd verl-FL
@@ -98,7 +98,7 @@ Require Megatron-LM-FL env
         ```sh
         mkdir -p ./qwentokenizer && cd ./qwentokenizer
         wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/tokenizer_config.json" -O tokenizer_config.json
-        wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/qwen.tiktoken" -O qwen.tiktoken    
+        wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/qwen.tiktoken" -O qwen.tiktoken
         wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/qwen_generation_utils.py" -O qwen_generation_utils.py
         wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/tokenization_qwen.py" -O tokenization_qwen.py
         ```
@@ -184,7 +184,7 @@ Require vLLM-FL env
     ```yaml
     - serve_id: vllm_model
       engine_args:
-        model: ./Qwen3-0.6B          # modify: Set model directory 
+        model: ./Qwen3-0.6B          # modify: Set model directory
         host: 0.0.0.0
         max_model_len: 4096
         max_num_seqs: 4
@@ -234,7 +234,7 @@ Require verl-FL env
     mkdir gsm8k && cd gsm8k
     wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/rl/datasets/gsm8k/train.parquet"
     wget "https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/rl/datasets/gsm8k/test.parquet"
-    
+
     ```
 
 3. Edit config
@@ -327,4 +327,3 @@ flagscale serve <MODEL_NAME> <MODEL_CONFIG_YAML>
 
 The configuration files allow you to specify the necessary parameters and settings
 for your deployment, ensuring a smooth and efficient serving process.
-

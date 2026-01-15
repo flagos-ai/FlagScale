@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# A retry strategy is triggered automatically upon failure in installing dependencies, 
+# A retry strategy is triggered automatically upon failure in installing dependencies,
 # especially under network instability or interruptions.
 
 retry() {
@@ -21,7 +21,7 @@ retry() {
     return 0
 }
 
-# Retry command array: Parameter 1 specifies the retry attempts, 
+# Retry command array: Parameter 1 specifies the retry attempts,
 # Parameter 2 provides the command array's name as a string.
 retry_commands() {
     local retries=$1
@@ -32,11 +32,11 @@ retry_commands() {
     echo "🔍 Retry config: max retries = $retries"
     echo "📝 Total commands to execute: ${#cmds[@]}"
 
-    # For each command in the array, run it and retry upon failure. 
+    # For each command in the array, run it and retry upon failure.
     # Proceed to return only when all commands have executed successfully.
     for cmd in "${cmds[@]}"; do
         echo "🔧 Executing command: $cmd"
-        # Run commands with special characters or variables via eval, 
+        # Run commands with special characters or variables via eval,
         # and trigger the retry function as needed.
         retry $retries "$cmd"
         local cmd_exit_code=$?

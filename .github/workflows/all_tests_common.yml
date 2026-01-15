@@ -22,7 +22,7 @@ jobs:
       functional_hetero_tasks: ${{ steps.config.outputs.functional_hetero_tasks }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Load hardware configuration
         id: config
         run: |
@@ -34,12 +34,12 @@ jobs:
             ls -la .github/configs/
             exit 1
           fi
-          
+
           # Install mikefarah/yq (v4) for YAML parsing.
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           /usr/local/bin/yq --version
-          
+
           # Extract configuration
           CI_IMAGE=$(/usr/local/bin/yq -r '.ci_image' "$CONFIG_FILE")
           RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
@@ -49,7 +49,7 @@ jobs:
           UNIT_SUBSETS=$(/usr/local/bin/yq -o=json -I=0 '.test_config.unit_subsets' "$CONFIG_FILE")
           TRAIN_TASKS=$(/usr/local/bin/yq -o=json -I=0 '.test_config.functional_train_tasks' "$CONFIG_FILE")
           HETERO_TASKS=$(/usr/local/bin/yq -o=json -I=0 '.test_config.functional_hetero_tasks' "$CONFIG_FILE")
-          
+
           # Validate required fields
           if [ -z "$CI_IMAGE" ] || [ "$CI_IMAGE" = "null" ]; then
             echo "❌ Error: ci_image not found in $CONFIG_FILE"
@@ -59,14 +59,14 @@ jobs:
             echo "❌ Error: runner_labels not found in $CONFIG_FILE"
             exit 1
           fi
-          
+
           echo "✅ Loaded config for hardware: ${{ inputs.hardware }}"
-          
+
           # Output using heredoc for JSON values
           echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
           echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
           echo "unit_backend=$UNIT_BACKEND" >> $GITHUB_OUTPUT
-          
+
           { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT
           { echo 'container_volumes<<EOFVOLUMES'; echo "$VOLUMES"; echo 'EOFVOLUMES'; } >> $GITHUB_OUTPUT
           { echo 'unit_subsets<<EOFUNITSUBSETS'; echo "$UNIT_SUBSETS"; echo 'EOFUNITSUBSETS'; } >> $GITHUB_OUTPUT

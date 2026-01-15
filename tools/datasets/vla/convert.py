@@ -4,13 +4,10 @@ import json
 import math
 import os
 import pickle
-
 from argparse import ArgumentParser
-from typing import List
 
 import webdataset as wds
 import yaml
-
 from tqdm import tqdm
 from webdataset.writer import add_handlers, default_handlers
 
@@ -60,24 +57,24 @@ def convert(
         extra_fields = set(sample_entry.keys()) - standard_fields
         print(f"Extra fields to be processed as metadata: {list(extra_fields)}")
 
-    add_handlers(default_handlers, 'jpgs', lambda data: pickle.dumps(data))
-    add_handlers(default_handlers, 'videos', lambda data: pickle.dumps(data))
-    add_handlers(default_handlers, 'metadata', lambda data: json.dumps(data).encode('utf-8'))
-    print(f"✓ Added metadata handler for extra fields")
+    add_handlers(default_handlers, "jpgs", lambda data: pickle.dumps(data))
+    add_handlers(default_handlers, "videos", lambda data: pickle.dumps(data))
+    add_handlers(default_handlers, "metadata", lambda data: json.dumps(data).encode("utf-8"))
+    print("✓ Added metadata handler for extra fields")
 
     def write_sample(entry, vision_dir, has_idx=None, idx=0):
         entry_copy = entry.copy()
 
         # Process images
-        image_datas: List[str] = []
+        image_data: list[str] = []
         image_paths = entry_copy.get(image_key, [])
         if isinstance(image_paths, str):
             image_paths = [image_paths]
-        image_datas = image_paths
+        image_data = image_paths
         entry_copy.pop(image_key, None)
 
         # Process videos
-        video_datas: List[List[str]] = []
+        video_data: list[list[str]] = []
         second_per_grid_ts = []
 
         for video in entry_copy.pop(video_key, []):
@@ -90,7 +87,7 @@ def convert(
             except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
                 fps = 2.0
 
-            frames: List[str] = []
+            frames: list[str] = []
             if os.path.exists(frame_folder):
                 for frame in sort_function(os.listdir(frame_folder)):
                     relative_path = os.path.relpath(
@@ -100,7 +97,7 @@ def convert(
 
             if len(frames) % 2 == 1:
                 frames = frames[:-1]
-            video_datas.append(frames)
+            video_data.append(frames)
             second_per_grid_ts.append(1 / fps)
         conversations = entry_copy.pop("conversations", [])
         sample_id = entry_copy.pop("id", str(idx))
@@ -114,8 +111,8 @@ def convert(
 
         sample = {
             "__key__": sample_id,
-            "jpgs": image_datas,
-            "videos": video_datas,
+            "jpgs": image_data,
+            "videos": video_data,
             "json": json.dumps(
                 {"conversations": conversations, "second_per_grid_ts": second_per_grid_ts}
             ).encode("utf-8"),
@@ -137,7 +134,7 @@ def convert(
                     data_id = id * dp_size + rank
                     entry = data[data_id]
 
-                    if 'action_eepose_token' in entry:
+                    if "action_eepose_token" in entry:
                         total_action_eepose_token_samples += 1
                     else:
                         total_regular_samples += 1
@@ -147,7 +144,7 @@ def convert(
             if left_data_count > 0:
                 for idx, entry in enumerate(data[data_len - left_data_count :]):
                     sample_idx = data_len - left_data_count + idx
-                    if 'action_eepose_token' in entry:
+                    if "action_eepose_token" in entry:
                         total_action_eepose_token_samples += 1
                     else:
                         total_regular_samples += 1
@@ -165,22 +162,22 @@ def convert(
                         break
                     entry = data[data_id]
 
-                    if 'action_eepose_token' in entry:
+                    if "action_eepose_token" in entry:
                         total_action_eepose_token_samples += 1
                     else:
                         total_regular_samples += 1
 
                     write_sample(entry, vision_dir, has_idx=has_idx, idx=data_id)
 
-    print(f"\n=== Final Processing Statistics ===")
+    print("\n=== Final Processing Statistics ===")
     print(f"📊 Total samples: {data_len}")
     print(f"✓ Samples with action_eepose_token: {total_action_eepose_token_samples}")
     print(f"✗ Samples without action_eepose_token: {total_regular_samples}")
     if total_action_eepose_token_samples + total_regular_samples > 0:
         print(
-            f"📈 Action eepose token ratio: {total_action_eepose_token_samples/(total_action_eepose_token_samples + total_regular_samples)*100:.1f}%"
+            f"📈 Action eepose token ratio: {total_action_eepose_token_samples / (total_action_eepose_token_samples + total_regular_samples) * 100:.1f}%"
         )
-    print(f"Dataset successfully converted to wds with all extra fields in metadata")
+    print("Dataset successfully converted to wds with all extra fields in metadata")
 
     return output
 
@@ -248,10 +245,10 @@ if __name__ == "__main__":
         dp_size=args.dp_size,
         drop_last=args.drop_last,
     )
-    print(f"Generating Configurations")
+    print("Generating Configurations")
     # NOTE: split_ratio: train/val/test
     split = [args.train_split, args.val_split, args.test_split]
     generate_configs(
         EPath(output_dir), split, shuffle_tars=args.shuffle_tars, num_workers=args.num_workers
     )
-    print(f"Configurations Generated")
+    print("Configurations Generated")

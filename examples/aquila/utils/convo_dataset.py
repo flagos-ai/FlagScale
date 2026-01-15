@@ -1,21 +1,16 @@
 """GPT style dataset."""
 
 import copy
-import hashlib
-import os
-import time
 
 import numpy as np
 import torch
 
-from megatron import print_rank_0
-from megatron.core import mpu
 from megatron.data.data_samplers import RandomSeedDataset
 
 
 class ConversationDatasetCPT(torch.utils.data.Dataset):
     def __init__(self, conversations, tokenizer, maxlen, seed, num_samples, role_sep="\n\n"):
-        super(ConversationDatasetCPT, self).__init__()
+        super().__init__()
         self.conversations = conversations
         self.tokenizer = tokenizer
         self.maxlen = maxlen + 1
@@ -85,7 +80,7 @@ class ConversationDatasetCPT(torch.utils.data.Dataset):
 
 class ConversationDatasetV2(torch.utils.data.Dataset):
     def __init__(self, conversations, tokenizer, maxlen, seed, num_samples):
-        super(ConversationDatasetV2, self).__init__()
+        super().__init__()
         self.conversations = conversations
         self.tokenizer = tokenizer
         self.maxlen = maxlen + 1
@@ -170,10 +165,10 @@ def build_train_valid_test_datasets(
     finetune_dataset_type=None,
 ):
     """Build train, valid, and test datasets."""
-    suppored_dataset_types = dict(CPT=ConversationDatasetCPT)
+    supported_dataset_types = dict(CPT=ConversationDatasetCPT)
     dataset_cls = ConversationDatasetV2
-    if finetune_dataset_type in suppored_dataset_types:
-        dataset_cls = suppored_dataset_types[finetune_dataset_type]
+    if finetune_dataset_type in supported_dataset_types:
+        dataset_cls = supported_dataset_types[finetune_dataset_type]
 
     def read_file(jsonl_file):
         import jsonlines

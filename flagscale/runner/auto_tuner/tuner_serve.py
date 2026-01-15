@@ -1,6 +1,5 @@
 import copy
 import datetime
-import json
 import logging
 import os
 import time
@@ -138,7 +137,7 @@ class ServeAutoTuner(AutoTunerBase):
                     f"Best strategy tuned so far: {best_strategy}, and {self.recorder.metric} is {best_strategy[self.recorder.metric]}."
                 )
             else:
-                self.logger.info(f"No strategy can run so far.")
+                self.logger.info("No strategy can run so far.")
         tuner_end_time = time.time()
         self.logger.info(f"AutoTuner Ended in {tuner_end_time - tuner_start_time} seconds.")
 
@@ -148,7 +147,7 @@ class ServeAutoTuner(AutoTunerBase):
             if best_strategy:
                 self.logger.info(f"Run best Strategy: {best_strategy}")
             else:
-                raise ValueError(f"No strategy can run.")
+                raise ValueError("No strategy can run.")
             best_task = self.generator.gen_best_task(best_strategy, self.orig_config)
             best_task.action = "run"
             runner = SSHServeRunner(best_task)
@@ -233,9 +232,7 @@ class ServeAutoTuner(AutoTunerBase):
         self.cur_strategy["start_time"] = readable_task_start_time
 
         self.logger.info(
-            "task_{} monitor time: {:.2f}s".format(
-                self.cur_strategy["idx"], self.cur_strategy["elapsed_time"]
-            )
+            f"task_{self.cur_strategy['idx']} monitor time: {self.cur_strategy['elapsed_time']:.2f}s"
         )
 
     def record(self):

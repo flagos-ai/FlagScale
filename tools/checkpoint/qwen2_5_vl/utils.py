@@ -7,7 +7,6 @@ import os
 
 import numpy as np
 import torch
-
 from transformers.modeling_utils import (
     SAFE_WEIGHTS_INDEX_NAME,
     SAFE_WEIGHTS_NAME,

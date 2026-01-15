@@ -2,7 +2,6 @@ import multiprocessing
 import os
 import shlex
 import time
-
 from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
@@ -28,9 +27,9 @@ _MAX_CPU_COUNT = multiprocessing.cpu_count()
 
 
 def _get_args_megatron(config: DictConfig):
-    assert (
-        config.experiment.task.backend == "megatron"
-    ), "This function only supports megatron backend."
+    assert config.experiment.task.backend == "megatron", (
+        "This function only supports megatron backend."
+    )
 
     # Convert the DictConfig to a regular dictionary
     config_dict = OmegaConf.to_container(config, resolve=True)
@@ -49,9 +48,9 @@ def _get_args_megatron(config: DictConfig):
 
 
 def _get_args_robotics(config: DictConfig):
-    assert (
-        config.experiment.task.backend == "robotics"
-    ), "This function only supports robotics backend."
+    assert config.experiment.task.backend == "robotics", (
+        "This function only supports robotics backend."
+    )
 
     # Convert the DictConfig to a regular dictionary
     config_dict = OmegaConf.to_container(config, resolve=True)
@@ -167,7 +166,7 @@ def _get_runner_cmd_train(
     log_dir = os.path.abspath(log_dir)
     no_shared_fs = runner_config.get("no_shared_fs", False)
     if no_shared_fs:
-        log_dir = os.path.join(log_dir, f"host")
+        log_dir = os.path.join(log_dir, "host")
     else:
         log_dir = os.path.join(log_dir, f"host_{node_rank}_{host}")
     log_dir = os.path.join(log_dir, datetime.now().strftime("%Y%m%d_%H%M%S.%f"))
@@ -233,7 +232,7 @@ def _generate_run_script_train(
 
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
     if no_shared_fs:
-        host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+        host_output_file = os.path.join(logging_config.log_dir, "host.output")
     else:
         host_output_file = os.path.join(logging_config.log_dir, f"host_{node_rank}_{host}.output")
     host_run_script_file = os.path.join(
@@ -263,35 +262,35 @@ def _generate_run_script_train(
         f.write(f"mkdir -p {system_config.logging.details_dir}\n")
         f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
         f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write(f"cd {root_dir}\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
-        f.write(f"\n")
+        f.write("\n")
         f.write(f'cmd="{cmd}"\n')
-        f.write(f"\n")
+        f.write("\n")
         if enable_monitoring:
             monitor_launcher_path = os.path.join(
                 root_dir, "flagscale", "runner", "elastic", "monitor_launcher.py"
             )
             ssh_port = config.experiment.runner.get("ssh_port", 22)
-            f.write(f'# Start monitoring service in background\n')
-            f.write(f'python {monitor_launcher_path} \\\n')
+            f.write("# Start monitoring service in background\n")
+            f.write(f"python {monitor_launcher_path} \\\n")
             f.write(f'  --log-dir "{logging_config.log_dir}" \\\n')
             f.write(f'  --pid-file "{host_pid_file}" \\\n')
             f.write(f'  --host "{host}" \\\n')
-            f.write(f'  --node-rank {node_rank} \\\n')
-            f.write(f'  {"--no-shared-fs" if no_shared_fs else ""} \\\n')
-            f.write(f'  --ssh-port {ssh_port} \\\n')
-            f.write(f'  --interval 5 \\\n')
-            f.write(f'  --enable-log-collection \\\n')
-            f.write(f'  --enable-diagnostic \\\n')
-            f.write(f'  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n')
+            f.write(f"  --node-rank {node_rank} \\\n")
+            f.write(f"  {'--no-shared-fs' if no_shared_fs else ''} \\\n")
+            f.write(f"  --ssh-port {ssh_port} \\\n")
+            f.write("  --interval 5 \\\n")
+            f.write("  --enable-log-collection \\\n")
+            f.write("  --enable-diagnostic \\\n")
+            f.write(f"  > /tmp/monitor_output_{node_rank}_{host}.log 2>&1 &\n")
             f.write(f'echo "Monitor service started in background for {host} (node {node_rank})"\n')
-        f.write(f'\n')
+        f.write("\n")
 
         if with_test:
-            f.write(f'bash -c "$cmd; sync" \n')
+            f.write('bash -c "$cmd; sync" \n')
         else:
             # TODO: need a option to control whether to append or overwrite the output file
             # Now, it always appends to the output file
@@ -492,7 +491,7 @@ class SSHTrainRunner(RunnerBase):
             nnodes_from_hostfile = len(self.resources.keys())
             nnodes_from_args = runner_config.get("nnodes", None)
             nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
-            available_ip = list(self.resources.keys())[0]
+            available_ip = next(iter(self.resources.keys()))
             available_port = get_free_port()
             num_processes = min(nnodes, _MAX_CPU_COUNT)
             with multiprocessing.Pool(processes=num_processes) as pool:

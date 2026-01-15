@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import builtins
-
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, TypeVar

@@ -19,7 +19,6 @@
 
 import logging
 import shutil
-
 from pathlib import Path
 
 import pandas as pd
@@ -362,9 +361,9 @@ def aggregate_videos(src_meta, dst_meta, videos_idx, video_files_size_in_mb, chu
                 # Append to existing destination file
                 # Offset is the current duration of this destination file
                 current_dst_duration = dst_file_durations.get(dst_key, 0)
-                videos_idx[key]["src_to_offset"][
-                    (src_chunk_idx, src_file_idx)
-                ] = current_dst_duration
+                videos_idx[key]["src_to_offset"][(src_chunk_idx, src_file_idx)] = (
+                    current_dst_duration
+                )
                 videos_idx[key]["src_to_dst"][(src_chunk_idx, src_file_idx)] = dst_key
                 concatenate_video_files([dst_path, src_path], dst_path)
                 # Update duration of this destination file
@@ -483,7 +482,7 @@ def append_or_create_parquet_file(
     chunk_size: int,
     default_path: str,
     contains_images: bool = False,
-    aggr_root: Path = None,
+    aggr_root: Path | None = None,
 ):
     """Appends data to an existing parquet file or creates a new one based on size constraints.
 

@@ -32,7 +32,7 @@ experiment:
         split_mode: [none, layer, row]
       sglang:
         tensor_model_parallel_size: [4]
-        # Error occured when PP with SGLang==main (v0.4.6 not support):
+        # Error occurred when PP with SGLang==main (v0.4.6 not support):
         # AttributeError: 'PPMissingLayer' object has no attribute 'quant_method'
         pipeline_model_parallel_size: [1]
         chunked_prefill_size: [128, 256, 512]

@@ -210,7 +210,7 @@ else
 fi
 
 mkdir -p ${TARGET_CKPT_PATH}
-# NOTE: model.safetensors.index.json will be copied by the following line and 
+# NOTE: model.safetensors.index.json will be copied by the following line and
 # should be removed in mg->hf conversion if save_safetensor is disabled.
 echo "Copying tokenizer files from ${PRETRAIN_CHECKPOINT_PATH} to ${TARGET_CKPT_PATH}"
 find -L ${PRETRAIN_CHECKPOINT_PATH} -maxdepth 1 -type f -name "*.json" -print0 | xargs -0 cp -t ${TARGET_CKPT_PATH}

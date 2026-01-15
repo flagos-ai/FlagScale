@@ -12,17 +12,15 @@ from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
-
 from torch import nn
 from torch.distributions import Beta
 from transformers import PretrainedConfig
 from transformers.feature_extraction_utils import BatchFeature
 
-from flagscale.logger import logger
 from flagscale.models.robobrain_x.action_encoder import SinusoidalPositionalEncoding, swish
 from flagscale.models.robobrain_x.cross_attention_dit import DiT
 
-# TODO try to meger DiT Modules with follow_match_head, they are just the same arch, but diff loss, use diffusers package will be simple
+# TODO try to merge DiT Modules with follow_match_head, they are just the same arch, but diff loss, use diffusers package will be simple
 
 
 class CategorySpecificLinear(nn.Module):
@@ -167,7 +165,7 @@ class FlowmatchingActionHeadConfig(PretrainedConfig):
     )
 
     hidden_size: int = field(default=1024, metadata={"help": "Input embedding dimension."})
-    max_seq_len: int = field(default=1024, metadata={"help": "Maxium Sequence Length"})
+    max_seq_len: int = field(default=1024, metadata={"help": "Maximum Sequence Length"})
     action_dim: int = field(default=None, metadata={"help": "Action dimension."})
     action_horizon: int = field(default=None, metadata={"help": "Action horizon."})
     noise_beta_alpha: float = field(default=1.5, metadata={"help": ""})

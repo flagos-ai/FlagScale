@@ -2,12 +2,7 @@
 
 import pickle
 import re
-import warnings
-
 from dataclasses import dataclass
-from typing import List, Union
-
-import torch
 
 from webdataset.autodecode import Decoder
 
@@ -20,8 +15,8 @@ from megatron.energon.flavors.webdataset import DefaultDecoderWebdatasetFactory
 class ChatMLSample(Sample):
     """multi-turn complex samples with images and videos"""
 
-    imgs: List[str]
-    videos: List[List[str]]
+    imgs: list[str]
+    videos: list[list[str]]
     conversation: str  # JSON string of GPT-format conversations
 
 

@@ -16,10 +16,10 @@ def _read_requirements_file(requirements_path):
     """Read the requirements file and return the dependency list"""
     requirements = []
     try:
-        with open(requirements_path, 'r', encoding='utf-8') as f:
+        with open(requirements_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
                 requirements.append(line)
     except FileNotFoundError:
@@ -53,8 +53,8 @@ def _get_install_requires():
     """get install_requires list"""
     install_requires = []
 
-    install_requires.extend(_read_requirements_file('requirements/requirements-base.txt'))
-    install_requires.extend(_read_requirements_file('requirements/requirements-common.txt'))
+    install_requires.extend(_read_requirements_file("requirements/requirements-base.txt"))
+    install_requires.extend(_read_requirements_file("requirements/requirements-common.txt"))
     core_deps = ["setuptools==79.0.1", "packaging>=24.2", "importlib_metadata>=8.5.0"]
 
     all_deps = install_requires + core_deps

@@ -24,7 +24,7 @@ def llama_cpp_kv_cache_dtype_converter(v) -> dict:
     if v in ["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]:
         return {"cache_type_k": v, "cache_type_v": v}
     # vllm supports fp8, fp8_e4m3, fp8_e5m2
-    if v in ['fp8', 'fp8_e4m3', 'fp8_e5m2']:
+    if v in ["fp8", "fp8_e4m3", "fp8_e5m2"]:
         return {"cache_type_k": "q8_0", "cache_type_v": "q8_0"}
     raise ValueError(f"Invalid kv_cache_dtype for llama.cpp: {v}")
 
@@ -73,7 +73,7 @@ def llama_cpp_model_converter(v) -> dict:
         raise NotADirectoryError(f"Error: model_path '{v}' is not a directory")
     for root, _, files in os.walk(v):
         for file in files:
-            if file.lower().endswith('.gguf'):
+            if file.lower().endswith(".gguf"):
                 full_path = os.path.join(root, file)
                 return {"model": full_path}
     return {"model": v}

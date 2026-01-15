@@ -1,7 +1,7 @@
 set +x
 
-if ! [[ $(pre-commit --version) == *"2.17.0"* ]]; then
-    pip install pre-commit==2.17.0
+if ! [[ $(pre-commit --version) == *"4.2.0"* ]]; then
+    pip install pre-commit==4.2.0
 fi
 
 diff_files=$(git diff --name-only --diff-filter=ACMR ${BRANCH})

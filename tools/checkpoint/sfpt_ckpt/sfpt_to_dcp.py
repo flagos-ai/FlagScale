@@ -1,6 +1,5 @@
 import argparse
 import os
-
 from argparse import Namespace
 from pathlib import Path
 
@@ -31,7 +30,7 @@ def convert_sfpt_ckpt_to_dist_ckpt(input_dir, output_dir):
             print(f"Processing file: {file_path}")
             state_dict = torch.load(file_path, weights_only=False)
             assert len(state_dict) == 1
-            key = list(state_dict.keys())[0]
+            key = next(iter(state_dict.keys()))
             tensor = state_dict[key]
             sharded_state_dict = {}
             sharded_state_dict[key] = ShardedTensor.from_rank_offsets(key, tensor)

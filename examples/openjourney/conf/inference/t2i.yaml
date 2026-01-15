@@ -12,7 +12,7 @@ engine:
       {}
 
 generate:
-  prompts: "retro serie of different cars with different colors and shapes, mdjrny-v4 style"
+  prompts: "retro series of different cars with different colors and shapes, mdjrny-v4 style"
   width: 512
   height: 512
   num_inference_steps: 50

@@ -1,16 +1,13 @@
 # Copied from https://github.com/alibaba/Pai-Megatron-Patch/blob/8949a6647cbf6b39837ad3dd911fa4aa0726895b/toolkits/multimodal_data_preprocessing/build_llava_frame_dataset.py
-import glob
 import json
 import multiprocessing.pool as mpp
 import os
 import tarfile
-
 from argparse import ArgumentParser
 from multiprocessing import Pool
 from pathlib import Path
 
 import cv2
-
 from tqdm import tqdm
 
 
@@ -18,7 +15,7 @@ def istarmap(self, func, iterable, chunksize=1):
     """starmap-version of imap"""
     self._check_running()
     if chunksize < 1:
-        raise ValueError("Chunksize must be 1+, not {0:n}".format(chunksize))
+        raise ValueError(f"Chunksize must be 1+, not {chunksize:n}")
 
     task_batches = mpp.Pool._get_tasks(func, iterable, chunksize)
     result = mpp.IMapIterator(self)
@@ -56,7 +53,6 @@ def extract_video_frames(dataset_root: str, video_paths: list, time_interval: fl
             continue
 
         fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         interval_frames = max(1, int(fps * time_interval))
         current_frame = 0
@@ -77,10 +73,6 @@ def extract_video_frames(dataset_root: str, video_paths: list, time_interval: fl
 
 
 def process(dataset_root, output_file, interval=1.0, num_workers: int = 32, video_token="<image>"):
-    json_or_jsonl = glob.glob(os.path.join(dataset_root, "*.json")) + glob.glob(
-        os.path.join(dataset_root, "*.jsonl")
-    )
-
     full_data = []
 
     args_list = []

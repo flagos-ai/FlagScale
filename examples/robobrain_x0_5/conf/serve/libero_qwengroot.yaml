@@ -9,5 +9,5 @@
     threaded: true
     torch_dtype: torch.float32
     framework:
-      qwenvl: 
+      qwenvl:
         base_vlm: outputs/libero_qwengroot/checkpoints/ckpt_out/backbone

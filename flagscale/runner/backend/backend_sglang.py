@@ -25,7 +25,7 @@ def _get_args_sglang(config: DictConfig):
     # step3: dict -> yaml
     logging_config = config.logging
     new_config = OmegaConf.create(config_dict)
-    new_conf_file = os.path.join(logging_config.scripts_dir, f"serve.yaml")
+    new_conf_file = os.path.join(logging_config.scripts_dir, "serve.yaml")
 
     # step4: write the new yaml file to `outputs_dir/serve_logs/scripts/serve.yaml`
     with open(new_conf_file, "w") as f:
@@ -94,7 +94,7 @@ def _update_config_serve(config: DictConfig):
                 if cli_engine_args:
                     item.engine_args.update(cli_engine_args)
 
-    log_dir = os.path.join(exp_dir, f"serve_logs")
+    log_dir = os.path.join(exp_dir, "serve_logs")
     scripts_dir = os.path.join(log_dir, "scripts")
     pids_dir = os.path.join(log_dir, "pids")
 
@@ -158,7 +158,7 @@ class SglangBackend(BackendBase):
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
         if no_shared_fs:
-            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+            host_output_file = os.path.join(logging_config.log_dir, "host.output")
         else:
             host_output_file = os.path.join(
                 logging_config.log_dir, f"host_{node_rank}_{host}.output"
@@ -192,34 +192,29 @@ class SglangBackend(BackendBase):
         except Exception:
             sglang_path = f"{root_dir}/sglang"
 
-        deploy_config = config.experiment.get("runner", {}).get("deploy", {})
         envs = config.experiment.get("envs", {})
 
         with open(host_run_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             f.write("set -x\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"{before_start_cmd}\n")
-            f.write(f"\n")
+            f.write("\n")
 
-            f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
+            f.write('if [ -z "$PYTHONPATH" ]; then\n')
             f.write(f"    export PYTHONPATH={sglang_path}:{root_dir}\n")
-            f.write(f"else\n")
+            f.write("else\n")
             f.write(f'    export PYTHONPATH="$PYTHONPATH:{sglang_path}:{root_dir}"\n')
-            f.write(f"fi\n")
-            f.write(f"\n")
+            f.write("fi\n")
+            f.write("\n")
 
             envs_str = " && ".join(
-                f"export {key}={value}" for key, value in envs.items() if key != 'nodes_envs'
+                f"export {key}={value}" for key, value in envs.items() if key != "nodes_envs"
             )
             f.write(f"{envs_str}\n")
 
             if nodes:
-                master_ip = nodes[0][0]
-                target_port = nodes[0][1].get("port")
-                master_port = target_port if target_port else get_free_port()
-
-                f.write(f"# clean nodes \n")
+                f.write("# clean nodes \n")
                 if len(nodes) > 1:
                     for ip, node in nodes[1:]:
                         if not node.get("type", None):
@@ -241,12 +236,12 @@ class SglangBackend(BackendBase):
                 if before_start_cmd:
                     f.write(f"{before_start_cmd} && pkill -f 'sglang.launch_server'\n")
                 else:
-                    f.write(f"pkill -f 'sglang.launch_server'\n")
+                    f.write("pkill -f 'sglang.launch_server'\n")
 
                 f.write("pkill -f 'run_inference_engine'\n")
                 f.write("pkill -f 'run_fs_serve_vllm'\n")
                 f.write("pkill -f 'vllm serve'\n")
-                f.write(f"\n")
+                f.write("\n")
 
                 nodes_envs = config.experiment.get("envs", {}).get("nodes_envs", {})
                 node_args = config.experiment.get("node_args", {})
@@ -286,7 +281,7 @@ class SglangBackend(BackendBase):
 
                         if sglang_args.get("dist-init-addr", None):
                             logger.warning(
-                                f"sglang dist-init-addr:{ sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
+                                f"sglang dist-init-addr:{sglang_args['dist-init-addr']} exists, will be overwrite by master_addr, master_port"
                             )
                             was_struct = OmegaConf.is_struct(sglang_args)
                             OmegaConf.set_struct(sglang_args, False)
@@ -330,7 +325,7 @@ class SglangBackend(BackendBase):
 
                         if nnodes_conf is None or addr_conf is None or port_conf is None:
                             raise ValueError(
-                                f"nnodes, master_addr, master_port must be specified in runner when engine is sglang with multi-nodes mode."
+                                "nnodes, master_addr, master_port must be specified in runner when engine is sglang with multi-nodes mode."
                             )
 
                         command.extend(["--nnodes", str(nnodes_conf)])
@@ -338,12 +333,12 @@ class SglangBackend(BackendBase):
                         command.append("> /dev/null 2>&1 &")
 
                         if docker_name:
-                            node_cmd = ' '.join(command)
+                            node_cmd = " ".join(command)
                         else:
                             # Directly connecting to a remote Docker environment requires processing the command
                             command.insert(0, "(")
                             command.append(") && disown")
-                            node_cmd = ' '.join(command)
+                            node_cmd = " ".join(command)
 
                         if per_node_cmd:
                             node_cmd = f"{per_node_cmd} && " + node_cmd
@@ -382,14 +377,14 @@ class SglangBackend(BackendBase):
             logger.info(f"in generate_run_script_serve_sglang, write cmd: {cmd}")
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"cd {root_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f'cmd="{cmd}"\n')
-            f.write(f"\n")
+            f.write("\n")
             # TODO: need a option to control whether to append or overwrite the output file
             # Now, it always appends to the output file
-            f.write(f"echo '=========== launch task ==========='\n")
+            f.write("echo '=========== launch task ==========='\n")
             if background:
                 f.write(
                     f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
@@ -410,7 +405,6 @@ class SglangBackend(BackendBase):
         host_stop_script_file = os.path.join(
             logging_config.scripts_dir, f"host_{node_rank}_{host}_stop.sh"
         )
-        host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
@@ -429,19 +423,18 @@ class SglangBackend(BackendBase):
         else:
             before_start_cmd = ""
 
-        deploy_config = config.experiment.get("runner", {}).get("deploy", {})
         envs = config.experiment.get("envs", {})
         with open(host_stop_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             f.write("set -x\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"{before_start_cmd}\n")
-            f.write(f"\n")
+            f.write("\n")
             envs_str = " && ".join(f"export {key}={value}" for key, value in envs.items())
             f.write(f"{envs_str}\n")
 
             if nodes:
-                f.write(f"# clean nodes\n")
+                f.write("# clean nodes\n")
                 if len(nodes) > 1:
                     for ip, node in nodes[1:]:
                         node_cmd = "pkill -f 'sglang.launch_server' && pkill -f python"

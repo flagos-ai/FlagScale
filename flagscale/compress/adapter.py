@@ -1,5 +1,4 @@
 import torch
-
 from compressed_tensors.quantization import (
     QuantizationConfig,
     QuantizationScheme,
@@ -119,7 +118,7 @@ class LLMCompressorAdapter:
             except:
                 continue
 
-            if matches := find_name_or_class_matches(name, layer, self.ignore):
+            if find_name_or_class_matches(name, layer, self.ignore):
                 continue
             logger.info(f"prepare compressor for layer {name}")
             compressor = LayerCompressor(
@@ -138,7 +137,7 @@ class LLMCompressorAdapter:
 
     @torch.no_grad()
     def run_blockwise_calib_forward(self):
-        logger.info(f"start calibration")
+        logger.info("start calibration")
         self.model.apply(disable_quantization)
         with DisableKVCache(self.model):
             intermediates = run_calibration_forward(

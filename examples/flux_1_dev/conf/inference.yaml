@@ -5,7 +5,7 @@ defaults:
 experiment:
   exp_name: flux_1_dev
   exp_dir: outputs/${experiment.exp_name}
-  model: /share/project/fengyupu/hf_hub/models/black-forest-labs/FLUX___1-dev 
+  model: /share/project/fengyupu/hf_hub/models/black-forest-labs/FLUX___1-dev
   task:
     type: inference
     backend: vllm # TODO(yupu): Remove this restriction

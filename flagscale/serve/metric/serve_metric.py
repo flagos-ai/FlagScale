@@ -1,8 +1,5 @@
-import asyncio
 import warnings
-
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -18,22 +15,22 @@ class Metrics:
     mean_ttft_ms: float
     median_ttft_ms: float
     std_ttft_ms: float
-    percentiles_ttft_ms: List[Tuple[float, float]]
+    percentiles_ttft_ms: list[tuple[float, float]]
     mean_tpot_ms: float
     median_tpot_ms: float
     std_tpot_ms: float
-    percentiles_tpot_ms: List[Tuple[float, float]]
+    percentiles_tpot_ms: list[tuple[float, float]]
     mean_itl_ms: float
     median_itl_ms: float
     std_itl_ms: float
-    percentiles_itl_ms: List[Tuple[float, float]]
+    percentiles_itl_ms: list[tuple[float, float]]
     # E2EL stands for end-to-end latency per request.
     # It is the time taken on the client side from sending
     # a request to receiving a complete response.
     mean_e2el_ms: float
     median_e2el_ms: float
     std_e2el_ms: float
-    percentiles_e2el_ms: List[Tuple[float, float]]
+    percentiles_e2el_ms: list[tuple[float, float]]
 
 
 def calculate_metrics(
@@ -42,7 +39,7 @@ def calculate_metrics(
     actual_output_lens = []
     total_input = 0
     completed = 0
-    good_completed = 0
+
     itls = []
     tpots = []
     all_tpots = []

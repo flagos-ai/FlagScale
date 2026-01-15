@@ -35,13 +35,13 @@ experiment:
         # model: /mnt/Qwen3-8B/
     x.x.x.x:     # ip and address for sglang distribute control
       engine_args:
-        # model: /models/Qwen3-8B/ 
+        # model: /models/Qwen3-8B/
   auto_tuner:
     engines: [sglang]
     space:
       sglang:
         tensor_model_parallel_size: [4]
-        # Error occured when PP with SGLang==main (v0.4.6 not support): should be after https://github.com/sgl-project/sglang/pull/5724
+        # Error occurred when PP with SGLang==main (v0.4.6 not support): should be after https://github.com/sgl-project/sglang/pull/5724
         # AttributeError: 'PPMissingLayer' object has no attribute 'quant_method'
         pipeline_model_parallel_size: [1]
         chunked_prefill_size: [128, 256, 512]

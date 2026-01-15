@@ -1,6 +1,6 @@
 """Tool registry for managing available tools"""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .tool_matcher import ToolMatcher
 
@@ -14,14 +14,14 @@ class ToolRegistry:
         self.matcher = ToolMatcher(max_tools, min_similarity)
         self._needs_refit = False
 
-    def register_tool(self, tool: Dict[str, Any], category: str = "general"):
+    def register_tool(self, tool: dict[str, Any], category: str = "general"):
         """Register a new tool"""
         self._register_tool_internal(tool, category)
 
         # Mark that refit is needed (lazy retraining)
         self._needs_refit = True
 
-    def register_tools(self, tools: List[Dict[str, Any]], category: str = "general"):
+    def register_tools(self, tools: list[dict[str, Any]], category: str = "general"):
         """Register multiple tools efficiently"""
         for tool in tools:
             # Use internal method to avoid multiple refits
@@ -29,7 +29,7 @@ class ToolRegistry:
         # Single refit after all tools are registered
         self._needs_refit = True
 
-    def _register_tool_internal(self, tool: Dict[str, Any], category: str = "general"):
+    def _register_tool_internal(self, tool: dict[str, Any], category: str = "general"):
         """Internal method for registering tool without refit"""
         if "function" not in tool:
             return
@@ -62,11 +62,11 @@ class ToolRegistry:
         if tool_name not in self.categories[category]:
             self.categories[category].append(tool_name)
 
-    def get_tool_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+    def get_tool_by_name(self, name: str) -> dict[str, Any] | None:
         """Get tool by name - O(1) lookup"""
         return self.tools.get(name)
 
-    def get_tools_by_category(self, category: str) -> List[Dict[str, Any]]:
+    def get_tools_by_category(self, category: str) -> list[dict[str, Any]]:
         """Get tools by category"""
         if category not in self.categories:
             return []
@@ -76,7 +76,7 @@ class ToolRegistry:
             if tool_name in self.tools
         ]
 
-    def search_tools(self, query: str, category: Optional[str] = None) -> List[Tuple[str, float]]:
+    def search_tools(self, query: str, category: str | None = None) -> list[tuple[str, float]]:
         """Search for tools with lazy refit"""
         # Ensure matcher is up to date
         if self._needs_refit:
@@ -93,17 +93,17 @@ class ToolRegistry:
         else:
             return self.matcher.match_tools(query)
 
-    def get_all_tools(self) -> List[Dict[str, Any]]:
+    def get_all_tools(self) -> list[dict[str, Any]]:
         """Get all tools"""
         return list(self.tools.values())
 
-    def get_categories(self) -> List[str]:
+    def get_categories(self) -> list[str]:
         """Get all categories"""
         return list(self.categories.keys())
 
     def clear_cache(self):
         """Clear matcher cache for fresh start"""
-        if hasattr(self.matcher, '_query_cache'):
+        if hasattr(self.matcher, "_query_cache"):
             self.matcher._query_cache.clear()
         self._needs_refit = True
 
@@ -116,7 +116,7 @@ class ToolRegistry:
         """
         self.matcher.set_degradation(component, degraded)
 
-    def get_degradation_status(self) -> Dict[str, bool]:
+    def get_degradation_status(self) -> dict[str, bool]:
         """Get current degradation status of all components."""
         return self.matcher.get_degradation_status()
 
@@ -124,18 +124,18 @@ class ToolRegistry:
         """Reset all degradation flags to False."""
         self.matcher.reset_degradation()
 
-    def get_effective_weights(self) -> Dict[str, float]:
+    def get_effective_weights(self) -> dict[str, float]:
         """Get effective weights considering degradation flags."""
         return self.matcher.get_effective_weights()
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get registry statistics"""
         return {
             "total_tools": len(self.tools),
             "categories": len(self.categories),
             "category_breakdown": {cat: len(tools) for cat, tools in self.categories.items()},
             "needs_refit": self._needs_refit,
-            "cache_size": len(getattr(self.matcher, '_query_cache', {})),
+            "cache_size": len(getattr(self.matcher, "_query_cache", {})),
             "degradation_status": self.get_degradation_status(),
             "effective_weights": self.get_effective_weights(),
         }

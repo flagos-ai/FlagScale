@@ -1,5 +1,3 @@
-from typing import Dict, List, Type
-
 from omegaconf import DictConfig
 
 from .log_io_transformation import LogIOTransformation
@@ -8,7 +6,7 @@ from .transformation import Transformation
 
 # Registry of supported Transformation classes by their class names.
 # Using lazy imports to avoid circular dependencies
-_TRANSFORMATION_REGISTRY: Dict[str, Type[Transformation]] = {
+_TRANSFORMATION_REGISTRY: dict[str, type[Transformation]] = {
     "LogIOTransformation": LogIOTransformation,
     "StateScopeTransformation": StateScopeTransformation,
 }
@@ -16,7 +14,7 @@ _TRANSFORMATION_REGISTRY: Dict[str, Type[Transformation]] = {
 __all__ = ["create_transformations_from_config"]
 
 
-def _get_transformation_registry() -> Dict[str, Type[Transformation]]:
+def _get_transformation_registry() -> dict[str, type[Transformation]]:
     """Get the transformation registry with lazy imports to avoid circular dependencies."""
     if "TimestepTrackerTransformation" not in _TRANSFORMATION_REGISTRY:
         from flagscale.inference.core.diffusion.timestep_tracker_transformation import (
@@ -35,7 +33,7 @@ def _get_transformation_registry() -> Dict[str, Type[Transformation]]:
     return _TRANSFORMATION_REGISTRY
 
 
-def create_transformations_from_config(cfg: DictConfig) -> List[Transformation]:
+def create_transformations_from_config(cfg: DictConfig) -> list[Transformation]:
     """Instantiate transformations from the configuration
 
     Args:
@@ -45,7 +43,7 @@ def create_transformations_from_config(cfg: DictConfig) -> List[Transformation]:
         A list of instantiated transformations
     """
 
-    instances: List[Transformation] = []
+    instances: list[Transformation] = []
     registry = _get_transformation_registry()
 
     for name, kwargs in cfg.items():

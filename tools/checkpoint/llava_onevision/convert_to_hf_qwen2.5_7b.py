@@ -5,7 +5,6 @@ import json
 import os
 
 import torch
-
 from safetensors.torch import load_file, save_file
 
 
@@ -198,7 +197,7 @@ def convert(input_path, output_path, use_te, tensor_parallel_size=2):
         # Language model mappings
         if "image_newline" in mc_name:
             file_name = check_model_file("model.image_newline", hf_models)
-            if file_name != None:
+            if file_name is not None:
                 hf_models[file_name]["model.image_newline"] = mc_tensor
 
         if "language_model.embedding.word_embeddings.weight" in mc_name:
@@ -396,19 +395,19 @@ def convert(input_path, output_path, use_te, tensor_parallel_size=2):
                 raise ValueError(f"{name} is not converted.")
 
     # vision_projection
-    file_name = check_model_file(f"model.mm_projector.0.weight", hf_models)
+    file_name = check_model_file("model.mm_projector.0.weight", hf_models)
     hf_models[file_name]["model.mm_projector.0.weight"] = mc_model[
         "vision_projection.encoder.linear_fc1.weight"
     ]
-    file_name = check_model_file(f"model.mm_projector.0.bias", hf_models)
+    file_name = check_model_file("model.mm_projector.0.bias", hf_models)
     hf_models[file_name]["model.mm_projector.0.bias"] = mc_model[
         "vision_projection.encoder.linear_fc1.bias"
     ]
-    file_name = check_model_file(f"model.mm_projector.2.weight", hf_models)
+    file_name = check_model_file("model.mm_projector.2.weight", hf_models)
     hf_models[file_name]["model.mm_projector.2.weight"] = mc_model[
         "vision_projection.encoder.linear_fc2.weight"
     ]
-    file_name = check_model_file(f"model.mm_projector.2.bias", hf_models)
+    file_name = check_model_file("model.mm_projector.2.bias", hf_models)
     hf_models[file_name]["model.mm_projector.2.bias"] = mc_model[
         "vision_projection.encoder.linear_fc2.bias"
     ]

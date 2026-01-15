@@ -63,7 +63,7 @@ def prune_by_recompute(config, strategy, history=[]):
     """
     use_recompute = strategy["use_recompute"]
     recompute_method = strategy["recompute_method"]
-    recompute_granularity = strategy["recompute_granularity"]
+    # recompute_granularity = strategy["recompute_granularity"]
     recompute_num_layers = strategy["recompute_num_layers"]
 
     retrieval = beside(

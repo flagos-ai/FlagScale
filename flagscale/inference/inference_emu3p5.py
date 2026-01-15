@@ -4,7 +4,6 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 import vllm
-
 from vllm import LLM
 from vllm.sampling_params import SamplingParams
 
@@ -17,7 +16,6 @@ from flagscale.logger import logger
 def generate(
     model: LLM, processor: Emu3p5Processor, prompts: list, sampling_cfg: DictConfig, save_dir: str
 ):
-
     os.makedirs(save_dir, exist_ok=True)
     for name, question in tqdm(prompts, total=len(prompts)):
         logger.info(f">>> Processing: {name=}, {question=}")
@@ -57,7 +55,7 @@ def generate(
         mm_outputs = processor.process_results(results)
         for i, (out_type, output) in enumerate(mm_outputs):
             if out_type in ["text", "global_cot", "image_cot"]:
-                with open(f"{save_path}/output_{name}_{i}.txt", 'w') as f:
+                with open(f"{save_path}/output_{name}_{i}.txt", "w") as f:
                     f.write(output)
                 logger.info(
                     f">>> 📄[OUTPUT-{i}][{out_type}]: saved to {save_path}/output_{name}_{i}.txt"
@@ -93,7 +91,7 @@ if __name__ == "__main__":
         raise ValueError("prompts should be a list or dict.")
 
     llm_cfg = cfg.get("llm", {})
-    save_dir = llm_cfg.pop("save", '.')
+    save_dir = llm_cfg.pop("save", ".")
     tokenizer_path = llm_cfg.get("tokenizer", None)
     vq_model_path = llm_cfg.pop("vq_model", None)
     assert tokenizer_path and vq_model_path, "Please set the tokenzier and vq_model in llm config."
@@ -106,7 +104,7 @@ if __name__ == "__main__":
         **llm_cfg,
         max_num_batched_tokens=26000,
         max_num_seqs=2,
-        generation_config='vllm',
+        generation_config="vllm",
         scheduler_cls="vllm.v1.core.sched.batch_scheduler.Scheduler",
         compilation_config={
             "full_cuda_graph": True,

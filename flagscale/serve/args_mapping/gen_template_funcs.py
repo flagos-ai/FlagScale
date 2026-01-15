@@ -3,11 +3,10 @@
 import argparse
 
 import yaml
-
 from mapping import args2func
 
 
-def gen_singel_func(func_name):
+def gen_single_func(func_name):
     """
     This function generates a single function definition for the given function name.
     It creates a function that takes a value, checks its type, and returns a dictionary.
@@ -15,7 +14,7 @@ def gen_singel_func(func_name):
     lines = []
     lines.append(f"def {func_name}(v) -> dict:\n")
     lines.append("     # Do mapping here: a vllm style kv -> new backend style kvs\n")
-    lines.append("    return {\"NEW_KEY\": \"NEW_VALUE\"}\n")
+    lines.append('    return {"NEW_KEY": "NEW_VALUE"}\n')
     return lines
 
 
@@ -39,7 +38,7 @@ def gen_template_funcs(backend_name):
             raise ValueError(f"kv_mapping_func is empty in mapping.yaml for backend {backend_name}")
         for i in kv_mapping_func:
             lines.append("\n")
-            lines.extend(gen_singel_func(args2func(backend_name=backend_name, args=i)))
+            lines.extend(gen_single_func(args2func(backend_name=backend_name, args=i)))
             lines.append("\n")
 
     with open("template_funcs.py", "w") as f:

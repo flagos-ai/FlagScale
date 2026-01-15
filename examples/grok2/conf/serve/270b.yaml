@@ -16,4 +16,3 @@
     output_len: 1024
     num_prompts: 128
     range_ratio: 1
-

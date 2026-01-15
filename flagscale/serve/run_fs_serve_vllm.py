@@ -15,9 +15,9 @@ def get_model_config_from_task(serve_id: str = "serve_model"):
     if not TASK_CONFIG.get("serve"):
         raise ValueError("No 'serve' section found in task config.")
     for item in TASK_CONFIG.serve:
-        if item.get("serve_id") == serve_id:
+        if "serve_id" in item and item.get("serve_id") is not None:
             return item
-    raise ValueError(f"Model config with serve_id={serve_id} not found.")
+    raise ValueError("serve_id in YAML config file is null")
 
 
 model_config = get_model_config_from_task()
@@ -30,7 +30,7 @@ para_list = [
     "model",
     "served_model_name",
     "port",
-    # defualt para
+    # default para
     "tensor_parallel_size",
     "pipeline_parallel_size",
     "gpu_memory_utilization",
@@ -84,7 +84,7 @@ if __name__ == "__main__":
         logger.info("Serving model name: %s", engine_args["served_model_name"])
     else:
         logger.warning(
-            f"No served_model_name specified in engine_args, using {engine_args["model"]}."
+            f"No served_model_name specified in engine_args, using {engine_args['model']}."
         )
 
     # Start Ray Serve and set HTTP port (read from original config, default 8000)

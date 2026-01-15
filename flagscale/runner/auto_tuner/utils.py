@@ -1,13 +1,10 @@
 import os
 import sys
-
 from types import SimpleNamespace
 
 
 def divisible(x, y):
-    if x % y == 0:
-        return True
-    return False
+    return x % y == 0
 
 
 def beside(keys, strategy, history):
@@ -183,9 +180,9 @@ def convert_config_to_megatron_args(config, strategy):
             if args.multiple_of is not None:
                 hidden_dim = int(4 * args.hidden_size * 2 / 3)
                 if args.hidden_dim_multiplier is not None:
-                    assert (
-                        args.hidden_dim_multiplier > 0
-                    ), "multiplier for hidden dim should be greater than zero"
+                    assert args.hidden_dim_multiplier > 0, (
+                        "multiplier for hidden dim should be greater than zero"
+                    )
                     hidden_dim = int(hidden_dim * args.hidden_dim_multiplier)
                 args.ffn_hidden_size = args.multiple_of * (
                     (hidden_dim + args.multiple_of - 1) // args.multiple_of

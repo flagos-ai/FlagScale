@@ -36,22 +36,26 @@ import importlib
 import json
 import os
 import re
-
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, TypeAlias, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypedDict, TypeVar, cast
 
-import torch
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
+
+    import torch
 
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file, save_file
 
 from .converters import batch_to_transition, create_transition, transition_to_batch
 from .core import EnvAction, EnvTransition, PolicyAction, RobotAction, TransitionKey
-from flagscale.models.configs.types import PipelineFeatureType, PolicyFeature
+
+if TYPE_CHECKING:
+    from flagscale.models.configs.types import PipelineFeatureType, PolicyFeature
+
 from flagscale.train.utils.hub import HubMixin
 
 # Generic type variables for pipeline input and output.
@@ -276,11 +280,11 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
     name: str = "DataProcessorPipeline"
 
     to_transition: Callable[[TInput], EnvTransition] = field(
-        default_factory=lambda: cast(Callable[[TInput], EnvTransition], batch_to_transition),
+        default_factory=lambda: cast("Callable[[TInput], EnvTransition]", batch_to_transition),
         repr=False,
     )
     to_output: Callable[[EnvTransition], TOutput] = field(
-        default_factory=lambda: cast(Callable[[EnvTransition], TOutput], transition_to_batch),
+        default_factory=lambda: cast("Callable[[EnvTransition], TOutput]", transition_to_batch),
         repr=False,
     )
 
@@ -508,7 +512,9 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
         **Loading Examples**:
         ```python
         # Directory loading
-        pipeline = DataProcessorPipeline.from_pretrained("/models/my_model", config_filename="processor.json")
+        pipeline = DataProcessorPipeline.from_pretrained(
+            "/models/my_model", config_filename="processor.json"
+        )
 
         # Single file loading
         pipeline = DataProcessorPipeline.from_pretrained(
@@ -516,7 +522,9 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
         )
 
         # Hub loading
-        pipeline = DataProcessorPipeline.from_pretrained("user/repo", config_filename="processor.json")
+        pipeline = DataProcessorPipeline.from_pretrained(
+            "user/repo", config_filename="processor.json"
+        )
 
         # Multiple configs (preprocessor/postprocessor)
         preprocessor = DataProcessorPipeline.from_pretrained(
@@ -591,8 +599,8 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
             steps=steps,
             name=loaded_config.get("name", "DataProcessorPipeline"),
             to_transition=to_transition
-            or cast(Callable[[TInput], EnvTransition], batch_to_transition),
-            to_output=to_output or cast(Callable[[EnvTransition], TOutput], transition_to_batch),
+            or cast("Callable[[TInput], EnvTransition]", batch_to_transition),
+            to_output=to_output or cast("Callable[[EnvTransition], TOutput]", transition_to_batch),
         )
 
     @classmethod
@@ -846,7 +854,7 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
                 step_class = ProcessorStepRegistry.get(step_entry["registry_name"])
                 return step_class, step_entry["registry_name"]
             except KeyError as e:
-                raise ImportError(f"Failed to load processor step from registry. {str(e)}") from e
+                raise ImportError(f"Failed to load processor step from registry. {e!s}") from e
         else:
             # Fallback to dynamic import using the full class path
             full_class_path = step_entry["class"]
@@ -861,7 +869,7 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
                     f"Failed to load processor step '{full_class_path}'. "
                     f"Make sure the module '{module_path}' is installed and contains class '{class_name}'. "
                     f"Consider registering the step using @ProcessorStepRegistry.register() for better portability. "
-                    f"Error: {str(e)}"
+                    f"Error: {e!s}"
                 ) from e
 
     @classmethod
@@ -919,7 +927,7 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
             step_name = step_entry.get("registry_name", step_entry.get("class", "Unknown"))
             raise ValueError(
                 f"Failed to instantiate processor step '{step_name}' with config: {step_entry.get('config', {})}. "
-                f"Error: {str(e)}"
+                f"Error: {e!s}"
             ) from e
 
     @classmethod

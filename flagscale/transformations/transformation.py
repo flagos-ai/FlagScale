@@ -1,8 +1,8 @@
 import importlib
-
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from fnmatch import fnmatch
-from typing import Iterable, Protocol, Tuple
+from typing import Protocol
 
 from omegaconf import DictConfig
 from torch import nn
@@ -15,13 +15,13 @@ class Selector(Protocol):
     pairs that a transformation should be applied to.
     """
 
-    def __call__(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]: ...
+    def __call__(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]: ...
 
 
 class SelectSelf:
     """Selector that yields the provided scope itself."""
 
-    def __call__(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]:
+    def __call__(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]:
         yield "", scope
 
 
@@ -33,9 +33,9 @@ class ByType:
     """
 
     def __init__(self, *types: type):
-        self._types: Tuple[type, ...] = tuple(types)
+        self._types: tuple[type, ...] = tuple(types)
 
-    def __call__(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]:
+    def __call__(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]:
         for name, m in scope.named_modules():
             if name and isinstance(m, self._types):
                 yield name, m
@@ -49,9 +49,9 @@ class ByName:
     """
 
     def __init__(self, *patterns: str):
-        self._patterns: Tuple[str, ...] = tuple(patterns)
+        self._patterns: tuple[str, ...] = tuple(patterns)
 
-    def __call__(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]:
+    def __call__(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]:
         for name, m in scope.named_modules():
             if name and any(fnmatch(name, p) for p in self._patterns):
                 yield name, m
@@ -61,9 +61,9 @@ class Or:
     """Union of multiple selectors; deduplicates by module identity."""
 
     def __init__(self, *selectors: Selector):
-        self._selectors: Tuple[Selector, ...] = tuple(selectors)
+        self._selectors: tuple[Selector, ...] = tuple(selectors)
 
-    def __call__(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]:
+    def __call__(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]:
         seen: set[int] = set()
         for sel in self._selectors:
             for name, m in sel(scope):
@@ -74,7 +74,7 @@ class Or:
                 yield name, m
 
 
-def _resolve_types(type_names: Iterable[str]) -> Tuple[type, ...]:
+def _resolve_types(type_names: Iterable[str]) -> tuple[type, ...]:
     """Resolve string type names to subclass of torch.nn.Module."""
     resolved: list[type] = []
     for n in type_names:
@@ -138,7 +138,7 @@ class Transformation(ABC):
         """
         return True
 
-    def targets(self, scope: nn.Module) -> Iterable[Tuple[str, nn.Module]]:
+    def targets(self, scope: nn.Module) -> Iterable[tuple[str, nn.Module]]:
         """
         Enumerate target modules for this transformation.
 

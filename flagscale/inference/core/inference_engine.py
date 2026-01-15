@@ -1,13 +1,11 @@
 import dataclasses
 import importlib
 import os
-
 from dataclasses import asdict, dataclass
-from typing import Any, List, Tuple, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
-
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.utils import export_to_video
 from omegaconf import DictConfig
@@ -17,7 +15,7 @@ from flagscale.inference.utils import parse_torch_dtype
 from flagscale.transformations import create_transformations_from_config
 
 
-def _check_required_fields(config_dict: DictConfig, required_fields: List[str]) -> None:
+def _check_required_fields(config_dict: DictConfig, required_fields: list[str]) -> None:
     """Check if the required fields are in the config dict."""
     if not config_dict:
         raise ValueError("config_dict is empty")
@@ -41,7 +39,7 @@ class InferenceEngineArgs:
 
     results_path: str = None
     output_format: str = None
-    state_scopes: List[str] = None
+    state_scopes: list[str] = None
     transformations: Any = None
 
     @classmethod
@@ -111,7 +109,7 @@ class ModelLoadConfig:
 class EngineConfig:
     results_path: str
     output_format: str
-    state_scopes: List[str] = None
+    state_scopes: list[str] = None
     transformations: Any = None
 
     def __post_init__(self):
@@ -153,7 +151,7 @@ class InferenceEngine:
         self.model_or_pipeline, self.backbone = self.load()
         self.apply_transformations()
 
-    def load(self) -> Union[DiffusionPipeline, nn.Module]:
+    def load(self) -> DiffusionPipeline | nn.Module:
         """Load the model or pipeline.
 
         Returns:
@@ -217,7 +215,7 @@ class InferenceEngine:
             outputs = self.model_or_pipeline(**kwargs)
             return outputs
 
-    def save(self, outputs, name_prefix: Union[str, None] = None) -> bool:
+    def save(self, outputs, name_prefix: str | None = None) -> bool:
         """Save the output.
 
         Args:
@@ -250,7 +248,7 @@ class InferenceEngine:
 
     def load_diffusers_pipeline(
         self, pretrained_model_name_or_path: str, **kwargs
-    ) -> Tuple[DiffusionPipeline, nn.Module]:
+    ) -> tuple[DiffusionPipeline, nn.Module]:
         """Load the DiffusionPipeline and locate the backbone.
 
         Args:
@@ -344,14 +342,14 @@ class InferenceEngine:
         # Simple heuristic to find the module to apply the transformations to
         if hasattr(pipeline, "unet"):
             backbone = pipeline.unet
-            assert isinstance(
-                backbone, nn.Module
-            ), f"unet should be a `nn.Module`, but got {type(backbone)}"
+            assert isinstance(backbone, nn.Module), (
+                f"unet should be a `nn.Module`, but got {type(backbone)}"
+            )
         elif hasattr(pipeline, "transformer"):
             backbone = pipeline.transformer
-            assert isinstance(
-                backbone, nn.Module
-            ), f"transformer should be a `nn.Module`, but got {type(backbone)}"
+            assert isinstance(backbone, nn.Module), (
+                f"transformer should be a `nn.Module`, but got {type(backbone)}"
+            )
         else:
             raise ValueError(f"Failed to find the backbone of the DiffusionPipeline: {pipeline}")
 

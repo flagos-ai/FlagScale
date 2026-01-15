@@ -579,7 +579,7 @@ def _assert_type_and_shape(stats_list: list[dict[str, dict]]):
 
 
 def aggregate_feature_stats(
-    stats_ft_list: list[dict[str, dict]]
+    stats_ft_list: list[dict[str, dict]],
 ) -> dict[str, dict[str, np.ndarray]]:
     """Aggregates stats for a single feature."""
     means = np.stack([s["mean"] for s in stats_ft_list])

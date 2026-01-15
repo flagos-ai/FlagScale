@@ -2,12 +2,7 @@ import os
 import subprocess
 import sys
 
-from urllib.parse import quote
-
 import click
-import yaml
-
-from packaging.version import Version
 
 VERSION = "0.8.0"
 
@@ -43,7 +38,7 @@ def train(model_name, yaml_path=None):
     else:
         default_dir = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
         # Default is train.yaml
-        yaml_path = os.path.join(default_dir, "examples", model_name, "conf", f"train.yaml")
+        yaml_path = os.path.join(default_dir, "examples", model_name, "conf", "train.yaml")
         if not os.path.exists(yaml_path):
             click.echo(f"Error: The yaml {yaml_path} does not exist.", err=True)
             return
@@ -71,7 +66,7 @@ def train(model_name, yaml_path=None):
     "engine_args",
     required=False,
     type=str,
-    help="Model config as JSON string, e.g. '{\"a\":1, \"b\":2}'",
+    help='Model config as JSON string, e.g. \'{"a":1, "b":2}\'',
 )
 def serve(model_name, yaml_path=None, model_path=None, port=None, engine_args=None):
     """
@@ -91,7 +86,7 @@ def serve(model_name, yaml_path=None, model_path=None, port=None, engine_args=No
     else:
         default_dir = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
         # Default is serve.yaml
-        yaml_path = os.path.join(default_dir, "examples", model_name, "conf", f"serve.yaml")
+        yaml_path = os.path.join(default_dir, "examples", model_name, "conf", "serve.yaml")
         if not os.path.exists(yaml_path):
             click.echo(f"Error: The yaml {yaml_path} does not exist.", err=True)
             return

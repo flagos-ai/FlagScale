@@ -23,7 +23,7 @@ def _get_args_ray(config: DictConfig):
     # step3: dict -> yaml
     logging_config = config.logging
     new_config = OmegaConf.create(config_dict)
-    new_conf_file = os.path.join(logging_config.scripts_dir, f"serve.yaml")
+    new_conf_file = os.path.join(logging_config.scripts_dir, "serve.yaml")
 
     # step4: write the new yaml file to `outputs_dir/serve_logs/scripts/serve.yaml`
     with open(new_conf_file, "w") as f:
@@ -92,7 +92,7 @@ def _update_config_serve(config: DictConfig):
                 if cli_engine_args:
                     item.engine_args.update(cli_engine_args)
 
-    log_dir = os.path.join(exp_dir, f"serve_logs")
+    log_dir = os.path.join(exp_dir, "serve_logs")
     scripts_dir = os.path.join(log_dir, "scripts")
     pids_dir = os.path.join(log_dir, "pids")
 
@@ -155,7 +155,7 @@ class NativeServeBackend(BackendBase):
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
         if no_shared_fs:
-            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+            host_output_file = os.path.join(logging_config.log_dir, "host.output")
         else:
             host_output_file = os.path.join(
                 logging_config.log_dir, f"host_{node_rank}_{host}.output"
@@ -194,28 +194,28 @@ class NativeServeBackend(BackendBase):
         with open(host_run_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             f.write("set -x\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"{before_start_cmd}\n")
-            f.write(f"\n")
+            f.write("\n")
 
-            f.write(f'if [ -z "$PYTHONPATH" ]; then\n')
+            f.write('if [ -z "$PYTHONPATH" ]; then\n')
             f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
-            f.write(f"else\n")
+            f.write("else\n")
             f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
-            f.write(f"fi\n")
-            f.write(f"\n")
+            f.write("fi\n")
+            f.write("\n")
 
             envs_str = " && ".join(
-                f"export {key}={value}" for key, value in envs.items() if key != 'nodes_envs'
+                f"export {key}={value}" for key, value in envs.items() if key != "nodes_envs"
             )
             f.write(f"{envs_str}\n")
 
             if nodes:
-                f.write(f"ray_path=$(realpath $(which ray))\n")
+                f.write("ray_path=$(realpath $(which ray))\n")
                 master_ip = nodes[0][0]
                 target_port = nodes[0][1].get("port")
 
-                f.write(f"# clean nodes \n")
+                f.write("# clean nodes \n")
                 if len(nodes) > 1:
                     for ip, node in nodes[1:]:
                         if not node.get("type", None):
@@ -223,7 +223,7 @@ class NativeServeBackend(BackendBase):
                         if not node.get("slots", None):
                             raise ValueError(f"Number of slots must be specified for node {node}.")
 
-                        node_cmd = f"${{ray_path}} stop"
+                        node_cmd = "${ray_path} stop"
                         if before_start_cmd:
                             node_cmd = f"{before_start_cmd} && " + node_cmd
                         if envs_str:
@@ -237,12 +237,12 @@ class NativeServeBackend(BackendBase):
                 if before_start_cmd:
                     f.write(f"{before_start_cmd} && ${{ray_path}} stop\n")
                 else:
-                    f.write(f"${{ray_path}} stop\n")
+                    f.write("${ray_path} stop\n")
 
                 f.write("pkill -f 'run_inference_engine'\n")
                 f.write("pkill -f 'run_fs_serve_vllm'\n")
                 f.write("pkill -f 'vllm serve'\n")
-                f.write(f"\n")
+                f.write("\n")
 
                 master_port = target_port if target_port else get_free_port()
                 address = f"{master_ip}:{master_port}"
@@ -262,14 +262,14 @@ class NativeServeBackend(BackendBase):
                         raise ValueError(f"Number of slots must be specified for node {node}.")
 
                     if index == 0:
-                        f.write(f"# start cluster\n")
-                        f.write(f"# master node\n")
+                        f.write("# start cluster\n")
+                        f.write("# master node\n")
                         if node.type == "gpu":
                             node_cmd = f"${{ray_path}} start --head --port={master_port} --num-gpus={node.slots}"
                         elif node.type == "cpu":
                             node_cmd = f"${{ray_path}} start --head --port={master_port} --num-cpus={node.slots}"
                         else:
-                            resource = json.dumps({node.type: node.slots}).replace('"', '\"')
+                            resource = json.dumps({node.type: node.slots}).replace('"', '"')
                             node_cmd = f"${{ray_path}} start --head --port={master_port} --resources='{resource}'"
 
                         if per_node_cmd:
@@ -280,8 +280,8 @@ class NativeServeBackend(BackendBase):
 
                     else:
                         if index == 1:
-                            f.write(f"\n")
-                            f.write(f"# worker nodes\n")
+                            f.write("\n")
+                            f.write("# worker nodes\n")
 
                         if node.type == "gpu":
                             node_cmd = (
@@ -324,9 +324,9 @@ class NativeServeBackend(BackendBase):
 
                 node_cmd = None
                 if self.use_fs_serve and config.serve[0].get("engine", None):
-                    f.write(f"ray_path=$(realpath $(which ray))\n")
+                    f.write("ray_path=$(realpath $(which ray))\n")
                     if not device_type:
-                        node_cmd = f"${{ray_path}} start --head"
+                        node_cmd = "${ray_path} start --head"
                     elif device_type == "gpu":
                         node_cmd = f"${{ray_path}} start --head --num-gpus={nproc_per_node}"
                     elif device_type == "cpu":
@@ -342,11 +342,11 @@ class NativeServeBackend(BackendBase):
 
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"cd {root_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f'cmd="{cmd}"\n')
-            f.write(f"\n")
+            f.write("\n")
             f.write("echo '=========== launch task (RayBackend) ==========='\n")
 
             if background:
@@ -388,13 +388,13 @@ class NativeServeBackend(BackendBase):
             f.write(f"{before_start_cmd}\n")
             f.write(f"{envs_str}\n\n")
 
-            f.write(f"ray_path=$(realpath $(which ray))\n")
+            f.write("ray_path=$(realpath $(which ray))\n")
 
             if nodes:
-                f.write(f"# clean nodes \n")
+                f.write("# clean nodes \n")
                 if len(nodes) > 1:
                     for ip, node in nodes[1:]:
-                        node_cmd = f"${{ray_path}} stop && pkill -f python"
+                        node_cmd = "${ray_path} stop && pkill -f python"
                         if before_start_cmd:
                             node_cmd = f"{before_start_cmd} && " + node_cmd
                         if envs_str:
@@ -408,11 +408,11 @@ class NativeServeBackend(BackendBase):
                 if before_start_cmd:
                     f.write(f"{before_start_cmd} && ${{ray_path}} stop\n")
                 else:
-                    f.write(f"${{ray_path}} stop\n")
+                    f.write("${ray_path} stop\n")
             else:
                 node_cmd = None
                 if self.use_fs_serve and config.serve[0].get("engine", None):
-                    node_cmd = f"${{ray_path}} stop"
+                    node_cmd = "${ray_path} stop"
                 if before_start_cmd:
                     node_cmd = f"{before_start_cmd} && {node_cmd}" if node_cmd else before_start_cmd
                 if node_cmd:

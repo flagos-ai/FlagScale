@@ -1,13 +1,7 @@
 import argparse
-import os
 import random
-import shutil
-import sys
 
 import torch
-import yaml
-
-from omegaconf import OmegaConf
 from torch.utils.data import Dataset
 
 from megatron.core.datasets.indexed_dataset import IndexedDataset

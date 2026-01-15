@@ -22,7 +22,6 @@ class Algo(ABC):
 
 
 class GridAlgo(Algo):
-
     def __init__(self, strategies, config):
         super().__init__(strategies, config)
         self.idx = 0
@@ -53,7 +52,5 @@ class GridAlgo(Algo):
         return strategy
 
     def has_done(self):
-        """Return True if the task space is empyt."""
-        if self.idx >= len(self.strategies):
-            return True
-        return False
+        """Return True if the task space is empty."""
+        return self.idx >= len(self.strategies)

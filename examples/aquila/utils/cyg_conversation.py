@@ -1,7 +1,6 @@
 import dataclasses
-
 from enum import Enum, auto
-from typing import Any, List, Tuple
+from typing import Any
 
 
 class SeparatorStyle(Enum):
@@ -17,8 +16,8 @@ class Conversation:
 
     system: str
     instruction: str
-    roles: List[str]
-    messages: List[List[str]]
+    roles: list[str]
+    messages: list[list[str]]
     offset: int
     sep_style: SeparatorStyle = SeparatorStyle.SINGLE
     sep: str = "###"

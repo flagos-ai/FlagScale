@@ -35,7 +35,6 @@ def validate_args(args):
 
 
 def padding_vocab_size(orig_word_embed, md, args, attr_name="padded_vocab_size"):
-
     vocab_size_attr = eval(f"args.{attr_name}")
     if md.true_vocab_size is not None:
         orig_vocab_size = orig_word_embed.shape[0]
@@ -66,18 +65,13 @@ def padding_vocab_size(orig_word_embed, md, args, attr_name="padded_vocab_size")
 
 
 def print_memory_usage(key, rank, num_ranks):
-    '''Print memory usage.'''
+    """Print memory usage."""
     process = psutil.Process()
     mem_info = process.memory_info()
     print(
-        "> memory usage: '%s', rank %d / %d, mem %.1f/%.1f gb."
-        % (
-            key,
-            rank,
-            num_ranks,
-            mem_info.rss / 1024**3,
-            100 * mem_info.rss / process.memory_percent() / 1024**3,
-        )
+        f"> memory usage: '{key}', "
+        f"rank {rank} / {num_ranks}, "
+        f"mem {mem_info.rss / 1024**3:.1f}/{100 * mem_info.rss / process.memory_percent() / 1024**3:.1f} gb."
     )
 
 

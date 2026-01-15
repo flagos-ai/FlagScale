@@ -6,10 +6,8 @@
 # Licensed under the MIT License, Version 1.0 (the "License");
 # Implemented by [Jinhui YE / HKUST University] in [2025].
 
-from typing import List, Optional
 
 import torch
-
 from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 from transformers.modeling_outputs import CausalLMOutputWithPast
@@ -43,7 +41,7 @@ class _QWen_VL_Interface(nn.Module):
         - Adaptation layer can be extended for future multi-modal routing if needed.
     """
 
-    def __init__(self, config: Optional[dict] = None, **kwargs):
+    def __init__(self, config: dict | None = None, **kwargs):
         """
         Initialize the Qwen2.5-VL wrapper.
 
@@ -95,17 +93,17 @@ class _QWen_VL_Interface(nn.Module):
 
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        image_grid_thw: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = False,
-        output_hidden_states: Optional[bool] = True,
-        return_dict: Optional[bool] = True,
+        input_ids: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        pixel_values: torch.FloatTensor | None = None,
+        labels: torch.LongTensor | None = None,
+        image_grid_thw: torch.FloatTensor | None = None,
+        inputs_embeds: torch.FloatTensor | None = None,
+        past_key_values: list[torch.FloatTensor] | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = False,
+        output_hidden_states: bool | None = True,
+        return_dict: bool | None = True,
         **kwargs,
     ) -> CausalLMOutputWithPast:
         """
@@ -263,7 +261,7 @@ class _QWen_VL_Interface(nn.Module):
         if solutions is not None:
             action_token_min = _ACTION_TOKEN_MIN  # how can we know this range? --> we has other way for this, but is slower see qwenhelix branch
             action_token_max = _ACTION_TOKEN_MAX  # here only for fast_tokenizer, see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md
-            labels = batch_input['input_ids'].clone()
+            labels = batch_input["input_ids"].clone()
             # For each sequence in the batch, find the first occurrence of an action token.
             for i in range(labels.size(0)):
                 seq = labels[i]
@@ -278,13 +276,13 @@ class _QWen_VL_Interface(nn.Module):
                     # If no action token is found, mask the entire sequence.
                     seq[:] = IGNORE_INDEX
                     RuntimeWarning(
-                        f"action token are on in yout tokenizer, plz see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md."
+                        "action token are on in your tokenizer, plz see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md."
                     )
 
-            labels[labels == self.processor.tokenizer.pad_token_id] = (
-                -100
-            )  ## mask out pad tokens as well
-            batch_input['labels'] = labels
+            labels[
+                labels == self.processor.tokenizer.pad_token_id
+            ] = -100  ## mask out pad tokens as well
+            batch_input["labels"] = labels
 
         return batch_input.to(self.model.device)
 

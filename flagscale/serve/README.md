@@ -52,7 +52,7 @@ python run.py --config-path ./examples/qwen/conf --config-name config_qwen2.5_7b
 ## logs
 
 Since serve is the distributed mode, the logs are stored separately. \
-The default logs of are loacated in `/outputs`.\
+The default logs of are located in `/outputs`.\
 
 
 ## Config Template
@@ -61,7 +61,7 @@ Flagscale.serve will support multiple scenarios. For better performance and usag
 
 ### Command Line Mode with vLLM
 
-If origin model is excuted in command line mode with vLLM, we can use Flagscale.serve to deploy it easily.
+If origin model is executed in command line mode with vLLM, we can use Flagscale.serve to deploy it easily.
 
 ```shell
 vllm serve /models/Qwen2.5-7B-Instruct --tensor-parallel-size=1 --gpu-memory-utilization=0.9 --max-model-len=32768 --max-num-seqs=256 --port=4567 --trust-remote-code --enable-chunked-prefill

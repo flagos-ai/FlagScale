@@ -1,16 +1,14 @@
 # Copy from:
 #   https://github.com/baaivision/Emu3/blob/main/emu3/mllm/processing_emu3.py
 #   https://github.com/baaivision/Emu3/blob/main/emu3/mllm/utils_emu3.py
-""" Processor class for Emu3. """
+"""Processor class for Emu3."""
 
 import math
 import re
-
+from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Callable, List, Optional, Sequence
 
 import torch
-
 from PIL import Image
 from torch.nn import functional as F
 from transformers.feature_extraction_utils import BatchFeature
@@ -71,11 +69,11 @@ class Emu3Processor(ProcessorMixin):
     @torch.no_grad()
     def __call__(
         self,
-        text: Optional[TextInput | PreTokenizedInput] = None,
-        image: Optional[Image.Image | List[Image.Image]] = None,
+        text: TextInput | PreTokenizedInput | None = None,
+        image: Image.Image | list[Image.Image] | None = None,
         *,
         mode: str = "G",
-        ratio: str | List[str] = "1:1",
+        ratio: str | list[str] = "1:1",
         image_area: int = 518400,
         padding_image: bool = False,
         **kwargs,
@@ -97,7 +95,7 @@ class Emu3Processor(ProcessorMixin):
             ratio (`str`, *optional*):
                 the image width-height ratio for generation
             image_area (`int`, *optional*):
-                image area used to calcualte the generated image height and width
+                image area used to calculate the generated image height and width
             padding_image (`bool`, *optional*):
                 whether pad images to same size for fast preprocessing if they have different sizes
             return_tensors (`str` or [`~utils.TensorType`], *optional*):
@@ -111,7 +109,7 @@ class Emu3Processor(ProcessorMixin):
             - **input_ids** -- List of token ids to be fed to a model.
             - **image_size** -- List of image size of input images or generated images.
         """
-        assert mode in ('G', 'U'), "mode must be 'G' or 'U'."
+        assert mode in ("G", "U"), "mode must be 'G' or 'U'."
         if isinstance(text, str):
             text = [text]
 
@@ -122,7 +120,7 @@ class Emu3Processor(ProcessorMixin):
             raise ValueError("`text` must be string or list of string")
 
         image_tokens = None
-        if mode == 'G':
+        if mode == "G":
             if image is not None:
                 raise ValueError("You have to specify only `text` in generation mode")
 
@@ -154,7 +152,7 @@ class Emu3Processor(ProcessorMixin):
         prompt_list, size_list = [], []
         for idx, text_prompt in enumerate(text):
             prompt = self.tokenizer.bos_token
-            if mode == 'U':
+            if mode == "U":
                 h, w = image_tokens[idx].shape
                 imgstr = self.to_imgstr(image_tokens[idx])
                 image_prompt = (
@@ -210,7 +208,7 @@ class Emu3Processor(ProcessorMixin):
     def multimodal_decode(self, doc):
         multimodal_output = []
         pattern = (
-            rf'({re.escape(self.tokenizer.boi_token)}.*?{re.escape(self.tokenizer.eoi_token)})'
+            rf"({re.escape(self.tokenizer.boi_token)}.*?{re.escape(self.tokenizer.eoi_token)})"
         )
         chunks = re.split(pattern, doc)
         for c in chunks:
@@ -259,7 +257,7 @@ class Emu3Processor(ProcessorMixin):
         tw = int(round(w * target_ratio / spatial_scale_factor))
         return th, tw
 
-    def tokenize_image(self, image: List[Image.Image], *, padding_image: bool = False):
+    def tokenize_image(self, image: list[Image.Image], *, padding_image: bool = False):
         is_all_same_size, prev_size = True, None
         for im in image:
             if prev_size is not None:
@@ -343,7 +341,6 @@ class Emu3Processor(ProcessorMixin):
 
 
 class Emu3PrefixConstrainedLogitsHelper:
-
     def __init__(
         self,
         height,
@@ -402,15 +399,14 @@ class Emu3PrefixConstrainedLogitsHelper:
 
 
 class CachedPrefixConstrainedLogitsProcessor(LogitsProcessor):
-
     def __init__(
-        self, prefix_allowed_tokens_fn: Callable[[int, torch.Tensor], List[int]], num_beams: int
+        self, prefix_allowed_tokens_fn: Callable[[int, torch.Tensor], list[int]], num_beams: int
     ):
         self._prefix_allowed_tokens_fn = prefix_allowed_tokens_fn
         self._cached_prefix_allowed_tokens = None
-        self._cache_mask: Optional[torch.Tensor] = None
+        self._cache_mask: torch.Tensor | None = None
 
-    def __call__(self, input_ids: List[int], scores: torch.FloatTensor) -> torch.FloatTensor:
+    def __call__(self, input_ids: list[int], scores: torch.FloatTensor) -> torch.FloatTensor:
         prefix_allowed_tokens = self._prefix_allowed_tokens_fn(0, input_ids)
         if prefix_allowed_tokens == self._cached_prefix_allowed_tokens:
             mask = self._cache_mask

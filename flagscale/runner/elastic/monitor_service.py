@@ -151,7 +151,6 @@ class MonitorService:
                 self.last_job_status == JobStatus.RUNNING
                 and current_status == JobStatus.COMPLETED_OR_IDLE
             ):
-
                 # Check if it happened too quickly (likely manual kill)
                 running_time = time.time() - self.process_start_time
                 if running_time < 300:  # Less than 5 minutes, likely manual kill
@@ -176,7 +175,7 @@ class MonitorService:
         """
         try:
             # Check if PID files still exist but processes are gone
-            if not hasattr(self.runner, 'resources') or self.runner.resources is None:
+            if not hasattr(self.runner, "resources") or self.runner.resources is None:
                 # Local mode
                 return self._check_pid_file_anomaly("localhost", 0)
             else:
@@ -199,11 +198,11 @@ class MonitorService:
 
             if os.path.exists(pid_file):
                 # PID file exists, check if process is still running
-                with open(pid_file, 'r') as f:
+                with open(pid_file, "r") as f:
                     pid = int(f.read().strip())
 
                 try:
-                    result = subprocess.run(['ps', '-p', str(pid)], capture_output=True, text=True)
+                    result = subprocess.run(["ps", "-p", str(pid)], capture_output=True, text=True)
                     if result.returncode != 0:
                         # PID file exists but process is gone - likely manual kill
                         return True
@@ -220,7 +219,7 @@ class MonitorService:
         Write manual kill detection entry to diagnostic files
         """
         try:
-            current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             # Write monitor-detected kill entry (won't be re-detected by diagnostic.py)
             kill_entry = f"[{current_time}] MonitorDetected: MANUAL KILL DETECTED - Process terminated unexpectedly, likely killed manually"
 
@@ -229,7 +228,7 @@ class MonitorService:
                 self._write_diagnostic_entry(
                     self.monitored_host, self.monitored_node_rank, kill_entry
                 )
-            elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+            elif not hasattr(self.runner, "resources") or self.runner.resources is None:
                 # Local mode (backward compatibility)
                 self._write_diagnostic_entry("localhost", 0, kill_entry)
             else:
@@ -254,16 +253,16 @@ class MonitorService:
             # Ensure diagnostic file exists with header if it doesn't
             if not os.path.exists(diagnostic_file):
                 os.makedirs(os.path.dirname(diagnostic_file), exist_ok=True)
-                current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+                current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
                 header_content = f"Diagnostic Report for {host} (node {node_rank})\n"
                 header_content += f"Generated at {current_time}\n"
                 header_content += "Analysis:\n"
 
-                with open(diagnostic_file, 'w', encoding='utf-8') as f:
+                with open(diagnostic_file, "w", encoding="utf-8") as f:
                     f.write(header_content)
 
             # Append the entry
-            with open(diagnostic_file, 'a', encoding='utf-8') as f:
+            with open(diagnostic_file, "a", encoding="utf-8") as f:
                 f.write(f"{entry}\n")
 
             logger.debug(f"Diagnostic entry written for {host} (node {node_rank}): {entry}")
@@ -285,7 +284,7 @@ class MonitorService:
         if self.single_node_mode:
             # Single-node monitoring mode - each node monitors only itself
             self._collect_logs_for_host(self.monitored_host, self.monitored_node_rank)
-        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        elif not hasattr(self.runner, "resources") or self.runner.resources is None:
             # Local mode (backward compatibility)
             self._collect_logs_for_host("localhost", 0)
         else:
@@ -309,7 +308,7 @@ class MonitorService:
         if self.single_node_mode:
             # Single-node monitoring mode - each node monitors only itself
             self._generate_diagnostic_for_host(self.monitored_host, self.monitored_node_rank)
-        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        elif not hasattr(self.runner, "resources") or self.runner.resources is None:
             self._generate_diagnostic_for_host("localhost", 0)
         else:
             # Multi-nodes (centralized monitoring)
@@ -420,11 +419,10 @@ class MonitorService:
             node_rank (int): Node rank
         """
         try:
-
             # Create a temporary diagnostic content for hang detection
             log_dir = self.monitor_log_dir
             diagnostic_file = os.path.join(log_dir, f"host_{node_rank}_{host}_diagnostic.txt")
-            current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
             # Determine log file name for reference
             no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
@@ -436,7 +434,7 @@ class MonitorService:
             else:
                 log_filename = f"host_{node_rank}_{host}.output"
 
-            hang_entry = f"[{current_time}] HangError: Process appears to be hanging - log file not updated for over {self.hang_detection_timeout//60} minutes. Check {log_filename}"
+            hang_entry = f"[{current_time}] HangError: Process appears to be hanging - log file not updated for over {self.hang_detection_timeout // 60} minutes. Check {log_filename}"
 
             # Ensure diagnostic file exists with header if it doesn't
             if not os.path.exists(diagnostic_file):
@@ -445,11 +443,11 @@ class MonitorService:
                 header_content += f"Generated at {current_time}\n"
                 header_content += "Analysis:\n"
 
-                with open(diagnostic_file, 'w', encoding='utf-8') as f:
+                with open(diagnostic_file, "w", encoding="utf-8") as f:
                     f.write(header_content)
 
             # Append hang detection entry
-            with open(diagnostic_file, 'a', encoding='utf-8') as f:
+            with open(diagnostic_file, "a", encoding="utf-8") as f:
                 f.write(f"{hang_entry}\n")
 
             logger.info(
@@ -465,7 +463,7 @@ class MonitorService:
             # Single-node monitoring mode
             if self._check_log_hang(self.monitored_host, self.monitored_node_rank):
                 self._generate_hang_diagnostic(self.monitored_host, self.monitored_node_rank)
-        elif not hasattr(self.runner, 'resources') or self.runner.resources is None:
+        elif not hasattr(self.runner, "resources") or self.runner.resources is None:
             # Local mode (backward compatibility)
             if self._check_log_hang("localhost", 0):
                 self._generate_hang_diagnostic("localhost", 0)

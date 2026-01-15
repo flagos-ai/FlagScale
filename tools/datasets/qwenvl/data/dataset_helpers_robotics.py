@@ -1,19 +1,5 @@
 # Adopted from https://github.com/alibaba/Pai-Megatron-Patch/blob/8949a6647cbf6b39837ad3dd911fa4aa0726895b/megatron_patch/data/energon/chatml.py.
-import dataclasses
-import json
 import logging
-import math
-import os
-import pprint
-import re
-import sys
-import time
-import traceback
-
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import PIL
@@ -21,15 +7,10 @@ import robotics.models.model as robotics_model
 import robotics.training.config as _config
 import robotics.transforms as _transforms
 import torch
-
-from PIL import Image
+from tools.datasets.qwenvl.data.energon.chatml_robotics import ChatMLSample
 from torchvision import transforms
 
-from megatron.energon import Batch, DefaultTaskEncoder, VQASample
-from megatron.training import get_args
-from megatron.training.global_vars import get_tokenizer
-from tools.datasets.qwenvl.data.energon.chatml_robotics import ChatMLSample
-from tools.datasets.qwenvl.data.image_processing import get_visual_transform
+from megatron.energon import DefaultTaskEncoder
 
 dataset_logger = logging.getLogger(__name__)
 
@@ -76,8 +57,8 @@ class TaskEncoder(
             "index": torch.tensor(0),
             "task_index": torch.tensor(0),
             "actions_is_pad": torch.zeros(action_eepose.shape[0]).bool(),  # [50] [30]
-            "task": sample.conversation['conversations'][0]['value'],
-            "prompt": sample.conversation['conversations'][0]['value'],
+            "task": sample.conversation["conversations"][0]["value"],
+            "prompt": sample.conversation["conversations"][0]["value"],
         }
         lerobot_data["action"] = lerobot_data["actions"]
         lerobot_data["wrist_image_right"] = lerobot_data["wrist_image"]
@@ -102,23 +83,23 @@ class TaskEncoder(
         # 'image_grid_thw': ((2, 3), dtype('int64'))}
 
         # [b, action_steps, action_dim]
-        actions = torch.from_numpy(data_transformed['actions'])[None,]
+        actions = torch.from_numpy(data_transformed["actions"])[None,]
         obs = robotics_model.Observation()
-        obs.state = torch.from_numpy(data_transformed['state'])[None,]
+        obs.state = torch.from_numpy(data_transformed["state"])[None,]
         obs.prompt = None
         obs.images = None
         obs.image_masks = None
-        obs.tokenized_prompt = torch.from_numpy(data_transformed['tokenized_prompt'])[None,]
-        obs.tokenized_prompt_mask = torch.from_numpy(data_transformed['tokenized_prompt_mask'])[
+        obs.tokenized_prompt = torch.from_numpy(data_transformed["tokenized_prompt"])[None,]
+        obs.tokenized_prompt_mask = torch.from_numpy(data_transformed["tokenized_prompt_mask"])[
             None,
         ]
-        obs.pixel_values = torch.from_numpy(data_transformed['pixel_values'])[None,]
-        obs.image_grid_thw = torch.from_numpy(data_transformed['image_grid_thw'])[None,]
+        obs.pixel_values = torch.from_numpy(data_transformed["pixel_values"])[None,]
+        obs.image_grid_thw = torch.from_numpy(data_transformed["image_grid_thw"])[None,]
 
         return obs, actions
 
     def batch(
-        self, samples: List[tuple[robotics_model.Observation, robotics_model.Actions]]
+        self, samples: list[tuple[robotics_model.Observation, robotics_model.Actions]]
     ) -> tuple[robotics_model.Observation, robotics_model.Actions]:
         rsp_obs, rsp_action = samples[0]
         for s in samples[1:]:

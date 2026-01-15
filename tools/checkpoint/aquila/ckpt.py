@@ -3,7 +3,7 @@ import sys
 import torch
 
 sys.path.append("..")
-from mixtral.ckpt import (
+from mixtral.ckpt import (  # noqa: F401
     get_embedding_ckpt,
     get_final_norm_ckpt,
     get_hf_attn_ckpt,

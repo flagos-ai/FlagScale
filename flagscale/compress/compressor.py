@@ -1,11 +1,9 @@
 import argparse
 import os
 import shutil
-import sys
 
 import torch
 import yaml
-
 from omegaconf import OmegaConf
 from transformers import *
 
@@ -58,12 +56,12 @@ def copy_rest_file(src_path, dst_path):
 
 
 def compress(cfg, model=None, dataset=None):
-    tokenizer = None
     model_path = cfg.model.pop("model_path")
-    if cfg.data.tokenzier_args is not None:
-        tokenizer = AutoTokenizer.from_pretrained(
-            cfg.data.tokenzier_args.pop("tokenizer_path"), **cfg.data.tokenzier_args
-        )
+    # tokenizer = None
+    # if cfg.data.tokenzier_args is not None:
+    #     tokenizer = AutoTokenizer.from_pretrained(
+    #         cfg.data.tokenzier_args.pop("tokenizer_path"), **cfg.data.tokenzier_args
+    #     )
     if model is None:
         model_cls = eval(cfg.model.pop("model_cls"))
         model = model_cls.from_pretrained(model_path, **cfg.model)

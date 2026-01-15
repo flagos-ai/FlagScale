@@ -1,9 +1,9 @@
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 
 
-def parse_torch_dtype(value: Any) -> Optional[Union[torch.dtype, str]]:
+def parse_torch_dtype(value: Any) -> torch.dtype | str | None:
     """Parse a YAML-provided dtype value into a torch.dtype.
 
     Accepts values like:

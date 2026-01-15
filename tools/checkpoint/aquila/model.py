@@ -19,7 +19,6 @@ def get_hf_model(dtype, model_path=None, config=None):
         )
     elif not model_path and config:
         import torch
-
         from accelerate import init_empty_weights
         from accelerate.utils import set_module_tensor_to_device
 

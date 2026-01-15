@@ -1,9 +1,7 @@
 import os
-
 from datetime import datetime
 
 import hydra
-
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
@@ -53,7 +51,7 @@ def _update_config_compress(config: DictConfig):
         else os.path.join(exp_dir, "logs")
     )
 
-    log_dir = os.path.join(exp_dir, f"compress_logs")
+    log_dir = os.path.join(exp_dir, "compress_logs")
     scripts_dir = os.path.join(log_dir, "scripts")
     pids_dir = os.path.join(log_dir, "pids")
 
@@ -90,7 +88,7 @@ class NativeCompressBackend(BackendBase):
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
         if no_shared_fs:
-            host_output_file = os.path.join(logging_config.log_dir, f"host.output")
+            host_output_file = os.path.join(logging_config.log_dir, "host.output")
         else:
             host_output_file = os.path.join(
                 logging_config.log_dir, f"host_{node_rank}_{host}.output"
@@ -121,15 +119,15 @@ class NativeCompressBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.pids_dir}\n")
             f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
             f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"cd {root_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f"export PYTHONPATH={compress_dir}:{megtron_dir}:{root_dir}\n")
-            f.write(f"\n")
+            f.write("\n")
             f.write(f'cmd="{cmd}"\n')
-            f.write(f"\n")
+            f.write("\n")
             if with_test:
-                f.write(f'bash -c "$cmd; sync" \n')
+                f.write('bash -c "$cmd; sync" \n')
             else:
                 # TODO: need a option to control whether to append or overwrite the output file
                 # Now, it always appends to the output file

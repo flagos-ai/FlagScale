@@ -88,6 +88,6 @@ data:
     legacy_tokenizer: true
     tokenizer_type: QwenTokenizerFS
     tokenizer_path: <tokenizer_path>
-    vocab_size: 151669 
-    padded_vocab_size: 151936 
+    vocab_size: 151669
+    padded_vocab_size: 151936
     make_vocab_size_divisible_by: 64

@@ -1,7 +1,7 @@
+import logging
 import math
 import os
 import types
-import logging
 
 NUM_BYTES_IN_MEGABYTE = 1024 * 1024
 logger = logging.getLogger("FlagScale-AutoTuner")
@@ -22,10 +22,10 @@ def _get_global_moe_pattern(args):
     for each layer in the model.
     """
     num_layers = args.num_layers
-    if not hasattr(args, 'num_experts') or args.num_experts is None or args.num_experts <= 1:
+    if not hasattr(args, "num_experts") or args.num_experts is None or args.num_experts <= 1:
         return [0] * num_layers
 
-    if hasattr(args, 'moe_layer_freq'):
+    if hasattr(args, "moe_layer_freq"):
         if isinstance(args.moe_layer_freq, int) and args.moe_layer_freq > 0:
             return [1 if (i % args.moe_layer_freq == 0) else 0 for i in range(num_layers)]
         elif isinstance(args.moe_layer_freq, list):
@@ -70,24 +70,24 @@ def _get_mesh_params_for_stage(stage_idx, hetero_meshes):
 # Activation Component Calculators
 def _calculate_attn_activation_components(args):
     """Calculates Attention activation components (per microbatch)."""
-    mbs = args.micro_batch_size if hasattr(args, 'micro_batch_size') else 1
-    sl = args.seq_length if hasattr(args, 'seq_length') else 1024
+    mbs = args.micro_batch_size if hasattr(args, "micro_batch_size") else 1
+    sl = args.seq_length if hasattr(args, "seq_length") else 1024
     hs = args.hidden_size
     nh = args.num_attention_heads
     kvc = (
         args.kv_channels
-        if hasattr(args, 'kv_channels') and args.kv_channels is not None
+        if hasattr(args, "kv_channels") and args.kv_channels is not None
         else (hs // nh)
     )
     nqg = (
         args.num_query_groups
-        if hasattr(args, 'num_query_groups') and args.num_query_groups is not None
+        if hasattr(args, "num_query_groups") and args.num_query_groups is not None
         else nh
     )
 
     pre_attn_layernorm_mem = 2 * sl * mbs * hs
 
-    if hasattr(args, 'multi_latent_attention') and args.multi_latent_attention:
+    if hasattr(args, "multi_latent_attention") and args.multi_latent_attention:
         # Approx for MLA
         QKV_mem = 2 * sl * mbs * hs
         q_head_dim = args.qk_head_dim + args.qk_pos_emb_head_dim
@@ -121,21 +121,21 @@ def _calculate_attn_activation_components(args):
 
 def _calculate_mlp_activation_components(args, is_expert=False):
     """Calculates MLP activation components."""
-    mbs = args.micro_batch_size if hasattr(args, 'micro_batch_size') else 1
-    sl = args.seq_length if hasattr(args, 'seq_length') else 1024
+    mbs = args.micro_batch_size if hasattr(args, "micro_batch_size") else 1
+    sl = args.seq_length if hasattr(args, "seq_length") else 1024
     hs = args.hidden_size
     ffn_h = args.ffn_hidden_size
 
     pre_mlp_layernorm_mem = 2 * sl * mbs * hs
-    gated_linear_multiplier = 3 / 2 if hasattr(args, 'swiglu') and args.swiglu else 1
+    gated_linear_multiplier = 3 / 2 if hasattr(args, "swiglu") and args.swiglu else 1
 
     if is_expert:
         moe_ffn_h = (
             args.moe_ffn_hidden_size
-            if hasattr(args, 'moe_ffn_hidden_size') and args.moe_ffn_hidden_size is not None
+            if hasattr(args, "moe_ffn_hidden_size") and args.moe_ffn_hidden_size is not None
             else ffn_h
         )
-        moe_topk = getattr(args, 'moe_router_topk', 1)
+        moe_topk = getattr(args, "moe_router_topk", 1)
         if moe_topk is None:
             moe_topk = 1
         # TP scaled part
@@ -150,13 +150,13 @@ def _calculate_mlp_activation_components(args, is_expert=False):
 
 def _calculate_moe_gate_activation(args):
     """Calculates MoE gate activation."""
-    if not hasattr(args, 'num_experts') or args.num_experts is None or args.num_experts <= 1:
+    if not hasattr(args, "num_experts") or args.num_experts is None or args.num_experts <= 1:
         return 0
-    mbs = args.micro_batch_size if hasattr(args, 'micro_batch_size') else 1
-    sl = args.seq_length if hasattr(args, 'seq_length') else 1024
+    mbs = args.micro_batch_size if hasattr(args, "micro_batch_size") else 1
+    sl = args.seq_length if hasattr(args, "seq_length") else 1024
     hs = args.hidden_size
     num_experts = args.num_experts
-    moe_topk = getattr(args, 'moe_router_topk', 1)
+    moe_topk = getattr(args, "moe_router_topk", 1)
     if moe_topk is None:
         moe_topk = 1
     gate_activation = sl * mbs * hs + 4 * sl * mbs * num_experts + 2 * sl * mbs * moe_topk
@@ -165,12 +165,12 @@ def _calculate_moe_gate_activation(args):
 
 def _calculate_embedding_activation(args):
     """Calculates embedding activation."""
-    mbs = args.micro_batch_size if hasattr(args, 'micro_batch_size') else 1
-    sl = args.seq_length if hasattr(args, 'seq_length') else 1024
+    mbs = args.micro_batch_size if hasattr(args, "micro_batch_size") else 1
+    sl = args.seq_length if hasattr(args, "seq_length") else 1024
     hs = args.hidden_size
     padded_vocab_size = (
         args.padded_vocab_size
-        if hasattr(args, 'padded_vocab_size') and args.padded_vocab_size is not None
+        if hasattr(args, "padded_vocab_size") and args.padded_vocab_size is not None
         else args.vocab_size
     )
     embedding_dropout_mem = sl * mbs * hs
@@ -180,12 +180,12 @@ def _calculate_embedding_activation(args):
 
 def _calculate_output_layer_activation(args):
     """Calculates output layer activation."""
-    mbs = args.micro_batch_size if hasattr(args, 'micro_batch_size') else 1
-    sl = args.seq_length if hasattr(args, 'seq_length') else 1024
+    mbs = args.micro_batch_size if hasattr(args, "micro_batch_size") else 1
+    sl = args.seq_length if hasattr(args, "seq_length") else 1024
     hs = args.hidden_size
     padded_vocab_size = (
         args.padded_vocab_size
-        if hasattr(args, 'padded_vocab_size') and args.padded_vocab_size is not None
+        if hasattr(args, "padded_vocab_size") and args.padded_vocab_size is not None
         else args.vocab_size
     )
     final_ln_mem = 2 * sl * mbs * hs
@@ -206,7 +206,6 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
 
     # Get global architecture patterns
     global_moe_pattern = _get_global_moe_pattern(base_args)
-    global_num_layers = base_args.num_layers
 
     mesh_memory_dict = {}
     num_meshes = len(hetero_meshes)
@@ -246,7 +245,7 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
         # 2. Base Parameter Calculations ---
         # Attention
         attn_params = 0
-        if hasattr(mesh_args, 'multi_latent_attention') and mesh_args.multi_latent_attention:
+        if hasattr(mesh_args, "multi_latent_attention") and mesh_args.multi_latent_attention:
             q_head_dim = mesh_args.qk_head_dim + mesh_args.qk_pos_emb_head_dim
             if mesh_args.q_lora_rank is None:
                 attn_params += mesh_args.hidden_size * mesh_args.num_attention_heads * q_head_dim
@@ -264,7 +263,7 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
                 mesh_args.v_head_dim * mesh_args.num_attention_heads * mesh_args.hidden_size
             )
             attn_params += 2 * mesh_args.hidden_size  # Pre-norm
-            if hasattr(mesh_args, 'qk_layernorm') and mesh_args.qk_layernorm:
+            if hasattr(mesh_args, "qk_layernorm") and mesh_args.qk_layernorm:
                 attn_params += mesh_args.kv_lora_rank + (
                     0 if mesh_args.q_lora_rank is None else mesh_args.q_lora_rank
                 )
@@ -272,12 +271,12 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
             # Standard GQA/MHA
             num_query_groups = (
                 mesh_args.num_query_groups
-                if hasattr(mesh_args, 'num_query_groups')
+                if hasattr(mesh_args, "num_query_groups")
                 else mesh_args.num_attention_heads
             )
             kv_channels = (
                 mesh_args.kv_channels
-                if hasattr(mesh_args, 'kv_channels')
+                if hasattr(mesh_args, "kv_channels")
                 else (mesh_args.hidden_size // mesh_args.num_attention_heads)
             )
             query_projection_size = kv_channels * mesh_args.num_attention_heads
@@ -287,11 +286,11 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
             )  # QKV
             attn_params += query_projection_size * mesh_args.hidden_size  # Out
             attn_params += 2 * mesh_args.hidden_size  # Pre-norm
-            if hasattr(mesh_args, 'qk_layernorm') and mesh_args.qk_layernorm:
+            if hasattr(mesh_args, "qk_layernorm") and mesh_args.qk_layernorm:
                 attn_params += query_projection_size + kv_projection_size
 
         # MLP (Dense & Sparse)
-        gated_linear_multiplier = 3 / 2 if hasattr(mesh_args, 'swiglu') and mesh_args.swiglu else 1
+        gated_linear_multiplier = 3 / 2 if hasattr(mesh_args, "swiglu") and mesh_args.swiglu else 1
         ffn_h = mesh_args.ffn_hidden_size
 
         dense_mlp_params = (
@@ -300,9 +299,9 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
         )
 
         # MoE Params
-        num_experts = getattr(mesh_args, 'num_experts', 0) or 0
-        moe_ffn_h = getattr(mesh_args, 'moe_ffn_hidden_size', ffn_h) or ffn_h
-        shared_expert_h = getattr(mesh_args, 'moe_shared_expert_intermediate_size', 0) or 0
+        num_experts = getattr(mesh_args, "num_experts", 0) or 0
+        moe_ffn_h = getattr(mesh_args, "moe_ffn_hidden_size", ffn_h) or ffn_h
+        shared_expert_h = getattr(mesh_args, "moe_shared_expert_intermediate_size", 0) or 0
 
         sparse_mlp_params_all_experts = (
             2
@@ -335,7 +334,7 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
 
         # Embeddings
         embedding_size = mesh_args.hidden_size * mesh_args.padded_vocab_size
-        untie = getattr(mesh_args, 'untie_embeddings_and_output_weights', False)
+        untie = getattr(mesh_args, "untie_embeddings_and_output_weights", False)
 
         embedding_params_on_mesh = 0
         if i == 0:
@@ -350,7 +349,7 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
         moe_attn_sharded = (num_moe_on_mesh * attn_params) / mesh_args.tensor_model_parallel_size
 
         expert_tp_size = getattr(
-            mesh_args, 'expert_tensor_parallel_size', mesh_args.tensor_model_parallel_size
+            mesh_args, "expert_tensor_parallel_size", mesh_args.tensor_model_parallel_size
         )
         moe_mlp_sharded = (num_moe_on_mesh * sparse_mlp_params_all_experts) / (
             mesh_args.expert_model_parallel_size * expert_tp_size
@@ -367,7 +366,7 @@ def hetero_compute_weight_and_optimizer_memory(base_args, strategy, config):
         total_sharded_params = sharded_layer_params + sharded_embedding_params + sharded_final_norm
 
         # 6. Optimizer States ---
-        use_do = getattr(mesh_args, 'use_distributed_optimizer', False)
+        use_do = getattr(mesh_args, "use_distributed_optimizer", False)
         if use_do:
             optimizer_multiplier = 4 + (12 / mesh_args.data_parallel_size)
         else:
@@ -396,12 +395,12 @@ def hetero_compute_activation_memory(base_args, strategy, config):
     global_moe_pattern = _get_global_moe_pattern(base_args)
 
     # Pipeline Schedule Factors
-    dp_fallback = getattr(base_args, 'data_parallel_size', 1)
+    dp_fallback = getattr(base_args, "data_parallel_size", 1)
     num_microbatches_global = max(1, gbs // (dp_fallback * max(1, mbs))) if dp_fallback > 0 else 1
 
     if global_pp_size > 1:
         in_flight_microbatches = min(num_microbatches_global, global_pp_size)
-        if getattr(base_args, 'virtual_pipeline_model_parallel_size', None) is not None:
+        if getattr(base_args, "virtual_pipeline_model_parallel_size", None) is not None:
             vpp = base_args.virtual_pipeline_model_parallel_size
             penalty = 1 + (global_pp_size - 1) / (global_pp_size * vpp)
             in_flight_microbatches = math.ceil(penalty * global_pp_size)
@@ -414,16 +413,16 @@ def hetero_compute_activation_memory(base_args, strategy, config):
     for stage_idx, layers_in_stage in enumerate(hetero_split):
         mesh_params = _get_mesh_params_for_stage(stage_idx, hetero_meshes)
         if not mesh_params:
-            stage_activation_list.append(float('inf'))
+            stage_activation_list.append(float("inf"))
             current_global_layer_idx += layers_in_stage
             continue
 
         # Set up local args for calculation
         stage_args = types.SimpleNamespace(**vars(base_args))
-        stage_args.tensor_model_parallel_size = mesh_params['tp']
-        stage_args.context_parallel_size = mesh_params['cp']
-        stage_args.expert_model_parallel_size = mesh_params['ep']
-        stage_args.data_parallel_size = mesh_params['dp']
+        stage_args.tensor_model_parallel_size = mesh_params["tp"]
+        stage_args.context_parallel_size = mesh_params["cp"]
+        stage_args.expert_model_parallel_size = mesh_params["ep"]
+        stage_args.data_parallel_size = mesh_params["dp"]
         stage_args.micro_batch_size = 1
 
         # Identify layer types in this stage
@@ -449,7 +448,7 @@ def hetero_compute_activation_memory(base_args, strategy, config):
         # Apply Parallelism Scaling
         tp = stage_args.tensor_model_parallel_size
         sp_enabled = strategy.get(
-            'sequence_parallel', getattr(stage_args, 'sequence_parallel', False)
+            "sequence_parallel", getattr(stage_args, "sequence_parallel", False)
         )
         sp_divisor = tp if sp_enabled else 1
 
@@ -544,7 +543,7 @@ def hetero_report_theoretical_memory(strategy, config, base_args):
         for stage_idx, act_bytes in enumerate(activation_list):
             m_params = _get_mesh_params_for_stage(stage_idx, hetero_meshes)
             if m_params:
-                m_idx = m_params['mesh_idx']
+                m_idx = m_params["mesh_idx"]
                 if m_idx not in mesh_to_activations:
                     mesh_to_activations[m_idx] = []
                 mesh_to_activations[m_idx].append(act_bytes)
@@ -555,16 +554,16 @@ def hetero_report_theoretical_memory(strategy, config, base_args):
             acts = mesh_to_activations.get(m_idx, [0])
             peak_act = max(acts) if acts else 0
 
-            if static == float('inf') or peak_act == float('inf'):
-                total = float('inf')
+            if static == float("inf") or peak_act == float("inf"):
+                total = float("inf")
             else:
                 total = (static + peak_act) / NUM_BYTES_IN_MEGABYTE
 
-            final_peaks.append(int(total) if total != float('inf') else float('inf'))
+            final_peaks.append(int(total) if total != float("inf") else float("inf"))
 
         logger.info(f">>> [FS] Hetero Theoretical Peak Memory per Mesh (MB): {final_peaks}\n")
         return final_peaks
 
     except Exception as e:
-        logger.error(f"Failed to calculate hetero memory: {e}", exc_info=True)
-        return [float('inf')] * len(strategy.get("hetero_process_meshes", []))
+        logger.exception(f"Failed to calculate hetero memory: {e}")
+        return [float("inf")] * len(strategy.get("hetero_process_meshes", []))

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch.nn as nn
 
@@ -15,7 +15,7 @@ class StateScopeHook(ModelHook):
     def __init__(self) -> None:
         super().__init__()
 
-    def pre_forward(self, module: nn.Module, *args, **kwargs) -> Tuple[Tuple[Any], Dict[str, Any]]:
+    def pre_forward(self, module: nn.Module, *args, **kwargs) -> tuple[tuple[Any], dict[str, Any]]:
         """Get the state context from the runtime context and set it for the current module recursively.
         For this hook to work properly, the transform must be applied to the root module and
         the state scope must be set in the field `engine_config.state_scopes`.
@@ -31,7 +31,7 @@ class StateScopeHook(ModelHook):
                     reg.reset_stateful_hooks(recursive=True)
 
                 ctx.add_on_exit(_cleanup)
-                setattr(reg, "_last_cleanup_ctx_id", id(ctx))
+                reg._last_cleanup_ctx_id = id(ctx)
 
             state_scope = ctx.state_scope
             if state_scope:

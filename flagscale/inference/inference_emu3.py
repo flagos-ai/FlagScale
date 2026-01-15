@@ -1,13 +1,8 @@
-import os
-import sys
-
 import torch
-
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
 import vllm
-
 from vllm import LLM
 from vllm.sampling_params import SamplingParams
 
@@ -80,9 +75,9 @@ def inference_t2i(cfg):
 
         # initialize the sampling_parameters
         sampling_cfg = cfg.generate.get("sampling", {})
-        assert not sampling_cfg.get(
-            "logits_processors", None
-        ), "logits_processors is not supported yet."
+        assert not sampling_cfg.get("logits_processors", None), (
+            "logits_processors is not supported yet."
+        )
         sampling_params.append(
             SamplingParams(
                 **sampling_cfg,
@@ -153,9 +148,9 @@ def inference_i2t(cfg):
 
         # initialize the sampling_parameters
         sampling_cfg = cfg.generate.get("sampling", {})
-        assert not sampling_cfg.get(
-            "logits_processors", None
-        ), "logits_processors is not supported yet."
+        assert not sampling_cfg.get("logits_processors", None), (
+            "logits_processors is not supported yet."
+        )
         sampling_params.append(SamplingParams(**sampling_cfg))
 
     # Step 6: build vllm inputs

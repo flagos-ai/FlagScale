@@ -3,9 +3,8 @@ import base64
 import json
 import sys
 import time
-
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 import requests
@@ -52,7 +51,7 @@ def load_state_from_file(state_path: str) -> np.ndarray:
     return state
 
 
-def build_payload(args) -> Dict[str, Any]:
+def build_payload(args) -> dict[str, Any]:
     """Construct JSON payload for /infer.
 
     The client must send images with keys matching the config's images_keys.

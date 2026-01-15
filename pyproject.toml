@@ -1,11 +1,18 @@
 [build-system]
-requires = ["setuptools>=77.0", "wheel", "gitpython", "pyyaml", "cryptography", "pip", "hatchling", "hatch-vcs", "editables"]
+requires = [
+    "setuptools>=77.0",
+    "wheel>=0.45.1",
+    "pip>=25.3",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flag_scale"
 version = "1.0.0"
 description = "FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI)."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
 dynamic = ["dependencies"]
 
 [project.urls]
@@ -14,19 +21,105 @@ Homepage = "https://github.com/flagos-ai/FlagScale"
 [project.scripts]
 flagscale = "flag_scale.flagscale.cli:flagscale"
 
-[tool.black]
+[tool.ruff]
 line-length = 100
-skip_string_normalization = true
-skip_magic_trailing_comma = true
 
-[tool.isort]
-line_length = 100
-profile = "black"
-use_parentheses = true
-skip_gitignore = true
-combine_as_imports = true
-lines_between_types = 1
-known_local_folder = ["flagscale"]
-known_first_party = ["megatron", "vllm"]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
-default_section = "THIRDPARTY"
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # isort
+    "I",
+    # flake8-bugbear
+    "B002",
+    "B003",
+    "B004",
+    "B005",
+    "B009",
+    "B010",
+    "B011",
+    "B012",
+    "B013",
+    "B014",
+    "B015",
+    "B016",
+    "B017",
+    "B018",
+    "B019",
+    "B020",
+    "B021",
+    "B022",
+    "B025",
+    "B029",
+    "B032",
+    # flake8-simplify
+    "SIM101",
+    "SIM103",
+    "SIM117",
+    # flake8-logging-format
+    "G",
+    # flake8-type-checking
+    "TC",
+    # Ruff-specific rules
+    "RUF005",
+    "RUF008",
+    "RUF009",
+    "RUF010",
+    "RUF013",
+    "RUF015",
+    "RUF016",
+    "RUF017",
+    "RUF018",
+    "RUF019",
+    "RUF020",
+    "RUF024",
+    "RUF026",
+    "RUF100",
+    # flake8-quotes
+    "Q003",
+    "Q004",
+]
+ignore = [
+    "E402",         # Module level import not at top of file
+    "E501",         # Line too long
+    "E722",         # Use bare except, specify exception instead
+    "E731",         # lambda assignment
+    "E741",         # Use variables named ‘l’, ‘O’, or ‘I’
+    "F403", "F405", # star imports
+    "B905",         # zip strict
+    "B007",         # unused loop var
+    "UP032",        # f-string format
+    "G004",         # logging f-string
+    "UP015",        # Explicit is better than implicit" rule
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["megatron", "vllm"]
+known-local-folder = ["flagscale"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.typos.files]
+extend-exclude = ["examples/aquila/tokenizer*"]
+
+[tool.typos.default]
+extend-ignore-identifiers-re = [
+    "NVML.*",
+    ".*thw",
+    "nd_*",
+    "\\d+[Bb][-]?[Aa]\\d+(\\.\\d+)?[Bb]", # protect 30BA3B
+]
+
+#[tool.mypy]
+#plugins = ["pydantic.mypy"]
+#ignore_missing_imports = true
+#check_untyped_defs = true
+#follow_imports = "silent"
+#mypy_path = "."
+#explicit_package_bases = true

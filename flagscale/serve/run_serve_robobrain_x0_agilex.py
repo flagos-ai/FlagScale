@@ -29,12 +29,10 @@ import io
 import os
 import sys
 import time
-
 from pathlib import Path
 
 import numpy as np
 import torch
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from PIL import Image
@@ -58,11 +56,11 @@ if SUBTASK_MODE:
 else:
     MODEL_PATH = ENGINE_CONFIG["model"]
 SERVICE_CONFIG = {
-    'host': ENGINE_CONFIG["host"],
-    'port': ENGINE_CONFIG["port"],
-    'debug': ENGINE_CONFIG["debug"],
-    'threaded': ENGINE_CONFIG["threaded"],
-    'max_content_length': 16 * 1024 * 1024,
+    "host": ENGINE_CONFIG["host"],
+    "port": ENGINE_CONFIG["port"],
+    "debug": ENGINE_CONFIG["debug"],
+    "threaded": ENGINE_CONFIG["threaded"],
+    "max_content_length": 16 * 1024 * 1024,
 }
 _TOKENIZER_CACHE: dict[int, ActionChunkProcessor] = {}
 
@@ -95,7 +93,7 @@ def load_model():
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             MODEL_PATH, torch_dtype=torch.bfloat16, device_map=device, trust_remote_code=True
         )
-        processor = AutoProcessor.from_pretrained(MODEL_PATH, padding_side='left')
+        processor = AutoProcessor.from_pretrained(MODEL_PATH, padding_side="left")
         model.eval()
 
         action_tokenizer = get_tokenizer(max_len=256)
@@ -119,7 +117,7 @@ def inverse_transform(x_norm, scale, offset):
 def decode_image_base64_to_pil(image_base64: str) -> Image:
     try:
         image_data = base64.b64decode(image_base64)
-        return Image.open(io.BytesIO(image_data)).convert('RGB')
+        return Image.open(io.BytesIO(image_data)).convert("RGB")
     except Exception as e:
         logger.error(f"Image decoding failed: {e}")
         raise ValueError("Invalid Base64 image string")
@@ -127,7 +125,7 @@ def decode_image_base64_to_pil(image_base64: str) -> Image:
 
 def process_images(images_dict: dict) -> list:
     try:
-        image_keys = ['cam_high', 'cam_right_wrist', 'cam_left_wrist']
+        image_keys = ["cam_high", "cam_right_wrist", "cam_left_wrist"]
         processed_list = [
             decode_image_base64_to_pil(images_dict[k]).resize((320, 240)) for k in image_keys
         ]
@@ -142,7 +140,7 @@ def process_images(images_dict: dict) -> list:
 # --- Flask API Endpoints ---
 
 
-@app.route('/health', methods=['GET'])
+@app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint, returns service and model status"""
     if model is None or processor is None:
@@ -158,7 +156,7 @@ def health_check():
     )
 
 
-@app.route('/info', methods=['GET'])
+@app.route("/info", methods=["GET"])
 def service_info():
     """Provide service metadata"""
     return jsonify(
@@ -172,7 +170,7 @@ def service_info():
     )
 
 
-@app.route('/infer', methods=['POST'])
+@app.route("/infer", methods=["POST"])
 def infer_api():
     """Core inference API endpoint"""
     start_time = time.time()
@@ -184,7 +182,7 @@ def infer_api():
         )
 
     data = request.get_json()
-    if not data or 'eef_pose' not in data or 'instruction' not in data or 'images' not in data:
+    if not data or "eef_pose" not in data or "instruction" not in data or "images" not in data:
         return (
             jsonify(
                 {"success": False, "error": "Request data is incomplete or in incorrect format"}
@@ -192,9 +190,8 @@ def infer_api():
             400,
         )
 
-    instruction = data['instruction']
-    images = data['images']
-    eef_pose = np.array(data['eef_pose'])  # shape (1, 14)
+    instruction = data["instruction"]
+    images = data["images"]
     images_pil = process_images(images)
 
     if SUBTASK_MODE:
@@ -304,7 +301,7 @@ def infer_api():
 
 
 # --- Main Program Entry ---
-if __name__ == '__main__':
+if __name__ == "__main__":
     if not load_model():
         sys.exit(1)
 
@@ -313,8 +310,8 @@ if __name__ == '__main__':
     logger.info(f"Current mode: {'Subtask' if SUBTASK_MODE else 'Standard'}")
 
     app.run(
-        host=SERVICE_CONFIG['host'],
-        port=SERVICE_CONFIG['port'],
-        debug=SERVICE_CONFIG['debug'],
-        threaded=SERVICE_CONFIG['threaded'],
+        host=SERVICE_CONFIG["host"],
+        port=SERVICE_CONFIG["port"],
+        debug=SERVICE_CONFIG["debug"],
+        threaded=SERVICE_CONFIG["threaded"],
     )

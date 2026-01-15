@@ -5,15 +5,12 @@ import json
 import math
 import os
 import pickle
-
 from argparse import ArgumentParser
-from typing import List, Union
 
 import webdataset as wds
 import yaml
-
 from tqdm import tqdm
-from webdataset.writer import add_handlers, default_handlers, imageencoder
+from webdataset.writer import add_handlers, default_handlers
 
 from megatron.energon.epathlib import EPath
 from megatron.energon.flavors import BaseWebdatasetFactory
@@ -51,7 +48,7 @@ def convert(
     data_len = len(data)
     print(f"Loaded {data_len} entries")
 
-    print(f"The fisrt entry in the dataset is {data[0]}")
+    print(f"The first entry in the dataset is {data[0]}")
     if image_key not in data[0]:
         print(f"Warning: {image_key} not found in the first entry")
     if video_key not in data[0]:
@@ -60,19 +57,19 @@ def convert(
     # custom webdataset ShardWriter Encoder
     # "jpgs": the key when saving the image, see line 93
     # "videos": the key when saving the video, see line 92
-    add_handlers(default_handlers, 'jpgs', lambda data: pickle.dumps(data))
-    add_handlers(default_handlers, 'videos', lambda data: pickle.dumps(data))
+    add_handlers(default_handlers, "jpgs", lambda data: pickle.dumps(data))
+    add_handlers(default_handlers, "videos", lambda data: pickle.dumps(data))
 
     def write_sample(entry, vision_dir, has_idx=None, idx=0):
         # NOTE: read a dataset in sharegpt format
-        image_datas: List[str] = []
+        image_data: list[str] = []
         # NOTE: we support both list and str for image path.
         image_paths = entry.get(image_key, [])
         if isinstance(image_paths, str):
             image_paths = [image_paths]
-        image_datas = image_paths
+        image_data = image_paths
 
-        video_datas: List[List[str]] = []
+        video_data: list[list[str]] = []
         second_per_grid_ts = []
 
         for video in entry.pop(video_key, []):
@@ -86,15 +83,15 @@ def convert(
             else:
                 fps = 2.0
 
-            frames: List[str] = []
+            frames: list[str] = []
             for frame in sort_function(os.listdir(frame_folder)):
                 # get relative path（remove "vision_dir"）
                 relative_path = os.path.relpath(os.path.join(frame_folder, frame), start=vision_dir)
-                frames.appen(relative_path)
+                frames.append(relative_path)
 
             if len(frames) % 2 == 1:
                 frames = frames[:-1]
-            video_datas.append(frames)
+            video_data.append(frames)
             second_per_grid_ts.append(1 / fps)
 
         if has_idx is None:
@@ -103,8 +100,8 @@ def convert(
 
         sample = {
             "__key__": entry.pop("id", str(idx)),
-            "jpgs": image_datas,
-            "videos": video_datas,
+            "jpgs": image_data,
+            "videos": video_data,
             "json": json.dumps(
                 {"conversations": entry["conversations"], "second_per_grid_ts": second_per_grid_ts}
             ).encode("utf-8"),
@@ -141,7 +138,7 @@ def convert(
                     entry = data[data_id]
                     write_sample(entry, vision_dir, has_idx=has_idx, idx=data_id)
 
-    print(f"Dataset successfully converted to wds")
+    print("Dataset successfully converted to wds")
     return output
 
 
@@ -206,10 +203,10 @@ if __name__ == "__main__":
         dp_size=args.dp_size,
         drop_last=args.drop_last,
     )
-    print(f"Generating Configurations")
+    print("Generating Configurations")
     # NOTE: split_ratio: train/val/test
     split = [args.train_split, args.val_split, args.test_split]
     generate_configs(
         EPath(output_dir), split, shuffle_tars=args.shuffle_tars, num_workers=args.num_workers
     )
-    print(f"Configurations Generated")
+    print("Configurations Generated")

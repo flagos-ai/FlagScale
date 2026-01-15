@@ -11,20 +11,17 @@ import random
 import socket
 import threading
 import uuid
-
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any
 
 import aiohttp
 import msgpack
 import zmq
-
 from quart import Quart, make_response, request
 from transformers import AutoTokenizer
 
 from flagscale import serve
 from flagscale.logger import logger
-from flagscale.utils import flatten_dict_to_args
 
 serve.load_args()
 TASK_CONFIG = serve.task_config
@@ -41,7 +38,7 @@ def load_hf_tokenizer(model_path: str):
     return AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
 
-def count_chat_tokens(messages: List[Dict[str, Any]]) -> int:
+def count_chat_tokens(messages: list[dict[str, Any]]) -> int:
     tokenizer = load_hf_tokenizer(MODEL_PATH)
     normalized_message = []
     for msg in messages:

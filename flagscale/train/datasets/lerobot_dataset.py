@@ -20,7 +20,6 @@ import contextlib
 import logging
 import shutil
 import tempfile
-
 from collections.abc import Callable
 from pathlib import Path
 
@@ -31,7 +30,6 @@ import pandas as pd
 import PIL.Image
 import torch
 import torch.utils
-
 from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.errors import RevisionNotFoundError
 
@@ -45,7 +43,6 @@ from flagscale.train.datasets.utils import (
     INFO_PATH,
     _validate_feature_names,
     check_delta_timestamps,
-    check_version_compatibility,
     create_empty_dataset_info,
     create_lerobot_dataset_card,
     embed_images,
@@ -53,9 +50,7 @@ from flagscale.train.datasets.utils import (
     get_delta_indices,
     get_file_size_in_mb,
     get_hf_features_from_features,
-    get_safe_version,
     hf_transform_to_torch,
-    is_valid_version,
     load_episodes,
     load_info,
     load_nested_dataset,

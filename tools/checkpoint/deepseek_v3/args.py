@@ -7,7 +7,6 @@ from moonlight_deepseek.configuration_deepseek import DeepseekV3Config
 
 
 def load_args_hf2mg(args):
-
     # Read deepseek_v3 args.
     deepseek_v3_args_path = os.path.join(args.load, "config.json")
     with open(deepseek_v3_args_path) as f:
@@ -92,7 +91,6 @@ def load_args_hf2mg(args):
 
 
 def save_args_mg2hf(args):
-
     first_k_dense_replace = args.moe_layer_freq.index(1)
     seq_aux = True if args.moe_router_load_balancing_type == "seq_aux_loss" else False
     config = DeepseekV3Config(

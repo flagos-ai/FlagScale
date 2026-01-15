@@ -41,7 +41,7 @@ echo "Master node: ${MASTER_ADDR}"
 echo ${NNodes}
 echo ${MASTER_ADDR}
 
-# twice indicates how many tasks are to be launched to process the data. 
+# twice indicates how many tasks are to be launched to process the data.
 twice=2
 for ((j = 0; j < twice; j++))
 do

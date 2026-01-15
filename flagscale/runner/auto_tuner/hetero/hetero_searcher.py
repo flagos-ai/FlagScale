@@ -2,10 +2,6 @@ import copy
 import itertools
 import logging
 import time
-import traceback
-
-from functools import reduce
-from typing import Any, Dict, List, Optional, Tuple
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
@@ -24,7 +20,7 @@ def calculate_hetero_memory(strategy, config):
     base_args = convert_config_to_megatron_args(config, strategy)
 
     # Add global batch size to base_args if not present
-    if not hasattr(base_args, 'global_batch_size'):
+    if not hasattr(base_args, "global_batch_size"):
         base_args.global_batch_size = config.train.model.global_batch_size
 
     # Call the dedicated hetero memory calculation function
@@ -63,7 +59,7 @@ def _generate_all_partitions_with_max_diff(n, k, max_diff):
                 continue
             if i - rest[-1] > max_diff:
                 continue
-            yield [i] + rest
+            yield [i, *rest]
 
 
 class HeteroSearcher:
@@ -87,7 +83,7 @@ class HeteroSearcher:
         self.space = self.build_space(self.config)
         end_time = time.time()
         self.logger.info(
-            "HeteroSearcher: build search space in {:.2f} seconds.".format(end_time - start_time)
+            f"HeteroSearcher: build search space in {end_time - start_time:.2f} seconds."
         )
 
         # Build strategies
@@ -95,9 +91,7 @@ class HeteroSearcher:
         self.strategies = self.build_strategies(self.space, self.config)
         end_time = time.time()
         self.logger.info(
-            "HeteroSearcher: build {} candidate strategies in {:.2f} seconds.".format(
-                len(self.strategies), end_time - start_time
-            )
+            f"HeteroSearcher: build {len(self.strategies)} candidate strategies in {end_time - start_time:.2f} seconds."
         )
 
         # Calculate Memory Model
@@ -106,9 +100,9 @@ class HeteroSearcher:
             for idx, strategy in enumerate(self.strategies):
                 try:
                     strategy["hetero_memory_model"] = calculate_hetero_memory(strategy, self.config)
-                except Exception as e:
+                except Exception:
                     # self.logger.error(f"Failed to calculate memory for strategy {idx}: {e}")
-                    strategy["hetero_memory_model"] = float('inf')
+                    strategy["hetero_memory_model"] = float("inf")
 
         # Build search algorithm
         self.algo = self.build_algo(self.strategies, self.config)
@@ -167,7 +161,6 @@ class HeteroSearcher:
         )
 
         # 3. Training Params
-        gbs = config.train.model.global_batch_size
 
         space["micro_batch_size"] = safe_to_container(hetero_space.get("micro_batch_size", [1]))
         self._sort("micro_batch_size", space["micro_batch_size"], priority)
@@ -182,14 +175,14 @@ class HeteroSearcher:
 
         # [Hetero Recompute Config Parsing]
         # We store these in self.recompute_search_space for complex template parsing later
-        self.recompute_search_space['use_recompute'] = space["use_recompute"]
-        self.recompute_search_space['granularity'] = safe_to_container(
+        self.recompute_search_space["use_recompute"] = space["use_recompute"]
+        self.recompute_search_space["granularity"] = safe_to_container(
             hetero_space.get("recompute_granularity_per_stage_micro_batch", "auto")
         )
-        self.recompute_search_space['method'] = safe_to_container(
+        self.recompute_search_space["method"] = safe_to_container(
             hetero_space.get("recompute_method_per_stage_micro_batch", "auto")
         )
-        self.recompute_search_space['num_layers'] = safe_to_container(
+        self.recompute_search_space["num_layers"] = safe_to_container(
             hetero_space.get("recompute_num_layers_per_stage_micro_batch", "auto")
         )
 
@@ -231,18 +224,18 @@ class HeteroSearcher:
         return self.algo.has_done()
 
     # Hetero Recompute Config Generator
-    def _generate_recompute_configs(self, pp_size: int, num_micro_batches: int) -> List[Dict]:
+    def _generate_recompute_configs(self, pp_size: int, num_micro_batches: int) -> list[dict]:
         """Generates dynamic recompute configurations based on hetero templates."""
         if pp_size == 0:
             return [{}]
 
-        def get_options_for(key: str) -> List[list]:
+        def get_options_for(key: str) -> list[list]:
             user_config = self.recompute_search_space.get(key)
             if user_config == "auto":
                 # 'auto' provides simple templates: [all off] and [all on (1 layer)]
-                auto_templates = [[[pp_size, 'ALL', 0]], [[pp_size, 'ALL', 1]]]
-                if key == 'num_layers':
-                    return [[[pp_size, 'ALL', 1]]]  # 'auto' for num_layers is just 1
+                auto_templates = [[[pp_size, "ALL", 0]], [[pp_size, "ALL", 1]]]
+                if key == "num_layers":
+                    return [[[pp_size, "ALL", 1]]]  # 'auto' for num_layers is just 1
                 return auto_templates
             elif isinstance(user_config, list):
                 # Validate user provided templates
@@ -256,9 +249,9 @@ class HeteroSearcher:
                 return valid_options
             return []
 
-        granularity_options = get_options_for('granularity')
-        method_options = get_options_for('method')
-        num_layers_options = get_options_for('num_layers')
+        granularity_options = get_options_for("granularity")
+        method_options = get_options_for("method")
+        num_layers_options = get_options_for("num_layers")
 
         # If any option list is empty, we can't form a valid combo
         if not granularity_options or not method_options or not num_layers_options:
@@ -274,7 +267,7 @@ class HeteroSearcher:
                 rendered_list = []
                 for item in template_list:
                     # item format: [num_stages, 'ALL'|int, val]
-                    rendered_item = [val if val != 'ALL' else num_micro_batches for val in item]
+                    rendered_item = [val if val != "ALL" else num_micro_batches for val in item]
                     rendered_list.append(rendered_item)
                 return rendered_list
 
@@ -327,8 +320,8 @@ class HeteroSearcher:
 
         for assignment in assignments:
             dims = {}
-            dims["hetero_process_meshes"] = [item['mesh'] for item in assignment]
-            dims["hetero_device_types"] = [item['device_type'] for item in assignment]
+            dims["hetero_process_meshes"] = [item["mesh"] for item in assignment]
+            dims["hetero_device_types"] = [item["device_type"] for item in assignment]
             self._append(result, unique_result, dims)
 
         return result
@@ -347,7 +340,7 @@ class HeteroSearcher:
         # Base case
         if mesh_idx == len(mesh_templates):
             if target_pp is not None:
-                if sum(item['mesh'][4] for item in current_assignment) != target_pp:
+                if sum(item["mesh"][4] for item in current_assignment) != target_pp:
                     return []
             return [current_assignment]
 
@@ -355,12 +348,12 @@ class HeteroSearcher:
         current_template = mesh_templates[mesh_idx]
         current_device_type = device_types[mesh_idx]
 
-        candidate_nodes = [n for n in available_nodes if n['type'] == current_device_type]
+        candidate_nodes = [n for n in available_nodes if n["type"] == current_device_type]
         if not candidate_nodes:
             return []
 
         # Pruning: Check if PP already exceeded
-        current_pp = sum(item['mesh'][4] for item in current_assignment)
+        current_pp = sum(item["mesh"][4] for item in current_assignment)
         if target_pp is not None and current_pp >= target_pp:
             return []
 
@@ -379,7 +372,7 @@ class HeteroSearcher:
                     # Constraint: Tied embeddings
                     if not config.train.model.get("untie_embeddings_and_output_weights", False):
                         if mesh_idx == len(mesh_templates) - 1 and current_assignment:
-                            first_tp = current_assignment[0]['mesh'][0]
+                            first_tp = current_assignment[0]["mesh"][0]
                             last_tp = mesh_config[0]
                             if first_tp != last_tp:
                                 continue
@@ -394,7 +387,7 @@ class HeteroSearcher:
                         self._find_valid_assignments_recursive(
                             mesh_idx + 1,
                             remaining,
-                            current_assignment + [new_step],
+                            [*current_assignment, new_step],
                             mesh_templates,
                             device_types,
                             config,
@@ -405,12 +398,12 @@ class HeteroSearcher:
         return results
 
     def _get_valid_mesh_configs(self, template, nodes, config, mbs_candidates):
-        total_gpus = sum(n['slots'] for n in nodes)
+        total_gpus = sum(n["slots"] for n in nodes)
         if total_gpus == 0:
             return []
 
         def get_candidates(val, limit):
-            if val == 'auto':
+            if val == "auto":
                 return [i for i in range(1, limit + 1) if limit % i == 0]
             if isinstance(val, (list, tuple)):
                 return sorted([v for v in val if v <= limit])
@@ -467,7 +460,7 @@ class HeteroSearcher:
             valid_splits = []
             split_config = space["hetero_pipeline_layer_split"]
 
-            if split_config == 'auto':
+            if split_config == "auto":
                 # 1. Constraints
                 inter_diff = (
                     space["inter_mesh_max_diff"]
@@ -488,7 +481,6 @@ class HeteroSearcher:
                 for part in inter_parts:
                     # Permute Mesh-to-Mesh assignments
                     for dist in set(itertools.permutations(part)):
-
                         possible_splits_per_mesh = []
                         is_distribution_possible = True
 
@@ -548,7 +540,6 @@ class HeteroSearcher:
         result = []
         unique_result = set()
         gbs = config.train.model.global_batch_size
-        num_layers = config.train.model.num_layers
 
         for strategy in layer_split_part:
             dp_list = [mesh[3] for mesh in strategy["hetero_process_meshes"]]
@@ -601,7 +592,7 @@ class HeteroSearcher:
                             num_micro_batches = 1
 
                         # Expand Recompute Options based on 'use_recompute' flag
-                        use_recompute_options = self.recompute_search_space['use_recompute']
+                        use_recompute_options = self.recompute_search_space["use_recompute"]
 
                         for use_recompute in use_recompute_options:
                             base_dim = copy.deepcopy(strategy)

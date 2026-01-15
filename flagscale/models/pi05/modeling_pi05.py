@@ -19,17 +19,14 @@
 import builtins
 import logging
 import math
-
 from collections import deque
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypedDict, TypeVar
+from typing import Literal, TypedDict, TypeVar
 
 import torch
-import torch.nn.functional as F  # noqa: N812
-
+import torch.nn.functional as F
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from safetensors.torch import (
-    load_model as load_model_as_safetensor,
     save_model as save_model_as_safetensor,
 )
 from torch import Tensor, nn
@@ -226,9 +223,7 @@ def compute_layer_complete(
     gates = []
     for i, hidden_states in enumerate(inputs_embeds):
         layer = models[i].layers[layer_idx]
-        hidden_states, gate = layer.input_layernorm(
-            hidden_states, cond=adarms_cond[i]
-        )  # noqa: PLW2901
+        hidden_states, gate = layer.input_layernorm(hidden_states, cond=adarms_cond[i])
         gates.append(gate)
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
@@ -277,7 +272,7 @@ def compute_layer_complete(
             att_output = att_output.to(layer.self_attn.o_proj.weight.dtype)
         out_emb = layer.self_attn.o_proj(att_output[:, start_pos:end_pos])
         # first residual
-        out_emb = modeling_gemma._gated_residual(hidden_states, out_emb, gates[i])  # noqa: SLF001
+        out_emb = modeling_gemma._gated_residual(hidden_states, out_emb, gates[i])
         after_first_residual = out_emb.clone()
         out_emb, gate = layer.post_attention_layernorm(out_emb, cond=adarms_cond[i])
         # Convert to bfloat16 if the next layer (mlp) uses bfloat16
@@ -285,9 +280,7 @@ def compute_layer_complete(
             out_emb = out_emb.to(dtype=torch.bfloat16)
         out_emb = layer.mlp(out_emb)
         # second residual
-        out_emb = modeling_gemma._gated_residual(
-            after_first_residual, out_emb, gate
-        )  # noqa: SLF001
+        out_emb = modeling_gemma._gated_residual(after_first_residual, out_emb, gate)
         outputs_embeds.append(out_emb)
         start_pos = end_pos
     return outputs_embeds
@@ -337,7 +330,7 @@ class PaliGemmaWithExpertModel(
         super().__init__()
 
         vlm_config_hf = CONFIG_MAPPING["paligemma"]()
-        vlm_config_hf._vocab_size = 257152  # noqa: SLF001
+        vlm_config_hf._vocab_size = 257152
         vlm_config_hf.image_token_index = 257152
         vlm_config_hf.text_config.hidden_size = vlm_config.width
         vlm_config_hf.text_config.intermediate_size = vlm_config.mlp_dim
@@ -786,9 +779,7 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
         prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
-        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = (
-            "eager"  # noqa: SLF001
-        )
+        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"
 
         _, past_key_values = self.paligemma_with_expert.forward(
             attention_mask=prefix_att_2d_masks_4d,
@@ -856,9 +847,7 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
 
         full_att_2d_masks_4d = self._prepare_attention_masks_4d(full_att_2d_masks)
-        self.paligemma_with_expert.gemma_expert.model.config._attn_implementation = (
-            "eager"  # noqa: SLF001
-        )
+        self.paligemma_with_expert.gemma_expert.model.config._attn_implementation = "eager"
 
         outputs_embeds, _ = self.paligemma_with_expert.forward(
             attention_mask=full_att_2d_masks_4d,
@@ -1179,9 +1168,9 @@ class PI05Policy(nn.Module, HubMixin):
     @torch.no_grad()
     def select_action(self, batch: dict[str, Tensor]) -> Tensor:
         """Select a single action given environment observations."""
-        assert (
-            not self._rtc_enabled()
-        ), "RTC is not supported for select_action, use it with predict_action_chunk"
+        assert not self._rtc_enabled(), (
+            "RTC is not supported for select_action, use it with predict_action_chunk"
+        )
 
         self.eval()
 

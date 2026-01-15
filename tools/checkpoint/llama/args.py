@@ -3,7 +3,6 @@ import os
 
 
 def load_args_hf2mg(args):
-
     # Read llama args.
     llama_args_path = os.path.join(args.load, "config.json")
     with open(llama_args_path) as f:

@@ -10,5 +10,5 @@
     limit_mm_per_prompt: image=18 # should be customized, 18 images/request is enough for most scenarios
     port: 9010
     trust_remote_code: true
-    enforce_eager: false # set true if use FlagGems 
+    enforce_eager: false # set true if use FlagGems
     enable_chunked_prefill: true

@@ -2,12 +2,11 @@
 # https://github.com/huggingface/diffusers/blob/4a7556eaecc9872dea50ce161301edfa6392693c/src/diffusers/hooks/hooks.py
 
 import functools
-
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
-
 from torch import nn
 
 from flagscale.transformations.state_store import StateStore
@@ -31,11 +30,11 @@ class ModelHook:
     """
 
     def __init__(self) -> None:
-        self.fn_ref: "HookFunctionReference" = None
+        self.fn_ref: HookFunctionReference = None
         # A list of `StateStore`s that the hook has access to.
         # The stores could be shared across multiple hooks from the same transform.
         # The transform should call `register_stateful` to register the stores.
-        self._stateful: List[StateStore[Any]] = []
+        self._stateful: list[StateStore[Any]] = []
 
     def on_attach(self, module: nn.Module) -> nn.Module:
         """
@@ -49,7 +48,7 @@ class ModelHook:
         """
         return module
 
-    def pre_forward(self, module: nn.Module, *args, **kwargs) -> Tuple[Tuple[Any], Dict[str, Any]]:
+    def pre_forward(self, module: nn.Module, *args, **kwargs) -> tuple[tuple[Any], dict[str, Any]]:
         """
         Called before the module's forward pass.
         """
@@ -77,7 +76,7 @@ class ModelHook:
         """
         self._stateful.append(state_store)
 
-    def set_state_scope(self, name: Optional[str] = None) -> None:
+    def set_state_scope(self, name: str | None = None) -> None:
         """
         Set the state scope for the hook.
         """
@@ -98,10 +97,10 @@ class HookFunctionReference:
     Mutable references for spliceable chains
     """
 
-    pre_forward: Optional[Callable[..., Any]] = None
-    post_forward: Optional[Callable[..., Any]] = None
-    forward: Optional[Callable[..., Any]] = None
-    original_forward: Optional[Callable[..., Any]] = None
+    pre_forward: Callable[..., Any] | None = None
+    post_forward: Callable[..., Any] | None = None
+    forward: Callable[..., Any] | None = None
+    original_forward: Callable[..., Any] | None = None
 
 
 class ModuleHookRegistry:
@@ -111,11 +110,11 @@ class ModuleHookRegistry:
         # A reference to the module
         self._module_ref = module_ref
         # name -> hook
-        self._hooks: Dict[str, ModelHook] = {}
+        self._hooks: dict[str, ModelHook] = {}
         # The order of hooks registered
-        self._order: List[str] = []
+        self._order: list[str] = []
         # A ordered list of applied forward functions for each hook
-        self._fn_refs: List[HookFunctionReference] = []
+        self._fn_refs: list[HookFunctionReference] = []
 
     @classmethod
     def get_or_create_registry(cls, module: nn.Module) -> "ModuleHookRegistry":
@@ -131,7 +130,7 @@ class ModuleHookRegistry:
         reg = ModuleHookRegistry.get_registry_if_present(module)
         if reg is None:
             reg = cls(module)
-            setattr(module, "_flagscale_hooks", reg)
+            module._flagscale_hooks = reg
         return reg
 
     @classmethod
@@ -186,12 +185,12 @@ class ModuleHookRegistry:
 
         # Track ordering and links
         hook.fn_ref = fn_ref
-        setattr(fn_ref, "_name", name)
+        fn_ref._name = name
         self._hooks[name] = hook
         self._order.append(name)
         self._fn_refs.append(fn_ref)
 
-    def get_hook(self, name: str) -> Optional[ModelHook]:
+    def get_hook(self, name: str) -> ModelHook | None:
         """Get a hook by name.
 
         Args:
@@ -262,7 +261,7 @@ class ModuleHookRegistry:
                 if reg is not None:
                     reg.reset_stateful_hooks(recursive=False)
 
-    def set_state_scope(self, name: Optional[str] = None) -> None:
+    def set_state_scope(self, name: str | None = None) -> None:
         # TODO(yupu): Does the order matter?
         for hook_name in reversed(self._order):
             self._hooks[hook_name].set_state_scope(name)

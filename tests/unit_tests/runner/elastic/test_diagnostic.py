@@ -1,7 +1,6 @@
 import os
 import tempfile
-
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,18 +35,18 @@ class TestDiagnostic:
         assert len(error_types) > 0
 
         expected_keys = [
-            'out of memory',
-            'rendezvousconnectionerror',
-            'traceback (most recent call last)',
-            'cuda error',
-            'hanging',
+            "out of memory",
+            "rendezvousconnectionerror",
+            "traceback (most recent call last)",
+            "cuda error",
+            "hanging",
         ]
         for key in expected_keys:
             assert key in error_types
 
     def test_generate_diagnostic_report_empty_file(self, mock_config):
         """Test that report's format"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write("")
             temp_path = f.name
 
@@ -65,7 +64,7 @@ class TestDiagnostic:
 
     def test_generate_diagnostic_report_with_errors(self, mock_config, sample_log_content):
         """Test that diagnostic report is generated"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write(sample_log_content)
             temp_path = f.name
 
@@ -96,7 +95,7 @@ class TestDiagnostic:
         [INFO] Training finished successfully
         """
 
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write(content)
             temp_path = f.name
 
@@ -111,7 +110,7 @@ class TestDiagnostic:
 
     def test_generate_diagnostic_report_file_output(self, mock_config, sample_log_content):
         """Test that generate diagnostic report file"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
             f.write(sample_log_content)
             temp_path = f.name
 
@@ -122,14 +121,14 @@ class TestDiagnostic:
             )
 
             assert result_path is not None
-            assert "diagnostic" in result_path or result_path.endswith('.txt')
+            assert "diagnostic" in result_path or result_path.endswith(".txt")
         finally:
             os.unlink(temp_path)
 
-    @patch('flagscale.runner.elastic.diagnostic.logger')
+    @patch("flagscale.runner.elastic.diagnostic.logger")
     def test_generate_diagnostic_report_read_error(self, mock_logger, mock_config):
         """Test diagnostic report generation with file read error"""
-        with patch('builtins.open', side_effect=PermissionError("Access denied")):
+        with patch("builtins.open", side_effect=PermissionError("Access denied")):
             report = generate_diagnostic_report(
                 mock_config, "localhost", 0, "/some/file.log", return_content=True
             )

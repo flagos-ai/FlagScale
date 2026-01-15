@@ -8,4 +8,3 @@
     trust_remote_code: true
     no_enable_prefix_caching: true
     compilation_config: '{"full_cuda_graph": true}'
-

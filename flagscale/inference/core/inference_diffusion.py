@@ -1,14 +1,12 @@
 import argparse
 
-from typing import Union
-
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from flagscale.inference.core.inference_engine import InferenceEngine
 from flagscale.runner.utils import logger
 
 
-def parse_config() -> Union[DictConfig, ListConfig]:
+def parse_config() -> DictConfig | ListConfig:
     """Parse the configuration file"""
 
     parser = argparse.ArgumentParser()

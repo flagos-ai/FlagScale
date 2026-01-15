@@ -105,6 +105,6 @@ data:
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
     tokenizer_path: ${tokenizer_path:??}
-    # vocab_size: 151936 # 
+    # vocab_size: 151936 #
     extra_vocab_size: 293 # Qwen3-VL specific. total vocab size: 151936 = 151643 + extra_vocab_size
     make_vocab_size_divisible_by: 64

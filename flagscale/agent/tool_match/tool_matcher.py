@@ -1,9 +1,8 @@
 """Intelligent tool matcher using semantic embeddings"""
 
 import logging
-
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -25,13 +24,13 @@ class ToolMatcher:
 
         # Multi-weight scoring system
         self.scoring_weights = {
-            'semantic': 0.7,  # Semantic similarity weight
-            'keyword': 0.2,  # Keyword matching weight
-            'category': 0.1,  # Category relevance weight
+            "semantic": 0.7,  # Semantic similarity weight
+            "keyword": 0.2,  # Keyword matching weight
+            "category": 0.1,  # Category relevance weight
         }
 
         # Degradation flags - when True, corresponding weight is set to 0
-        self.degradation_flags = {'semantic': False, 'keyword': False, 'category': False}
+        self.degradation_flags = {"semantic": False, "keyword": False, "category": False}
 
         self._init_model()
 
@@ -48,7 +47,7 @@ class ToolMatcher:
         else:
             raise ValueError(f"Unknown degradation component: '{component}'")
 
-    def get_effective_weights(self) -> Dict[str, float]:
+    def get_effective_weights(self) -> dict[str, float]:
         """Get effective weights considering degradation flags."""
         effective_weights = {}
         for component, weight in self.scoring_weights.items():
@@ -58,7 +57,7 @@ class ToolMatcher:
                 effective_weights[component] = weight
         return effective_weights
 
-    def normalize_weights(self, weights: Dict[str, float]) -> Dict[str, float]:
+    def normalize_weights(self, weights: dict[str, float]) -> dict[str, float]:
         """Normalize weights so they sum to 1.0."""
         total_weight = sum(weights.values())
         if total_weight == 0:
@@ -86,7 +85,7 @@ class ToolMatcher:
                     "Network unavailable for model download. Degrading semantic component."
                 )
                 self.model = None
-                self.set_degradation('semantic', True)
+                self.set_degradation("semantic", True)
                 return
 
             # Try to load model with local cache first
@@ -97,7 +96,7 @@ class ToolMatcher:
                 logger.warning(f"Failed to load model (may need download): {e}")
                 logger.warning("Degrading semantic component.")
                 self.model = None
-                self.set_degradation('semantic', True)
+                self.set_degradation("semantic", True)
 
         except ImportError:
             logger.warning(
@@ -105,24 +104,23 @@ class ToolMatcher:
             )
             logger.warning("Degrading semantic component.")
             self.model = None
-            self.set_degradation('semantic', True)
+            self.set_degradation("semantic", True)
         except Exception as e:
             logger.error(f"Failed to initialize semantic model: {e}. Degrading semantic component.")
             self.model = None
-            self.set_degradation('semantic', True)
+            self.set_degradation("semantic", True)
 
     def _check_network_connectivity(self) -> bool:
         """Check network connectivity with  endpoint"""
-        import socket
         import urllib.request
 
-        endpoints = ['https://huggingface.co']
+        endpoints = ["https://huggingface.co"]
 
         for endpoint in endpoints:
             try:
                 urllib.request.urlopen(endpoint, timeout=3)
                 return True
-            except (urllib.error.URLError, socket.timeout):
+            except (TimeoutError, urllib.error.URLError):
                 continue
 
         return False
@@ -138,9 +136,9 @@ class ToolMatcher:
                 task_embedding, self.tool_embeddings[tool_index : tool_index + 1]
             )
             # Handle both scalar and array results
-            if hasattr(similarity, '__len__') and len(similarity) > 0:
+            if hasattr(similarity, "__len__") and len(similarity) > 0:
                 return float(similarity[0])
-            elif hasattr(similarity, 'item'):  # numpy scalar
+            elif hasattr(similarity, "item"):  # numpy scalar
                 return float(similarity.item())
             else:
                 return float(similarity)
@@ -148,7 +146,7 @@ class ToolMatcher:
             logger.error(f"Semantic scoring failed: {e}")
             return 0.0
 
-    def _calculate_keyword_score(self, task: str, tool: Dict[str, Any]) -> float:
+    def _calculate_keyword_score(self, task: str, tool: dict[str, Any]) -> float:
         """Calculate keyword matching score for a tool."""
         try:
             func = tool.get("function", {})
@@ -172,7 +170,7 @@ class ToolMatcher:
             logger.error(f"Keyword scoring failed: {e}")
             return 0.0
 
-    def _calculate_category_score(self, task: str, tool: Dict[str, Any]) -> float:
+    def _calculate_category_score(self, task: str, tool: dict[str, Any]) -> float:
         """Calculate category relevance score for a tool."""
         try:
             category = tool.get("category", "general").lower()
@@ -180,32 +178,32 @@ class ToolMatcher:
 
             # Simple category matching based on keywords
             category_keywords = {
-                'general': 0.5,
-                'file': (
+                "general": 0.5,
+                "file": (
                     1.0
-                    if any(word in task_lower for word in ['file', 'read', 'write', 'save', 'load'])
+                    if any(word in task_lower for word in ["file", "read", "write", "save", "load"])
                     else 0.0
                 ),
-                'search': (
+                "search": (
                     1.0
-                    if any(word in task_lower for word in ['search', 'find', 'look', 'query'])
+                    if any(word in task_lower for word in ["search", "find", "look", "query"])
                     else 0.0
                 ),
-                'data': (
+                "data": (
                     1.0
                     if any(
-                        word in task_lower for word in ['data', 'process', 'analyze', 'transform']
+                        word in task_lower for word in ["data", "process", "analyze", "transform"]
                     )
                     else 0.0
                 ),
-                'network': (
+                "network": (
                     1.0
-                    if any(word in task_lower for word in ['network', 'url', 'http', 'api'])
+                    if any(word in task_lower for word in ["network", "url", "http", "api"])
                     else 0.0
                 ),
-                'system': (
+                "system": (
                     1.0
-                    if any(word in task_lower for word in ['system', 'command', 'run', 'execute'])
+                    if any(word in task_lower for word in ["system", "command", "run", "execute"])
                     else 0.0
                 ),
             }
@@ -215,7 +213,7 @@ class ToolMatcher:
             logger.error(f"Category scoring failed: {e}")
             return 0.0
 
-    def fit(self, tools: List[Dict[str, Any]]):
+    def fit(self, tools: list[dict[str, Any]]):
         """Train matcher with tools"""
         self.tools = tools
         if self.model:
@@ -238,7 +236,7 @@ class ToolMatcher:
             logger.error(f"Failed to generate embeddings: {e}")
             self.tool_embeddings = []
 
-    def match_tools(self, task: str) -> List[Tuple[str, float]]:
+    def match_tools(self, task: str) -> list[tuple[str, float]]:
         """Match task with relevant tools using multi-weight scoring.
         When components are degraded, their weights are set to 0.
         """
@@ -256,9 +254,9 @@ class ToolMatcher:
 
             # Calculate individual component scores
             scores = {}
-            scores['semantic'] = self._calculate_semantic_score(task, i)
-            scores['keyword'] = self._calculate_keyword_score(task, tool)
-            scores['category'] = self._calculate_category_score(task, tool)
+            scores["semantic"] = self._calculate_semantic_score(task, i)
+            scores["keyword"] = self._calculate_keyword_score(task, tool)
+            scores["category"] = self._calculate_category_score(task, tool)
 
             # Calculate weighted final score
             final_score = sum(
@@ -273,7 +271,7 @@ class ToolMatcher:
         tool_scores.sort(key=lambda x: x[1], reverse=True)
         return tool_scores[: self.max_tools]
 
-    def get_degradation_status(self) -> Dict[str, bool]:
+    def get_degradation_status(self) -> dict[str, bool]:
         """Get current degradation status of all components."""
         return self.degradation_flags.copy()
 
@@ -318,8 +316,8 @@ class ToolMatcher:
 
         # Fallback to numpy
         try:
-            a_np = a.cpu().numpy() if hasattr(a, 'cpu') else np.array(a)
-            b_np = b.cpu().numpy() if hasattr(b, 'cpu') else np.array(b)
+            a_np = a.cpu().numpy() if hasattr(a, "cpu") else np.array(a)
+            b_np = b.cpu().numpy() if hasattr(b, "cpu") else np.array(b)
 
             a_norm = a_np / np.linalg.norm(a_np, axis=1, keepdims=True)
             b_norm = b_np / np.linalg.norm(b_np, axis=1, keepdims=True)
