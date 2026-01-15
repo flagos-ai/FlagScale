@@ -424,6 +424,7 @@ class NativeServeBackend(BackendBase):
             f.write("pkill -f 'run_fs_serve_vllm'\n")
             f.write("pkill -f 'vllm serve'\n")
             f.write("pkill -f multiprocessing\n")
+            f.write("pkill -f VLLM\n")
 
             f.write("if [ -f " + host_pid_file + " ]; then\n")
             f.write("    pid=$(cat " + host_pid_file + ")\n")
