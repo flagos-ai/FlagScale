@@ -14,12 +14,14 @@ cd FlagScale
 Apply the submodule patch code.
 
 ```bash
-# to be updated
-python ./tools/patch/unpatch.py --backend=Megatron-LM
-python ./tools/patch/unpatch.py --backend=Megatron-Energon
-cd ./third_party/Megatron-Energon/
-pip install -e .
-cp -r src/megatron/energon/ ../Megatron-LM/megatron/
+# install Megatron-Energon
+pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226100830f41de38d1f1204d7848b54b1f3e
+# install Megatron-LM-FL
+git clone https://github.com/flagos-ai/Megatron-LM-FL
+cd Megatron-LM-FL
+pip install --no-build-isolation .
+# update transformers
+pip install transformers==4.57.1
 ```
 
 You can also refer to the readme in `https://github.com/FlagOpen/FlagScale.git`
@@ -35,7 +37,7 @@ cd Qwen3-VL-8B-Instruct
 git lfs pull
 
 cd ./tools/checkpoint/qwen3_vl/
-export PYTHONPATH=$PYTHONPATH:../../../:../../../flagscale/train/
+export PYTHONPATH=../../../:$PYTHONPATH
 bash hf2mcore_qwen_vl_convertor.sh 8B \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct-tp2 \
@@ -58,7 +60,7 @@ unzip images.zip
 
 # convert to webdataset format
 cd ./tools/datasets/qwenvl/
-export PYTHONPATH=$PYTHONPATH:../../../flagscale/train/
+export PYTHONPATH=../../../:$PYTHONPATH
 
 python convert_custom_dataset_to_wds_chatml_str.py \
     --dataset-root=/mnt/LLaVA-Pretrain \
@@ -106,6 +108,8 @@ Reference [convert.md](../../../../tools/checkpoint/qwen3_vl/convert.md)
 
 ``` bash
 cd ./tools/checkpoint/qwen3_vl/
+export PYTHONPATH=../../../:$PYTHONPATH
+
 bash hf2mcore_qwen_vl_convertor.sh 8B \
 ./train_qwen3_vl_7b/checkpoints \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct-fs2hf-tp2 \

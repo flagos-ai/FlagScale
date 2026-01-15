@@ -1,33 +1,47 @@
 # QuickStart
 
+## Installation
+
+### Clone Repository
+
+```sh
+git clone https://github.com/FlagOpen/FlagScale.git
+cd FlagScale/
+```
+
+### Setup Conda Environment
+
+Create a new conda environment for robotics training:
+
+```sh
+conda create -n flagscale-train python=3.12
+conda activate flagscale-train
+```
+
+Install FlagScale:
+
+```sh
+cd FlagScale/
+pip install . --verbose
+```
+
+Install Megatron and Energon:
+
+```sh
+pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226
+mkdir -p /tmp
+cd /tmp
+git clone https://github.com/flagos-ai/Megatron-LM-FL.git
+cd Megatron-LM-FL
+pip install --no-build-isolation .[mlm,dev]
+
+# add your path of FlagScale and the Megatron in FlagScale to PYTHONPATH
+export PYTHONPATH=$PYTHONPATH:/xxx/FlagScale:/xxx/FlagScale/flagscale/train/
+```
+
 ## Train
 
-### 1. Install the FlagScale
-
-Download the source code.
-
-```bash
-git clone https://github.com/FlagOpen/FlagScale.git
-cd FlagScale
-```
-
-Apply the submodule patch code
-
-
-```bash
-# to be updated
-python ./tools/patch/unpatch.py --backend=Megatron-LM
-python ./tools/patch/unpatch.py --backend=Megatron-Energon
-cd ./third_party/Megatron-Energon/
-pip install -e .
-cp -r src/megatron/energon/ ../Megatron-LM/megatron/
-cd ../Megatron-LM/
-mv tools tools_bk # avoid the tools conflict
-```
-
-You can also refer to the readme in `https://github.com/FlagOpen/FlagScale.git`
-
-### 2. Prepare checkpoint
+### Prepare checkpoint
 
 Reference [convert.md](../../../../tools/checkpoint/qwen2_5_vl/convert.md)
 ```bash
@@ -38,7 +52,6 @@ cd Qwen2.5-VL-7B-Instruct
 git lfs pull
 
 cd ./tools/checkpoint/qwen2_5_vl/
-export PYTHONPATH=$PYTHONPATH:../../../:../../../flagscale/train/
 bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct-tp2 \
@@ -46,7 +59,50 @@ bash hf2mcore_qwen2.5_vl_convertor.sh 7B \
 /mnt/qwen2.5-vl-ckpts/Qwen2.5-VL-7B-Instruct
 ```
 
-### 3. Preprocess dataset
+### Preprocess dataset
+
+#### Demo dataset
+
+FlagScale uses WebDataset format and Megatraon.Energon data loader, you need process your data first.
+
+There is a dataset processed: [demo_0913_n2_vlm](https://gitee.com/hchnr/flag-scale/tree/robotics_dataset/demo_0913_n2_vlm/wds-1).
+
+Download demo_0913_n2_vlm:
+
+```sh
+mkdir /tmp/datasets
+cd /tmp/datasets
+git clone https://gitee.com/hchnr/flag-scale.git
+cd flag-scale
+git checkout robotics_dataset
+```
+
+Move .jpg and .npy files from ./demo_0913_n2_vlm/deps to /:
+
+```sh
+mkdir -p /share/
+cp -r ./demo_0913_n2_vlm/deps/* /
+```
+
+If you need to make your own datasets, generate Data in webdataset format (DP=2) to ./demo_0913_n2_vlm/wds-2:
+
+```sh
+python tools/datasets/qwenvl/convert.py \
+    --dataset-root=./demo_0913_n2_vlm \
+    --output-root=./demo_0913_n2_vlm \
+    --json=demo_0913_n2.jsonl \
+    --train-split 1 \
+    --val-split 0 \
+    --images-key=image \
+    --videos-key=video \
+    --vision-root='' \
+    --shuffle-tars \
+    --num-workers=1 \
+    --max-samples-per-tar 100000 \
+    --dp-size 2
+```
+
+#### Formal dataset
 
 Reference [dataset_preparation.md](../../../../tools/datasets/qwenvl/dataset_preparation.md)
 
@@ -79,12 +135,16 @@ python convert_custom_dataset_to_wds_chatml_str.py \
 The preprocessed dataset will be stored at the output-root path `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1`.
 The configuration of `data-path` is `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1` and the configuration of `vision-path` is `/mnt/LLaVA-Pretrain` in the step 4.
 
-### 4. Add your configuration
+### Add your configuration
 
 Add the data path and checkpoint path in ./examples/qwen2_5_vl/conf/train/7b.yaml as shown below:
 
 ```bash
-# dataset
+# Use demo dataset
+data_path: /tmp/datasets/flag-scale/demo_0913_n2_vlm/wds-1
+vision_root: /
+
+# Or Use formal dataset
 data_path: /mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1
 vision_root: /mnt/LLaVA-Pretrain
 
@@ -103,7 +163,7 @@ Stop training.
 python run.py --config-path ./examples/qwen2_5_vl/conf  --config-name train action=stop
 ```
 
-### 5. Convert the checkpoint to HuggingFace
+### Convert the checkpoint to HuggingFace
 
 Reference [convert.md](../../../../tools/checkpoint/qwen2_5_vl/convert.md)
 
@@ -123,13 +183,13 @@ Our evaluation process leverages the capabilities of [FlagEval](https://flageval
 
 More details about [Auto-Evaluation](https://github.com/flageval-baai/Auto-Evaluation/blob/main/README_en.md) tools.
 
-### 1. Start the server
+### Start the server
 
     ```sh
     python run.py --config-path ./examples/robobrain2/conf --config-name serve action=run
     ```
 
-### 2. Start evaluation
+### Start evaluation
 
     ```sh
     IP=$(ip addr show | grep -E 'inet ([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '127.0.0.1' | grep -v '::1' | awk '{print $2}' | cut -d/ -f1 | head -n1)
@@ -153,7 +213,7 @@ More details about [Auto-Evaluation](https://github.com/flageval-baai/Auto-Evalu
     }'
     ```
 
-### 3. Check Progress
+### Check Progress
 
    `request_id` is in response of `Start evaluation`.
     ```sh
@@ -166,7 +226,7 @@ More details about [Auto-Evaluation](https://github.com/flageval-baai/Auto-Evalu
     }'
     ```
 
-### 4. Check result
+### Check result
 
     ```sh
     curl -X GET http://120.92.17.239:5050/evaldiffs \
