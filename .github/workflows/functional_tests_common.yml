@@ -11,6 +11,14 @@ on:
         required: true
         type: string
         description: Device type (e.g., a100, a800, h100, generic)
+      task:
+        required: true
+        type: string
+        description: Task name (e.g., train, hetero_train)
+      model:
+        required: true
+        type: string
+        description: Model name (e.g., aquila, mixtral, deepseek)
       image:
         required: true
         type: string
@@ -27,7 +35,7 @@ on:
 jobs:
   functional_test:
     runs-on: ${{ fromJson(inputs.runs_on) }}
-    name: functional-${{ inputs.device }}
+    name: functional-${{ inputs.device }}-${{ inputs.task }}-${{ inputs.model }}
     container:
       image: ${{ inputs.image }}
       ports:
@@ -62,11 +70,15 @@ jobs:
 
           PLATFORM='${{ inputs.platform }}'
           DEVICE='${{ inputs.device }}'
+          TASK='${{ inputs.task }}'
+          MODEL='${{ inputs.model }}'
           PROJECT_ROOT="/__w/FlagScale/FlagScale"
 
           echo "Running functional tests"
           echo "Platform: $PLATFORM"
           echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
           echo "Project root: $PROJECT_ROOT"
 
           # Load retry functions
@@ -86,17 +98,19 @@ jobs:
           # Ensure we're back in the project root
           cd "$PROJECT_ROOT"
 
-          # Run all functional tests using run_tests.sh
+          # Run functional tests for specific task/model using run_tests.sh
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
             --platform "$PLATFORM" \
             --device "$DEVICE" \
-            --type functional
+            --type functional \
+            --task "$TASK" \
+            --model "$MODEL"
           exit_code=$?
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Functional tests passed for $PLATFORM/$DEVICE"
+            echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL"
           else
-            echo "❌ Functional tests failed for $PLATFORM/$DEVICE (exit code: $exit_code)"
+            echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
@@ -107,7 +121,7 @@ jobs:
         if: always() && steps.functional_test.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: functional_tests-logs-${{ github.run_id }}-${{ inputs.platform }}-${{ inputs.device }}
-          path: tests/functional_tests/**/test_results/*/logs
+          name: functional_tests-logs-${{ github.run_id }}-${{ inputs.platform }}-${{ inputs.device }}-${{ inputs.task }}-${{ inputs.model }}
+          path: tests/functional_tests/${{ inputs.task }}/${{ inputs.model }}/test_results/*/logs
           retention-days: 7
           if-no-files-found: warn
