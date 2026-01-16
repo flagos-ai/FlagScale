@@ -178,18 +178,30 @@ def test_train_equal(test_path, test_type, test_task, test_case):
 
     # Compare each metric
     all_passed = True
+    print(f"\n{'=' * 70}")
+    print("DETAILED COMPARISON REPORT")
+    print(f"{'=' * 70}")
+
     for key in metric_keys:
         result_values = result_json.get(key, {}).get("values", [])
         gold_values = gold_result_json.get(key, {}).get("values", [])
 
+        print(f"\n{'=' * 70}")
+        print(f"Metric: {key}")
+        print(f"{'=' * 70}")
+        print(f"GOLDEN VALUES ({len(gold_values)} values):")
+        print(f"  {gold_values}")
+        print(f"\nACTUAL VALUES ({len(result_values)} values):")
+        print(f"  {result_values}")
+
         if len(result_values) == 0:
-            print(f"WARNING: No values extracted for metric '{key}'")
+            print(f"❌ WARNING: No values extracted for metric '{key}'")
             all_passed = False
             continue
 
         if len(result_values) != len(gold_values):
             print(
-                f"WARNING: Length mismatch for '{key}': got {len(result_values)}, expected {len(gold_values)}"
+                f"\n⚠️  WARNING: Length mismatch for '{key}': got {len(result_values)}, expected {len(gold_values)}"
             )
             # Try to compare what we have
             min_len = min(len(result_values), len(gold_values))
@@ -197,17 +209,29 @@ def test_train_equal(test_path, test_type, test_task, test_case):
                 is_close = np.allclose(
                     gold_values[:min_len], result_values[:min_len], rtol=1e-3, atol=1e-5
                 )
-                print(f"Partial comparison ({min_len} values) for '{key}': {is_close}")
+                diff = np.abs(np.array(gold_values[:min_len]) - np.array(result_values[:min_len]))
+                print(f"\nPartial comparison (first {min_len} values):")
+                print(f"  Status: {'✅ PASS' if is_close else '❌ FAIL'}")
+                print(f"  Max diff: {np.max(diff):.6e}")
+                print(f"  Mean diff: {np.mean(diff):.6e}")
+                print("  Tolerance: rtol=1e-3, atol=1e-5")
             all_passed = False
             continue
 
+        # Calculate differences
+        diff = np.abs(np.array(gold_values) - np.array(result_values))
         is_close = np.allclose(gold_values, result_values, rtol=1e-3, atol=1e-5)
-        print(f"Metric '{key}' comparison: {is_close}")
+
+        print(f"\nComparison result: {'✅ PASS' if is_close else '❌ FAIL'}")
+        print(f"  Max diff: {np.max(diff):.6e}")
+        print(f"  Mean diff: {np.mean(diff):.6e}")
+        print("  Tolerance: rtol=1e-3, atol=1e-5")
 
         if not is_close:
-            # Print detailed diff for debugging
-            diff = np.abs(np.array(gold_values) - np.array(result_values))
-            print(f"  Max diff: {np.max(diff)}, Mean diff: {np.mean(diff)}")
             all_passed = False
+
+    print(f"\n{'=' * 70}")
+    print(f"Overall result: {'✅ ALL TESTS PASSED' if all_passed else '❌ SOME TESTS FAILED'}")
+    print(f"{'=' * 70}\n")
 
     assert all_passed, "One or more metrics did not match gold values"

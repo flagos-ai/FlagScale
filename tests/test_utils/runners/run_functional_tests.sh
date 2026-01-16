@@ -79,9 +79,12 @@ run_test() {
     wait_for_gpu
 
     # Clean old results
+    # Extract exp_dir from config file and clean it
     local exp_dir=$(grep -E '^\s*exp_dir:' "$config_file" | head -1 | sed 's/.*exp_dir:\s*//' | tr -d '"' | tr -d "'")
-    [ -n "$exp_dir" ] && rm -rf "$exp_dir"/* 2>/dev/null || true
-    rm -rf "$test_dir/results_test/$config" 2>/dev/null || true
+    if [ -n "$exp_dir" ]; then
+        log_info "Cleaning old results in: $exp_dir"
+        rm -rf "$exp_dir"/* 2>/dev/null || true
+    fi
 
     # Run test
     python run.py --config-path "$conf_dir" --config-name "$config" action=test || return 1
