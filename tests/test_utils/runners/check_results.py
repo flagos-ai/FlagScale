@@ -158,7 +158,7 @@ def test_train_equal(test_path, test_type, test_task, test_case):
 
     # Load gold values first to determine which metrics to extract
     gold_value_path = os.path.join(
-        test_path, test_type, test_task, "test_results", test_case + ".json"
+        test_path, test_type, test_task, "gold_values", test_case + ".json"
     )
     assert os.path.exists(gold_value_path), f"Failed to find gold result JSON at {gold_value_path}"
 

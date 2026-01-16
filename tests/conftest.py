@@ -9,6 +9,7 @@ def pytest_addoption(parser):
         ("--test_task", "test_task", "Task/model name (aquila/deepseek/mixtral)"),
         ("--test_case", "test_case", "Specific test case configuration"),
         ("--platform", "platform", "Platform type (default/a100)"),
+        ("--device", "device", "Device type (generic/a100/a800/h100)"),
     ]
     for opt, name, help_text in opts:
         parser.addoption(opt, action="store", default="none", help=help_text)
@@ -37,3 +38,8 @@ def test_case(request):
 @pytest.fixture
 def platform(request):
     return request.config.getoption("--platform")
+
+
+@pytest.fixture
+def device(request):
+    return request.config.getoption("--device")

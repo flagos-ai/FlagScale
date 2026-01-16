@@ -92,7 +92,10 @@ run_test() {
             --test_path=tests/functional_tests --test_type=\"$task\" --test_task=\"$model\" \
             --test_case=\"$config\" --platform=\"$PLATFORM\""
         [ -n "$CURRENT_DEVICE" ] && validator_cmd="$validator_cmd --device=\"$CURRENT_DEVICE\""
-        eval "$validator_cmd" 2>/dev/null || log_info "Validation skipped or failed"
+        if ! eval "$validator_cmd"; then
+            log_error "Validation failed for $task/$model/$config"
+            return 1
+        fi
     fi
 
     log_success "Test completed: $task/$model/$config"
@@ -114,19 +117,26 @@ get_test_configs() {
 # Parse and run tests using helper module
 run_tests_from_json() {
     local tests_json="$1"
+    local failed=0
 
     # Use helper module to parse test cases
-    echo "$tests_json" | python "$SCRIPT_DIR/helpers.py" parse-test-cases | \
+    # Use process substitution to avoid subshell and allow failure tracking
     while IFS=' ' read -r task model config; do
         [ -z "$task" ] && continue
-        run_test "$task" "$model" "$config" || log_error "FAIL: $task/$model/$config"
-    done
+        if ! run_test "$task" "$model" "$config"; then
+            log_error "FAIL: $task/$model/$config"
+            failed=1
+        fi
+    done < <(echo "$tests_json" | python "$SCRIPT_DIR/helpers.py" parse-test-cases)
+
+    return $failed
 }
 
 # Function to run functional tests for a specific device
 run_functional_tests_for_device() {
     local device="$1"
     export CURRENT_DEVICE="$device"
+    local failed=0
 
     log_info "Running functional tests for device: $device"
 
@@ -154,7 +164,10 @@ run_functional_tests_for_device() {
             tests_json=$(get_test_configs "$device" "$task_name" "$MODEL" "$TEST_LIST")
             [ -z "$tests_json" ] && { log_info "No tests found for task=$task_name"; continue; }
 
-            run_tests_from_json "$tests_json"
+            if ! run_tests_from_json "$tests_json"; then
+                log_error "Some tests failed for task: $task_name"
+                failed=1
+            fi
         done
     else
         # Task specified, run only that task
@@ -163,10 +176,13 @@ run_functional_tests_for_device() {
         tests_json=$(get_test_configs "$device" "$TASK" "$MODEL" "$TEST_LIST")
         [ -z "$tests_json" ] && { log_error "No tests found for task=$TASK"; return 1; }
 
-        run_tests_from_json "$tests_json"
+        if ! run_tests_from_json "$tests_json"; then
+            log_error "Some tests failed for task: $TASK"
+            failed=1
+        fi
     fi
 
-    return 0
+    return $failed
 }
 
 # Validate platform
