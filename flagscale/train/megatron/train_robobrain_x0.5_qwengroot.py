@@ -12,19 +12,15 @@ import pathlib
 import platform
 import random
 
-from typing import Tuple
-
 import epath
 import numpy as np
 import torch
 import torch.distributed as dist
-
 from omegaconf import OmegaConf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import get_scheduler
 
 import wandb
-
 from megatron.energon import WorkerConfig, get_loader, get_train_dataset
 from tools.datasets.vla.data.dataset_helpers_np_pil import TaskEncoder
 
@@ -66,7 +62,7 @@ def build_param_lr_groups(model, cfg):
 
 def setup_optimizer_and_scheduler(
     model, cfg
-) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
+) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
     """set optimizer and scheduler"""
     # initialize optimizer
     param_groups = build_param_lr_groups(model=model, cfg=cfg)
@@ -191,11 +187,11 @@ def main(cfg) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config-path",
+        "--config-file",
         type=str,
-        default="examples/robotics/conf/train/libero_qwengroot.yaml",
+        default="outputs/libero_qwengroot/hydra/.hydra/config.yaml",
         help="Path to YAML config",
     )
     args, clipargs = parser.parse_known_args()
-    cfg = OmegaConf.load(args.config_path)
-    main(cfg)
+    cfg = OmegaConf.load(args.config_file)
+    main(cfg.train)

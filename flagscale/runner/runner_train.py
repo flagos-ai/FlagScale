@@ -49,18 +49,6 @@ def _get_args_megatron(config: DictConfig):
     return args
 
 
-def _get_args_robotics(config: DictConfig):
-    assert config.experiment.task.backend == "robotics", (
-        "This function only supports robotics backend."
-    )
-
-    # Convert the DictConfig to a regular dictionary
-    config_dict = OmegaConf.to_container(config, resolve=True)
-    config_dict = config_dict["train"]
-    args = flatten_dict_to_args({"config_path": config_dict["config_path"]})
-    return args
-
-
 def _get_args_native(config: DictConfig):
     """
     Use Hydra-generated config.yaml for native backend.
@@ -387,8 +375,6 @@ class SSHTrainRunner(RunnerBase):
         _update_config_train(self.config)
         if self.config.experiment.task.backend == "megatron":
             self.user_args = _get_args_megatron(self.config)
-        elif self.config.experiment.task.backend == "robotics":
-            self.user_args = _get_args_robotics(self.config)
         elif self.config.experiment.task.backend == "native":
             self.user_args = _get_args_native(self.config)
         else:
@@ -827,8 +813,6 @@ class CloudTrainRunner(RunnerBase):
         _update_config_train(self.config)
         if self.config.experiment.task.backend == "megatron":
             self.user_args = _get_args_megatron(self.config)
-        elif self.config.experiment.task.backend == "robotics":
-            self.user_args = _get_args_robotics(self.config)
         logger.info("\n************** configuration ***********")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 

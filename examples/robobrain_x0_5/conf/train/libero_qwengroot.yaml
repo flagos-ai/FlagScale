@@ -1,4 +1,3 @@
-config_path: examples/robobrain_x0_5/conf/train/libero_qwengroot.yaml
 seed: 42
 trackers: [jsonl, wandb]
 wandb_entity: jinhuiye
