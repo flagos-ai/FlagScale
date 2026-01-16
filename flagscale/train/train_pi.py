@@ -15,6 +15,7 @@ import math
 import time
 from contextlib import nullcontext
 
+from omegaconf import OmegaConf
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -23,6 +24,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from flagscale.runner.utils import logger
+from flagscale.train.train_config import TrainConfig, DataConfig
 from flagscale.train.datasets.transforms import ImageTransforms
 from flagscale.train.datasets.lerobot_dataset import (
     LeRobotDataset,
@@ -103,14 +105,14 @@ def init_ddp():
 #         wandb.run.log_code(epath.Path(__file__).parent.parent)
 
 
-def make_dataset(cfg, policy_config):
+def make_dataset(cfg: DataConfig, policy_config):
     # TODO: (yupu) Support image transforms
-    cfg.enable_image_transform = False
+    enable_image_transform = False
     # TODO: (yupu) Remove hard-coded video backend
-    cfg.video_backend = "pyav"
+    video_backend = "pyav"
 
     image_transforms = (
-        ImageTransforms(cfg.image_transforms) if cfg.enable_image_transform else None
+        ImageTransforms(cfg.image_transforms) if enable_image_transform else None
     )
     # Leave the revision to None
     ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
@@ -122,7 +124,7 @@ def make_dataset(cfg, policy_config):
         delta_timestamps=delta_timestamps,
         image_transforms=image_transforms,
         revision=None,
-        video_backend=cfg.video_backend,
+        video_backend=video_backend,
         tolerance_s=cfg.tolerance_s,
     )
 
@@ -515,25 +517,32 @@ def update_policy(
     return train_metrics
 
 
-def main(config: argparse.Namespace):
-    set_seed(config.seed)
+def main(config: TrainConfig, seed: int):
+    set_seed(seed)
 
-    model_variant = config.model_variant.lower()
-    if model_variant not in ["pi0", "pi0.5"]:
+    model_name = config.model.model_name.lower()
+    if model_name not in ["pi0", "pi0.5"]:
         raise ValueError(
-            f"Invalid model_variant: {model_variant}. Must be 'pi0' or 'pi0.5'"
+            f"Invalid model_name: {model_name}. Must be 'pi0' or 'pi0.5'"
         )
 
-    if model_variant == "pi0.5":
-        policy_config = PI05Config.from_pretrained(config.checkpoint_dir)
+    # Load base config from checkpoint
+    if model_name == "pi0.5":
+        policy_config = PI05Config.from_pretrained(config.model.checkpoint_dir)
     else:
-        policy_config = PI0Config.from_pretrained(config.checkpoint_dir)
+        policy_config = PI0Config.from_pretrained(config.model.checkpoint_dir)
 
-    policy_config.pretrained_path = config.checkpoint_dir
-    policy_config.n_action_steps = config.action_steps
-    policy_config.tokenizer_max_length = config.tokenizer_max_length
+    # Override with any model-specific fields from YAML
+    model_config_overrides = config.model.get_model_config_dict()
+    for key, value in model_config_overrides.items():
+        if hasattr(policy_config, key):
+            setattr(policy_config, key, value)
+        else:
+            logger.warning(f"Model config field '{key}' not found in {model_name} config, ignoring")
 
-    policy_config.use_amp = config.use_amp
+    # Set training-specific fields
+    policy_config.pretrained_path = config.model.checkpoint_dir
+    policy_config.use_amp = config.system.use_amp
 
     local_rank = init_ddp()
     device = torch.device("cuda", local_rank)
@@ -542,37 +551,19 @@ def main(config: argparse.Namespace):
     policy_config.device = device
 
     if is_main_process:
-        logger.info(f"Policy config ({model_variant}): {policy_config}")
+        logger.info(f"Policy config ({model_name}): {policy_config}")
 
-    dataset = make_dataset(config, policy_config)
+    dataset = make_dataset(config.data, policy_config)
 
     dist.barrier()
 
-    # TODO: (yupu) This is so ugly
-    rename_map = None
-    if config.rename_map:
-        rename_map_str = config.rename_map
-        # Clean up the rename map string, remove outer quotes if present
-        if (rename_map_str.startswith("'") and rename_map_str.endswith("'")) or (
-            rename_map_str.startswith('"') and rename_map_str.endswith('"')
-        ):
-            rename_map_str = rename_map_str[1:-1]
-            print(f"rename_map_str: {rename_map_str}")
-
-        try:
-            rename_map = json.loads(rename_map_str)
-            if not isinstance(rename_map, dict):
-                raise ValueError(
-                    f"rename_map must be a dictionary, got {type(rename_map)}"
-                )
-        except json.JSONDecodeError as e:
-            raise ValueError("Invalid JSON in --rename-map") from e
+    rename_map = config.data.rename_map
 
     policy = make_policy(
         cfg=policy_config,
         ds_meta=dataset.meta,
         rename_map=rename_map,
-        model_variant=model_variant,
+        model_variant=model_name,
     )
 
     dist.barrier()
@@ -583,7 +574,7 @@ def main(config: argparse.Namespace):
     # Only provide dataset_stats when not resuming from saved processor state
     processor_kwargs["dataset_stats"] = dataset.meta.stats
 
-    if not config.use_quantiles and model_variant == "pi0.5":
+    if not config.data.use_quantiles and model_name == "pi0.5":
         from flagscale.models.configs.types import NormalizationMode
 
         policy.config.normalization_mapping = {
@@ -602,7 +593,7 @@ def main(config: argparse.Namespace):
             },
             "norm_map": policy.config.normalization_mapping,
         },
-        "tokenizer_processor": {"tokenizer_name": config.tokenizer_path},
+        "tokenizer_processor": {"tokenizer_name": config.model.tokenizer_path},
     }
 
     if rename_map is not None:
@@ -628,27 +619,28 @@ def main(config: argparse.Namespace):
     )
 
     # Convert optimizer_betas to tuple if it's a list
-    if isinstance(config.optimizer_betas, list):
-        config.optimizer_betas = tuple(config.optimizer_betas)
+    optimizer_betas = config.system.optimizer.betas
+    if isinstance(optimizer_betas, list):
+        optimizer_betas = tuple(optimizer_betas)
 
     # TODO: (yupu) Should we let the user choose between config and policy preset?
     optimizer = torch.optim.AdamW(
         policy.parameters(),
-        lr=config.optimizer_lr,
-        betas=config.optimizer_betas,
-        eps=config.optimizer_eps,
-        weight_decay=config.optimizer_weight_decay,
+        lr=config.system.optimizer.lr,
+        betas=optimizer_betas,
+        eps=config.system.optimizer.eps,
+        weight_decay=config.system.optimizer.weight_decay,
     )
     scheduler_config = CosineDecayWithWarmupSchedulerConfig(
-        num_warmup_steps=config.scheduler_warmup_steps,
-        num_decay_steps=config.scheduler_decay_steps,
-        peak_lr=config.optimizer_lr,
-        decay_lr=config.scheduler_decay_lr,
+        num_warmup_steps=config.system.scheduler.warmup_steps,
+        num_decay_steps=config.system.scheduler.decay_steps,
+        peak_lr=config.system.optimizer.lr,
+        decay_lr=config.system.scheduler.decay_lr,
     )
-    lr_scheduler = scheduler_config.build(optimizer, config.train_steps)
+    lr_scheduler = scheduler_config.build(optimizer, config.system.train_steps)
 
-    config.num_workers = 4
-    shuffle = config.shuffle
+    num_workers = config.system.num_workers
+    shuffle = config.system.shuffle
 
     # DistributedSampler ensures each rank gets different data
     sampler = torch.utils.data.distributed.DistributedSampler(
@@ -661,13 +653,13 @@ def main(config: argparse.Namespace):
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        num_workers=config.num_workers,
-        batch_size=config.batch_size,
+        num_workers=num_workers,
+        batch_size=config.system.batch_size,
         shuffle=False,  # Must be False when using sampler
         sampler=sampler,
         pin_memory=True,  # Assume all data is on GPU
         drop_last=False,
-        prefetch_factor=2 if config.num_workers > 0 else None,
+        prefetch_factor=2 if num_workers > 0 else None,
     )
 
     policy = DDP(
@@ -691,7 +683,7 @@ def main(config: argparse.Namespace):
         "dataloading_s": AverageMeter("data_s", ":.3f"),
     }
 
-    effective_batch_size = config.batch_size * dist.get_world_size()
+    effective_batch_size = config.system.batch_size * dist.get_world_size()
 
     step = 0
 
@@ -709,7 +701,7 @@ def main(config: argparse.Namespace):
     dataloader.sampler.set_epoch(epoch)
     samples_per_epoch = len(dataset) // effective_batch_size
 
-    for _ in range(step, config.train_steps):
+    for _ in range(step, config.system.train_steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
         batch = {
@@ -725,7 +717,7 @@ def main(config: argparse.Namespace):
             policy,
             batch,
             optimizer,
-            config.grad_clip_norm,
+            config.system.grad_clip_norm,
             lr_scheduler=lr_scheduler,
         )
 
@@ -740,18 +732,18 @@ def main(config: argparse.Namespace):
             epoch += 1
             dataloader.sampler.set_epoch(epoch)
 
-        if step % config.log_freq == 0 and is_main_process:
+        if step % config.system.log_freq == 0 and is_main_process:
             logger.info(f"step: {step} loss: {train_tracker}")
 
-        if config.save_checkpoint and step % config.save_freq == 0:
+        if config.system.checkpoint.save_checkpoint and step % config.system.checkpoint.save_freq == 0:
             # Synchronize all processes before checkpoint saving
             dist.barrier()
 
             if is_main_process:
                 logger.info(f"Saving checkpoint at step {step}")
-                output_dir = Path(config.output_directory)
+                output_dir = Path(config.system.checkpoint.output_directory)
                 checkpoint_dir = get_step_checkpoint_dir(
-                    output_dir, config.train_steps, step
+                    output_dir, config.system.train_steps, step
                 )
                 policy_to_save = policy.module
                 save_checkpoint(
@@ -772,71 +764,30 @@ def main(config: argparse.Namespace):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Train PI0/PI0.5 model. This script is typically called by the flagscale runner, not directly."
+    )
+    parser.add_argument(
+        "--config-file", type=str, required=True, help="Path to the configuration YAML file"
+    )
+    args = parser.parse_args()
 
-    # ============================== System Configs ==============================
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--batch-size", type=int, default=1)
-    parser.add_argument("--train-steps", type=int, default=100000)
-    parser.add_argument("--log-freq", type=int, default=10)
-    parser.add_argument(
-        "--output-directory", type=str, default="", help="Path to the output directory"
-    )
-    parser.add_argument("--save-checkpoint", action="store_true")
-    parser.add_argument("--save-freq", type=int, default=1000)
-    parser.add_argument("--optimizer-lr", type=float, default=2.5e-5)
-    parser.add_argument("--optimizer-betas", nargs=2, type=float, default=[0.9, 0.95])
-    parser.add_argument("--optimizer-eps", type=float, default=1e-8)
-    parser.add_argument("--optimizer-weight-decay", type=float, default=0.01)
-    parser.add_argument("--optimizer-grad-clip-norm", type=float, default=1.0)
-    parser.add_argument("--scheduler-warmup-steps", type=int, default=1000)
-    parser.add_argument("--scheduler-decay-steps", type=int, default=30000)
-    parser.add_argument("--scheduler-decay-lr", type=float, default=2.5e-6)
-    parser.add_argument("--grad-clip-norm", type=float, default=1.0)
-    parser.add_argument("--use-amp", action="store_true")
-    parser.add_argument("--shuffle", action="store_true")
+    config_file_path = args.config_file
 
-    # ============================== Model Configs ==============================
-    parser.add_argument(
-        "--checkpoint-dir",
-        type=str,
-        default="",
-        help="Path to the pretrained model checkpoint directory",
-    )
-    parser.add_argument(
-        "--model-variant",
-        type=str,
-        default="pi0",
-        choices=["pi0", "pi0.5"],
-        help="Model variant to use: 'pi0' or 'pi0.5'",
-    )
-    parser.add_argument(
-        "--tokenizer-path", type=str, default="", help="Path to the tokenizer"
-    )
-    parser.add_argument("--tokenizer-max-length", type=int, default=48)
-    parser.add_argument("--action-steps", type=int, default=50)
+    # Load config from YAML file (Hydra-generated config.yaml contains both train and experiment)
+    config = OmegaConf.load(config_file_path)
 
-    # ============================== Data Configs ==============================
-    parser.add_argument("--enable-image-transform", action="store_true")
-    parser.add_argument("--tolerance-s", type=float, default=0.0001)
-    parser.add_argument("--use-imagenet-stats", action="store_true")
-    parser.add_argument("--video-backend", type=str, default="pyav")
-    parser.add_argument(
-        "--data-path", type=str, default="", help="Path to the training dataset"
-    )
-    parser.add_argument(
-        "--rename-map",
-        type=str,
-        default="",
-        help=(
-            "JSON string mapping dataset feature keys to policy feature keys, "
-            'e.g., \'{"observation.images.cam_high": "observation.images.base_0_rgb"}\''
-        ),
-    )
-    parser.add_argument("--use-quantiles", action="store_true")
+    # Extract train config and convert to Pydantic TrainConfig
+    train_config_dict = OmegaConf.to_container(config.train, resolve=True)
+    train_config = TrainConfig(**train_config_dict)
 
-    config = parser.parse_args()
+    # Extract experiment config (seed, exp_dir, etc.)
+    experiment_config = OmegaConf.to_container(config.experiment, resolve=True)
+    seed = experiment_config.get('seed', 42)
 
     logger.info("=" * 100)
-    logger.info(f"train_pi0_base.py config: {config}")
-    main(config)
+    logger.info(f"Experiment: {experiment_config}")
+    logger.info(f"Train config: {train_config}")
+
+    # Run training with both configs
+    main(train_config, seed)

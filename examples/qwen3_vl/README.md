@@ -14,12 +14,14 @@ cd FlagScale
 Apply the submodule patch code.
 
 ```bash
-# to be updated
-python ./tools/patch/unpatch.py --backend=Megatron-LM
-python ./tools/patch/unpatch.py --backend=Megatron-Energon
-cd ./third_party/Megatron-Energon/
-pip install -e .
-cp -r src/megatron/energon/ ../Megatron-LM/megatron/
+# install Megatron-Energon
+pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226100830f41de38d1f1204d7848b54b1f3e
+# install Megatron-LM-FL
+git clone https://github.com/flagos-ai/Megatron-LM-FL
+cd Megatron-LM-FL
+pip install --no-build-isolation .
+# update transformers
+pip install transformers==4.57.1
 ```
 
 You can also refer to the readme in `https://github.com/FlagOpen/FlagScale.git`
@@ -35,8 +37,8 @@ cd Qwen3-VL-8B-Instruct
 git lfs pull
 
 cd ./tools/checkpoint/qwen3_vl/
-export PYTHONPATH=$PYTHONPATH:../../../:../../../flagscale/train/
-bash hf2mcore_qwen_vl_convertor.sh 8B \
+export PYTHONPATH=../../../:$PYTHONPATH
+bash hf2mcore_qwen3_vl_convertor.sh 8B \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct-tp2 \
 2 1 false bf16  \
@@ -44,6 +46,50 @@ bash hf2mcore_qwen_vl_convertor.sh 8B \
 ```
 
 ### 3. Preprocess dataset
+
+
+#### Demo dataset
+
+FlagScale uses WebDataset format and Megatraon.Energon data loader, you need to process your data first.
+
+There is a dataset processed: [demo_0913_n2_vlm](https://gitee.com/hchnr/flag-scale/tree/robotics_dataset/demo_0913_n2_vlm/wds-1).
+
+Download demo_0913_n2_vlm:
+
+```sh
+mkdir /tmp/datasets
+cd /tmp/datasets
+git clone https://gitee.com/hchnr/flag-scale.git
+cd flag-scale
+git checkout robotics_dataset
+```
+
+Move .jpg and .npy files from ./demo_0913_n2_vlm/deps to /:
+
+```sh
+mkdir -p /share/
+cp -r ./demo_0913_n2_vlm/deps/* /
+```
+
+If you need to make your own datasets, generate Data in webdataset format (DP=2) to ./demo_0913_n2_vlm/wds-2:
+
+```sh
+python tools/datasets/qwenvl/convert.py \
+    --dataset-root=./demo_0913_n2_vlm \
+    --output-root=./demo_0913_n2_vlm \
+    --json=demo_0913_n2.jsonl \
+    --train-split 1 \
+    --val-split 0 \
+    --images-key=image \
+    --videos-key=video \
+    --vision-root='' \
+    --shuffle-tars \
+    --num-workers=1 \
+    --max-samples-per-tar 100000 \
+    --dp-size 2
+```
+
+#### Formal dataset
 
 Reference [dataset_preparation.md](../../../../tools/datasets/qwenvl/dataset_preparation.md)
 
@@ -58,7 +104,7 @@ unzip images.zip
 
 # convert to webdataset format
 cd ./tools/datasets/qwenvl/
-export PYTHONPATH=$PYTHONPATH:../../../flagscale/train/
+export PYTHONPATH=../../../:$PYTHONPATH
 
 python convert_custom_dataset_to_wds_chatml_str.py \
     --dataset-root=/mnt/LLaVA-Pretrain \
@@ -81,7 +127,11 @@ The configuration of `data-path` is `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/
 Add the data path and checkpoint path in ./examples/qwen3_vl/conf/train/8b.yaml as shown below:
 
 ```bash
-# dataset
+# use demo dataset
+data_path: /tmp/datasets/flag-scale/demo_0913_n2_vlm/wds-1
+vision_root: /
+
+# or use formal dataset
 data_path: /mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1
 vision_root: /mnt/LLaVA-Pretrain
 
@@ -106,8 +156,10 @@ Reference [convert.md](../../../../tools/checkpoint/qwen3_vl/convert.md)
 
 ``` bash
 cd ./tools/checkpoint/qwen3_vl/
-bash hf2mcore_qwen_vl_convertor.sh 8B \
-./train_qwen3_vl_7b/checkpoints \
+export PYTHONPATH=../../../:$PYTHONPATH
+
+bash hf2mcore_qwen3_vl_convertor.sh 8B \
+../../../train_qwen3_vl_8b/checkpoints \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct-fs2hf-tp2 \
 2 1 true bf16  \
 /mnt/qwen-vl-ckpts/Qwen3-VL-8B-Instruct
@@ -122,6 +174,7 @@ Our evaluation process leverages the capabilities of [FlagEval](https://flageval
 More details about [Auto-Evaluation](https://github.com/flageval-baai/Auto-Evaluation/blob/main/README_en.md) tools.
 
 ### 1. Start the server
+    More details refer to this [doc](https://github.com/flagos-ai/FlagScale/tree/main/examples/robobrain2_5).
 
     ```sh
     python run.py --config-path ./examples/robobrain2_5/conf --config-name serve action=run

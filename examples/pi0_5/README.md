@@ -154,12 +154,20 @@ Configure the following fields:
 **System settings** (training hyperparameters):
 - `system.batch_size` - Batch size per GPU
 - `system.train_steps` - Total training steps
-- `system.optimizer_lr` - Learning rate
-- `system.save_checkpoint` - Whether to save checkpoints (default: `true`)
-- `system.save_freq` - Steps between checkpoints
+- `system.optimizer.name` - Optimizer name (default: `"AdamW"`)
+- `system.optimizer.lr` - Learning rate (default: `2.5e-5`)
+- `system.optimizer.betas` - Optimizer betas (default: `[0.9, 0.95]`)
+- `system.optimizer.eps` - Optimizer epsilon (default: `1.0e-8`)
+- `system.optimizer.weight_decay` - Weight decay (default: `0.01`)
+- `system.scheduler.warmup_steps` - Warmup steps (default: `1000`)
+- `system.scheduler.decay_steps` - Decay steps (default: `30000`)
+- `system.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
+- `system.checkpoint.save_checkpoint` - Whether to save checkpoints (default: `true`)
+- `system.checkpoint.save_freq` - Steps between checkpoints (default: `1000`)
+- `system.checkpoint.output_directory` - Checkpoint output directory (default: `${experiment.exp_dir}/ckpt`)
 
 **Model settings**:
-- `model.model_variant` - Model variant: `"pi0.5"`
+- `model.model_name` - Model name: `"pi0.5"`
 - `model.checkpoint_dir` - Path to pretrained model (e.g., `/workspace/models/lerobot/pi05_base`)
 - `model.tokenizer_path` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `model.tokenizer_max_length` - Maximum tokenizer sequence length (default: `200` for pi0.5)
@@ -168,9 +176,12 @@ Configure the following fields:
 **Data settings**:
 - `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
 - `data.use_imagenet_stats` - Whether to use ImageNet normalization stats (default: `true`)
-- `data.rename_map` - JSON string mapping dataset keys to policy keys (optional). Check the `features` key in your dataset's `meta/info.json` file to determine the correct mapping:
+- `data.rename_map` - Dictionary mapping dataset keys to policy keys (optional). Check the `features` key in your dataset's `meta/info.json` file to determine the correct mapping:
   ```yaml
-  rename_map: '{"observation.images.cam_high": "observation.images.base_0_rgb", "observation.images.cam_left_wrist": "observation.images.left_wrist_0_rgb", "observation.images.cam_right_wrist": "observation.images.right_wrist_0_rgb"}'
+  rename_map:
+    observation.images.cam_high: observation.images.base_0_rgb
+    observation.images.cam_left_wrist: observation.images.left_wrist_0_rgb
+    observation.images.cam_right_wrist: observation.images.right_wrist_0_rgb
   ```
 - `data.use_quantiles` - Whether to use quantile normalization (default: `false` for pi0.5, uses MEAN_STD normalization)
 

@@ -87,11 +87,11 @@ Require Megatron-LM-FL env
 
     - dataset
 
-        We provide a small processed data ([bin](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin) and [idx](https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx)) from the [Pile](https://pile.eleuther.ai/) dataset.
+        We provide a small processed data ([bin](https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/datasets/enron_emails_demo_text_document_qwen/enron_emails_demo_text_document_qwen.bin) and [idx](https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/datasets/enron_emails_demo_text_document_qwen/enron_emails_demo_text_document_qwen.idx)) from the [Pile](https://pile.eleuther.ai/) dataset.
         ```sh
         mkdir -p ./data && cd ./data
-        wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.idx
-        wget https://model.ks3-cn-beijing.ksyuncs.com/nlpdata/pile_wikipedia_demo.bin
+        wget https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/datasets/enron_emails_demo_text_document_qwen/enron_emails_demo_text_document_qwen.idx
+        wget https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/datasets/enron_emails_demo_text_document_qwen/enron_emails_demo_text_document_qwen.bin
         ```
 
     - tokenizer
@@ -108,7 +108,7 @@ Require Megatron-LM-FL env
     Modify the data_path and tokenizer_path in ./examples/qwen3/conf/train/0_6b.yaml at line 81 and line 87
     ```yaml
     data:
-        data_path: ./data/pile_wikipedia_demo    # modify data_path here
+        data_path: ./data/enron_emails_demo_text_document_qwen    # modify data_path here
         split: 1
         no_mmap_bin_files: true
         tokenizer:

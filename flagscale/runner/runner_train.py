@@ -4,6 +4,8 @@ import shlex
 import time
 from datetime import datetime
 
+import hydra
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.elastic.monitor_service import MonitorService
@@ -59,35 +61,26 @@ def _get_args_robotics(config: DictConfig):
     return args
 
 
-def _get_args_pi0(config: DictConfig):
-    assert config.experiment.task.backend in [
-        "pi0",
-        "lerobot",
-    ], "This function only supports pi0 or lerobot backend."
+def _get_args_native(config: DictConfig):
+    """
+    Use Hydra-generated config.yaml for native backend.
+    """
+    assert config.experiment.task.backend in (
+        "native",
+        "native_train",
+    ), "This function only supports native train backend."
 
-    # Convert the DictConfig to a regular dictionary
-    config_dict = OmegaConf.to_container(config, resolve=True)
-    config_dict = config_dict["train"]
+    # Use Hydra's generated config.yaml (same pattern as backend_native_compress.py)
+    # See: https://github.com/facebookresearch/hydra/discussions/2750
 
-    new_config_dict = {}
-    new_config_dict.update(config_dict["system"])
-    new_config_dict.update(config_dict["model"])
-    new_config_dict.update(config_dict["data"])
+    hydra_config = HydraConfig.get()
+    output_dir = hydra_config.runtime.output_dir
+    output_subdir = hydra_config.output_subdir
+    config_path = os.path.join(output_dir, f"{output_subdir}/config.yaml")
+    config_path = hydra.utils.to_absolute_path(config_path)
 
-    ignore_keys = [
-        "log_dir",
-        "details_dir",
-        "scripts_dir",
-        "pids_dir",
-        "save",
-        "output_dir",
-        "load",
-        "tensorboard_dir",
-        "wandb_save_dir",
-    ]
-    # Flatten the dictionary to a list of arguments
-    args = flatten_dict_to_args(new_config_dict, ignore_keys=ignore_keys)
-    return args
+    # Return the path to Hydra's config.yaml
+    return [f"--config-file={config_path}"]
 
 
 def _update_config_train(config: DictConfig):
@@ -396,8 +389,10 @@ class SSHTrainRunner(RunnerBase):
             self.user_args = _get_args_megatron(self.config)
         elif self.config.experiment.task.backend == "robotics":
             self.user_args = _get_args_robotics(self.config)
-        elif self.config.experiment.task.backend in ["pi0", "lerobot"]:
-            self.user_args = _get_args_pi0(self.config)
+        elif self.config.experiment.task.backend == "native":
+            self.user_args = _get_args_native(self.config)
+        else:
+            raise ValueError(f"Unsupported backend: {self.config.experiment.task.backend}")
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint
@@ -477,7 +472,12 @@ class SSHTrainRunner(RunnerBase):
             run_local_command(f"bash {host_run_script_file}", dryrun)
 
     def run(
-        self, with_test=False, dryrun=False, monitor=False, interval=10, enable_monitoring=None
+        self,
+        with_test=False,
+        dryrun=False,
+        monitor=False,
+        interval=10,
+        enable_monitoring=None,
     ):
         # Read from config if not explicitly provided
         if enable_monitoring is None:

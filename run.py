@@ -75,9 +75,7 @@ def get_runner(config: DictConfig, task_type: str):
             raise NotImplementedError(f"Task type '{task_type}' is not supported by cloud runner")
 
     if FLAGSCALE_USE_V1 and config.experiment.task.get("backend", None) not in {
-        "pi0",
         "robotics",
-        "lerobot",
     }:
         return Runner(config)
 
