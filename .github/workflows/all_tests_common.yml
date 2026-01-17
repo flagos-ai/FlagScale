@@ -115,7 +115,6 @@ jobs:
       fail-fast: false
       matrix:
         test_config: ${{ fromJson(needs.load_config.outputs.functional_test_matrix) }}
-    name: functional-tests
     uses: ./.github/workflows/functional_tests_common.yml
     with:
       platform: ${{ inputs.hardware }}

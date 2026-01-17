@@ -39,7 +39,7 @@ on:
 jobs:
   functional_test:
     runs-on: ${{ fromJson(inputs.runs_on) }}
-    name: functional-${{ inputs.device }}-${{ inputs.task }}-${{ inputs.model }}${{ inputs.case && format('-{0}', inputs.case) || '' }}
+    name: ${{ inputs.device }}-${{ inputs.task }}-${{ inputs.model }}${{ inputs.case && format('-{0}', inputs.case) || '' }}
     container:
       image: ${{ inputs.image }}
       ports:
