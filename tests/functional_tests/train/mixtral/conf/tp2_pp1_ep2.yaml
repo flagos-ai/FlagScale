@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: tp2_pp1_ep2
-  exp_dir: tests/functional_tests/test_cases/train/mixtral/test_results/tp2_pp1_ep2
+  exp_dir: tests/functional_tests/train/mixtral/test_results/tp2_pp1_ep2
   task:
     type: train
     backend: megatron

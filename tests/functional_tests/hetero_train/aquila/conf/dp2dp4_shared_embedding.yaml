@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: dp2dp4_shared_embedding
-  exp_dir: tests/functional_tests/test_cases/hetero_train/aquila/test_results/dp2dp4_shared_embedding
+  exp_dir: tests/functional_tests/hetero_train/aquila/test_results/dp2dp4_shared_embedding
   task:
     type: train
     backend: megatron

@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: tp2dp1pp1_tp2dp2pp1_tp1dp2pp1
-  exp_dir: tests/functional_tests/test_cases/hetero_train/aquila/test_results/tp2dp1pp1_tp2dp2pp1_tp1dp2pp1
+  exp_dir: tests/functional_tests/hetero_train/aquila/test_results/tp2dp1pp1_tp2dp2pp1_tp1dp2pp1
   task:
     type: train
     backend: megatron
