@@ -117,7 +117,6 @@ jobs:
       matrix:
         test_config: ${{ fromJson(needs.load_config.outputs.functional_test_matrix) }}
     uses: ./.github/workflows/functional_tests_common.yml
-    name: functional_tests
     with:
       platform: ${{ inputs.hardware }}
       device: ${{ matrix.test_config.device }}
