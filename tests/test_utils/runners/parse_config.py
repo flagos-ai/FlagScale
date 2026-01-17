@@ -18,22 +18,29 @@ def load_yaml(path):
         raise ValueError(f"Invalid YAML: {e}")
 
 
-def get_platform_config(platform="default", device=None):
+def get_platform_config(platform, device=None):
     """Load platform configuration YAML file.
 
     Args:
-        platform: Platform name (e.g., 'cuda', 'default')
+        platform: Platform name (e.g., 'cuda') - REQUIRED, no default
         device: Device type within platform (e.g., 'a100', 'a800', 'h100')
                 If None, device will be derived from platform name
 
     Returns:
         Tuple of (config_dict, device_type)
+
+    Raises:
+        ValueError: If platform is not specified or is invalid
     """
+    if not platform:
+        raise ValueError(
+            "Platform must be specified. Available platforms: cuda. See template.yaml for creating new platforms."
+        )
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Map platform names to config files
     platform_file_map = {
-        "default": "default.yaml",
         "cuda": "cuda.yaml",
         "a100": "cuda.yaml",
         "a800": "cuda.yaml",
@@ -49,15 +56,22 @@ def get_platform_config(platform="default", device=None):
     config_file = os.path.join(script_dir, "../config/platforms", yaml_file)
 
     if not os.path.exists(config_file):
-        raise OSError(f"Platform config not found: {config_file}")
+        # List available platforms
+        platforms_dir = os.path.join(script_dir, "../config/platforms")
+        available = [
+            f.replace(".yaml", "")
+            for f in os.listdir(platforms_dir)
+            if f.endswith(".yaml") and f != "template.yaml"
+        ]
+        raise OSError(
+            f"Platform config not found: {config_file}. Available platforms: {', '.join(available)}. Use template.yaml to create a new platform."
+        )
 
     config = load_yaml(config_file)
 
-    # If device not specified, use default device from config
+    # If device not specified, use first device type from config
     if device is None:
-        if platform == "default":
-            device = "generic"
-        elif config.get("device_types"):
+        if config.get("device_types"):
             # Use first device type as default
             device = config["device_types"][0]
         else:
@@ -82,23 +96,37 @@ def get_platform_data(config, device):
     return config[device]
 
 
-def get_device_types(platform="default"):
+def get_device_types(platform):
     """Get available device types for a platform.
 
     Args:
-        platform: Platform name (e.g., 'cuda', 'default')
+        platform: Platform name (e.g., 'cuda') - REQUIRED
 
     Returns:
         List of device types available for the platform
+
+    Raises:
+        ValueError: If platform is not specified
     """
+    if not platform:
+        raise ValueError("Platform must be specified. Available platforms: cuda")
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    platform_file_map = {"default": "default.yaml", "cuda": "cuda.yaml"}
+    platform_file_map = {"cuda": "cuda.yaml"}
 
     yaml_file = platform_file_map.get(platform, f"{platform}.yaml")
     config_file = os.path.join(script_dir, "../config/platforms", yaml_file)
 
     if not os.path.exists(config_file):
-        raise OSError(f"Platform config not found: {config_file}")
+        platforms_dir = os.path.join(script_dir, "../config/platforms")
+        available = [
+            f.replace(".yaml", "")
+            for f in os.listdir(platforms_dir)
+            if f.endswith(".yaml") and f != "template.yaml"
+        ]
+        raise OSError(
+            f"Platform config not found: {config_file}. Available platforms: {', '.join(available)}"
+        )
 
     config = load_yaml(config_file)
 
@@ -109,16 +137,22 @@ def get_device_types(platform="default"):
         return [k for k in config.keys() if k != "device_types"]
 
 
-def get_unit_tests_config(platform="default", device=None):
+def get_unit_tests_config(platform, device=None):
     """Get unit test patterns from platform configuration.
 
     Args:
-        platform: Platform name (e.g., 'cuda', 'default')
-        device: Device type (e.g., 'a100', 'a800', 'h100')
+        platform: Platform name (e.g., 'cuda') - REQUIRED
+        device: Device type (e.g., 'a100', 'a800')
 
     Returns:
         Dict with 'include' and 'exclude' patterns
+
+    Raises:
+        ValueError: If platform is not specified
     """
+    if not platform:
+        raise ValueError("Platform must be specified")
+
     try:
         config, device = get_platform_config(platform, device)
         platform_data = get_platform_data(config, device)
@@ -129,11 +163,11 @@ def get_unit_tests_config(platform="default", device=None):
         return {"include": "*", "exclude": []}
 
 
-def get_functional_tests(platform="default", device=None, task=None, model=None, test_list=None):
+def get_functional_tests(platform, device=None, task=None, model=None, test_list=None):
     """Get functional tests from platform config, optionally filtered by task/model/list.
 
     Args:
-        platform: Platform name (e.g., 'cuda', 'default')
+        platform: Platform name (e.g., 'cuda') - REQUIRED
         device: Device type (e.g., 'a100', 'a800', 'h100')
         task: Task name to filter (e.g., 'train', 'hetero_train')
         model: Model name to filter (e.g., 'aquila', 'mixtral')
@@ -141,7 +175,13 @@ def get_functional_tests(platform="default", device=None, task=None, model=None,
 
     Returns:
         Dict of functional tests configuration
+
+    Raises:
+        ValueError: If platform is not specified
     """
+    if not platform:
+        raise ValueError("Platform must be specified")
+
     config, device = get_platform_config(platform, device)
     platform_data = get_platform_data(config, device)
     functional_tests = platform_data.get("tests", {}).get("functional", {})
@@ -184,11 +224,11 @@ def main():
     parser = argparse.ArgumentParser(
         description="Parse test configuration with platform and device support"
     )
-    parser.add_argument("--platform", default="default", help="Platform type (default, cuda, etc)")
-    parser.add_argument("--device", help="Device type within platform (a100, a800, h100, etc)")
+    parser.add_argument("--platform", required=True, help="Platform type (cuda, etc.) - REQUIRED")
+    parser.add_argument("--device", help="Device type within platform (a100, a800, h100, etc.)")
     parser.add_argument("--type", choices=["unit", "functional", "device_types"], help="Query type")
     parser.add_argument("--task", help="Functional task name (train, hetero_train)")
-    parser.add_argument("--model", help="Model name (aquila, mixtral, etc)")
+    parser.add_argument("--model", help="Model name (aquila, mixtral, etc.)")
     parser.add_argument("--list", dest="test_list", help="Comma-separated list of test names")
 
     args = parser.parse_args()

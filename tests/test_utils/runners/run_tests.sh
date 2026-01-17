@@ -9,7 +9,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/utils.sh"
 
 # Defaults
-PLATFORM="default"
+PLATFORM=""
 DEVICE=""
 TEST_TYPE=""
 TASK=""
@@ -23,8 +23,10 @@ Usage: $(basename "$0") [OPTIONS]
 Run FlagScale tests with platform-specific configurations.
 
 OPTIONS:
-    --platform PLATFORM    Platform: default or cuda (default: default)
-    --device DEVICE        Device type: a100, a800, h100, generic (optional)
+    --platform PLATFORM    Platform: cuda (REQUIRED)
+                           See tests/test_utils/config/platforms/ for available platforms
+                           Use template.yaml to create new platform configurations
+    --device DEVICE        Device type: a100, a800 (optional)
                            If not specified, runs tests for all devices in the platform
     --type TYPE            Test type: unit or functional (optional, runs all if not specified)
     --task TASK            Task name for functional tests: train, hetero_train (optional)
@@ -34,7 +36,6 @@ OPTIONS:
 
 EXAMPLES:
     # Run all tests for all devices in the platform
-    $(basename "$0") --platform default
     $(basename "$0") --platform cuda
 
     # Run all tests for specific device
@@ -76,6 +77,13 @@ done
 # Validate test type if provided
 if [ -n "$TEST_TYPE" ] && [ "$TEST_TYPE" != "unit" ] && [ "$TEST_TYPE" != "functional" ]; then
     log_error "Invalid test type '$TEST_TYPE'. Must be 'unit' or 'functional'"
+    exit 1
+fi
+
+# Require platform to be specified
+if [ -z "$PLATFORM" ]; then
+    log_error "Platform must be specified with --platform. Available platforms: cuda"
+    log_error "See tests/test_utils/config/platforms/template.yaml to create new platforms"
     exit 1
 fi
 

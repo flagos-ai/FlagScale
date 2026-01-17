@@ -1,7 +1,16 @@
-# Default Platform Configuration
-# Flexible test selection mechanism for CPU and other hardware environments
+# Platform Configuration Template
+# This is a TEMPLATE file - copy and customize it for your specific hardware platform
 #
-# This platform configuration supports generic device type
+# To create a new platform configuration:
+# 1. Copy this file to a new file (e.g., my_platform.yaml)
+# 2. Update the device_types list
+# 3. Configure device-specific test settings
+# 4. Run tests with: --platform my_platform
+#
+# Example platforms:
+# - cuda.yaml: NVIDIA GPU configuration
+# - Add your own: cpu.yaml, npu.yaml, etc.
+#
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
 #   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items

@@ -8,8 +8,12 @@ def pytest_addoption(parser):
         ("--task", "task", "Task type (train/inference/hetero_train/rl/serve)"),
         ("--model", "model", "Model name (aquila/deepseek/mixtral)"),
         ("--case", "case", "Specific test case configuration"),
-        ("--platform", "platform", "Platform type (default/a100)"),
-        ("--device", "device", "Device type (generic/a100/a800/h100)"),
+        (
+            "--platform",
+            "platform",
+            "Platform type (cuda, etc.) - see tests/test_utils/config/platforms/",
+        ),
+        ("--device", "device", "Device type (a100/a800/etc.)"),
     ]
     for opt, name, help_text in opts:
         parser.addoption(opt, action="store", default="none", help=help_text)

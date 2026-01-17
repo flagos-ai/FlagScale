@@ -20,10 +20,23 @@ validate_platform() {
     local script_dir="$2"
     local config_file="${script_dir}/../config/platforms/${platform}.yaml"
 
+    # Reject template as a platform
+    if [ "$platform" = "template" ]; then
+        log_error "Cannot use 'template' as a platform"
+        log_error "template.yaml is a template file for creating new platform configurations"
+        log_error "Available platforms:"
+        ls -1 "${script_dir}/../config/platforms/" 2>/dev/null | grep -v '^template\.yaml$' | sed 's/.yaml$//' | sed 's/^/  - /' >&2
+        return 1
+    fi
+
     if [ ! -f "$config_file" ]; then
         log_error "Platform configuration not found: $config_file"
         log_info "Available platforms:"
-        ls -1 "${script_dir}/../config/platforms/" 2>/dev/null | sed 's/.yaml$//' | sed 's/^/  - /' >&2
+        ls -1 "${script_dir}/../config/platforms/" 2>/dev/null | grep -v '^template\.yaml$' | sed 's/.yaml$//' | sed 's/^/  - /' >&2
+        log_info ""
+        log_info "To create a new platform configuration:"
+        log_info "  1. Copy tests/test_utils/config/platforms/template.yaml to ${platform}.yaml"
+        log_info "  2. Customize the configuration for your platform"
         return 1
     fi
     return 0

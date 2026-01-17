@@ -115,7 +115,7 @@ jobs:
       fail-fast: false
       matrix:
         test_config: ${{ fromJson(needs.load_config.outputs.functional_test_matrix) }}
-    name: functional-${{ matrix.test_config.device }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}${{ matrix.test_config.case && format('-{0}', matrix.test_config.case) || '' }}
+    name: functional-tests
     uses: ./.github/workflows/functional_tests_common.yml
     with:
       platform: ${{ inputs.hardware }}
