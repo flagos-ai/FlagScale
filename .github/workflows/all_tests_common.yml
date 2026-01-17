@@ -9,7 +9,7 @@ on:
         description: Platform name (e.g., cuda, default)
 
 jobs:
-  load_config:
+  checkout_and_config:
     runs-on: ubuntu-latest
     outputs:
       ci_image: ${{ steps.config.outputs.ci_image }}
@@ -19,7 +19,47 @@ jobs:
       device_types: ${{ steps.config.outputs.device_types }}
       functional_test_matrix: ${{ steps.config.outputs.functional_test_matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
+
+      - name: Cache source code
+        id: cache-source
+        uses: actions/cache@v4
+        with:
+          path: .
+          key: source-code-${{ github.sha }}
+          restore-keys: |
+            source-code-${{ github.event.pull_request.base.sha }}
+            source-code-
+
+      - name: Create source code tarball for distribution
+        run: |
+          tar -czf /tmp/flagscale-source.tar.gz \
+            --exclude='.git' \
+            --exclude='*.pyc' \
+            --exclude='__pycache__' \
+            .
+
+      - name: Upload source code artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flagscale-source-${{ github.sha }}
+          path: /tmp/flagscale-source.tar.gz
+          retention-days: 1
+          compression-level: 0
 
       - name: Load hardware configuration
         id: config
@@ -93,29 +133,30 @@ jobs:
           { echo 'functional_test_matrix<<EOFFUNCTIONAL'; echo "$FUNCTIONAL_TEST_MATRIX"; echo 'EOFFUNCTIONAL'; } >> $GITHUB_OUTPUT
 
   unit_tests:
-    needs: load_config
+    needs: checkout_and_config
     strategy:
       fail-fast: false
       matrix:
-        device: ${{ fromJson(needs.load_config.outputs.device_types) }}
+        device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/unit_tests_common.yml
     name: unit_tests
     with:
       platform: ${{ inputs.hardware }}
       device: ${{ matrix.device }}
-      image: ${{ needs.load_config.outputs.ci_image }}
-      runs_on: ${{ needs.load_config.outputs.runs_on }}
-      container_volumes: ${{ needs.load_config.outputs.container_volumes }}
-      container_options: ${{ needs.load_config.outputs.container_options }}
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
 
   functional_tests:
     needs:
-      - load_config
+      - checkout_and_config
       - unit_tests
     strategy:
       fail-fast: false
       matrix:
-        test_config: ${{ fromJson(needs.load_config.outputs.functional_test_matrix) }}
+        test_config: ${{ fromJson(needs.checkout_and_config.outputs.functional_test_matrix) }}
     uses: ./.github/workflows/functional_tests_common.yml
     with:
       platform: ${{ inputs.hardware }}
@@ -123,14 +164,15 @@ jobs:
       task: ${{ matrix.test_config.task }}
       model: ${{ matrix.test_config.model }}
       case: ${{ matrix.test_config.case }}
-      image: ${{ needs.load_config.outputs.ci_image }}
-      runs_on: ${{ needs.load_config.outputs.runs_on }}
-      container_volumes: ${{ needs.load_config.outputs.container_volumes }}
-      container_options: ${{ needs.load_config.outputs.container_options }}
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
 
   all_tests_complete:
     needs:
-      - load_config
+      - checkout_and_config
       - unit_tests
       - functional_tests
     runs-on: ubuntu-latest

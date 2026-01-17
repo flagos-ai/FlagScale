@@ -35,6 +35,10 @@ on:
       container_options:
         required: true
         type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
 
 jobs:
   functional_test:
@@ -48,21 +52,22 @@ jobs:
       options: ${{ inputs.container_options }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download source code artifact
+        uses: actions/download-artifact@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
-          ssh-strict: true
-          ssh-user: git
-          persist-credentials: true
-          clean: true
-          sparse-checkout-cone-mode: true
-          fetch-tags: false
-          show-progress: true
-          lfs: false
-          submodules: false
-          set-safe-directory: true
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Extract source code
+        shell: bash
+        run: |
+          mkdir -p /__w/FlagScale/FlagScale
+          tar -xzf /tmp/flagscale-source.tar.gz -C /__w/FlagScale/FlagScale
+
+      - name: Set safe directory
+        shell: bash
+        run: |
+          git config --global --add safe.directory /__w/FlagScale/FlagScale
 
       - name: Run functional tests
         id: functional_test
@@ -70,7 +75,6 @@ jobs:
         run: |
           set -euo pipefail
           cd /__w/FlagScale/FlagScale
-          git config --global --add safe.directory /__w/FlagScale/FlagScale
 
           PLATFORM='${{ inputs.platform }}'
           DEVICE='${{ inputs.device }}'

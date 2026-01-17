@@ -204,26 +204,22 @@ def test_train_equal(path, task, model, case):
             # Try to compare what we have
             min_len = min(len(result_values), len(gold_values))
             if min_len > 0:
-                is_close = np.allclose(
-                    gold_values[:min_len], result_values[:min_len], rtol=1e-3, atol=1e-5
-                )
+                is_close = np.allclose(gold_values[:min_len], result_values[:min_len])
                 diff = np.abs(np.array(gold_values[:min_len]) - np.array(result_values[:min_len]))
                 print(f"\nPartial comparison (first {min_len} values):")
                 print(f"  Status: {'✅ PASS' if is_close else '❌ FAIL'}")
                 print(f"  Max diff: {np.max(diff):.6e}")
                 print(f"  Mean diff: {np.mean(diff):.6e}")
-                print("  Tolerance: rtol=1e-3, atol=1e-5")
             all_passed = False
             continue
 
         # Calculate differences
         diff = np.abs(np.array(gold_values) - np.array(result_values))
-        is_close = np.allclose(gold_values, result_values, rtol=1e-3, atol=1e-5)
+        is_close = np.allclose(gold_values, result_values)
 
         print(f"\nComparison result: {'✅ PASS' if is_close else '❌ FAIL'}")
         print(f"  Max diff: {np.max(diff):.6e}")
         print(f"  Mean diff: {np.mean(diff):.6e}")
-        print("  Tolerance: rtol=1e-3, atol=1e-5")
 
         if not is_close:
             all_passed = False
