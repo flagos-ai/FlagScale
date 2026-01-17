@@ -133,8 +133,8 @@ def find_latest_stdout_log(start_path):
     return None, latest_attempt
 
 
-@pytest.mark.usefixtures("test_path", "test_type", "test_task", "test_case")
-def test_train_equal(test_path, test_type, test_task, test_case):
+@pytest.mark.usefixtures("path", "task", "model", "case")
+def test_train_equal(path, task, model, case):
     """
     Compare training metrics from test run against gold values.
 
@@ -142,7 +142,7 @@ def test_train_equal(test_path, test_type, test_task, test_case):
     against pre-recorded gold values using numpy.allclose for tolerance.
     """
     # Construct the test_result_path using the provided fixtures
-    test_result_path = os.path.join(test_path, test_type, test_task, "test_results", test_case)
+    test_result_path = os.path.join(path, task, model, "test_results", case)
     start_path = os.path.join(test_result_path, "logs/details/host_0_localhost")
 
     # Find the latest stdout.log
@@ -157,9 +157,7 @@ def test_train_equal(test_path, test_type, test_task, test_case):
         lines = file.readlines()
 
     # Load gold values first to determine which metrics to extract
-    gold_value_path = os.path.join(
-        test_path, test_type, test_task, "gold_values", test_case + ".json"
-    )
+    gold_value_path = os.path.join(path, task, model, "gold_values", case + ".json")
     assert os.path.exists(gold_value_path), f"Failed to find gold result JSON at {gold_value_path}"
 
     with open(gold_value_path, "r") as f:

@@ -92,8 +92,8 @@ run_test() {
     # Validate results if validator exists
     if [ -f "$PROJECT_ROOT/tests/test_utils/runners/check_results.py" ]; then
         local validator_cmd="python -m pytest \"$PROJECT_ROOT/tests/test_utils/runners/check_results.py::test_train_equal\" \
-            --test_path=tests/functional_tests --test_type=\"$task\" --test_task=\"$model\" \
-            --test_case=\"$config\" --platform=\"$PLATFORM\""
+            --path=tests/functional_tests --task=\"$task\" --model=\"$model\" \
+            --case=\"$config\" --platform=\"$PLATFORM\""
         [ -n "$CURRENT_DEVICE" ] && validator_cmd="$validator_cmd --device=\"$CURRENT_DEVICE\""
         if ! eval "$validator_cmd"; then
             log_error "Validation failed for $task/$model/$config"

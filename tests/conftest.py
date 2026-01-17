@@ -4,10 +4,10 @@ import pytest
 def pytest_addoption(parser):
     """Register pytest options for test configuration and environment."""
     opts = [
-        ("--test_path", "test_path", "Base directory path for test cases"),
-        ("--test_type", "test_type", "Test type (train/inference/hetero_train/rl/serve)"),
-        ("--test_task", "test_task", "Task/model name (aquila/deepseek/mixtral)"),
-        ("--test_case", "test_case", "Specific test case configuration"),
+        ("--path", "path", "Base directory path for test cases"),
+        ("--task", "task", "Task type (train/inference/hetero_train/rl/serve)"),
+        ("--model", "model", "Model name (aquila/deepseek/mixtral)"),
+        ("--case", "case", "Specific test case configuration"),
         ("--platform", "platform", "Platform type (default/a100)"),
         ("--device", "device", "Device type (generic/a100/a800/h100)"),
     ]
@@ -16,23 +16,23 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def test_path(request):
-    return request.config.getoption("--test_path")
+def path(request):
+    return request.config.getoption("--path")
 
 
 @pytest.fixture
-def test_type(request):
-    return request.config.getoption("--test_type")
+def task(request):
+    return request.config.getoption("--task")
 
 
 @pytest.fixture
-def test_task(request):
-    return request.config.getoption("--test_task")
+def model(request):
+    return request.config.getoption("--model")
 
 
 @pytest.fixture
-def test_case(request):
-    return request.config.getoption("--test_case")
+def case(request):
+    return request.config.getoption("--case")
 
 
 @pytest.fixture
