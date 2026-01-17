@@ -62,24 +62,21 @@ jobs:
           DEVICE_TYPES=$(python tests/test_utils/runners/parse_config.py --platform "$PLATFORM" --type device_types 2>/dev/null || echo '[]')
           echo "Device types: $DEVICE_TYPES"
 
-          # Discover functional test matrix (device/task/model combinations)
+          # Discover functional test matrix (device/task/model/case combinations)
           echo "Discovering functional test matrix..."
           FUNCTIONAL_TEST_MATRIX="[]"
-          if [ -d "tests/functional_tests" ]; then
-            # Find all task/model directories and combine with device types to create JSON array
-            TASK_MODELS=$(find tests/functional_tests -mindepth 2 -maxdepth 2 -type d | sort | while read dir; do
-              task=$(basename $(dirname "$dir"))
-              model=$(basename "$dir")
-              echo "$task/$model"
-            done)
 
-            # Create combined matrix with device types
+          # Parse functional tests from platform configuration for each device type
+          if [ -f "tests/test_utils/runners/parse_config.py" ]; then
             FUNCTIONAL_TEST_MATRIX=$(echo "$DEVICE_TYPES" | jq -r '.[]' | while read device; do
-              echo "$TASK_MODELS" | while read task_model; do
-                task=$(echo "$task_model" | cut -d'/' -f1)
-                model=$(echo "$task_model" | cut -d'/' -f2)
-                echo "{\"device\":\"$device\",\"task\":\"$task\",\"model\":\"$model\"}"
-              done
+              # Get functional tests for this device from platform config
+              functional_json=$(python tests/test_utils/runners/parse_config.py \
+                --platform "$PLATFORM" \
+                --device "$device" \
+                --type functional 2>/dev/null || echo '{}')
+
+              # Convert the functional tests JSON to device/task/model/case matrix entries
+              echo "$functional_json" | jq -r 'to_entries[] | .key as $task | .value | to_entries[] | .key as $model | .value[] | {device: "'"$device"'", task: $task, model: $model, case: .}'
             done | jq -s -c '.')
           fi
           echo "Functional test matrix: $FUNCTIONAL_TEST_MATRIX"
@@ -118,12 +115,14 @@ jobs:
       fail-fast: false
       matrix:
         test_config: ${{ fromJson(needs.load_config.outputs.functional_test_matrix) }}
+    name: functional-${{ matrix.test_config.device }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}${{ matrix.test_config.case && format('-{0}', matrix.test_config.case) || '' }}
     uses: ./.github/workflows/functional_tests_common.yml
     with:
       platform: ${{ inputs.hardware }}
       device: ${{ matrix.test_config.device }}
       task: ${{ matrix.test_config.task }}
       model: ${{ matrix.test_config.model }}
+      case: ${{ matrix.test_config.case }}
       image: ${{ needs.load_config.outputs.ci_image }}
       runs_on: ${{ needs.load_config.outputs.runs_on }}
       container_volumes: ${{ needs.load_config.outputs.container_volumes }}
