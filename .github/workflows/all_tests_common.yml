@@ -41,9 +41,6 @@ jobs:
         with:
           path: .
           key: source-code-${{ github.sha }}
-          restore-keys: |
-            source-code-${{ github.event.pull_request.base.sha }}
-            source-code-
 
       - name: Create source code tarball for distribution
         run: |
