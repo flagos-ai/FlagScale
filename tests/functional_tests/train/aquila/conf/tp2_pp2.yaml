@@ -26,7 +26,6 @@ experiment:
     CUDNN_DETERMINISTIC: "true"
   cmds:
     before_start: source /root/miniconda3/bin/activate flagscale-train
-    # before_start: source /root/miniconda3/bin/activate ayl-train
 action: run
 
 hydra:
