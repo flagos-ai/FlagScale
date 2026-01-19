@@ -3,7 +3,21 @@
 <!--TODO(Qiming): replace this banner-->
 [<img width="4750" height="958" alt="github+banner__2025-11-11+13_27_10" src="https://github.com/user-attachments/assets/e63014d8-ac72-4b82-98f7-aeed9833672a" />](https://www.flagopen.ac.cn/)
 
-<!--TODO(Qiming): Placeholder for announcements.-->
+<!--Begin Announcements.-->
+
+> [!IMPORTANT]
+>
+> **2026/01 UPDATE**
+>
+> The codebase has been refactored since [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0).
+> The hardware-specific (multi-chip) support has been moved into plugin repositories such as
+> [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) and
+> [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL).
+> These plugins build on top of [FlagOS](https://flagos.io/), a unified open-source AI system software stack.
+> If you are using or upgrading from a version earlier than *v1.0.0-alpha.0*, please use the
+> [`main-legacy`](https://github.com/flagos-ai/FlagScale/tree/main-legacy) branch.
+> It will continue to receive critical bug fixes and minor updates for a period of time.
+<!--End Announcements.-->
 
 ## Overview
 
@@ -22,9 +36,6 @@ The primary objective of FlagScale is to enable seamless scalability across dive
 while maximizing computational resource efficiency and enhancing model performance.
 By offering essential components for model development, training, and deployment, FlagScale seeks to
 establish itself as an indispensable toolkit for optimizing both the speed and effectiveness of large model workflows.
-
-## ⚠️ Important: Major Refactoring (2026/01)
-- Refactored the codebase since [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0) by moving hardware-specific (multi-chip) support into plugin repositories such as [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) and [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL). These plugins build on top of [FlagOS](https://github.com/flagos-ai), a unified open-source AI system software stack. If you are using or upgrading from a version earlier than v1.0.0-alpha.0, please use the [main-legacy](https://github.com/flagos-ai/FlagScale/tree/main-legacy) branch. It will continue to receive critical bug fixes and minor updates for a period of time.
 
 ## Resources
 

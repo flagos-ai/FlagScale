@@ -1,4 +1,4 @@
-name: Format Check
+name: format_check
 
 on:
   pull_request:

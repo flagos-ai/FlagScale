@@ -1,5 +1,6 @@
 # CUDA Hardware Configuration
-# This file defines settings for CUDA-based testing
+# This file defines CI/CD settings for CUDA-based testing
+# Test configurations are defined in tests/test_utils/config/platforms/cuda.yaml
 
 hardware_name: cuda
 display_name: "CUDA Tests"
@@ -25,17 +26,3 @@ container_volumes:
 
 # Container options (hardware-specific settings)
 container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"
-
-# Test configuration
-test_config:
-  unit_backend: train_flagscale
-  unit_subsets:
-    - "runner"
-    - "train"
-    - "./"
-  functional_train_tasks:
-    - "aquila"
-    - "deepseek"
-    - "mixtral"
-  functional_hetero_tasks:
-    - "aquila"
