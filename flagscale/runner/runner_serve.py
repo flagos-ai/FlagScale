@@ -1056,6 +1056,7 @@ class SSHServeRunner(RunnerBase):
         else:
             self.inference_engine = None
             self.port = None
+        self.background = self.config.experiment.get("runner", {}).get("background", False)
         self.use_fs_serve = self.deploy_config.get("use_fs_serve", True)
 
         self._prepare()
@@ -1129,10 +1130,10 @@ class SSHServeRunner(RunnerBase):
         cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
 
         host_run_script_file = _generate_run_script_serve(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=self.background, with_test=with_test
         )
 
-        run_local_command(f"bash {host_run_script_file}", dryrun)
+        run_local_command(f"bash {host_run_script_file}", dryrun, stream=not self.background)
 
     def run(self, with_test=False, dryrun=False):
         num_visible_devices = None
