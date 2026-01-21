@@ -154,7 +154,7 @@ def get_addr():
     return socket.gethostname()
 
 
-def run_local_command(cmd, dryrun=False, query=False):
+def run_local_command(cmd, dryrun=False, query=False, stream=False):
     logger.info(f"Run the local command: {cmd}")
     if dryrun:
         return
@@ -169,6 +169,13 @@ def run_local_command(cmd, dryrun=False, query=False):
             errors="replace",
         )
         return result
+    if stream:
+        subprocess.run(
+            cmd,
+            shell=True,
+            check=True,
+        )
+        return
     else:
         result = subprocess.run(
             cmd,
