@@ -119,7 +119,7 @@ class NativeServeBackend(BackendBase):
         self.user_args = _get_args_ray(self.config)
         self.user_envs = self.config.experiment.get("envs", {})
         entrypoint = self.config.experiment.task.get("entrypoint", None)
-        enable_composition = self.config.experiment.runner.deploy.get("enable_composition", None)
+        enable_composition = self.config.experiment.runner.deploy.get("enable_composition", False)
 
         if entrypoint:
             self.user_script = entrypoint
