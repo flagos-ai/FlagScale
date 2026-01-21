@@ -1056,7 +1056,7 @@ class SSHServeRunner(RunnerBase):
         else:
             self.inference_engine = None
             self.port = None
-        self.background = self.config.experiment.get("runner", {}).get("background", False)
+        self.background = self.config.experiment.get("runner", {}).get("background", True)
         self.use_fs_serve = self.deploy_config.get("use_fs_serve", True)
 
         self._prepare()
