@@ -3,13 +3,26 @@ name: Common Functional Tests
 on:
   workflow_call:
     inputs:
-      type:
+      platform:
         required: true
         type: string
-      tasks_json:
+        description: Platform name (e.g., cuda, default)
+      device:
         required: true
         type: string
-        description: JSON array of tasks to run
+        description: Device type (e.g., a100, a800, h100, generic)
+      task:
+        required: true
+        type: string
+        description: Task name (e.g., train, hetero_train)
+      model:
+        required: true
+        type: string
+        description: Model name (e.g., aquila, mixtral, deepseek)
+      case:
+        required: false
+        type: string
+        description: Specific test case (e.g., tp2_pp2, tp4_pp2)
       image:
         required: true
         type: string
@@ -22,15 +35,14 @@ on:
       container_options:
         required: true
         type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
 
 jobs:
   functional_test:
     runs-on: ${{ fromJson(inputs.runs_on) }}
-    strategy:
-      fail-fast: false
-      matrix:
-        task: ${{ fromJson(inputs.tasks_json) }}
-    name: ${{ inputs.type }}-${{ matrix.task }}
     container:
       image: ${{ inputs.image }}
       ports:
@@ -39,35 +51,43 @@ jobs:
       options: ${{ inputs.container_options }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download source code artifact
+        uses: actions/download-artifact@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
-          ssh-strict: true
-          ssh-user: git
-          persist-credentials: true
-          clean: true
-          sparse-checkout-cone-mode: true
-          fetch-tags: false
-          show-progress: true
-          lfs: false
-          submodules: false
-          set-safe-directory: true
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
 
-      - name: Run functional test
+      - name: Extract source code
+        shell: bash
+        run: |
+          mkdir -p /__w/FlagScale/FlagScale
+          tar -xzf /tmp/flagscale-source.tar.gz -C /__w/FlagScale/FlagScale
+
+      - name: Set safe directory
+        shell: bash
+        run: |
+          git config --global --add safe.directory /__w/FlagScale/FlagScale
+
+      - name: Run functional tests
         id: functional_test
         shell: bash
         run: |
           set -euo pipefail
           cd /__w/FlagScale/FlagScale
-          git config --global --add safe.directory /__w/FlagScale/FlagScale
 
-          TASK='${{ matrix.task }}'
-          TYPE='${{ inputs.type }}'
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ inputs.device }}'
+          TASK='${{ inputs.task }}'
+          MODEL='${{ inputs.model }}'
+          CASE='${{ inputs.case }}'
           PROJECT_ROOT="/__w/FlagScale/FlagScale"
 
-          echo "Running functional test ($TYPE) for task: $TASK"
+          echo "Running functional tests"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
+          echo "Case: ${CASE:-all}"
           echo "Project root: $PROJECT_ROOT"
 
           # Load retry functions
@@ -87,25 +107,29 @@ jobs:
           # Ensure we're back in the project root
           cd "$PROJECT_ROOT"
 
-          # Run test for this task
-          "$PROJECT_ROOT/tests/scripts/functional_tests/test_task.sh" --type "$TYPE" --task "$TASK"
+          # Build run_tests.sh command
+          TEST_CMD="bash $PROJECT_ROOT/tests/test_utils/runners/run_tests.sh \
+            --platform $PLATFORM \
+            --device $DEVICE \
+            --type functional \
+            --task $TASK \
+            --model $MODEL"
+
+          # Add case filter if specified
+          if [ -n "$CASE" ]; then
+            TEST_CMD="$TEST_CMD --list $CASE"
+          fi
+
+          # Run functional tests
+          eval "$TEST_CMD"
           exit_code=$?
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Functional test passed for $TYPE/$TASK"
+            echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL${CASE:+/$CASE}"
           else
-            echo "❌ Functional test failed for $TYPE/$TASK (exit code: $exit_code)"
+            echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL${CASE:+/$CASE} (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 90
-
-      - name: Upload Functional Test Logs
-        if: always() && steps.functional_test.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: functional_tests-logs-${{ github.run_id }}-${{ inputs.type }}-${{ matrix.task }}
-          path: tests/functional_tests/test_cases/${{ inputs.type }}/${{ matrix.task }}/results_test
-          retention-days: 7
-          if-no-files-found: warn
+        timeout-minutes: 180

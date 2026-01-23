@@ -1,0 +1,41 @@
+# Platform Configuration Template
+# This is a TEMPLATE file - copy and customize it for your specific hardware platform
+#
+# To create a new platform configuration:
+# 1. Copy this file to a new file (e.g., my_platform.yaml)
+# 2. Update the device_types list
+# 3. Configure device-specific test settings
+# 4. Run tests with: --platform my_platform
+#
+# Example platforms:
+# - cuda.yaml: NVIDIA GPU configuration
+# - Add your own: cpu.yaml, npu.yaml, etc.
+#
+# Users can modify the following:
+# - functional: Add/remove test case names in the support lists
+#   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
+# - unit: Add/remove paths in include and exclude lists
+#   Example: include: "*" or ["test_basic.py", "runner/*"]
+#            exclude: [] or ["test_spiky_loss_detector.py"]
+
+# Define device types available for this platform
+device_types:
+  - generic
+
+# Device-specific test configurations
+generic:
+  name: "generic"
+  tests:
+    functional:
+      # Add or remove test cases per model
+      train:
+        aquila: ["tp2_pp2", "tp4_pp2"]
+        deepseek: ["tp2_pp2_ep2"]
+        mixtral: ["tp2_pp1_ep2", "tp4_pp1_ep2"]
+      hetero_train:
+        aquila: ["tp2pp1_tp4pp1_tp2pp1", "tp2dp1pp1_tp2dp2pp1_tp1dp2pp1", "dp2dp4_shared_embedding"]
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

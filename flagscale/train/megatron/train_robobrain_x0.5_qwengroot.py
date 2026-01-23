@@ -11,25 +11,22 @@ import os
 import pathlib
 import platform
 import random
-
-from typing import Tuple
+import time
 
 import epath
 import numpy as np
 import torch
 import torch.distributed as dist
-
 from omegaconf import OmegaConf
 from torch.nn.parallel import DistributedDataParallel as DDP
 from transformers import get_scheduler
 
 import wandb
-
 from megatron.energon import WorkerConfig, get_loader, get_train_dataset
-from tools.datasets.vla.data.dataset_helpers_np_pil import TaskEncoder
+from tools.datasets.vla.data.dataset_helpers_preprocess import TaskEncoder
 
 from flagscale.logger import logger
-from flagscale.models.robobrain_x.qwen_groot import Qwen_GR00T, get_batch
+from flagscale.models.robobrain_x.qwen_groot import Qwen_GR00T
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -66,7 +63,7 @@ def build_param_lr_groups(model, cfg):
 
 def setup_optimizer_and_scheduler(
     model, cfg
-) -> Tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
+) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
     """set optimizer and scheduler"""
     # initialize optimizer
     param_groups = build_param_lr_groups(model=model, cfg=cfg)
@@ -98,15 +95,20 @@ def setup_optimizer_and_scheduler(
 
 
 def init_ddp(seed):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     random.seed(seed)
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    torch.distributed.init_process_group(backend='nccl', init_method='env://')
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.enabled = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
+
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+    torch.distributed.init_process_group(backend="nccl", init_method="env://")
     return local_rank
 
 
@@ -130,16 +132,19 @@ def init_wandb(config, *, resuming: bool, log_code: bool = False, enabled: bool 
 
 
 def main(cfg) -> None:
+    local_rank = init_ddp(cfg.seed)
+
     # build model
     vla = Qwen_GR00T(cfg)
     # prepare data
     ds = get_train_dataset(
         cfg.datasets.data_path,
         batch_size=cfg.batch_size,
-        shuffle_buffer_size=100,
+        shuffle_buffer_size=cfg.shuffle_buffer_size,
         max_samples_per_sequence=100,
+        shuffle_over_epochs_multiplier=cfg.shuffle_over_epochs_multiplier,
         worker_config=WorkerConfig.default_worker_config(num_workers=1, data_parallel_group=None),
-        task_encoder=TaskEncoder(cfg.datasets.task_encoder),
+        task_encoder=TaskEncoder(cfg),
         repeat=True,
     )
     vla_train_dataloader = get_loader(ds)
@@ -149,13 +154,9 @@ def main(cfg) -> None:
     # set optimizer and scheduler
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(model=vla, cfg=cfg)
     # Run VLA Training
-    local_rank = init_ddp(cfg.seed)
+
     if dist.get_rank() == 0 and local_rank == 0:
         logger.info(f"Running on: {platform.node()}")
-        if cfg.batch_size % torch.cuda.device_count() != 0:
-            raise ValueError(
-                f"Batch size {cfg.batch_size} must be divisible by the number of devices {torch.cuda.device_count()}."
-            )
         resuming = cfg.resume
         init_wandb(cfg, resuming=resuming, enabled=cfg.wandb_enabled)
 
@@ -164,18 +165,28 @@ def main(cfg) -> None:
 
     step = 0
     done = False
+
+    t_start = time.time()
     while not done:
         batch = next(data_iter)
-        batch = get_batch(batch)
-        output_dict = vla.forward(batch)
+
+        qwen_inputs, state, actions = batch.get("qwen_inputs"), batch.get("state"), batch.get("actions")
+        if not qwen_inputs or not actions:
+            continue
+        for i in qwen_inputs:
+            qwen_inputs[i] = qwen_inputs[i].to(device=vla.device)
+        output_dict = vla.forward(qwen_inputs=qwen_inputs, state=state, actions=actions)
+
         action_loss = output_dict["action_loss"]
         action_loss.backward()
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
 
-        if step % cfg.log_freq == 0:
-            logger.info(f"step: {step} loss: {action_loss.item():.3f}")
+        if step % cfg.log_freq == 0 and dist.get_rank() == 0 and local_rank == 0:
+            logger.info(f"step {step} loss: {action_loss.item()}")
+            logger.info(f"step {step}: {(time.time() - t_start) / cfg.log_freq:.3f}s/iter")
+            t_start = time.time()
         step += 1
         if step >= cfg.train_steps:
             done = True
@@ -191,11 +202,11 @@ def main(cfg) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config-path",
+        "--config-file",
         type=str,
-        default="examples/robotics/conf/train/libero_qwengroot.yaml",
+        default="outputs/libero_qwengroot/hydra/.hydra/config.yaml",
         help="Path to YAML config",
     )
     args, clipargs = parser.parse_known_args()
-    cfg = OmegaConf.load(args.config_path)
-    main(cfg)
+    cfg = OmegaConf.load(args.config_file)
+    main(cfg.train)
