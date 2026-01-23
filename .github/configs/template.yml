@@ -27,10 +27,3 @@ container_volumes:
 
 # Container options (hardware-specific settings - update as needed)
 container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"
-
-# Test configuration (customize per hardware)
-test_config:
-  unit_backend: train_flagscale                          # Backend to test: train_flagscale, vllm, inference_flagscale
-  unit_subsets: ["runner", "./"]                         # Unit test subsets to run
-  functional_train_tasks: ["aquila", "deepseek", "mixtral"]  # Training tasks to validate
-  functional_hetero_tasks: ["aquila"]                    # Hetero training tasks to validate

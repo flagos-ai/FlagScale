@@ -1,4 +1,5 @@
-export PYTHONPATH=$(dirname $(dirname "$0")):$(dirname $(dirname $(dirname "$0")))/flagscale/train/:$PYTHONPATH
+export CUDA_VISIBLE_DEVICES=0
+export PYTHONPATH=../../../:$PYTHONPATH
 # export MP_PP0_LAYERS=30
 # bash hf2mcore_qwen3_vl_convertor.sh \
 #     32B \

@@ -3,7 +3,20 @@
 <!--TODO(Qiming): replace this banner-->
 [<img width="4750" height="958" alt="github+banner__2025-11-11+13_27_10" src="https://github.com/user-attachments/assets/e63014d8-ac72-4b82-98f7-aeed9833672a" />](https://www.flagopen.ac.cn/)
 
-<!--TODO(Qiming): Placeholder for announcements.-->
+<!--Begin  announcements.-->
+> [!IMPORTANT]
+>
+> **2026/01 重要更新**
+>
+> 与之前的 [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0)
+> 版本相比，FlagScale 代码仓库完成重大重构。与硬件（多芯片支持）相关的代码已经被迁移到
+> [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) 和
+> [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL) 这类插件仓库（Plugin Repository）中。
+> 这些插件基于统一、开源的 AI 系统软件堆栈 [FlagOS](https://flagos.io/) 构建。
+> 如果你在使用或迁移到比 *v1.0.0-alpha.0* 更早的版本，请使用代码仓库的
+> [`main-legacy`](https://github.com/flagos-ai/FlagScale/tree/main-legacy) 分支。
+> 此分支将在一定时间内继续接受重大缺陷修复以及一些小的更新。
+<!--End announcements.-->
 
 ## 介绍
 

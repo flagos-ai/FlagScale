@@ -1,0 +1,32 @@
+# CUDA-Based Platform Configuration
+# Flexible test selection mechanism for NVIDIA GPU environments
+#
+# This platform configuration supports multiple device types (a100, a800, h100)
+# Users can modify the following:
+# - functional: Add/remove test case names in the support lists
+#   Example: aquila: ["tp2_pp2", "tp4_pp2"] -> add or remove items
+# - unit: Add/remove paths in include and exclude lists
+#   Example: include: "*" or ["test_basic.py", "runner/*"]
+#            exclude: [] or ["test_spiky_loss_detector.py"]
+
+# Define device types available for this platform
+device_types:
+  - a100
+
+# Device-specific test configurations
+a100:
+  name: "a100"
+  tests:
+    functional:
+      # Add or remove test cases per model
+      train:
+        aquila: ["tp2_pp2", "tp4_pp2"]
+        deepseek: ["tp2_pp2_ep2"]
+        mixtral: ["tp2_pp1_ep2", "tp4_pp1_ep2"]
+      hetero_train:
+        aquila: ["tp2pp1_tp4pp1_tp2pp1", "tp2dp1pp1_tp2dp2pp1_tp1dp2pp1", "dp2dp4_shared_embedding"]
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

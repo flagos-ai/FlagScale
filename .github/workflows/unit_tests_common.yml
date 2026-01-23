@@ -3,13 +3,14 @@ name: Common Unit Tests
 on:
   workflow_call:
     inputs:
-      backend:
+      platform:
         required: true
         type: string
-      subsets_json:
+        description: Platform name (e.g., cuda, default)
+      device:
         required: true
         type: string
-        description: JSON array of subsets to run
+        description: Device type (e.g., a100, a800, h100, generic)
       image:
         required: true
         type: string
@@ -22,15 +23,15 @@ on:
       container_options:
         required: true
         type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
 
 jobs:
   unit_test:
     runs-on: ${{ fromJson(inputs.runs_on) }}
-    strategy:
-      fail-fast: false
-      matrix:
-        subset: ${{ fromJson(inputs.subsets_json) }}
-    name: unit-${{ matrix.subset == './' && 'root' || matrix.subset }}
+    name: unit-${{ inputs.device }}
     container:
       image: ${{ inputs.image }}
       ports:
@@ -38,21 +39,22 @@ jobs:
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: ${{ inputs.container_options }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download source code artifact
+        uses: actions/download-artifact@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
-          ssh-strict: true
-          ssh-user: git
-          persist-credentials: true
-          clean: true
-          sparse-checkout-cone-mode: true
-          fetch-tags: false
-          show-progress: true
-          lfs: false
-          submodules: false
-          set-safe-directory: true
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Extract source code
+        shell: bash
+        run: |
+          mkdir -p /__w/FlagScale/FlagScale
+          tar -xzf /tmp/flagscale-source.tar.gz -C /__w/FlagScale/FlagScale
+
+      - name: Set safe directory
+        shell: bash
+        run: |
+          git config --global --add safe.directory /__w/FlagScale/FlagScale
 
       - name: Run unit tests
         id: unit_test
@@ -60,48 +62,47 @@ jobs:
         run: |
           set -euo pipefail
           cd /__w/FlagScale/FlagScale
-          git config --global --add safe.directory /__w/FlagScale/FlagScale
 
-          BACKEND='${{ inputs.backend }}'
-          SUBSET='${{ matrix.subset }}'
-          SHA='${{ github.sha }}'
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ inputs.device }}'
           PROJECT_ROOT="/__w/FlagScale/FlagScale"
 
-          echo "Running unit tests for subset: $SUBSET"
-          echo "Backend: $BACKEND"
+          echo "Running unit tests"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
           echo "Project root: $PROJECT_ROOT"
 
-          # Setup backend if needed
-          if [ "$BACKEND" = "train_flagscale" ]; then
-            echo "Setting up training backend dependencies..."
-            source /root/miniconda3/bin/activate flagscale-train
-            source "$PROJECT_ROOT/.github/workflows/scripts/retry_functions.sh"
+          # Setup backend
+          source /root/miniconda3/bin/activate flagscale-train
+          source "$PROJECT_ROOT/.github/workflows/scripts/retry_functions.sh"
 
-            # For megatron unit tests
-            mkdir -p /opt/data
-            cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
-            cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
+          # For megatron unit tests
+          mkdir -p /opt/data
+          cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
+          cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
 
-            # Install megatron.core with retry
-            COMMANDS=(
-              "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
-              "git clone https://github.com/flagos-ai/Megatron-LM-FL.git"
-              "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL && pip install --no-build-isolation . -vvv"
-            )
-            retry_commands 3 "${COMMANDS[@]}"
+          # Install megatron.core with retry
+          COMMANDS=(
+            "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
+            "git clone https://github.com/flagos-ai/Megatron-LM-FL.git"
+            "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL && pip install --no-build-isolation . -vvv"
+          )
+          retry_commands 3 "${COMMANDS[@]}"
 
-            # Ensure we're back in the project root
-            cd "$PROJECT_ROOT"
-          fi
+          # Ensure we're back in the project root
+          cd "$PROJECT_ROOT"
 
-          # Run tests for this subset
-          "$PROJECT_ROOT/tests/scripts/unit_tests/test_subset.sh" --backend "$BACKEND" --subset "$SUBSET" --id "$SHA"
+          # Run unit tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type unit
           exit_code=$?
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Unit test passed for subset: $SUBSET"
+            echo "✅ Unit tests passed for $PLATFORM/$DEVICE"
           else
-            echo "❌ Unit test failed for subset: $SUBSET (exit code: $exit_code)"
+            echo "❌ Unit tests failed for $PLATFORM/$DEVICE (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT

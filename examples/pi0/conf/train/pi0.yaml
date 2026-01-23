@@ -1,42 +1,50 @@
 system:
-  seed: 42
   batch_size: 1
   train_steps: 100000
   log_freq: 10
-  output_directory: ${experiment.exp_dir}/ckpt
-  # Whether to save checkpoint
-  save_checkpoint: true
-  # Number of steps between checkpoints
-  save_freq: 1000
-  optimizer_lr: 2.5e-5
-  optimizer_betas: [0.9, 0.95]
-  optimizer_eps: 1e-8
-  optimizer_weight_decay: 0.01
-  optimizer_grad_clip_norm: 1.0
-  scheduler_warmup_steps: 1000
-  scheduler_decay_steps: 30000
-  scheduler_decay_lr: 2.5e-6
-  # Whether to shuffle the data
-  shuffle: false
   grad_clip_norm: 1.0
-  use_amp: false
+  use_amp: true
+  shuffle: false
+  num_workers: 4
+
+  optimizer:
+    name: AdamW
+    lr: 2.5e-5
+    betas: [0.9, 0.95]
+    eps: 1.0e-8
+    weight_decay: 0.01
+
+  scheduler:
+    warmup_steps: 1000
+    decay_steps: 30000
+    decay_lr: 2.5e-6
+
+  checkpoint:
+    output_directory: ${experiment.exp_dir}/ckpt
+    # Whether to save checkpoint
+    save_checkpoint: true
+    # Number of steps between checkpoints
+    save_freq: 1000
+  # TODO(yupu): Support resuming from checkpoint
 
 model:
-  model_variant: pi0
+  model_name: pi0
   # Path to the pretrained pi0_base model checkpoint
   checkpoint_dir: /workspace/models/lerobot/pi0_base
   # Path to paligemma tokenizer
   tokenizer_path: /workspace/models/google/paligemma-3b-pt-224
   tokenizer_max_length: 48
   action_steps: 50
-  # TODO(yupu): Support resuming from checkpoint
 
 data:
-  tolerance_s: 0.0001
-  use_imagenet_stats: true
   # Path to the training data
   data_path: /workspace/datasets/lerobot/aloha_mobile_cabinet
+  tolerance_s: 0.0001
+  use_imagenet_stats: true
   # To match the input features naming from the dataset to the policy config
   # For example, for the aloha_mobile_cabinet dataset, the rename_map is:
-  # rename_map: '{\"observation.images.cam_high\": \"observation.images.base_0_rgb\", \"observation.images.cam_left_wrist\": \"observation.images.left_wrist_0_rgb\", \"observation.images.cam_right_wrist\": \"observation.images.right_wrist_0_rgb\"}'
-  rename_map: '{\"observation.images.cam_high\": \"observation.images.base_0_rgb\", \"observation.images.cam_left_wrist\": \"observation.images.left_wrist_0_rgb\", \"observation.images.cam_right_wrist\": \"observation.images.right_wrist_0_rgb\"}'
+  rename_map:
+    observation.images.cam_high: observation.images.base_0_rgb
+    observation.images.cam_left_wrist: observation.images.left_wrist_0_rgb
+    observation.images.cam_right_wrist: observation.images.right_wrist_0_rgb
+  use_quantiles: false

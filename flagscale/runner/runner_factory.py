@@ -6,6 +6,7 @@ from flagscale.runner.backend import (
     MegatronBackend,
     NativeCompressBackend,
     NativeServeBackend,
+    NativeTrainBackend,
     SglangBackend,
     VerlBackend,
     VllmBackend,
@@ -57,6 +58,7 @@ RunnerFactory.register_backend("llama_cpp", LlamaCppBackend)
 RunnerFactory.register_backend("verl", VerlBackend)
 RunnerFactory.register_backend("native_compress", NativeCompressBackend)
 RunnerFactory.register_backend("native_serve", NativeServeBackend)
+RunnerFactory.register_backend("native_train", NativeTrainBackend)
 
 # launchers
 RunnerFactory.register_launcher("ssh", SshLauncher)

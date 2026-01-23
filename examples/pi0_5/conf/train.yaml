@@ -11,7 +11,7 @@ experiment:
   ckpt_format: torch
   task:
     type: train
-    backend: lerobot
+    backend: native
     entrypoint: flagscale/train/train_pi.py
   runner:
     per_node_task: false
