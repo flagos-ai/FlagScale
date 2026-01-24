@@ -3,7 +3,7 @@
 ### Clone Repository
 
 ```sh
-git clone https://github.com/FlagOpen/FlagScale.git
+git clone https://github.com/flagos-ai/FlagScale.git
 cd FlagScale/
 ```
 

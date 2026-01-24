@@ -7,7 +7,7 @@
 Download the source code。
 
 ```bash
-git clone https://github.com/FlagOpen/FlagScale.git
+git clone https://github.com/flagos-ai/FlagScale.git
 cd FlagScale
 ```
 
@@ -24,7 +24,7 @@ pip install --no-build-isolation .
 pip install transformers==4.57.1
 ```
 
-You can also refer to the readme in `https://github.com/FlagOpen/FlagScale.git`
+You can also refer to the readme in `https://github.com/flagos-ai/FlagScale.git`
 
 ### 2. Prepare checkpoint
 

@@ -7,7 +7,7 @@ This guide covers how to train, run inference, and serve PI0.5 models using Flag
 ### Clone Repository
 
 ```sh
-git clone https://github.com/FlagOpen/FlagScale.git
+git clone https://github.com/flagos-ai/FlagScale.git
 cd FlagScale/
 ```
 

@@ -5,14 +5,16 @@ vLLM implementation of https://github.com/baaivision/Emu3.5
 ## Environment Setup
 
 ### Install FlagScale
-- Build from source code base on vLLM tag/0.11.0
+- Install FlagScale and vLLM-FL backend (based on vLLM)
 ```bash
 git clone https://github.com/flagos-ai/FlagScale.git
-cd FlgScale
-python tools/patch/unpatch.py --backend vllm
-cd FlagScale/third_party/vllm
-pip install -r requirements/cuda.txt --no-cache-dir
-MAX_JOBS=32 pip install --no-build-isolation -v .
+cd FlagScale
+pip install . --verbose
+
+# Install vLLM-FL backend
+git clone https://github.com/flagos-ai/vllm-FL
+cd vllm-FL
+pip install -e .
 ```
 
 ### Prepare Emu3.5

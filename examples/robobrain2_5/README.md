@@ -6,7 +6,7 @@
 ### Clone Repository
 
 ```sh
-git clone https://github.com/FlagOpen/FlagScale.git
+git clone https://github.com/flagos-ai/FlagScale.git
 cd FlagScale/
 ```
 
@@ -87,7 +87,7 @@ tail -f outputs/robobrain2.5_4b/serve_logs/host_0_localhost.output
 
 ```sh
 cd FlagScale/
-vim examples/robobrain2_5/conf/serve/3b.yaml
+vim examples/robobrain2_5/conf/serve/32b.yaml
 ```
 
 Change 1 fields:
