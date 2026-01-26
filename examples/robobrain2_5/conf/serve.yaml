@@ -1,8 +1,8 @@
 defaults:
   - _self_
-  - serve: 4b
+  - serve: 8b
 experiment:
-  exp_name: robobrain2.5_4b
+  exp_name: robobrain2.5_8b
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve

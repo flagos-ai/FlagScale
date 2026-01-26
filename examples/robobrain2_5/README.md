@@ -41,9 +41,9 @@ pip install transformers==4.57.0
 ```sh
 git lfs install
 
-mkdir -p /tmp/models/Qwen/
-cd /tmp/models/Qwen/
-git clone https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct
+mkdir -p /tmp/models/BAAI/
+cd /tmp/models/BAAI/
+git clone https://huggingface.co/BAAI/RoboBrain2.5-8B-NV
 ```
 
 If you don't have access to the international internet, download from modelscope.
@@ -51,7 +51,7 @@ If you don't have access to the international internet, download from modelscope
 ```sh
 mkdir -p /tmp/models/
 cd /tmp/models/
-modelscope download --model Qwen/Qwen3-VL-4B-Instruct --local_dir Qwen/Qwen3-VL-4B-Instruct
+modelscope download --model BAAI/RoboBrain2.5-8B-NV --local_dir BAAI/RoboBrain2.5-8B-NV
 ```
 
 ## Inference
@@ -60,12 +60,12 @@ modelscope download --model Qwen/Qwen3-VL-4B-Instruct --local_dir Qwen/Qwen3-VL-
 
 ```sh
 cd FlagScale/
-vim examples/robobrain2_5/conf/inference/4b.yaml
+vim examples/robobrain2_5/conf/inference/8b.yaml
 ```
 
 Change 2 fields:
 
-- llm.model: change to "/tmp/models/Qwen/Qwen3-VL-4B-Instruct".
+- llm.model: change to "/tmp/models/BAAI/RoboBrain2.5-8B-NV".
 - generate.prompts: change to your customized input text.
 
 ### Run Inference
@@ -87,12 +87,12 @@ tail -f outputs/robobrain2.5_4b/serve_logs/host_0_localhost.output
 
 ```sh
 cd FlagScale/
-vim examples/robobrain2_5/conf/serve/3b.yaml
+vim examples/robobrain2_5/conf/serve/8b.yaml
 ```
 
 Change 1 fields:
 
-- engine_args.model: change to "/tmp/models/Qwen/Qwen3-VL-4B-Instruct".
+- engine_args.model: change to "/tmp/models/BAAI/RoboBrain2.5-8B-NV".
 
 ## Run Serving
 
