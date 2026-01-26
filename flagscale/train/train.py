@@ -714,8 +714,15 @@ def preprocess_common_state_dict(common_state_dict):
             if "param_groups" not in inner_optimizer:
                 return
             param_groups = inner_optimizer["param_groups"]
-            key_fn = lambda pg: [pg[key] for key in param_group_identifier_keys]
-            param_groups.sort(key=key_fn)
+            def get_sort_key(pg):
+                result = []
+                for key in param_group_identifier_keys:
+                    if key not in pg:
+                        result.append(None)
+                    else:
+                        result.append(pg[key])
+                return tuple(result)
+            param_groups.sort(key=get_sort_key)
             inner_optimizer["param_groups"] = param_groups
 
         optimizer_state_dict = preprocessed_common_state_dict['optimizer']
