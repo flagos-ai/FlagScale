@@ -1,5 +1,5 @@
 diff --git a/megatron/core/datasets/Makefile b/megatron/core/datasets/Makefile
-index e745f5239..415739e09 100644
+index e745f5239..723f7c85c 100644
 --- a/megatron/core/datasets/Makefile
 +++ b/megatron/core/datasets/Makefile
 @@ -1,8 +1,10 @@
@@ -15,9 +15,4 @@ index e745f5239..415739e09 100644
  
  OUT = $(LIBNAME)$(LIBEXT)
  SRC = helpers.cpp
-@@ -11,3 +13,4 @@ default: $(OUT)
- 
- $(OUT): $(SRC)
- 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $< -o $@
-+
 
