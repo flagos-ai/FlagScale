@@ -1,0 +1,62 @@
+diff --git a/tools/datasets/qwenvl/dataset_preparation.md b/tools/datasets/qwenvl/dataset_preparation.md
+index 1bd24a84..14d517f0 100644
+--- a/tools/datasets/qwenvl/dataset_preparation.md
++++ b/tools/datasets/qwenvl/dataset_preparation.md
+@@ -1,7 +1,7 @@
+ # 📎 Reference
+ Mainly based on [Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch/tree/main/toolkits/multimodal_data_preprocessing/),with necessary modifications for integration into the current training framework.
+ 
+-# Dataset Download & Preprocessing
++# Dataset Download
+ 
+ ```bash
+ cd /mnt
+@@ -13,25 +13,30 @@ cd LLaVA-Pretrain
+ unzip images.zip
+ 
+ #convert to webdataset format:
+-cd ./tools/datasets/qwenvl/
+-
+-
+-export PYTHONPATH=$PYTHONPATH:../../../../third_party/Megatron-LM/
+-
+-python convert_custom_dataset_to_wds_chatml_str.py \
+-    --dataset-root=/mnt/LLaVA-Pretrain \
+-    --output-root=/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/ \
+-    --json=blip_laion_cc_sbu_558k.json \
+-    --train-split 1 \
+-    --val-split 0 \
+-    --images-key=image \
+-    --videos-key=video \
+-    --vision-root=/mnt/LLaVA-Pretrain \
+-    --max-samples-per-tar 100000000 \
+-    --dp-size 1 \
+-    --num-workers 20
++cd /workspace/tools/datasets/qwenvl/
++python convert_llava_pretrain_to_wds.py /mnt/llava-datasets/LLaVA-Pretrain/
++
++#convert to megatron-energon format:
++cd /mnt/llava-datasets/LLaVA-Pretrain/wds
++energon prepare ./
++
++#select the following values for the presented options:
++> Please enter a desired train/val/test split like "0.5, 0.2, 0.3" or "8,1,1": 9,1,0
++> Do you want to create a dataset.yaml interactively? [Y/n]: Y
++> Please enter a number to choose a class: 10 (VQAWebdataset)
++> Do you want to set a simple field_map[Y] (or write your own sample_loader [n])? [Y/n]: Y
++> Please enter a webdataset field name for 'image' (<class 'torch.Tensor'>): jpg
++> Please enter a webdataset field name for 'context' (<class 'str'>): json[0][value]
++> Please enter a webdataset field name for 'answers' (typing.Optional[typing.List[str]], default: None): json[1][value]
++> Please enter a webdataset field name for 'answer_weights' (typing.Optional[torch.Tensor], default: None):
++```
++
++You can also directly get the preprocessed data:
++```bash
++cd /mnt/llava-datasets/LLaVA-Pretrain/
++wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/vlm-datasets/wds.tgz
++tar -zxf wds.tgz
+ ```
+-The preprocessed datas will stored at the output-root path `/mnt/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1`.
+ 
+ ## Prepare Multimodal Datasets Based on ShareGPT Format
+ 

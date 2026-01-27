@@ -1,0 +1,33 @@
+diff --git a/flagscale/train/models/qwen2_5_vl/qwen2_5_vl_model.py b/flagscale/train/models/qwen2_5_vl/qwen2_5_vl_model.py
+index 5f0ce50e..93154cdf 100644
+--- a/flagscale/train/models/qwen2_5_vl/qwen2_5_vl_model.py
++++ b/flagscale/train/models/qwen2_5_vl/qwen2_5_vl_model.py
+@@ -199,7 +199,6 @@ class Qwen2_5VLModel(MegatronModule):
+         Returns:
+             output (torch.Tensor): Loss of shape [b, s] if labels are provided, otherwise logits of shape [b, s, vocab_size].
+         """
+-
+         use_inference_kv_cache = (
+             inference_params is not None
+             and "image_tokens_count" in inference_params.key_value_memory_dict
+@@ -210,11 +209,6 @@ class Qwen2_5VLModel(MegatronModule):
+         if self.pre_process:
+             vision_embeds = None
+             if vision_grid_thw.shape[0] > 0:
+-                # NOTE(lizhiyu): Reference https://github.com/huggingface/transformers/blob/40a493c7ed4f19f08eadb0639cf26d49bfa5e180/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py#L1612
+-                if self.config.bf16:
+-                    vision_data = vision_data.to(torch.bfloat16)
+-                elif self.config.fp16:
+-                    vision_data = vision_data.to(torch.float16)
+                 vision_embeds = self.vision_model(
+                     vision_data=vision_data, # If None, vision model should use intermediate outputs (EPP > 1)
+                     grid_thw=vision_grid_thw # should provided in each EPP stage
+@@ -268,6 +262,7 @@ class Qwen2_5VLModel(MegatronModule):
+                 )  # [text_seq_len, b, h_language]
+         else:
+             combined_embeddings = None
++
+         output = self.language_model(
+             input_ids=None,
+             position_ids=position_ids,              # None in encoder
+

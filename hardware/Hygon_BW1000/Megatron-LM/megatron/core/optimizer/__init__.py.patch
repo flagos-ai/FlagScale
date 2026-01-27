@@ -1,0 +1,34 @@
+diff --git a/megatron/core/optimizer/__init__.py b/megatron/core/optimizer/__init__.py
+index 2608fde8e..6e63e4142 100644
+--- a/megatron/core/optimizer/__init__.py
++++ b/megatron/core/optimizer/__init__.py
+@@ -464,7 +464,9 @@ def get_megatron_optimizer(
+     else:
+         all_dense_model_chunks = [model_chunks]
+         overlap_param_gather_with_optimizer_step_flags = [False]
+-    model_parallel_rank = torch.distributed.get_rank(mpu.get_model_parallel_group())
++    mp_group = mpu.get_model_parallel_group()
++    mp_group = [mp_group] if not isinstance(mp_group, list) else mp_group
++    model_parallel_rank = torch.distributed.get_rank(mp_group[0])
+ 
+     if torch.distributed.get_world_size(
+         mpu.get_data_parallel_group(with_context_parallel=True, partial_data_parallel=False)
+@@ -568,9 +570,14 @@ def get_megatron_optimizer(
+         buffer_name='expert_parallel_buffers',
+     )
+     if len(moe_param_groups) > 0:
+-        model_parallel_rank = torch.distributed.get_rank(
+-            mpu.get_expert_tensor_model_pipeline_parallel_group()
+-        )
++        expert_mp_group = mpu.get_expert_tensor_model_pipeline_parallel_group()
++        if not isinstance(expert_mp_group, list):
++            model_parallel_rank = torch.distributed.get_rank(
++                mpu.get_expert_tensor_model_pipeline_parallel_group()
++            )
++        else:
++            model_parallel_rank = torch.distributed.get_rank(expert_mp_group[0])
++
+         # Pass Gloo process groups into optimizer only if needed.
+         if use_gloo_process_groups:
+             data_parallel_group_gloo = mpu.get_expert_data_parallel_group_gloo()
+

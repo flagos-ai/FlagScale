@@ -1,0 +1,58 @@
+diff --git a/examples/llama3/conf/train/70b_finetune.yaml b/examples/llama3/conf/train/70b_finetune.yaml
+index aca7f56b..6fc63780 100644
+--- a/examples/llama3/conf/train/70b_finetune.yaml
++++ b/examples/llama3/conf/train/70b_finetune.yaml
+@@ -1,6 +1,7 @@
+ system:
+-  tensor_model_parallel_size: 8
++  tensor_model_parallel_size: 4
+   pipeline_model_parallel_size: 4
++  context_parallel_size: 2
+   make_vocab_size_divisible_by: 64
+   disable_bias_linear: True
+   sequence_parallel: True
+@@ -18,9 +19,9 @@ system:
+     wandb_project: "train-llama3-70B"
+     wandb_exp_name: "train-llama3-70B"
+   checkpoint:
+-    load: ${ckpt_path:??}
++    load: /share/project/llama3/tp4pp4
+     ckpt_format: torch
+-    save_interval: 100
++    save_interval: 250
+     finetune: True
+ 
+ model:
+@@ -48,11 +49,12 @@ model:
+   hidden_dropout: 0.0
+   clip_grad: 1.0
+ 
+-  train_samples: 6160066
++  train_samples: 256000
+   micro_batch_size: 1
+-  global_batch_size: 1024
++  global_batch_size: 512
+   seed: 42
+ 
++
+   optimizer:
+     start_weight_decay: 0
+     end_weight_decay: 5e-7
+@@ -62,13 +64,13 @@ model:
+     lr_scheduler:
+       lr: 5e-6
+       min_lr: 0
+-      lr_warmup_samples: 2048000
++      lr_warmup_samples: 25600
+       lr_decay_style: cosine
+ 
+ data:
+-  data_path: ${data_path:??}
++  data_path: /share/project/DNOT_MOVE/dataset/dedup-md5-pile-pile-cc_text_document
+   split: 1
+   tokenizer:
+     tokenizer_type: Llama3TokenizerFS
+-    tokenizer_path: ${tokenizer_path:??}
++    tokenizer_path:  /share/project/DNOT_MOVE/tokenizer
+     vocab_size: 128256
+

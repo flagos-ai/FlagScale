@@ -1,0 +1,17 @@
+diff --git a/megatron/core/transformer/transformer_layer.py b/megatron/core/transformer/transformer_layer.py
+index b7d761f8a..ca7de92cf 100644
+--- a/megatron/core/transformer/transformer_layer.py
++++ b/megatron/core/transformer/transformer_layer.py
+@@ -31,8 +31,9 @@ def get_transformer_layer_offset(config: TransformerConfig):
+             pipeline_rank = pipeline_rank - pp_decoder_start
+ 
+     if config.pipeline_model_parallel_size > 1:
+-
+-        if (
++        if config.enable_hetero:
++            offset = sum(([0] + config.hetero_pipeline_layer_split)[: pipeline_rank + 1])
++        elif (
+             config.num_layers_in_first_pipeline_stage is not None
+             or config.num_layers_in_last_pipeline_stage is not None
+         ):
+
