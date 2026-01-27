@@ -1,162 +1,106 @@
 import torch
-from compressed_tensors.quantization import (
-    QuantizationConfig,
-    QuantizationScheme,
-    QuantizationStatus,
-    apply_quantization_config,
-    disable_quantization,
-    enable_quantization,
-    is_preset_scheme,
-    preset_name_to_scheme,
-)
-from compressed_tensors.quantization.lifecycle.apply import find_name_or_class_matches
-from llmcompressor.modifiers.quantization.calibration import (
-    freeze_module_quantization,
-    initialize_observer,
-    update_weight_zp_scale,
-)
-from llmcompressor.modifiers.quantization.gptq.utils import get_output_error
-from llmcompressor.modifiers.quantization.gptq.utils.gptq_wrapper import GPTQWrapper
-from llmcompressor.modifiers.utils.layer_compressor import LayerCompressor
-from llmcompressor.modifiers.utils.pytorch_helpers import run_calibration_forward
-from llmcompressor.transformers.sparsification.compressed_tensors_utils import (
-    modify_save_pretrained,
-)
-from llmcompressor.utils.fsdp.context import fix_fsdp_module_name
-from llmcompressor.utils.helpers import DisableKVCache
+from typing import List, Optional, Dict, Any
+from transformers import PreTrainedModel, PreTrainedTokenizer
+from flagscale.logger import logger
 
-from flagscale.runner.utils import logger
+# 尝试导入必要的库，处理不同版本的路径差异
+try:
+    from llmcompressor.modifiers.quantization import QuantizationModifier
+except ImportError:
+    QuantizationModifier = None
 
-__all__ = ["LLMCompressorAdapter"]
+try:
+    # 优先尝试从 transformers 导入 oneshot
+    from llmcompressor.transformers import oneshot
+except ImportError:
+    try:
+        # 备选：尝试从根目录或其他路径导入
+        from llmcompressor import oneshot
+    except ImportError:
+        oneshot = None
 
-QUANT_MAPPING_NAMES = {"gptq": GPTQWrapper}
+try:
+    from llmcompressor.modifiers import ScheduledModifierManager
+except ImportError:
+    ScheduledModifierManager = None
 
 
 class LLMCompressorAdapter:
-    def __init__(
-        self,
-        model,
-        scheme,
-        targets,
-        algo=None,
-        ignore=None,
-        dataset=None,
-        num_calibration_steps=384,
-    ):
+    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, config: Dict[str, Any]):
         self.model = model
-        modify_save_pretrained(self.model)
-        if algo is not None:
-            assert len(algo) == 1
-            for k, v in algo.items():
-                self.algo = k
-                self.algo_args = v
+        self.tokenizer = tokenizer
+        self.config = config
+        
+        if hasattr(config, "compress") and hasattr(config.compress, "compress_args"):
+             self.compress_args = config.compress.compress_args
         else:
-            self.algo = algo
-        self.scheme = scheme
-        self.ignore = ignore
-        self.targets = targets
-        self.wrapper_cls = None
-        self.layer_compressors_ = []
-        self.num_calibration_steps = num_calibration_steps
-        self.dataset = dataset
+             self.compress_args = config.get("compress_args", config)
 
-        if (self.algo is None and is_preset_scheme(self.scheme)) or self.algo in list(
-            QUANT_MAPPING_NAMES.keys()
-        ):
-            self.wrapper_cls = QUANT_MAPPING_NAMES[self.algo] if self.algo is not None else None
-            quant_config = self.init_quant_config()
+    def run(self):
+        logger.info("Starting LLMCompressor Adapter...")
+        
+        if QuantizationModifier is None:
+            raise ImportError("Could not import QuantizationModifier from llmcompressor.modifiers.quantization")
 
-            ### find ignore and target to quant, initialize module for quant
-            ### overwrite forward if quantization_enabled is Tue
-            apply_quantization_config(self.model, quant_config)
-        if self.wrapper_cls is None:
-            self.preprocess_weight()
-        else:
-            self.init_compressor()
-        if self.dataset is not None:
-            self.run_blockwise_calib_forward()
-        self.model.apply(freeze_module_quantization)
+        targets = self.compress_args.get("targets", ["Linear"])
+        if hasattr(targets, "to_container"): 
+            targets = targets.to_container()
+        
+        ignore_layers = self.compress_args.get("ignore", [])
+        if hasattr(ignore_layers, "to_container"): 
+            ignore_layers = ignore_layers.to_container()
 
-    def init_quant_config(self):
-        if self.scheme is not None:
-            # takes precedence over config_groups
-            if isinstance(self.scheme, str) and is_preset_scheme(self.scheme):
-                # attach targets to scheme
-                self.scheme = {self.scheme: self.targets}
+        quant_config_list = self.compress_args.get("quantization", [])
+        if not quant_config_list:
+            logger.warning("No quantization config found.")
+            return
 
-            self.config_groups = {}
-            for idx, key in enumerate(self.scheme.keys()):
-                if is_preset_scheme(key):
-                    scheme = preset_name_to_scheme(key, self.scheme[key])
-                else:
-                    scheme = QuantizationScheme.model_validate(
-                        {"targets": self.scheme[key], **self.scheme}
-                    )
+        q_cfg = quant_config_list[0]
+        scheme_name = q_cfg.get("scheme", "W8A16")
 
-                group_name = f"group_{idx}"
-                self.config_groups[group_name] = scheme
-
-        if self.config_groups is None or len(self.config_groups) == 0:
-            default_quant_scheme = QuantizationScheme(targets=self.targets)
-            self.config_groups = {"group_0": default_quant_scheme}
-            logger.info(f"No config groups were provided, using default {self.config_groups}")
-
-        return QuantizationConfig(
-            config_groups=self.config_groups,
-            kv_cache_scheme=None,  ### TODO(lvmengsi): not support kv cache quant for now
-            quantization_status=QuantizationStatus.INITIALIZED,
-            ignore=self.ignore,
+        logger.info(f"Applying Scheme: {scheme_name}")
+        
+        # 初始化 Modifier
+        # 注意：scheme 必须是字符串
+        modifier = QuantizationModifier(
+            targets=targets,
+            ignore=ignore_layers,
+            scheme=scheme_name
         )
 
-    def init_compressor(self):
-        for name, layer in self.model.named_modules():
-            name = fix_fsdp_module_name(name)
-            if name is None:
-                continue
-            try:
-                idx = int(name.split(".")[-1])
-            except:
-                continue
+        logger.info("Applying quantization modifier...")
 
-            if find_name_or_class_matches(name, layer, self.ignore):
-                continue
-            logger.info(f"prepare compressor for layer {name}")
-            compressor = LayerCompressor(
-                self.wrapper_cls, self.model, layer, idx, name, self.algo_args
+        # 策略 1: 使用 oneshot (首选)
+        if oneshot is not None:
+            logger.info("Using 'oneshot' API.")
+            oneshot(
+                model=self.model,
+                recipe=modifier,
             )
-            self.layer_compressors_.append(compressor)
-        self.layer_compressors_[0].set_early_stop()
-
-    def preprocess_weight(self):
-        for idx, (name, layer) in enumerate(self.model.named_modules()):
-            layer.apply(lambda module: initialize_observer(layer, base_name="weight"))
-        self.model.apply(update_weight_zp_scale)
-
-    def add_hook(self):
-        pass
-
-    @torch.no_grad()
-    def run_blockwise_calib_forward(self):
-        logger.info("start calibration")
-        self.model.apply(disable_quantization)
-        with DisableKVCache(self.model):
-            intermediates = run_calibration_forward(
-                self.model,
-                self.dataset,
-                num_calibration_steps=self.num_calibration_steps,
-                mask_padding=False,
+        
+        # 策略 2: 使用 ScheduledModifierManager (备选)
+        elif ScheduledModifierManager is not None:
+            logger.info("Using 'ScheduledModifierManager' API.")
+            manager = ScheduledModifierManager([modifier])
+            manager.apply(self.model)
+            
+        # 策略 3: 如果 Modifier 有 apply 方法 (旧版)
+        elif hasattr(modifier, "apply"):
+            logger.info("Using 'modifier.apply' directly.")
+            modifier.apply(self.model)
+            
+        else:
+            raise ImportError(
+                "Could not find a valid method to apply the quantization. "
+                "'oneshot' not found in llmcompressor.transformers, "
+                "and ScheduledModifierManager not available."
             )
-            self.layer_compressors_[0].clear_early_stop()
+        
+        logger.info("Quantization complete.")
 
-            for idx, layer_compressor in enumerate(self.layer_compressors_):
-                logger.info(f"start calibration layer {layer_compressor.name}")
-                layer_compressor.pre_compress()
-                unquantized_outputs = layer_compressor.calibrate_layer(intermediates)
-                layer_compressor.compress()
-                layer_compressor.post_compress()
-                layer_compressor.revert_layer_wrappers()
-                quantized_outputs = layer_compressor.calibrate_layer(intermediates)
-                error = get_output_error(unquantized_outputs, quantized_outputs)
-                logger.info(f"Mean output error from quantization: {error:.3f}")
-                intermediates = quantized_outputs
-        self.model.apply(enable_quantization)
+    def save(self, save_dir: str):
+        logger.info(f"Saving quantized model to {save_dir}...")
+        self.model.save_pretrained(save_dir)
+        self.tokenizer.save_pretrained(save_dir)
+        logger.info(f"Model saved successfully.")
+

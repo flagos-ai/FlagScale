@@ -1,9 +1,9 @@
 defaults:
   - _self_
-  - compress: w8a16
+  - compress: mix_precision
 
 experiment:
-  exp_name: robobrain
+  exp_name: robobrain_mix
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: compress
@@ -21,4 +21,3 @@ action: run
 hydra:
   run:
     dir: ${experiment.exp_dir}/hydra
-
