@@ -213,6 +213,7 @@ Huawei_Atlas800TA3:
     FlagScale:
     - f54888ff0b7a3f042be0b8f5bd41176a0fe79e6f
     - 10e79271435ec4fdbae89be7d2c310fe93771604
+    - 57d0837828d7c53454f1b4223cbfbb66ad6d701b
   inference:
     FlagScale+vllm:
     - 1d3c4b66bd2d214f6d25ce45c412a1b6ec043a90
