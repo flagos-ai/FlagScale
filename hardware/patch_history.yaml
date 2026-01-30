@@ -42,10 +42,13 @@ Cambricon_MLU:
   train:
     FlagScale+Megatron-LM:
     - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    - 71d49a1aa3f04a42e3091c277130654eebefd509
     Megatron-LM:
     - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    - 71d49a1aa3f04a42e3091c277130654eebefd509
     FlagScale:
     - a4434373b7d0bf952d8d6eecb036243cd0a7a049
+    - 71d49a1aa3f04a42e3091c277130654eebefd509
 Kunlunxin_R310p:
   inference:
     FlagScale+vllm:
@@ -67,12 +70,15 @@ Kunlunxin_R310p:
     FlagScale+Megatron-LM:
     - 25e9b91b3428e74da262d631fa3e2c13f3e2e2c3
     - 86a9634302da78433aef8dcf2d748771ba6393dd
+    - a8222e3566992306645fa1a40e98fa12f835f1b2
     Megatron-LM:
     - 25e9b91b3428e74da262d631fa3e2c13f3e2e2c3
     - 86a9634302da78433aef8dcf2d748771ba6393dd
+    - a8222e3566992306645fa1a40e98fa12f835f1b2
     FlagScale:
     - 25e9b91b3428e74da262d631fa3e2c13f3e2e2c3
     - 86a9634302da78433aef8dcf2d748771ba6393dd
+    - a8222e3566992306645fa1a40e98fa12f835f1b2
 MUSA_S5000:
   train:
     FlagScale+Megatron-LM:
