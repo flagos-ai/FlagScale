@@ -10,6 +10,8 @@ experiment:
     entrypoint: flagscale/compress/compressor.py
   runner:
     hostfile: null
+    deploy:
+      use_fs_serve: true
   cmds:
     before_start: source activate flagscale-inference
   envs:
