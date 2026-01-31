@@ -12,8 +12,8 @@
 # Usage:
 #   source pkg_utils.sh
 #   set_pkg_manager "uv"  # or "pip" or "conda"
-#   pkg_install -r requirements.txt
-#   pkg_install package1 package2
+#   pkg_install -d $DEBUG -r requirements.txt
+#   pkg_install -d $DEBUG package1 package2
 #
 # Environment:
 #   FLAGSCALE_PKG_MANAGER - Set to "uv", "pip", or "conda" (default: uv)
@@ -26,21 +26,7 @@ source "$_PKG_UTILS_DIR/utils.sh"
 # =============================================================================
 # Package Manager Functions
 # =============================================================================
-
-# Check if uv is available
-has_uv() {
-    command -v uv &> /dev/null
-}
-
-# Check if pip is available
-has_pip() {
-    command -v pip &> /dev/null
-}
-
-# Check if conda is available
-has_conda() {
-    command -v conda &> /dev/null
-}
+# Note: has_uv, has_pip, has_conda are defined in utils.sh
 
 # Get current package manager
 # Returns: "uv", "pip", or "conda"
@@ -49,16 +35,14 @@ get_pkg_manager() {
 }
 
 # Set package manager
-# Usage: set_pkg_manager <uv|pip|conda>
 set_pkg_manager() {
     local manager=$1
     case "$manager" in
         uv|pip|conda)
             export FLAGSCALE_PKG_MANAGER="$manager"
-            log_info "Package manager set to: $manager"
             ;;
         *)
-            log_error "Unknown package manager: $manager (use 'uv', 'pip', or 'conda')"
+            log_error "Unknown package manager: $manager"
             return 1
             ;;
     esac
@@ -69,25 +53,30 @@ set_pkg_manager() {
 # =============================================================================
 
 # Install packages using the configured package manager
-# Usage: pkg_install [-r requirements.txt] [package1 package2 ...]
+# Usage: pkg_install -d <debug> [-r requirements.txt] [package1 package2 ...]
 #
 # For conda: Uses pip within the conda environment for requirements files
 #            (conda install is used for conda-specific packages via pkg_conda_install)
 pkg_install() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local manager=$(get_pkg_manager)
     local args=("$@")
 
     case "$manager" in
         uv)
-            _uv_install "${args[@]}"
+            _uv_install "$debug" "${args[@]}"
             ;;
         pip)
-            _pip_install "${args[@]}"
+            _pip_install "$debug" "${args[@]}"
             ;;
         conda)
             # For requirements files, use pip within conda environment
             # This is the standard approach for PyPI packages in conda
-            _conda_pip_install "${args[@]}"
+            _conda_pip_install "$debug" "${args[@]}"
             ;;
         *)
             log_error "Unknown package manager: $manager"
@@ -97,40 +86,55 @@ pkg_install() {
 }
 
 # Install from requirements file
-# Usage: pkg_install_requirements <requirements_file>
+# Usage: pkg_install_requirements -d <debug> <requirements_file>
 pkg_install_requirements() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local req_file=$1
 
-    if [ ! -f "$req_file" ]; then
+    if [ ! -f "$req_file" ] && [ "$debug" != true ]; then
         log_error "Requirements file not found: $req_file"
         return 1
     fi
 
-    pkg_install -r "$req_file"
+    pkg_install -d $debug -r "$req_file"
 }
 
 # Install conda packages directly (only for conda manager)
-# Usage: pkg_conda_install package1 package2 ...
+# Usage: pkg_conda_install -d <debug> package1 package2 ...
 pkg_conda_install() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local manager=$(get_pkg_manager)
 
     if [ "$manager" != "conda" ]; then
         log_warn "pkg_conda_install called but manager is $manager, using pip instead"
-        pkg_install "$@"
+        pkg_install -d $debug "$@"
         return
     fi
 
-    if ! has_conda; then
+    if ! has_conda && [ "$debug" != true ]; then
         log_error "Conda not available"
         return 1
     fi
 
-    conda install -y "$@"
+    run_cmd -d $debug conda install -y "$@"
 }
 
 # Install package from source (editable mode)
-# Usage: pkg_install_editable <path> [extra_args...]
+# Usage: pkg_install_editable -d <debug> <path> [extra_args...]
 pkg_install_editable() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local path=$1
     shift
     local extra_args=("$@")
@@ -138,26 +142,31 @@ pkg_install_editable() {
 
     case "$manager" in
         uv)
-            uv pip install -e "$path" "${extra_args[@]}"
+            run_cmd -d $debug uv pip install -e "$path" "${extra_args[@]}"
             ;;
         pip|conda)
-            pip install -e "$path" "${extra_args[@]}"
+            run_cmd -d $debug pip install --root-user-action=ignore -e "$path" "${extra_args[@]}"
             ;;
     esac
 }
 
 # Install package without build isolation (for packages with complex builds)
-# Usage: pkg_install_no_isolation <path>
+# Usage: pkg_install_no_isolation -d <debug> <path>
 pkg_install_no_isolation() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local path=$1
     local manager=$(get_pkg_manager)
 
     case "$manager" in
         uv)
-            uv pip install --no-build-isolation "$path" -v
+            run_cmd -d $debug uv pip install --no-build-isolation "$path" -v
             ;;
         pip|conda)
-            pip install --no-build-isolation "$path" -vvv
+            run_cmd -d $debug pip install --root-user-action=ignore --no-build-isolation "$path" -vvv
             ;;
     esac
 }
@@ -168,18 +177,21 @@ pkg_install_no_isolation() {
 
 # pip install wrapper
 _pip_install() {
-    pip install "$@"
+    local debug=$1; shift
+    run_cmd -d $debug pip install --root-user-action=ignore "$@"
 }
 
 # uv pip install wrapper
 _uv_install() {
-    uv pip install "$@"
+    local debug=$1; shift
+    run_cmd -d $debug uv pip install "$@"
 }
 
 # conda pip install wrapper (uses pip within conda environment)
 _conda_pip_install() {
+    local debug=$1; shift
     # In conda environments, pip is the standard way to install PyPI packages
-    pip install "$@"
+    run_cmd -d $debug pip install --root-user-action=ignore "$@"
 }
 
 # =============================================================================
@@ -224,4 +236,52 @@ get_install_cmd() {
         pip)   echo "pip install" ;;
         conda) echo "pip install (in conda)" ;;
     esac
+}
+
+# =============================================================================
+# Package Check Functions
+# =============================================================================
+
+# Check if a Python package is installed
+# Usage: is_package_installed <package_name>
+# Returns: 0 if installed, 1 if not
+is_package_installed() {
+    local package=$1
+    # Normalize package name (replace - with _ for pip show compatibility)
+    local normalized=$(echo "$package" | tr '-' '_')
+    pip show "$normalized" &>/dev/null || pip show "$package" &>/dev/null
+}
+
+# Get installed version of a package
+# Usage: get_package_version <package_name>
+# Returns: version string or empty if not installed
+get_package_version() {
+    local package=$1
+    local normalized=$(echo "$package" | tr '-' '_')
+    pip show "$normalized" 2>/dev/null | grep -i "^Version:" | awk '{print $2}' || \
+    pip show "$package" 2>/dev/null | grep -i "^Version:" | awk '{print $2}'
+}
+
+# Check if we should build a package from source
+# Usage: should_build_package <package_name>
+# Returns: 0 if should build (not installed or FORCE_BUILD=true), 1 if skip
+# Environment: FLAGSCALE_FORCE_BUILD - Set to "true" to force rebuild
+should_build_package() {
+    local package=$1
+
+    # Always build if force-build is set
+    if [ "${FLAGSCALE_FORCE_BUILD:-false}" = true ]; then
+        log_info "Force build enabled, will build $package"
+        return 0
+    fi
+
+    # Check if already installed
+    if is_package_installed "$package"; then
+        local version=$(get_package_version "$package")
+        log_info "$package already installed (version: ${version:-unknown}), skipping build"
+        return 1
+    fi
+
+    # Not installed, should build
+    return 0
 }

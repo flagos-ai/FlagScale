@@ -16,4 +16,6 @@ matplotlib==3.9.4
 # Utilities
 tqdm==4.67.1
 requests==2.32.3
+aiohttp==3.11.11
 pyyaml==6.0.2
+regex==2025.10.22

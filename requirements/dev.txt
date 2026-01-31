@@ -1,0 +1,24 @@
+# Development dependencies
+# Includes build tools, linting, testing utilities
+# Install with: ./tools/install/install.sh --dev ...
+
+# Build dependencies
+setuptools==77.0.3
+wheel==0.45.1
+pip==25.0.1
+pybind11==3.0.1
+
+# Linting and formatting
+pre-commit==4.2.0
+black==24.4.2
+isort==5.13.2
+flake8==7.1.0
+pylint==3.2.6
+
+# Testing
+coverage==7.6.10
+pytest==8.3.5
+pytest-asyncio==0.25.3
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+pytest-random-order==1.1.1

@@ -11,19 +11,15 @@
     "matplotlib": {"version": "3.9.4", "pip": true},
     "tqdm": {"version": "4.67.1", "pip": true},
     "requests": {"version": "2.32.3", "pip": true},
-    "pyyaml": {"version": "6.0.2", "pip": true}
-  },
-  "cuda": {
-    "cuda": {"version": "12.4.1", "pip": false},
-    "ubuntu": {"version": "22.04", "pip": false},
-    "torch": {"version": "2.9.1", "pip": true},
-    "torchaudio": {"version": "2.9.1", "pip": true},
-    "torchvision": {"version": "0.24.1", "pip": true}
+    "aiohttp": {"version": "3.11.11", "pip": true},
+    "pyyaml": {"version": "6.0.2", "pip": true},
+    "regex": {"version": "2025.10.22", "pip": true}
   },
   "dev": {
     "setuptools": {"version": "77.0.3", "pip": true},
     "wheel": {"version": "0.45.1", "pip": true},
     "pip": {"version": "25.0.1", "pip": true},
+    "pybind11": {"version": "3.0.1", "pip": true},
     "pre-commit": {"version": "4.2.0", "pip": true},
     "black": {"version": "24.4.2", "pip": true},
     "isort": {"version": "5.13.2", "pip": true},
@@ -35,5 +31,21 @@
     "pytest-asyncio": {"version": "0.25.3", "pip": true},
     "pytest-random-order": {"version": "1.1.1", "pip": true},
     "coverage": {"version": "7.6.10", "pip": true}
+  },
+  "cuda": {
+    "cuda": {"version": "12.8.1", "pip": false},
+    "ubuntu": {"version": "22.04", "pip": false},
+    "base": {
+      "torch": {"version": "2.9.1", "pip": true},
+      "torchaudio": {"version": "2.9.1", "pip": true},
+      "torchvision": {"version": "0.24.1", "pip": true}
+    },
+    "train": {
+      "flash-attn": {"version": "2.8.1", "pip": false}
+    },
+    "inference": {
+    },
+    "rl": {
+    }
   }
 }

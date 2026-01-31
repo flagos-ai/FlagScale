@@ -123,38 +123,67 @@ jobs:
         run: |
           git config --global --add safe.directory $PROJECT_ROOT
 
-      - name: Install dependencies for task
+      - name: Setup environment for task
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
+          TASK='${{ inputs.task }}'
           PKG_MGR='${{ inputs.pkg_mgr }}'
           ENV_NAME='${{ inputs.env_name }}'
           ENV_PATH='${{ inputs.env_path }}'
 
-          echo "Installing dependencies for task: ${{ inputs.task }}"
+          echo "Setting up environment for task: $TASK"
           echo "Platform: ${{ inputs.platform }}"
           echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
 
-          # Build install command with package manager and environment parameters
-          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task ${{ inputs.task }} --retry-count 3"
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+          source ./tools/install/utils/pkg_utils.sh
 
-          # Add package manager option
-          if [ -n "$PKG_MGR" ]; then
-            INSTALL_CMD="$INSTALL_CMD --pkg-mgr $PKG_MGR"
-          fi
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
 
-          # Add environment options based on package manager
-          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_NAME" ]; then
-            INSTALL_CMD="$INSTALL_CMD --env-name $ENV_NAME"
-          fi
-          if [ -n "$ENV_PATH" ]; then
-            INSTALL_CMD="$INSTALL_CMD --env-path $ENV_PATH"
-          fi
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
 
-          # Run install script
-          echo "Running: $INSTALL_CMD"
-          eval $INSTALL_CMD
+          # Task-specific installation:
+          # - train/hetero_train: install task source dependencies
+          # - inference/rl: all dependencies pre-installed, no installation needed
+          case "$TASK" in
+            train|hetero_train)
+              echo "Installing task source dependencies for $TASK..."
+              ./tools/install/install.sh \
+                --platform ${{ inputs.platform }} \
+                --task train \
+                --pkg-mgr "$PKG_MGR" \
+                ${ENV_NAME:+--env-name "$ENV_NAME"} \
+                --no-system --no-dev --no-base \
+                --retry-count 3
+              ;;
+            inference|rl)
+              echo "✅ All dependencies pre-installed for $TASK"
+              ;;
+            *)
+              echo "⚠️  Unknown task: $TASK, skipping installation"
+              ;;
+          esac
         timeout-minutes: 30
 
       - name: Run functional tests
@@ -182,7 +211,7 @@ jobs:
           echo "Project root: $PROJECT_ROOT"
 
           # Source environment utilities
-          source ./tools/install/utils/conda_utils.sh
+          source ./tools/install/utils/pyenv_utils.sh
           source ./tools/install/utils/pkg_utils.sh
 
           # Activate environment based on package manager

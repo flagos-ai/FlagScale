@@ -59,7 +59,7 @@ check_versions_file() {
 }
 
 # =============================================================================
-# Version getters
+# Version getters (handles nested structure)
 # =============================================================================
 
 # Get version from common section
@@ -68,18 +68,34 @@ get_common() {
     jq -r ".common.\"${name}\".version // empty" "$VERSIONS_FILE"
 }
 
-# Get version from platform section
+# Get version from platform section (handles nested base and platform-level props)
+# Usage: get_platform "cuda" "torch"  -> looks in cuda.base.torch
+#        get_platform "cuda" "cuda"   -> looks in cuda.cuda (platform-level)
 get_platform() {
     local platform=$1
     local name=$2
-    jq -r ".\"${platform}\".\"${name}\".version // empty" "$VERSIONS_FILE"
+    # First try platform.base.<name> (for packages like torch)
+    local version=$(jq -r ".\"${platform}\".base.\"${name}\".version // empty" "$VERSIONS_FILE")
+    # If not found, try platform.<name> (for platform-level props like cuda version)
+    if [ -z "$version" ]; then
+        version=$(jq -r ".\"${platform}\".\"${name}\".version // empty" "$VERSIONS_FILE")
+    fi
+    echo "$version"
 }
 
 # Check if entry is a pip package (pip: true means pip package, false means tool)
 is_pip_package() {
     local section=$1
     local name=$2
-    local result=$(jq -r ".\"${section}\".\"${name}\".pip // false" "$VERSIONS_FILE")
+    # First check common/dev sections
+    local result=$(jq -r ".\"${section}\".\"${name}\".pip // empty" "$VERSIONS_FILE")
+    if [ -z "$result" ]; then
+        # For platform sections, check base subsection first, then platform level
+        result=$(jq -r ".\"${section}\".base.\"${name}\".pip // empty" "$VERSIONS_FILE")
+        if [ -z "$result" ]; then
+            result=$(jq -r ".\"${section}\".\"${name}\".pip // empty" "$VERSIONS_FILE")
+        fi
+    fi
     [ "$result" = "true" ]
 }
 
@@ -172,13 +188,27 @@ EOF
         echo ""
         echo "  [$platform]"
         echo "    Tasks: $(get_platform_tasks "$platform" | tr '\n' ' ')"
-        for key in $(jq -r ".\"${platform}\" | keys[]" "$VERSIONS_FILE"); do
+
+        # Show platform-level properties (cuda, ubuntu)
+        for key in $(jq -r ".\"${platform}\" | to_entries[] | select(.value | type == \"object\" and has(\"version\")) | .key" "$VERSIONS_FILE"); do
             local value=$(get_platform "$platform" "$key")
             local is_pip=$(jq -r ".\"${platform}\".\"${key}\".pip" "$VERSIONS_FILE")
             local type_label="tool"
             [ "$is_pip" = "true" ] && type_label="pip"
             printf "    %-16s = %-10s (%s)\n" "$key" "$value" "$type_label"
         done
+
+        # Show base packages
+        if jq -e ".\"${platform}\".base" "$VERSIONS_FILE" > /dev/null 2>&1; then
+            echo "    [base]"
+            for key in $(jq -r ".\"${platform}\".base | keys[]" "$VERSIONS_FILE"); do
+                local value=$(jq -r ".\"${platform}\".base.\"${key}\".version // empty" "$VERSIONS_FILE")
+                local is_pip=$(jq -r ".\"${platform}\".base.\"${key}\".pip" "$VERSIONS_FILE")
+                local type_label="tool"
+                [ "$is_pip" = "true" ] && type_label="pip"
+                printf "      %-14s = %-10s (%s)\n" "$key" "$value" "$type_label"
+            done
+        fi
     done
 
     cat << EOF
@@ -261,17 +291,17 @@ build_image() {
     for key in $(jq -r '.common | keys[]' "$VERSIONS_FILE"); do
         if ! is_pip_package "common" "$key"; then
             local value=$(get_common "$key")
-            local arg_name=$(echo "$key" | tr '[:lower:]' '[:upper:]')_VERSION
+            local arg_name=$(echo "$key" | tr '[:lower:]' '[:upper:]' | tr '-' '_')_VERSION
             log_info "${arg_name}: $value"
             build_cmd="$build_cmd --build-arg ${arg_name}=$value"
         fi
     done
 
-    # Add platform-specific tool versions as build args (only non-Python packages)
-    for key in $(jq -r ".\"${platform}\" | keys[]" "$VERSIONS_FILE"); do
+    # Add platform-specific tool versions as build args (platform-level properties only)
+    for key in $(jq -r ".\"${platform}\" | to_entries[] | select(.value | type == \"object\" and has(\"version\")) | .key" "$VERSIONS_FILE"); do
         if ! is_pip_package "$platform" "$key"; then
             local value=$(get_platform "$platform" "$key")
-            local arg_name=$(echo "$key" | tr '[:lower:]' '[:upper:]')_VERSION
+            local arg_name=$(echo "$key" | tr '[:lower:]' '[:upper:]' | tr '-' '_')_VERSION
             log_info "${arg_name}: $value"
             build_cmd="$build_cmd --build-arg ${arg_name}=$value"
         fi

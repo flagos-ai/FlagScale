@@ -5,7 +5,7 @@
 
 -r ../common.txt
 
-# PyTorch with CUDA support
+# PyTorch
 torch==2.9.1
 torchaudio==2.9.1
 torchvision==0.24.1

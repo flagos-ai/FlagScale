@@ -120,25 +120,44 @@ jobs:
           ENV_NAME='${{ inputs.env_name }}'
           ENV_PATH='${{ inputs.env_path }}'
 
-          # Build install command with package manager and environment parameters
-          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task hetero_train --retry-count 3"
+          echo "Installing dependencies for heterogeneous training"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
 
-          # Add package manager option
-          if [ -n "$PKG_MGR" ]; then
-            INSTALL_CMD="$INSTALL_CMD --pkg-mgr $PKG_MGR"
-          fi
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+          source ./tools/install/utils/pkg_utils.sh
 
-          # Add environment options based on package manager
-          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_NAME" ]; then
-            INSTALL_CMD="$INSTALL_CMD --env-name $ENV_NAME"
-          fi
-          if [ -n "$ENV_PATH" ]; then
-            INSTALL_CMD="$INSTALL_CMD --env-path $ENV_PATH"
-          fi
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
 
-          # Run install script
-          echo "Running: $INSTALL_CMD"
-          eval $INSTALL_CMD
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install task source dependencies (pip deps are pre-installed in the env)
+          echo "Installing task source dependencies..."
+          ./tools/install/install.sh \
+            --platform ${{ inputs.platform }} \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            --no-system --no-dev --no-base \
+            --retry-count 3
         timeout-minutes: 30
 
       - name: Run functional tests
@@ -168,7 +187,7 @@ jobs:
           echo "Project root: $PROJECT_ROOT"
 
           # Source environment utilities
-          source ./tools/install/utils/conda_utils.sh
+          source ./tools/install/utils/pyenv_utils.sh
           source ./tools/install/utils/pkg_utils.sh
 
           # Activate environment based on package manager

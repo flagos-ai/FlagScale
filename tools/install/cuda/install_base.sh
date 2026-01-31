@@ -1,39 +1,47 @@
 #!/bin/bash
-# Base dependency installation script for CUDA platform
-# Installs: common.txt + cuda/base.txt
+# Base dependencies for CUDA platform
 #
-# This script is called by install.sh and inherits its environment.
-# It can also be run standalone for testing.
-
-set -euo pipefail
+# This script installs:
+#   1. CUDA-specific apt packages (cudnn-dev, etc.)
+#   2. Source dependencies (git repos, etc.)
+#
+# NOTE: Pip requirements (common.txt, base.txt) are handled by install.sh
+# via install_base_requirements().
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/utils.sh"
 source "$SCRIPT_DIR/../utils/retry_utils.sh"
 
 # Use inherited values or defaults for standalone execution
-PROJECT_ROOT="${PROJECT_ROOT:-$(get_project_root)}"
-PLATFORM="${PLATFORM:-cuda}"
+FLAGSCALE_HOME="${FLAGSCALE_HOME:-/opt/flagscale}"
+FLAGSCALE_DEPS="${FLAGSCALE_DEPS:-$FLAGSCALE_HOME/deps}"
 RETRY_COUNT="${RETRY_COUNT:-3}"
+DEBUG=false
 
-main() {
-    log_step "Installing base dependencies for $PLATFORM"
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug) DEBUG=true; shift ;;
+        *) shift ;;
+    esac
+done
 
-    # Install platform-agnostic common requirements
-    local common_file="$PROJECT_ROOT/requirements/common.txt"
-    if [ -f "$common_file" ]; then
-        log_info "Installing common requirements"
-        retry_pip_install "$common_file" "$RETRY_COUNT"
-    fi
+# CUDA-specific apt packages
+CUDA_PACKAGES="
+    libcudnn9-dev-cuda-12
+"
 
-    # Install platform-specific base requirements
-    local base_file="$PROJECT_ROOT/requirements/$PLATFORM/base.txt"
-    if [ -f "$base_file" ]; then
-        log_info "Installing $PLATFORM base requirements"
-        retry_pip_install "$base_file" "$RETRY_COUNT"
-    fi
+install_cuda_packages() {
+    set_step "Installing CUDA-specific packages"
 
-    log_success "Base dependencies installed"
+    run_cmd -d $DEBUG -m "Installing CUDA packages..." \
+        apt-get install -y --no-install-recommends $CUDA_PACKAGES || return 1
+    log_success "CUDA packages installed"
 }
 
-main "$@"
+main() {
+    install_cuda_packages || die "CUDA packages installation failed"
+    log_info "CUDA base dependencies complete"
+}
+
+main
