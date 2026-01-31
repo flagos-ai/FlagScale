@@ -22,7 +22,7 @@ container_volumes:
   - /home/flagscale_cicd/flask/config:/workspace/config
   - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
   - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
-  - /home/flagscale_cicd/sccache:/root/.cache/sccache
+  - /home/flagscale_cicd/sccache:/github/home/.cache/sccache
 
 # Container options (hardware-specific settings)
 container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"

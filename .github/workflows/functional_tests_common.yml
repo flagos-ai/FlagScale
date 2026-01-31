@@ -253,4 +253,4 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 180
+        timeout-minutes: 15

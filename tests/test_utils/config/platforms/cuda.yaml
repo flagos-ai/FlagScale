@@ -25,6 +25,18 @@ a100:
         mixtral: ["tp2_pp1_ep2", "tp4_pp1_ep2"]
       hetero_train:
         aquila: ["tp2pp1_tp4pp1_tp2pp1", "tp2dp1pp1_tp2dp2pp1_tp1dp2pp1", "dp2dp4_shared_embedding"]
+      inference:
+        deepseek_r1_distill_qwen: ["7b-tp2"]
+        # deepseek_r1_distill_qwen-flaggems: ["7b-tp2"]  # TODO: test need fix
+        qwen3: ["4b-tp2"]
+        # qwen3-flaggems: ["4b-tp2"]  # TODO: test need fix
+        robobrain2: ["7b-tp2"]
+        # robobrain2-flaggems: ["7b-tp2"]  # TODO: test need fix
+      serve:
+        qwen2_5: ["0.5b", "0.5b_multiple_instance"]
+      #   base: ["multiple_model"]  # TODO: test need fix
+      # rl:  # TODO: test need fix
+      #   qwen2_5: ["0_5b"]
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

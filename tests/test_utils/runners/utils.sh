@@ -3,15 +3,15 @@
 
 # Logging
 log_info() {
-    echo "[INFO] $*" >&2
+    echo "[INFO] $(date +'%Y-%m-%d %H:%M:%S') - $*" >&2
 }
 
 log_error() {
-    echo "[ERROR] $*" >&2
+    echo -e "\033[0;31m[ERROR] $(date +'%Y-%m-%d %H:%M:%S') - $*\033[0m" >&2
 }
 
 log_success() {
-    echo "[SUCCESS] $*" >&2
+    echo -e "\033[0;32m[SUCCESS] $(date +'%Y-%m-%d %H:%M:%S') - $*\033[0m" >&2
 }
 
 # Validation

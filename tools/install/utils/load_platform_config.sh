@@ -73,11 +73,13 @@ load_platform_config() {
     TRAIN_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "train")]')
     HETERO_TRAIN_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "hetero_train")]')
     INFERENCE_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "inference")]')
+    SERVE_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "serve")]')
     RL_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "rl")]')
 
     echo "Train tests: $(echo "$TRAIN_TESTS" | jq 'length') test(s)"
     echo "Hetero train tests: $(echo "$HETERO_TRAIN_TESTS" | jq 'length') test(s)"
     echo "Inference tests: $(echo "$INFERENCE_TESTS" | jq 'length') test(s)"
+    echo "Serve tests: $(echo "$SERVE_TESTS" | jq 'length') test(s)"
     echo "RL tests: $(echo "$RL_TESTS" | jq 'length') test(s)"
 
     echo "✅ Loaded config for platform: $PLATFORM"
@@ -92,6 +94,7 @@ load_platform_config() {
     { echo 'train_test_matrix<<EOFTRAIN'; echo "$TRAIN_TESTS"; echo 'EOFTRAIN'; } >> $GITHUB_OUTPUT
     { echo 'hetero_train_test_matrix<<EOFHETEROTRAIN'; echo "$HETERO_TRAIN_TESTS"; echo 'EOFHETEROTRAIN'; } >> $GITHUB_OUTPUT
     { echo 'inference_test_matrix<<EOFINFERENCE'; echo "$INFERENCE_TESTS"; echo 'EOFINFERENCE'; } >> $GITHUB_OUTPUT
+    { echo 'serve_test_matrix<<EOFINFERENCE'; echo "$SERVE_TESTS"; echo 'EOFINFERENCE'; } >> $GITHUB_OUTPUT
     { echo 'rl_test_matrix<<EOFRL'; echo "$RL_TESTS"; echo 'EOFRL'; } >> $GITHUB_OUTPUT
 
     # Output package manager configuration

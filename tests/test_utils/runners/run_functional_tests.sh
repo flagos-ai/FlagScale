@@ -87,17 +87,56 @@ run_test() {
     fi
 
     # Run test
-    python run.py --config-path "$conf_dir" --config-name "$config" action=test || return 1
+    log_info "Start operation for executing the task: "
+    log_info "  python run.py --config-path ${conf_dir} --config-name ${config} action=test"
+    python run.py --config-path ${conf_dir} --config-name ${config} action=test || return 1
+
+    # Match the corresponding comparison function according to task type
+    # Matching rules:
+    #   - *train*: Tasks containing "train" (e.g., train, hetero_train), use training result comparison function
+    #   - inference: Exact match for inference tasks, use inference result comparison function
+    #   - *: Unsupported task type, throw error and exit execution
+    local compare_function
+    case "$task" in
+        *train*)
+            compare_function="test_train_equal"
+            ;;
+        inference)
+            compare_function="test_inference_equal"
+            ;;
+        serve)
+            compare_function="test_serve_equal"
+            ;;
+        rl)
+            compare_function="test_rl_equal"
+            ;;
+        *)
+            log_error "Unsupported task type: $task, no corresponding comparison function for standard vs test values"
+            return 1
+            ;;
+    esac
 
     # Validate results if validator exists
     if [ -f "$PROJECT_ROOT/tests/test_utils/runners/check_results.py" ]; then
-        local validator_cmd="python -m pytest \"$PROJECT_ROOT/tests/test_utils/runners/check_results.py::test_train_equal\" \
+        local validator_cmd="python -m pytest \"$PROJECT_ROOT/tests/test_utils/runners/check_results.py::$compare_function\" \
             --path=tests/functional_tests --task=\"$task\" --model=\"$model\" \
             --case=\"$config\" --platform=\"$PLATFORM\""
         [ -n "$CURRENT_DEVICE" ] && validator_cmd="$validator_cmd --device=\"$CURRENT_DEVICE\""
+
+        if [ "$task" = "serve" ]; then
+            log_info "Waiting 1 minute for service to be ready..."
+            sleep 1m
+        fi
+
         if ! eval "$validator_cmd"; then
             log_error "Validation failed for $task/$model/$config"
             return 1
+        fi
+
+        if [ "$task" = "serve" ]; then
+            log_info "Stop operation for executing the serve task: "
+            log_info "  python run.py --config-path ${conf_dir} --config-name ${config} action=stop"
+            python run.py --config-path ${conf_dir} --config-name ${config} action=stop
         fi
     fi
 

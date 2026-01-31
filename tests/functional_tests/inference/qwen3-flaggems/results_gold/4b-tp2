@@ -1,0 +1,8 @@
+**************************************************
+output.prompt='The first President of the United States'
+output.outputs[0].text=', George Washington, was born in 1732. The 4'
+output.outputs[0].token_ids=[11, 9857, 6515, 11, 572, 9223, 304, 220, 16, 22, 18, 17, 13, 576, 220, 19]
+**************************************************
+output.prompt='The capital of France'
+output.outputs[0].text=' is Paris. The capital of Germany is Berlin. The capital of Italy is Rome'
+output.outputs[0].token_ids=[374, 12095, 13, 576, 6722, 315, 9856, 374, 19846, 13, 576, 6722, 315, 15344, 374, 21718]

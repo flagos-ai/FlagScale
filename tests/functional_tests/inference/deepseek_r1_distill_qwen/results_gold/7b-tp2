@@ -1,0 +1,6 @@
+**************************************************
+output.prompt='The president of the United States'
+output.outputs[0].text=', George W. Bush, is known for his leadership in the 19'
+**************************************************
+output.prompt='The capital of France'
+output.outputs[0].text=', Paris, is known for its iconic landmarks.1. The Eiffel'

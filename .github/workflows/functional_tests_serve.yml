@@ -1,0 +1,227 @@
+name: Common Functional Tests - Serve
+
+# Serve task workflow - currently minimal tests
+# Install scripts and test infrastructure are ready
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+        description: Platform name (e.g., cuda, default)
+      test_matrix:
+        required: true
+        type: string
+        description: JSON array of test configurations
+      image:
+        required: true
+        type: string
+      runs_on:
+        required: true
+        type: string
+      container_volumes:
+        required: true
+        type: string
+      container_options:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
+      conda_env:
+        required: false
+        type: string
+        description: Conda environment name (optional, skips conda if not provided)
+        default: ""
+      conda_path:
+        required: false
+        type: string
+        description: Conda installation path (optional, auto-detects if not provided)
+        default: "/root/miniconda3"
+
+jobs:
+  functional_test_serve:
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: /workspace/FlagScale
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test_config: ${{ fromJson(inputs.test_matrix) }}
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Download source code artifact (attempt 1)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_1
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 2)
+        if: steps.download_attempt_1.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_2
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 3)
+        if: steps.download_attempt_2.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        id: download_attempt_3
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Verify artifact download
+        run: |
+          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 1"
+          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
+          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
+          else
+            echo "❌ Error: All 3 download attempts failed"
+            echo "Artifact name: ${{ inputs.source_artifact }}"
+            exit 1
+          fi
+
+      - name: Extract source code
+        run: |
+          mkdir -p $PROJECT_ROOT
+          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+
+      - name: Set safe directory
+        run: |
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Check sccache installation and get path
+        id: get_sccache_path
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          if ! command -v sccache &> /dev/null; then
+            echo "❌ sccache not found in PATH, running auto-installer..."
+            source ./tools/install/utils/install-sccache.sh
+          fi
+
+          SCCACHE_PATH=$(command -v sccache)
+          echo "sccache_path=${SCCACHE_PATH}" >> $GITHUB_OUTPUT
+
+          echo "Found sccache at: ${SCCACHE_PATH}"
+
+      - name: Install dependencies for serve
+        env:
+          SCCACHE_CPP2: 1
+          CUDA_CCACHE: 1
+          SCCACHE_VERBOSE: 0
+          SCCACHE_CACHE_SIZE: 20G
+          SCCACHE_DIR: /github/home/.cache/sccache
+          CMAKE_C_COMPILER_LAUNCHER: ${{ steps.get_sccache_path.outputs.sccache_path }}
+          CMAKE_CXX_COMPILER_LAUNCHER: ${{ steps.get_sccache_path.outputs.sccache_path }}
+          CMAKE_CUDA_COMPILER_LAUNCHER: ${{ steps.get_sccache_path.outputs.sccache_path }}
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          CONDA_ENV='${{ inputs.conda_env }}'
+          CONDA_PATH='${{ inputs.conda_path }}'
+
+          # Build install command with optional conda parameters
+          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task serve --retry-count 3"
+          if [ -n "$CONDA_ENV" ]; then
+            INSTALL_CMD="$INSTALL_CMD --conda-env $CONDA_ENV"
+            if [ -n "$CONDA_PATH" ]; then
+              INSTALL_CMD="$INSTALL_CMD --conda-path $CONDA_PATH"
+            fi
+          fi
+
+          # Run install script (handles conda activation internally if needed)
+          eval $INSTALL_CMD
+        timeout-minutes: 90
+
+      - name: Run functional tests
+        id: functional_test
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ matrix.test_config.device }}'
+          TASK='${{ matrix.test_config.task }}'
+          MODEL='${{ matrix.test_config.model }}'
+          CASE='${{ matrix.test_config.case }}'
+          CONDA_ENV='${{ inputs.conda_env }}'
+          CONDA_PATH='${{ inputs.conda_path }}'
+
+          echo "Running functional tests for serve"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
+          echo "Case: ${CASE:-all}"
+          echo "Project root: $PROJECT_ROOT"
+
+          # Source conda utilities for reusable functions
+          source ./tools/install/utils/conda_utils.sh
+
+          # Conditionally activate conda environment if specified
+          if [ -n "$CONDA_ENV" ]; then
+            if activate_conda "$CONDA_ENV" "$CONDA_PATH"; then
+              : # Success message already displayed by activate_conda
+            else
+              echo "⚠️  Conda environment requested but conda not found"
+              echo "Continuing without conda activation..."
+            fi
+          else
+            echo "ℹ️  Running tests with system Python"
+          fi
+
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Run functional tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type functional \
+            --task "$TASK" \
+            --model "$MODEL" \
+            --list "$CASE"
+          exit_code=$?
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
+          else
+            echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+          fi
+
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit $exit_code
+        timeout-minutes: 15
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          path: tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/results_test
+          retention-days: 7
+          if-no-files-found: warn

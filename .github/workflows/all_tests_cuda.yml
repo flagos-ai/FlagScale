@@ -1,4 +1,4 @@
-name: tests_cuda
+name: CUDA Tests Validation
 
 on:
   push:
