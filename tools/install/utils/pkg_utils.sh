@@ -285,3 +285,27 @@ should_build_package() {
     # Not installed, should build
     return 0
 }
+
+# Check if a specific source dependency should be installed
+# Usage: should_install_dep <dep_name>
+# Returns: 0 if should install, 1 if skip
+# When FLAGSCALE_SRC_DEPS is empty, all deps are installed (default behavior)
+# When set, only specified deps are installed (e.g., "megatron-lm" or "apex,megatron-lm")
+# Environment: FLAGSCALE_SRC_DEPS - Comma-separated list of deps to install
+should_install_dep() {
+    local dep_name="$1"
+    local src_deps="${FLAGSCALE_SRC_DEPS:-}"
+
+    # Empty means install all
+    if [ -z "$src_deps" ]; then
+        return 0
+    fi
+
+    # Check if dep_name is in the comma-separated list
+    if echo ",$src_deps," | grep -q ",$dep_name,"; then
+        return 0
+    fi
+
+    log_info "Skipping $dep_name (not in --src-deps list)"
+    return 1
+}

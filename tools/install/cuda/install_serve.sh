@@ -1,41 +1,45 @@
 #!/bin/bash
 # Source dependencies for serve task (CUDA platform)
-#
-# This script is called by install.sh after base and pip requirements.
-# It only handles source dependencies (git repos, etc.)
-#
-# Currently a placeholder - add source dependencies here when needed.
-
-set -euo pipefail
+# Available deps: vllm
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/utils.sh"
 source "$SCRIPT_DIR/../utils/retry_utils.sh"
+source "$SCRIPT_DIR/../utils/pkg_utils.sh"
 
-# Use inherited values or defaults for standalone execution
-PROJECT_ROOT="${PROJECT_ROOT:-$(get_project_root)}"
+FLAGSCALE_HOME="${FLAGSCALE_HOME:-/opt/flagscale}"
+FLAGSCALE_DEPS="${FLAGSCALE_DEPS:-$FLAGSCALE_HOME/deps}"
 RETRY_COUNT="${RETRY_COUNT:-3}"
+DEBUG=false
 
-install_vllm_lm() {
-    local vllm_dir="$PROJECT_ROOT/vllm-FL"
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug) DEBUG=true; shift ;;
+        *) shift ;;
+    esac
+done
+
+install_vllm() {
+    set_step "Installing vLLM-FL"
+
+    if ! should_build_package "vllm"; then
+        return 0
+    fi
+
+    local vllm_dir="$FLAGSCALE_DEPS/vllm-FL"
     local vllm_url="https://github.com/flagos-ai/vllm-FL.git"
 
-    log_info "Installing vllm-FL"
+    mkdir -p "$FLAGSCALE_DEPS"
+    retry_git_clone -d $DEBUG "$vllm_url" "$vllm_dir" "$RETRY_COUNT" || return 1
 
-    # Clone repository
-    retry_git_clone "$vllm_url" "$vllm_dir" "$RETRY_COUNT"
-
-    # Install from source
-    cd "$vllm_dir"
-    retry "$RETRY_COUNT" "pip install . -vvv"
-    cd "$PROJECT_ROOT"
-
-    log_success "vllm-FL installed"
+    log_info "Building vLLM-FL"
+    run_cmd -d $DEBUG -m "Installing from source..." \
+        bash -c "cd '$vllm_dir' && pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
+    log_success "vLLM-FL ready"
 }
 
 main() {
-    log_step "Installing source dependencies for serve task"
-    install_vllm_lm
+    should_install_dep "vllm" && { install_vllm || die "vLLM installation failed"; }
 }
 
 main "$@"

@@ -154,13 +154,15 @@ jobs:
             INSTALL_DIR=$(dirname "$ENV_PATH")
           fi
 
+          # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
           ./tools/install/install.sh \
             --platform ${{ inputs.platform }} \
             --task train \
             --pkg-mgr "$PKG_MGR" \
             ${ENV_NAME:+--env-name "$ENV_NAME"} \
             ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
-            --no-system --no-dev --no-base \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
             --retry-count 3
 
           # Copy test data (keep existing logic)
