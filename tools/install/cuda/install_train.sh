@@ -1,6 +1,6 @@
 #!/bin/bash
 # Source dependencies for train task (CUDA platform)
-# Installs: NVIDIA Apex, Flash-Attention, TransformerEngine-FL, Megatron-LM-FL
+# Installs: NVIDIA Apex, Flash-Attention 2, TransformerEngine, Megatron-LM-FL
 #
 # This script is called by install.sh after base and pip requirements.
 # It only handles source dependencies (git repos, etc.)
@@ -47,15 +47,15 @@ install_apex() {
     log_success "NVIDIA Apex ready"
 }
 
+# Install Flash-Attention
 install_flash_attn() {
     set_step "Installing Flash-Attention"
 
-    # Check if both flash_attn packages are installed
+    # Check if flash_attn_2 needs to be installed
     local need_flash_attn_2=$(should_build_package "flash_attn" && echo true || echo false)
-    local need_flash_attn_3=$(should_build_package "flash_attn_3" && echo true || echo false)
 
-    if [ "$need_flash_attn_2" = false ] && [ "$need_flash_attn_3" = false ]; then
-        log_info "All Flash-Attention packages already installed"
+    if [ "$need_flash_attn_2" = false ]; then
+        log_info "Flash-Attention 2 already installed"
         return 0
     fi
 
@@ -63,10 +63,6 @@ install_flash_attn() {
     local flash_url="https://github.com/Dao-AILab/flash-attention.git"
     local flash_version=$(get_task "cuda" "train" "flash-attn")
     local flash_branch="v${flash_version:-2.8.1}"
-
-    # Install ninja (required for flash-attn-3 build)
-    run_cmd -d $DEBUG -m "Installing ninja..." \
-        pip install --root-user-action=ignore ninja || return 1
 
     mkdir -p "$FLAGSCALE_DEPS"
     retry_git_clone -d $DEBUG --branch "$flash_branch" --depth 1 "$flash_url" "$flash_dir" "$RETRY_COUNT" || return 1
@@ -79,14 +75,6 @@ install_flash_attn() {
             bash -c "cd '$flash_dir' && FLASH_ATTENTION_FORCE_BUILD=TRUE MAX_JOBS=4 pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
         log_success "Flash-Attention 2 ready"
     fi
-
-    # Install flash-attn 3 (hopper) - must use pip install to properly copy Python files
-    if [ "$need_flash_attn_3" = true ]; then
-        log_info "Building Flash-Attention 3 (Hopper)"
-        run_cmd -d $DEBUG -m "Installing flash-attn 3 from source..." \
-            bash -c "cd '$flash_dir/hopper' && FLASH_ATTENTION_FORCE_BUILD=TRUE MAX_JOBS=4 pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
-        log_success "Flash-Attention 3 ready"
-    fi
 }
 
 install_transformer_engine() {
@@ -98,7 +86,7 @@ install_transformer_engine() {
     fi
 
     local te_dir="$FLAGSCALE_DEPS/TransformerEngine-FL"
-    # TODO: switch back to TransformerEngine-FL fork when fixed 
+    # TODO: switch back to TransformerEngine-FL fork when fixed
     # local te_url="https://github.com/flagos-ai/TransformerEngine-FL.git"
     local te_url="https://github.com/NVIDIA/TransformerEngine.git"
 
@@ -114,7 +102,7 @@ install_transformer_engine() {
     log_info "Building TransformerEngine-FL"
     # Export NVTE_FRAMEWORK=pytorch to enable PyTorch bindings (te.pytorch module)
     run_cmd -d $DEBUG -m "Installing from source (may take a while)..." \
-        bash -c "cd '$te_dir' && pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
+        bash -c "cd '$te_dir' && NVTE_FRAMEWORK=pytorch pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
     log_success "TransformerEngine-FL ready"
 }
 

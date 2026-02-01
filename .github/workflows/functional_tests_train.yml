@@ -151,11 +151,19 @@ jobs:
 
           # Install task source dependencies (pip deps are pre-installed in the env)
           echo "Installing task source dependencies..."
+
+          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          INSTALL_DIR=""
+          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            INSTALL_DIR=$(dirname "$ENV_PATH")
+          fi
+
           ./tools/install/install.sh \
             --platform ${{ inputs.platform }} \
             --task train \
             --pkg-mgr "$PKG_MGR" \
             ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
             --no-system --no-dev --no-base \
             --retry-count 3
         timeout-minutes: 30
