@@ -1,0 +1,11 @@
+diff --git a/megatron/core/tokenizers/__init__.py b/megatron/core/tokenizers/__init__.py
+new file mode 100755
+index 00000000..c1f5a086
+--- /dev/null
++++ b/megatron/core/tokenizers/__init__.py
+@@ -0,0 +1,4 @@
++# Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
++
++from megatron.core.tokenizers.base_tokenizer import MegatronTokenizerBase
++from megatron.core.tokenizers.megatron_tokenizer import MegatronTokenizer
+

@@ -1,0 +1,33 @@
+diff --git a/megatron/core/datasets/gpt_dataset.py b/megatron/core/datasets/gpt_dataset.py
+index b80caaf6..097f6686 100644
+--- a/megatron/core/datasets/gpt_dataset.py
++++ b/megatron/core/datasets/gpt_dataset.py
+@@ -170,6 +170,9 @@ class GPTDataset(MegatronDataset):
+         Returns:
+             Dict[str, torch.Tensor]: The sample information wrapped in a dictionary
+         """
++        if idx is not None:
++            logger.debug(f"Batch sample idx: {idx}, shuffled idx: {self.shuffle_index[idx]}")
++
+         if idx is None:
+             # Batch padding sequence so the index does not matter
+             text, _ = self._query_document_sample_shuffle_indices(0)
+@@ -246,12 +249,16 @@ class GPTDataset(MegatronDataset):
+             Tuple[numpy.ndarray, numpy.ndarray]: The text ids and document ids
+         """
+         # Do the shuffle mapping
++        logger.debug(f"Original idx: {idx}")
+         idx = self.shuffle_index[idx]
+-
++        logger.debug(f"-> Shuffled idx: {idx}")
+         # Get the beginning and end documents and offsets
+         doc_index_beg, doc_index_beg_offset = self.sample_index[idx]
+         doc_index_end, doc_index_end_offset = self.sample_index[idx + 1]
+ 
++        logger.debug(f"Document range: [{doc_index_beg}:{doc_index_end}], "
++                 f"Offsets: [{doc_index_beg_offset}:{doc_index_end_offset}]")
++                 
+         document_ids = []
+         sample_parts = []
+ 
+

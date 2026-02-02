@@ -1,0 +1,34 @@
+diff --git a/megatron/core/datasets/setup.py b/megatron/core/datasets/setup.py
+new file mode 100644
+index 00000000..227c2f1a
+--- /dev/null
++++ b/megatron/core/datasets/setup.py
+@@ -0,0 +1,26 @@
++import subprocess
++
++from setuptools import Extension, setup
++
++setup_args = dict(
++    name="mghelpers",
++    version="0.1.0",
++    description="Helper methods for fast index mapping builds",
++    author="NVIDIA",
++    ext_modules=[
++        Extension(
++            "helpers_cpp",
++            sources=["helpers.cpp"],
++            language="c++",
++            extra_compile_args=(
++                subprocess.check_output(["python", "-m", "pybind11", "--includes"])
++                .decode("utf-8")
++                .strip()
++                .split()
++            )
++            + ["-O3", "-Wall", "-std=c++17"],
++            optional=True,
++        )
++    ]
++)
++setup(**setup_args)
+\ No newline at end of file
+

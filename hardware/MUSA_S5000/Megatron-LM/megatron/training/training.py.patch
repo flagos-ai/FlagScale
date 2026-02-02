@@ -1,0 +1,24 @@
+diff --git a/megatron/training/training.py b/megatron/training/training.py
+index 1b1d348d..f7d7f172 100644
+--- a/megatron/training/training.py
++++ b/megatron/training/training.py
+@@ -1095,12 +1095,12 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
+     # GPU allocation.
+     # For FSDP2, we don't allocate GPU memory here. We allocate GPU memory
+     # in the fully_shard function of FSDP2 instead.
+-    if (
+-        not (args.use_torch_fsdp2 and args.use_cpu_initialization)
+-        and not args.init_model_with_meta_device
+-    ):
+-        for model_module in model:
+-            model_module.cuda(torch.cuda.current_device())
++    # if (
++    #     not (args.use_torch_fsdp2 and args.use_cpu_initialization)
++    #     and not args.init_model_with_meta_device
++    # ):
++    #     for model_module in model:
++    #         model_module.cuda(torch.cuda.current_device())
+ 
+     # Fp16 conversion.
+     if args.fp16 or args.bf16:
+

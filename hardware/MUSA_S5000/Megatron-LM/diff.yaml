@@ -1,12 +1,12 @@
 backends_commit:
-  Megatron-LM: fdfcef87004205eca69ea462b375578185ea01f6
+  Megatron-LM: 015542d9607d50a7e2f39d8b625a3f999ad66d93
 backends_version:
   FlagScale: 0.8.0
-  Megatron-LM: 0.12.0
-commit: 8473967eff51da1e77e79f8060a333d616480b68
-contact: ''
+  Megatron-LM: 0.14.0
+commit: c632b27986130d42a451970a93c1b3c905600626
+contact: jiaming.wang@mthreads.com
 device_type: MUSA_S5000
 models:
-- llama3
+- Qwen3-0.6B
 task:
 - train

@@ -1,0 +1,14 @@
+diff --git a/megatron-lm-musa-patch/musa_patch/recomupte_variance/__init__.py b/megatron-lm-musa-patch/musa_patch/recomupte_variance/__init__.py
+new file mode 100644
+index 00000000..0437d153
+--- /dev/null
++++ b/megatron-lm-musa-patch/musa_patch/recomupte_variance/__init__.py
+@@ -0,0 +1,7 @@
++from . import multi_latent_attention
++from . import random
++from . import moe_layer
++from . import mlp
++from . import transformer_layer
++from . import transformer_engine
++from . import schedules
+

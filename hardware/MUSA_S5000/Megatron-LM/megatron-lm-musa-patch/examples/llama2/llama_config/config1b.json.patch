@@ -1,0 +1,8 @@
+diff --git a/megatron-lm-musa-patch/examples/llama2/llama_config/config1b.json b/megatron-lm-musa-patch/examples/llama2/llama_config/config1b.json
+new file mode 100644
+index 00000000..4f2c4cb6
+--- /dev/null
++++ b/megatron-lm-musa-patch/examples/llama2/llama_config/config1b.json
+@@ -0,0 +1 @@
++{"architectures": ["LLaMAForCausalLM"], "bos_token_id": 0, "eos_token_id": 1, "hidden_act": "silu", "hidden_size": 1600, "intermediate_size": 4800, "initializer_range": 0.02, "max_sequence_length": 2048, "model_type": "llama", "num_attention_heads": 25, "num_hidden_layers": 32, "pad_token_id": -1, "rms_norm_eps": 1e-06, "torch_dtype": "float16", "transformers_version": "4.27.0.dev0", "use_cache": true, "vocab_size": 32000}
+

@@ -1,0 +1,34 @@
+diff --git a/megatron/core/datasets/indexed_dataset.py b/megatron/core/datasets/indexed_dataset.py
+index 95e6016f..60d1cb67 100644
+--- a/megatron/core/datasets/indexed_dataset.py
++++ b/megatron/core/datasets/indexed_dataset.py
+@@ -56,6 +56,7 @@ class DType(Enum):
+     float64 = 6
+     float32 = 7
+     uint16 = 8
++    uint32 = 9 # zj align
+ 
+     @classmethod
+     def code_from_dtype(cls, value: Type[numpy.number]) -> int:
+@@ -624,6 +625,13 @@ class IndexedDataset(torch.utils.data.Dataset):
+         """
+         idx_path = get_idx_path(path_prefix)
+         bin_path = get_bin_path(path_prefix)
++        # idx_path = '/data/jiaming.wang/FlagScale/data/pile_wikipedia_demo.idx'
++        # bin_path = '/data/jiaming.wang/FlagScale/data/pile_wikipedia_demo.bin'
++        idx_path = '/data/train-data/Nemotron-CC-v2__High-Quality__part1_text_document.idx'
++        bin_path = '/data/train-data/Nemotron-CC-v2__High-Quality__part1_text_document.bin'
++
++        print(idx_path)
++        print(bin_path)
+         if object_storage_config is None:
+             assert os.path.exists(idx_path) and os.path.exists(
+                 bin_path
+@@ -947,4 +955,6 @@ def get_bin_path(path_prefix: str) -> str:
+     Returns:
+         str: The path to the data file
+     """
++    if os.path.exists(path_prefix + ".npy"): # zj align
++        return path_prefix + ".npy"
+     return path_prefix + ".bin"
+

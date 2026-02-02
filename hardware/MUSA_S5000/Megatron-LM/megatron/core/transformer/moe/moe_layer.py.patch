@@ -1,0 +1,33 @@
+diff --git a/megatron/core/transformer/moe/moe_layer.py b/megatron/core/transformer/moe/moe_layer.py
+index 626d7688..f2960b5c 100644
+--- a/megatron/core/transformer/moe/moe_layer.py
++++ b/megatron/core/transformer/moe/moe_layer.py
+@@ -22,6 +22,8 @@ from megatron.core.transformer.transformer_config import TransformerConfig
+ 
+ try:
+     from megatron.core.extensions.transformer_engine import te_checkpoint
++    from transformer_engine.pytorch.cpu_offload import get_fine_grained_offload_handler
++    from transformer_engine.pytorch.cpu_offload import LaunchReloadFunction
+ 
+     HAVE_TE = True
+ except ImportError:
+@@ -241,6 +243,8 @@ class MoELayer(BaseMoELayer):
+                 "are enabled without also enabling sequence parallelism."
+             )
+ 
++        if self.config.offload_moe_fc1_input:
++            hidden_states = LaunchReloadFunction.apply(hidden_states, 'fc1_inp')
+         # MoE forward: route -> dispatch -> compute -> combine
+         def custom_forward(hidden_states):
+             hidden_states, probs, residual = self.router_and_preprocess(hidden_states)
+@@ -249,6 +253,9 @@ class MoELayer(BaseMoELayer):
+                 dispatched_input, probs, residual
+             )
+             output = self.combine(output, shared_expert_output)
++            if self.config.offload_moe_fc1_input:
++                get_fine_grained_offload_handler().launch_offload('fc1_inp')
++
+             return output, mlp_bias
+ 
+         if self.moe_layer_recompute:
+

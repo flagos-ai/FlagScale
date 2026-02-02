@@ -1,0 +1,16 @@
+diff --git a/megatron/core/datasets/helpers.py b/megatron/core/datasets/helpers.py
+index 8fb1607f..40115085 100644
+--- a/megatron/core/datasets/helpers.py
++++ b/megatron/core/datasets/helpers.py
+@@ -5,8 +5,8 @@
+ # Explicit imports for readability
+ import numpy
+ 
+-from megatron.core.datasets.helpers_cpp import *
+-from megatron.core.datasets.helpers_cpp import build_sample_idx_int32, build_sample_idx_int64
++from helpers_cpp import *
++from helpers_cpp import build_sample_idx_int32, build_sample_idx_int64
+ 
+ 
+ def build_sample_idx(
+

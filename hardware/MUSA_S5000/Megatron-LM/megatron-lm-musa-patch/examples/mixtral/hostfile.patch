@@ -1,0 +1,8 @@
+diff --git a/megatron-lm-musa-patch/examples/mixtral/hostfile b/megatron-lm-musa-patch/examples/mixtral/hostfile
+new file mode 100644
+index 00000000..e5ec7f64
+--- /dev/null
++++ b/megatron-lm-musa-patch/examples/mixtral/hostfile
+@@ -0,0 +1 @@
++172.27.1.22
+

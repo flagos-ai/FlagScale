@@ -1,0 +1,75 @@
+diff --git a/megatron-lm-musa-patch/examples/deepseek-v2/deepseek-v2-lite/fault_tolerance_function.sh b/megatron-lm-musa-patch/examples/deepseek-v2/deepseek-v2-lite/fault_tolerance_function.sh
+new file mode 100644
+index 00000000..4993690c
+--- /dev/null
++++ b/megatron-lm-musa-patch/examples/deepseek-v2/deepseek-v2-lite/fault_tolerance_function.sh
+@@ -0,0 +1,67 @@
++#!/bin/bash
++function get_envs {
++    echo "Start runing EPX with env MUAS_VISIBLE_DEVICES : ${MUSA_VISIBLE_DEVICES}"
++    echo "Start runing EPX with env EPX_SESSION : ${EPX_SESSION}"
++    echo "Start runing EPX with env EPX_CCP_ADDR : ${EPX_CCP_ADDR} on Port : ${EPX_CCP_PORT}"
++    echo "Start runing EPX with env EPX_STORE_ADDR : ${EPX_STORE_ADDR} on Port : ${EPX_STORE_PORT}"
++    echo "Start runing EPX with env EPX_LCP_ADDR : ${EPX_LCP_ADDR} on Port : $1"
++}
++
++function ft_training {
++    if [ $# -ne 1 ]; then
++        echo "Error: You need to enter training script"
++    fi
++
++    cmd="$1"
++
++    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
++    TEMP_STATE_PATH="${SCRIPT_DIR}/../.temp_state"
++
++    if [ ! -d "${TEMP_STATE_PATH}" ]; then
++        mkdir -p "${TEMP_STATE_PATH}"
++        echo "Created temporary state directory at ${TEMP_STATE_PATH}"
++    fi
++
++    if [ -z "${EPX_SESSION}" ]; then
++    echo "No EPX_SESSION found, generating a new one..."
++    export EPX_SESSION="$(uuiden)"
++    fi
++
++    if [ -z "${EPX_LCP_BIN}" ]; then
++        echo "Error: No EPX_LCP_BIN found, please set it in your environment variables."
++        exit 1
++    fi
++
++    for i in {1..1000}; do
++        if [ ! -f "${TEMP_STATE_PATH}/port_${i}" ]; then
++            touch "${TEMP_STATE_PATH}/port_${i}"
++
++            EPX_LCP_PORT=$((19000+i))
++            if lsof -Pi :${EPX_LCP_PORT} -sTCP:LISTEN -t >/dev/null ; then
++                echo "Port ${EPX_LCP_PORT} is already in use, skipping..."
++                continue
++            fi
++            export EPX_LCP_PORT
++
++            get_envs ${EPX_LCP_PORT}
++
++            ${EPX_LCP_BIN} \
++            --group-ranks "${EPX_GROUP_RANK}" \
++            --local-addr "${EPX_LCP_ADDR}" \
++            --local-port "${EPX_LCP_PORT}" \
++            --ccp-addr "http://${EPX_CCP_ADDR}:${EPX_CCP_PORT}" \
++            --session "${EPX_SESSION}" &
++
++            EPX_LCP_PID=$!
++
++            echo $cmd
++            $cmd
++
++            echo "Killing EPX_LCP with PID ${EPX_LCP_PID}..."
++            kill -9 "${EPX_LCP_PID}"
++
++            rm "${TEMP_STATE_PATH}/port_${i}"
++            break
++        fi
++    done
++}
+\ No newline at end of file
+

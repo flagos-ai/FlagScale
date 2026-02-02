@@ -1,0 +1,90 @@
+diff --git a/megatron/training/tokenizer/tokenizer.py b/megatron/training/tokenizer/tokenizer.py
+index 5cf222cc..77d1dbc7 100644
+--- a/megatron/training/tokenizer/tokenizer.py
++++ b/megatron/training/tokenizer/tokenizer.py
+@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
+ from pathlib import Path
+ from typing import Dict, List, Optional
+ 
+-from megatron.core.datasets.megatron_tokenizer import MegatronTokenizer
++from megatron.core.datasets.megatron_tokenizer import MegatronTokenizer,MegatronLegacyTokenizer
+ 
+ from .bert_tokenization import FullTokenizer as FullBertTokenizer
+ from .gpt2_tokenization import GPT2Tokenizer
+@@ -43,6 +43,10 @@ def build_tokenizer(args, **kwargs):
+         tokenizer = _SentencePieceTokenizer(
+             args.tokenizer_model, vocab_extra_ids=args.vocab_extra_ids
+         )
++    elif args.tokenizer_type == "QwenTokenizerFS":
++        assert args.tokenizer_path is not None
++        tokenizer = _QwenTokenizerFS(args.tokenizer_path)
++
+     elif args.tokenizer_type == 'GPTSentencePieceTokenizer':
+         assert args.tokenizer_model is not None
+         tokenizer = _GPTSentencePieceTokenizer(args.tokenizer_model)
+@@ -326,6 +330,64 @@ class _BertWordPieceTokenizer(MegatronTokenizer):
+         self._additional_special_tokens = value
+ 
+ 
++class _HFTokenizerFS(MegatronLegacyTokenizer):
++    """Huggingface tokenizer."""
++
++    def __init__(self, tokenizer_path):
++        name = 'HFTokenizer'
++        super().__init__(name)
++        
++        from transformers import AutoTokenizer
++        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
++
++        self.eod_id = self.tokenizer.eos_token_id
++        self.cls_id = self.tokenizer.bos_token_id
++        self.pad_id = self.tokenizer.pad_token_id
++
++        self._inv_vocab = None
++        
++    @property
++    def vocab_size(self):
++        return self.tokenizer.vocab_size
++
++    @property
++    def vocab(self):
++        return self.tokenizer.get_vocab()
++
++    @property
++    def inv_vocab(self):
++        vocab = self.vocab()
++        if self._inv_vocab is None:
++            self._inv_vocab = {v: k for k, v in vocab.items()}
++        return self._inv_vocab
++    
++    def tokenize(self, text):
++        return self.tokenizer.encode(text)
++
++    def detokenize(self, token_ids):
++        return self.tokenizer.decode(token_ids)
++
++    @property
++    def eod(self):
++        return self.eod_id
++
++    @property
++    def cls(self):
++        return self.cls_id
++
++    @property
++    def pad(self):
++        return self.pad_id
++
++class _QwenTokenizerFS(_HFTokenizerFS):
++    """Adapted Qwen tokenizer."""
++    def __init__(self, tokenizer_path):
++        super().__init__(tokenizer_path)
++        self.eod_id = self.tokenizer.encode('<|extra_204|>')[0]
++        self.cls_id = self.tokenizer.encode('<|extra_203|>')[0]
++        self.pad_id = self.tokenizer.encode('<|endoftext|>')[0]
++
++
+ class _GPT2BPETokenizer(MegatronTokenizer):
+     """Original GPT2 BPE tokenizer."""
+ 
+

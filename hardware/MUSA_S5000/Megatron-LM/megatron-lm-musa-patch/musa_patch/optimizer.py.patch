@@ -1,0 +1,245 @@
+diff --git a/megatron-lm-musa-patch/musa_patch/optimizer.py b/megatron-lm-musa-patch/musa_patch/optimizer.py
+new file mode 100644
+index 00000000..7ac54851
+--- /dev/null
++++ b/megatron-lm-musa-patch/musa_patch/optimizer.py
+@@ -0,0 +1,238 @@
++# Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
++import logging
++import warnings
++from typing import Callable, Dict, List, Optional, Tuple
++
++import os
++import torch
++from torch.optim import SGD as CPUSGD
++
++try:
++    from transformer_engine.pytorch.optimizers import FusedAdam as Adam
++    from transformer_engine.pytorch.optimizers import FusedSGD as SGD
++except ImportError:
++    try:
++        from apex.optimizers import FusedAdam as Adam
++        from apex.optimizers import FusedSGD as SGD
++    except ImportError:
++        import warnings
++
++        warnings.warn(
++            f'Transformer Engine and Apex are not installed. Falling back to Torch optimizers.'
++        )
++
++        # Apex's FusedAdam is a drop-in replacement for torch's AdamW.
++        # pylint: disable-next=line-too-long.
++        # See https://github.com/NVIDIA/apex/blob/7b73b12361068a10b0f44844534613f252a5ea75/apex/optimizers/fused_adam.py#L16.
++        from torch.optim import AdamW as Adam, SGD
++
++from megatron.core.optimizer.cpu_offloading.hybrid_optimizer import HybridDeviceOptimizer
++from megatron.core.distributed.param_and_grad_buffer import _ParamAndGradBuffer
++from megatron.core.transformer.module import MegatronModule
++from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
++from megatron.core.optimizer.grad_scaler import ConstantGradScaler, DynamicGradScaler
++from megatron.core.optimizer import (
++    Float16OptimizerWithFloat16Params,
++    FP32Optimizer,
++    MegatronOptimizer,
++)
++from megatron.core.optimizer.optimizer_config import OptimizerConfig
++from megatron.core.utils import is_te_min_version
++
++
++logger = logging.getLogger(__name__)
++
++def _get_megatron_optimizer_based_on_param_groups(
++    config: OptimizerConfig,
++    model_chunks: List[MegatronModule],
++    param_groups: List,
++    per_model_buffers: Optional[Dict[int, List[_ParamAndGradBuffer]]] = None,
++    model_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
++    data_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
++    data_parallel_group_gloo: Optional[torch.distributed.ProcessGroup] = None,
++    data_parallel_group_idx: Optional[int] = None,
++    distributed_optimizer_instance_id: Optional[int] = 0,
++) -> MegatronOptimizer:
++    """Get Megatron optimizer based on parameter groups.
++
++    Args:
++        config (OptimizerConfig): optimizer configuration object.
++        model_chunks (list): list of model chunks.
++        param_groups (list): list of parameter groups.
++        per_model_buffers (dict, optional): buffers for distributed optimizer. Defaults to None.
++        data_parallel_group (torch.distributed.ProcessGroup, optional): data-parallel group for
++            distributed optimizer. Defaults to None.
++        data_parallel_group_gloo (torch.distributed.ProcessGroup, optional): gloo data-parallel
++            group for distributed optimizer. Defaults to None.
++        data_parallel_group_idx (int, optional): data-parallel group index for distributed
++            optimizer. Defaults to None.
++        distributed_optimizer_instance_id (int, optional): Distributed optimizer instance. Defaults
++            0.
++
++    Returns:
++        Instance of MegatronOptimizer.
++    """
++    # when freezing sub-models we may have no trainable parameters on a rank and
++    # hence an empty param_groups. However, we still need to create an optimizer
++    # for the purposes of grad stats reductions
++    if param_groups:
++        if config.optimizer_cpu_offload:
++            if torch.__version__ < '2.3.0':
++                # is_available = lambda: False
++                # set cuda not available for complex cuda inspection
++                torch.cuda.is_available = lambda : False
++                # use DeepSpeedCPUAdam for better performance
++                from deepspeed.ops.adam import DeepSpeedCPUAdam as CPUAdam
++                # reset the cuda availability back to normal
++                torch.cuda.is_available = torch.musa.is_available
++                warnings.warn("We use DeepSpeedCPUAdam instead of torch.optim.AdamW "
++                              "for better performace if torch.version < 2.3.0.")
++            else:
++                # torch.optim.AdamW supports __fused_adamw when torch.version >= 2.3.0
++                from torch.optim import AdamW as CPUAdam
++
++            # cpu optimizer offload must config use_precision_aware_optimizer to True,
++            # we should reconfig use_precision_aware_optimizer to break the compatibility.
++            if not int(os.getenv("CPU_OPTIMIZER_PRECISION_AWARE_RECONFIG", 0)):
++                config.use_precision_aware_optimizer = False
++
++            gpu_optimizer_cls = Adam if config.optimizer == 'adam' else SGD
++            cpu_optimizer_cls = CPUAdam if config.optimizer == 'adam' else CPUSGD
++            if config.use_torch_optimizer_for_cpu_offload:
++                gpu_optimizer_cls = cpu_optimizer_cls
++            if config.optimizer == 'adam':
++                gpu_optimizer_cls = Adam
++                cpu_optimizer_cls = CPUAdam
++                optimizer_defaults = dict(
++                    lr=config.lr,
++                    weight_decay=config.weight_decay,
++                    betas=(config.adam_beta1, config.adam_beta2),
++                    eps=config.adam_eps,
++                    bias_correction=True,
++                    fused=True,  # this flag is used to improve the performance of the cpu optimizer
++                )
++            else:
++                gpu_optimizer_cls = SGD
++                cpu_optimizer_cls = CPUSGD
++                optimizer_defaults = dict(
++                    lr=config.lr, weight_decay=config.weight_decay, momentum=config.sgd_momentum
++                )
++
++            optimizer = HybridDeviceOptimizer(
++                param_groups,
++                offload_fraction=config.optimizer_offload_fraction,
++                cpu_optimizer_cls=cpu_optimizer_cls,
++                gpu_optimizer_cls=gpu_optimizer_cls,
++                overlap_cpu_optimizer_d2h_h2d=config.overlap_cpu_optimizer_d2h_h2d,
++                pin_cpu_grads=config.pin_cpu_grads,
++                pin_cpu_params=config.pin_cpu_params,
++                param_update_in_fp32=True,
++                **optimizer_defaults,
++            )
++            init_state_fn = None
++        elif config.optimizer == 'adam':
++            kwargs = {
++                "params": param_groups,
++                "lr": config.lr,
++                "weight_decay": config.weight_decay,
++                "betas": (config.adam_beta1, config.adam_beta2),
++                "eps": config.adam_eps,
++            }
++
++            if config.use_precision_aware_optimizer:
++                kwargs.update(
++                    {
++                        "master_weights": True,
++                        "use_decoupled_grad": True,
++                        "master_weight_dtype": config.main_params_dtype,
++                        "exp_avg_dtype": config.exp_avg_dtype,
++                        "exp_avg_sq_dtype": config.exp_avg_sq_dtype,
++                    }
++                )
++
++                if is_te_min_version("2.1.0.dev0"):
++                    kwargs.update({"store_param_remainders": True})
++
++            optimizer = Adam(**kwargs)
++
++            def init_state_fn(opt, config=None):
++                for group in opt.param_groups:
++                    for p in group['params']:
++                        if len(opt.state[p]) == 0:
++                            if config is None or not config.use_precision_aware_optimizer:
++                                opt.state[p]['exp_avg'] = torch.zeros_like(p.data)
++                                opt.state[p]['exp_avg_sq'] = torch.zeros_like(p.data)
++                            else:
++                                opt.initialize_state(p)
++
++        elif config.optimizer == 'sgd':
++            optimizer = SGD(
++                param_groups,
++                lr=config.lr,
++                weight_decay=config.weight_decay,
++                momentum=config.sgd_momentum,
++            )
++            init_state_fn = None
++        else:
++            raise Exception('{} optimizer is not supported.'.format(config.optimizer))
++    else:
++        optimizer = None
++        init_state_fn = None
++
++    # Mixed precision optimizer.
++    # - Note: both the Float16Optimizer and the DistributedOptimizer inherit
++    #   from the MixedPrecisionOptimizer, which manages any optimizer where
++    #   the model params and main params are distinct.
++    if config.fp16 or config.bf16 or config.use_distributed_optimizer:
++
++        # Grad scaler:
++        #    if loss-scale is provided, instantiate the constant scaler.
++        #    if we are using fp16 and loss-scale is not present, use a
++        #       dynamic scaler.
++        #    otherwise we are running in bf16 with no loss-scale so
++        #       leave it as None.
++        grad_scaler = None
++
++        # Constant loss scale.
++        if config.loss_scale:
++            grad_scaler = ConstantGradScaler(config.loss_scale)
++
++        # Dynamic loss scale.
++        else:
++            if config.fp16:
++                grad_scaler = DynamicGradScaler(
++                    initial_scale=config.initial_loss_scale,
++                    min_scale=config.min_loss_scale,
++                    growth_factor=2.0,
++                    backoff_factor=0.5,
++                    growth_interval=config.loss_scale_window,
++                    hysteresis=config.hysteresis,
++                )
++
++        optimizer_args = [optimizer, config, grad_scaler, init_state_fn]
++        if config.use_distributed_optimizer:
++            optimizer = DistributedOptimizer(
++                *optimizer_args,
++                model_chunks=model_chunks,
++                per_model_buffers=per_model_buffers,
++                data_parallel_group=data_parallel_group,
++                data_parallel_group_gloo=data_parallel_group_gloo,
++                data_parallel_group_idx=data_parallel_group_idx,
++                distributed_optimizer_instance_id=distributed_optimizer_instance_id,
++            )
++        else:
++            optimizer = Float16OptimizerWithFloat16Params(*optimizer_args)
++            setattr(optimizer, 'grad_stats_parallel_group', model_parallel_group)
++    else:
++        # FP32 optimizer.
++        optimizer = FP32Optimizer(optimizer, config, init_state_fn)
++        setattr(optimizer, 'grad_stats_parallel_group', model_parallel_group)
++
++    return optimizer
++
++import sys
++for k in sys.modules:
++    if k.startswith('megatron'):
++        for target in ['_get_megatron_optimizer_based_on_param_groups']:
++            if getattr(sys.modules[k], target, None):
++                setattr(sys.modules[k], target, _get_megatron_optimizer_based_on_param_groups)
+

@@ -1,0 +1,26 @@
+diff --git a/megatron-lm-musa-patch/musa_patch/fault_tolerance_epx/epx_sync_tensor.py b/megatron-lm-musa-patch/musa_patch/fault_tolerance_epx/epx_sync_tensor.py
+new file mode 100644
+index 00000000..a9c73d28
+--- /dev/null
++++ b/megatron-lm-musa-patch/musa_patch/fault_tolerance_epx/epx_sync_tensor.py
+@@ -0,0 +1,19 @@
++import logging
++from torch.distributed import ReduceOp
++import megatron.core.parallel_state as parallel_state
++
++logger = logging.getLogger(__name__)
++
++def epx_sync_tensor_across_replicas(tensor, opts=ReduceOp.SUM, assemble=True):
++    """
++    Sync grad across instances.
++    """
++    lcp = parallel_state.get_epx_data_parallel_lcp()
++    # TODO: avoid assemble before each allreduce
++    if assemble:
++        lcp.assemble()
++    logger.info("start epx allreduce")
++    logger.debug(f"grad before epx allreduce : {tensor[:10]}")
++    lcp.allreduce([tensor], opts).wait()
++    logger.info("finished epx allreduce")
++    logger.debug(f"grad after epx allreduce : {tensor[:10]}")
+

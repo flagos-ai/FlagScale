@@ -1,0 +1,75 @@
+diff --git a/megatron/core/fp8_utils.py b/megatron/core/fp8_utils.py
+index eed30429..7383e890 100644
+--- a/megatron/core/fp8_utils.py
++++ b/megatron/core/fp8_utils.py
+@@ -156,10 +156,19 @@ elif HAVE_TE and is_te_min_version("2.0"):
+     # Supported TE versions: 2.0
+     from transformer_engine.pytorch.tensor import QuantizedTensor
+     from transformer_engine.pytorch.tensor.float8_tensor import Float8Tensor
++    from transformer_engine.musa.pytorch.tensor.mtfp8_tensor import MTFP8Tensor
+ 
+     def _modify_underlying_storage_impl(
+         fp8_tensor: QuantizedTensor, new_raw_data: torch.Tensor
+     ) -> None:
++
++        if isinstance(fp8_tensor, MTFP8Tensor):
++
++            from transformer_engine.pytorch.tensor.utils import replace_raw_data
++
++            replace_raw_data(fp8_tensor, new_raw_data)
++            return
++
+         old_raw_data = fp8_tensor._data
+         assert old_raw_data.dtype == new_raw_data.dtype
+         new_raw_data.detach().copy_(old_raw_data)
+@@ -173,6 +182,28 @@ elif HAVE_TE and is_te_min_version("2.0"):
+         data_parallel_group: torch.distributed.ProcessGroup,
+         fsdp_shard_model_params: Optional[List[torch.Tensor]] = None,
+     ) -> None:
++        if len(model_params) == 0:
++            return
++
++        if any(is_mxfp8tensor(p) for p in model_params):
++            from transformer_engine.pytorch.tensor.utils import cast_master_weights_to_fp8
++
++            args = [model_params, main_params, start_offsets, data_parallel_group]
++            if fsdp_shard_model_params is not None:
++                if not HAVE_PACKAGING:
++                    raise ImportError(
++                        "packaging not found, please install it with `pip install packaging`"
++                    )
++                if get_te_version() == PkgVersion("2.3.0.dev0+5fdd7bb") or is_te_min_version("2.3.0"):
++                    args.append(fsdp_shard_model_params)
++                else:
++                    raise NotImplementedError(
++                        f"FSDP with --fp8-param-gather is not supported in TE v{get_te_version()}"
++                    )
++            cast_master_weights_to_fp8(*args)
++
++            return
++
+         # Avoid circular import
+         from megatron.core.optimizer.optimizer import _multi_tensor_copy_this_to_that
+ 
+@@ -448,16 +479,16 @@ if HAVE_TE:
+                     fp8_recipe = transformer_engine.common.recipe.Float8BlockScaling(
+                         fp8_format=fp8_format
+                     )
+-                elif config.fp8_recipe == Fp8Recipe.mxfp8:
+-                    fp8_recipe = transformer_engine.common.recipe.MXFP8BlockScaling(
+-                        fp8_format=fp8_format
+-                    )
+                 else:
+                     raise ValueError(
+                         "Float8CurrentScaling, MXFP8BlockScaling, Float8BlockwiseScaling and "
+                         "DelayedScaling are the only supported FP8 recipes. Please also make sure "
+                         "you are using a compatible TE version."
+                     )
++            elif config.fp8_recipe == Fp8Recipe.mxfp8:
++                fp8_recipe = transformer_engine.common.recipe.MXFP8BlockScaling(
++                    fp8_format=fp8_format
++                )
+             else:
+                 # Assert that the user is using delayed scaling.
+                 assert config.fp8_recipe == Fp8Recipe.delayed, (
+

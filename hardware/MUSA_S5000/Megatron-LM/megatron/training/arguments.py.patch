@@ -1,0 +1,89 @@
+diff --git a/megatron/training/arguments.py b/megatron/training/arguments.py
+old mode 100644
+new mode 100755
+index 0de9505a..e60c9561
+--- a/megatron/training/arguments.py
++++ b/megatron/training/arguments.py
+@@ -87,7 +87,7 @@ def parse_args(extra_args_provider=None, ignore_unknown_args=False):
+                                      allow_abbrev=False)
+ 
+     parser = add_megatron_arguments(parser)
+-
++    parser = _add_transformer_engine_fl_args(parser)
+     # Custom arguments.
+     if extra_args_provider is not None:
+         parser = extra_args_provider(parser)
+@@ -798,8 +798,8 @@ def validate_args(args, defaults={}):
+         assert args.max_position_embeddings >= args.decoder_seq_length
+     if args.lr is not None:
+         assert args.min_lr <= args.lr
+-    if args.save is not None:
+-        assert args.save_interval is not None
++    # if args.save is not None:
++    #     assert args.save_interval is not None
+     # Mixed precision checks.
+     if args.fp16_lm_cross_entropy:
+         assert args.fp16, 'lm cross entropy in fp16 only support in fp16 mode.'
+@@ -1091,6 +1091,16 @@ def validate_args(args, defaults={}):
+     if args.external_cuda_graph:
+         assert args.te_rng_tracker, "--te-rng-tracker must be enabled when using CUDA Graphs."
+ 
++
++    # args.distributed_backend = 'flagcx'
++
++    if args.use_transformer_engine_fl:
++        assert not args.tp_comm_overlap, "Do not support gemm/sp comm in TransformerEngine-FL now"
++        args.distributed_backend = 'flagcx'
++        if not args.disable_flag_gems_replace_torch:
++            args.use_flag_gems_replace_torch = True
++        args.flag_gems_log_path = os.getenv("FLAG_GEMS_LOG_PATH", 'xxx/gems.log')
++
+     # Print arguments.
+     _print_args("arguments", args)
+ 
+@@ -2012,7 +2022,7 @@ def _add_rerun_machine_args(parser):
+ def _add_initialization_args(parser):
+     group = parser.add_argument_group(title='initialization')
+ 
+-    group.add_argument('--seed', type=int, default=1234,
++    group.add_argument('--seed', type=int, default=42,
+                        help='Random seed used for python, numpy, '
+                        'pytorch, and cuda.')
+     group.add_argument('--data-parallel-random-init', action='store_true',
+@@ -2477,9 +2487,11 @@ def _add_tokenizer_args(parser):
+                                 'TikTokenizer',
+                                 'MultimodalTokenizer',
+                                 'NullTokenizer',
++                                'QwenTokenizerFS',
+                                 'NullMultimodalTokenizer',
+                                 'SFTTokenizer'],
+                        help='What type of tokenizer to use.')
++    group.add_argument('--tokenizer-path', type=str, default=None,help='Path to the huggingface tokenizer.')
+     group.add_argument('--tokenizer-model', type=str, default=None,
+                        help='Sentencepiece tokenizer model.')
+     group.add_argument('--tiktoken-pattern', type=str, default=None,
+@@ -3016,3 +3028,22 @@ def _add_sft_args(parser):
+     group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned", 
+                        help='SFT prompt format.')
+     return parser
++
++
++def _add_transformer_engine_fl_args(parser):
++    group = parser.add_argument_group(title="flag engine")
++    group.add_argument('--use-transformer-engine-fl', action='store_true',
++                       help='Enable transformer engine fl for training')
++    group.add_argument('--disable-flag-gems-replace-torch', action='store_true',
++                       help='Disable flag gems for training when using te-fl')
++    group.add_argument('--use-flag-gems-replace-torch', action='store_true',
++                       help='Enable flag gems for training')
++    group.add_argument('--flag-gems-log-path', type=str, default=None,
++                       help='Path of flag gems logging')
++    group.add_argument(
++        '--flag-gems-unused',
++        nargs='*',
++        default=None,
++        help='Flag Gems unused ops list'
++    )
++    return parser
+\ No newline at end of file
+

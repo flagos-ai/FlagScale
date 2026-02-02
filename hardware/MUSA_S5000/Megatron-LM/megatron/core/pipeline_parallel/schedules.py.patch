@@ -1,0 +1,91 @@
+diff --git a/megatron/core/pipeline_parallel/schedules.py b/megatron/core/pipeline_parallel/schedules.py
+index 317789ad..a7e73268 100644
+--- a/megatron/core/pipeline_parallel/schedules.py
++++ b/megatron/core/pipeline_parallel/schedules.py
+@@ -23,6 +23,8 @@ from megatron.core.utils import (
+     nvtx_range_push,
+ )
+ 
++from transformer_engine.pytorch.cpu_offload import get_fine_grained_offload_handler
++
+ # Types
+ Shape = Union[List[int], torch.Size]
+ 
+@@ -497,6 +499,7 @@ def forward_backward_no_pipelining(
+     total_num_tokens = torch.zeros([], dtype=torch.int, device="cuda")
+     with no_sync_func():
+         for i in range(num_microbatches - 1):
++            get_fine_grained_offload_handler().start_microbatch_forward(i)
+             output_tensor, num_tokens = forward_step(
+                 forward_step_func,
+                 data_iterator,
+@@ -511,10 +514,12 @@ def forward_backward_no_pipelining(
+             )
+             total_num_tokens += num_tokens
+             if not forward_only:
++                get_fine_grained_offload_handler().start_microbatch_backward(i)
+                 backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, config)
+ 
+     # Run computation for last microbatch out of context handler (want to
+     # synchronize gradients).
++    get_fine_grained_offload_handler().start_microbatch_forward(num_microbatches - 1)
+     output_tensor, num_tokens = forward_step(
+         forward_step_func,
+         data_iterator,
+@@ -532,6 +537,7 @@ def forward_backward_no_pipelining(
+     total_num_tokens += num_tokens
+ 
+     if not forward_only:
++        get_fine_grained_offload_handler().start_microbatch_backward(num_microbatches - 1)
+         backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, config)
+ 
+     if config.finalize_model_grads_func is not None and not forward_only:
+@@ -989,6 +995,7 @@ def forward_backward_pipelining_with_interleaving(
+         virtual_microbatch_id, microbatch_id, checkpoint_activations_microbatch
+     ):
+         """Helper method to run forward step with model split into chunks"""
++        get_fine_grained_offload_handler().start_microbatch_backward(virtual_microbatch_id)
+         model_chunk_id = get_model_chunk_id(virtual_microbatch_id, forward=True)
+ 
+         # launch param synchronization for next model chunk
+@@ -1057,6 +1064,7 @@ def forward_backward_pipelining_with_interleaving(
+ 
+     def backward_step_helper(virtual_microbatch_id):
+         """Helper method to run backward step with model split into chunks"""
++        get_fine_grained_offload_handler().start_microbatch_backward(virtual_microbatch_id)
+         model_chunk_id = get_model_chunk_id(virtual_microbatch_id, forward=False)
+ 
+         # launch grad synchronization (default)
+@@ -1886,6 +1894,7 @@ def forward_backward_pipelining_without_interleaving(
+         input_tensor = recv_forward(
+             recv_tensor_shapes, config, parallel_state.is_pipeline_first_stage()
+         )
++        get_fine_grained_offload_handler().start_microbatch_forward(i)
+         output_tensor, num_tokens = forward_step(
+             forward_step_func,
+             data_iterator,
+@@ -1930,6 +1939,7 @@ def forward_backward_pipelining_without_interleaving(
+         else:
+             checkpoint_activations_microbatch = None
+ 
++        get_fine_grained_offload_handler().start_microbatch_forward(num_warmup_microbatches + i)
+         output_tensor, num_tokens = forward_step(
+             forward_step_func,
+             data_iterator,
+@@ -1979,6 +1989,7 @@ def forward_backward_pipelining_without_interleaving(
+                 if config.grad_sync_func is None or rank == 0:
+                     enable_grad_sync()
+ 
++            get_fine_grained_offload_handler().start_microbatch_backward(i)
+             input_tensor_grad = backward_step(
+                 input_tensor, output_tensor, output_tensor_grad, model_type, config
+             )
+@@ -2019,6 +2030,7 @@ def forward_backward_pipelining_without_interleaving(
+                 send_tensor_shapes, config, parallel_state.is_pipeline_last_stage()
+             )
+ 
++            get_fine_grained_offload_handler().start_microbatch_backward(num_microbatches_remaining + i)
+             input_tensor_grad = backward_step(
+                 input_tensor, output_tensor, output_tensor_grad, model_type, config
+             )
+

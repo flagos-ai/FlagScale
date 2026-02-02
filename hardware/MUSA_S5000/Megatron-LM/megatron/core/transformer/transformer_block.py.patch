@@ -1,0 +1,60 @@
+diff --git a/megatron/core/transformer/transformer_block.py b/megatron/core/transformer/transformer_block.py
+index af0b3234..ce0c42c7 100755
+--- a/megatron/core/transformer/transformer_block.py
++++ b/megatron/core/transformer/transformer_block.py
+@@ -34,6 +34,11 @@ try:
+         te_checkpoint,
+     )
+ 
++    from transformer_engine.pytorch.cpu_offload import (
++        get_fine_grained_offload_handler,
++        FineGrainedOffloadLayerCounter,
++    )
++
+     HAVE_TE = True
+     LayerNormImpl = TENorm
+ except ImportError:
+@@ -384,6 +389,14 @@ class TransformerBlock(MegatronModule):
+                             inference_context=None,
+                             packed_seq_params=packed_seq_params,
+                         )
++                        if self.config.offload_moe_fc1_input:
++                            hidden_states = FineGrainedOffloadLayerCounter.apply(hidden_states)
++                            hidden_states = make_viewless_tensor(
++                                inp=hidden_states, requires_grad=True, keep_graph=True
++                            )
++
++                if self.config.offload_moe_fc1_input:
++                    get_fine_grained_offload_handler().end_microbatch()
+                 return hidden_states, context
+ 
+             return custom_forward
+@@ -546,6 +559,10 @@ class TransformerBlock(MegatronModule):
+         use_inner_fp8_context = self.config.fp8 and self.config.fp8_recipe != Fp8Recipe.delayed
+         outer_fp8_context = get_fp8_context(self.config) if use_outer_fp8_context else nullcontext()
+ 
++        get_fine_grained_offload_handler().num_layers = len(self.layers)
++        get_fine_grained_offload_handler().pp_size = self.config.pipeline_model_parallel_size
++        get_fine_grained_offload_handler().is_pipeline_last_stage = parallel_state.is_pipeline_last_stage()
++
+         with rng_context, outer_fp8_context:
+             # Forward pass.
+             if self.config.recompute_granularity == 'full' and self.training:
+@@ -588,6 +605,16 @@ class TransformerBlock(MegatronModule):
+                     ):
+                         hidden_states = self.group_prefetch_offload_commit_async(hidden_states)
+ 
++                    if self.config.offload_moe_fc1_input:
++
++                        hidden_states = FineGrainedOffloadLayerCounter.apply(hidden_states)
++                        hidden_states = make_viewless_tensor(
++                            inp=hidden_states, requires_grad=True, keep_graph=True
++                        )
++
++                if self.config.offload_moe_fc1_input:
++                    get_fine_grained_offload_handler().end_microbatch()
++
+         # Final layer norm.
+         if self.final_layernorm is not None:
+             hidden_states = self.final_layernorm(hidden_states)
+

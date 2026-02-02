@@ -1,0 +1,9 @@
+diff --git a/megatron-lm-musa-patch/examples/llama2/llama_config/special_tokens_map.json b/megatron-lm-musa-patch/examples/llama2/llama_config/special_tokens_map.json
+new file mode 100644
+index 00000000..9e26dfee
+--- /dev/null
++++ b/megatron-lm-musa-patch/examples/llama2/llama_config/special_tokens_map.json
+@@ -0,0 +1 @@
++{}
+\ No newline at end of file
+

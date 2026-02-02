@@ -1,0 +1,10 @@
+diff --git a/megatron-lm-musa-patch/musa_patch/zbb_light/__init__.py b/megatron-lm-musa-patch/musa_patch/zbb_light/__init__.py
+new file mode 100644
+index 00000000..8b0d05a8
+--- /dev/null
++++ b/megatron-lm-musa-patch/musa_patch/zbb_light/__init__.py
+@@ -0,0 +1,2 @@
++
++from .zbpp_light import patch_megatron
+\ No newline at end of file
+

@@ -1,0 +1,13 @@
+diff --git a/.flagscale_unpatched b/.flagscale_unpatched
+new file mode 100644
+index 00000000..28817e3b
+--- /dev/null
++++ b/.flagscale_unpatched
+@@ -0,0 +1,5 @@
++{
++  "backend": "Megatron-LM",
++  "device": "MUSA_S5000",
++  "backend_commit": null
++}
+\ No newline at end of file
+
