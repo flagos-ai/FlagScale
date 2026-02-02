@@ -1,5 +1,5 @@
 diff --git a/megatron/core/optimizer/optimizer.py b/megatron/core/optimizer/optimizer.py
-index 1829cb424..ae2041cd6 100644
+index 1829cb424..2199943d1 100644
 --- a/megatron/core/optimizer/optimizer.py
 +++ b/megatron/core/optimizer/optimizer.py
 @@ -92,7 +92,7 @@ def _multi_tensor_copy_this_to_that(
@@ -7,7 +7,7 @@ index 1829cb424..ae2041cd6 100644
  
  
 -param_group_identifier_keys = ('wd_mult', 'lr_mult', 'is_expert_parallel', 'is_decoupled_lr')
-+param_group_identifier_keys = ('wd_mult', 'lr_mult', 'is_expert_parallel', 'is_decoupled_lr', 'is_vision_model_param') ####FlagScale add is_vision_model_param
++param_group_identifier_keys = ('wd_mult', 'lr_mult', 'is_expert_parallel', 'is_decoupled_lr', 'use_muon', 'is_vision_model_param') ####FlagScale add is_vision_model_param
  
  
  class MegatronOptimizer(ABC):

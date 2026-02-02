@@ -1,14 +1,11 @@
 backends_commit:
-  vllm: a5dd03c1ebc5e4f56f3c9d3dc0436e9c582c978f
+  vllm: aab549870df50edf0512f0a59b574f692f546465
 backends_version:
-  vllm: 0.9.2
-commit: cc6f5f01c48239fe86041bacd638fa803142fffc
+  vllm: 0.10.1
+commit: 168e52ed839f8b940acbe458fb3f8278e5773828
 contact: fanglai.peng@iluvatar.com
 device_type: BI_V150
 models:
 - qwen3-8b
-- ds
-- minicpm-o
-- ds-distill-qwen for jn
 task:
 - inference

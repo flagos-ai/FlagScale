@@ -1,0 +1,36 @@
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index fdc6bc245..09c73151f 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -15,7 +15,7 @@
+ workflow:
+   rules:
+     # Do not trigger for forks
+-    - if: $CI_PROJECT_NAMESPACE != "ADLR" || $CI_MERGE_REQUEST_PROJECT_PATH != "ADLR/megatron-lm"
++    - if: $CI_PROJECT_NAMESPACE != "ADLR" || ($CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_PROJECT_PATH != "ADLR/megatron-lm")
+       when: never
+ 
+     # ci-branches only for schedule
+@@ -69,7 +69,9 @@ workflow:
+     # For MRs with nightly
+     - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merged_result' && $CI_MERGE_REQUEST_LABELS =~ /Run nightly/
+       variables:
+-        UNIT_TEST: "no"
++        UNIT_TEST: "yes"
++        UNIT_TEST_REPEAT: 1
++        UNIT_TEST_TIMEOUT: 15
+         INTEGRATION_TEST: "no"
+         FUNCTIONAL_TEST: "yes"
+         FUNCTIONAL_TEST_SCOPE: nightly
+@@ -83,7 +85,9 @@ workflow:
+     # For MRs with weekly
+     - if: $CI_MERGE_REQUEST_EVENT_TYPE == 'merged_result' && $CI_MERGE_REQUEST_LABELS =~ /Run weekly/
+       variables:
+-        UNIT_TEST: "no"
++        UNIT_TEST: "yes"
++        UNIT_TEST_REPEAT: 1
++        UNIT_TEST_TIMEOUT: 15
+         INTEGRATION_TEST: "no"
+         FUNCTIONAL_TEST: "yes"
+         FUNCTIONAL_TEST_SCOPE: weekly
+

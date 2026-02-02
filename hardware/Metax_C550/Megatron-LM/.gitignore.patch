@@ -1,0 +1,16 @@
+diff --git a/.gitignore b/.gitignore
+index 144a8c2b8..179d9efa2 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -15,4 +15,8 @@ onelogger.err
+ .venv
+ runs/
+ /test_cases/
+-**/dist/
+\ No newline at end of file
++**/dist/
++tests/*
++tests/unit_tests/*
++tests
++examples/*
+

@@ -1,0 +1,52 @@
+diff --git a/.gitlab/stages/05.publish.yml b/.gitlab/stages/05.publish.yml
+index f0d2a6188..81125607f 100644
+--- a/.gitlab/stages/05.publish.yml
++++ b/.gitlab/stages/05.publish.yml
+@@ -466,10 +466,17 @@ publish:docs:
+     - owner/jet-core
+     - purpose/utility
+     - team/megatron
++  before_script:
++    - eval PUBLISH_COMMIT=$PUBLISH_COMMIT
++    - git fetch origin '+refs/merge-requests/*:refs/remotes/merge-requests/*'
++    - git fetch origin $PUBLISH_COMMIT
++    - git checkout $PUBLISH_COMMIT
+   script:
+     - cd ..
+-    - rm -rf documentation && git clone --recursive https://gitlab-ci-token:${PROJECT_ACCESS_TOKEN_MCORE}@${GITLAB_ENDPOINT}/nemo-megatron-core-tme/documentation.git
++    - rm -rf documentation && git clone --recursive https://gitlab-ci-token:${PAT}@${GITLAB_ENDPOINT}/nemo-megatron-core-tme/documentation.git
+     - cd documentation/megatron-lm
++    - git config --global user.email "mcore-bot@nvidia.com"
++    - git config --global user.name "Mcore Bot"
+     - git fetch origin '+refs/merge-requests/*:refs/remotes/merge-requests/*'
+     - git fetch origin $PUBLISH_COMMIT
+     - git checkout $PUBLISH_COMMIT
+@@ -479,6 +486,10 @@ publish:docs:
+       git commit -m 'feat: Bump mcore'
+ 
+     - git push
++  rules:
++    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_PIPELINE_SOURCE == "push"'
++      allow_failure: true
++    - when: never
+ 
+ publish:upload_statistics:
+   stage: publish
+@@ -518,7 +529,7 @@ public:review_reminder:
+   image: ${UTILITY_IMAGE}:${CI_PIPELINE_ID}
+   script:
+     - export GITLAB_ENDPOINT
+-    - export RO_API_TOKEN=${PROJECT_ACCESS_TOKEN_MCORE}
++    - export RO_API_TOKEN=${PAT}
+     - export SLACK_WEBHOOK_URL=${SLACK_REMINDER_HOOK}
+     - export SLACK_API_TOKEN=${SLACK_API_TOKEN}
+     - python tests/test_utils/python_scripts/auto_reminder.py
+@@ -530,6 +541,5 @@ public:review_reminder:
+     - purpose/utility
+     - team/megatron
+   rules:
+-    - if: $CI_COMMIT_BRANCH == "ko3n1g/ci/auto-reminder"
+-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $PUBLISH == "yes" && $PUBLISH_SCOPE == "review-reminder"
++    - if: $CI_COMMIT_BRANCH == "ci-review-reminder" && $PUBLISH == "yes" && $PUBLISH_SCOPE == "review-reminder"
+     - when: never
+

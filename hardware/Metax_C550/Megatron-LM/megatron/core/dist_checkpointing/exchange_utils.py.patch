@@ -1,0 +1,14 @@
+diff --git a/megatron/core/dist_checkpointing/exchange_utils.py b/megatron/core/dist_checkpointing/exchange_utils.py
+index def79fb77..2f7914490 100644
+--- a/megatron/core/dist_checkpointing/exchange_utils.py
++++ b/megatron/core/dist_checkpointing/exchange_utils.py
+@@ -63,7 +63,7 @@ class ShardDistribution(NamedTuple):
+ def _shard_size(sh_ten: ShardedTensor):
+     """Returns size in bytes of a given sharded tensor."""
+     if sh_ten.flattened_range is None:
+-        numel = np.product(sh_ten.local_shape)
++        numel = np.prod(sh_ten.local_shape)
+     else:
+         numel = sh_ten.flattened_range.stop - sh_ten.flattened_range.start
+     return numel * torch._utils._element_size(sh_ten.dtype)
+

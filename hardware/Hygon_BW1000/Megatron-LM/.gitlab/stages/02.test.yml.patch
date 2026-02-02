@@ -1,0 +1,13 @@
+diff --git a/.gitlab/stages/02.test.yml b/.gitlab/stages/02.test.yml
+index d0c51c08c..bde211d98 100644
+--- a/.gitlab/stages/02.test.yml
++++ b/.gitlab/stages/02.test.yml
+@@ -1,6 +1,6 @@
+ .test_rules:
+   rules:
+-    - if: $PUBLISH == "yes" && $PUBLISH_SCOPE == "review-reminder"
++    - if: $PUBLISH == "yes"
+       when: never
+     - when: on_success
+   stage: test
+

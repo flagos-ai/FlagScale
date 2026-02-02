@@ -1,0 +1,25 @@
+diff --git a/.gitlab/stages/00.pre.yml b/.gitlab/stages/00.pre.yml
+index cf44ffe02..c4e92a353 100644
+--- a/.gitlab/stages/00.pre.yml
++++ b/.gitlab/stages/00.pre.yml
+@@ -59,6 +59,7 @@ pre:create_ci_branches:
+       - branch: ci-nightly
+       - branch: ci-weekly
+       - branch: ci-pre-release
++      - branch: ci-review-reminder
+   tags:
+     - arch/amd64
+     - env/prod
+@@ -214,8 +215,9 @@ pre:check_milestone:
+       MILESTONE=$(curl --header "PRIVATE-TOKEN: ${PROJECT_ACCESS_TOKEN_MCORE}" --url "https://${GITLAB_ENDPOINT}/api/v4/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}" | jq '.milestone')
+     - |
+       if [[ "$MILESTONE" == "null" ]]; then
+-        echo Please assign a Milestone to this MR!
+-        exit 1
++        LATEST_MILESTONE=$(curl --header "PRIVATE-TOKEN: ${PROJECT_ACCESS_TOKEN_MCORE}" --url "https://${GITLAB_ENDPOINT}/api/v4/projects/${CI_PROJECT_ID}/milestones?state=active&order_by=due_date&sort=desc" | jq '.[0].id')
++        curl --request PUT --header "PRIVATE-TOKEN: ${PROJECT_ACCESS_TOKEN_MCORE}" --url "https://${GITLAB_ENDPOINT}/api/v4/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}" --data "milestone_id=${LATEST_MILESTONE}"
++        echo "Applied latest milestone (ID: ${LATEST_MILESTONE}) to this MR"
+       fi
+ 
+ pre:check_status_of_main:
+

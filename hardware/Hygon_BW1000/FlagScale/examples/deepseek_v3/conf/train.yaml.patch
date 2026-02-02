@@ -1,0 +1,67 @@
+diff --git a/examples/deepseek_v3/conf/train.yaml b/examples/deepseek_v3/conf/train.yaml
+index e030db9e..d377ab11 100644
+--- a/examples/deepseek_v3/conf/train.yaml
++++ b/examples/deepseek_v3/conf/train.yaml
+@@ -4,27 +4,49 @@ defaults:
+   - train: 16b_a3b
+ 
+ experiment:
+-  exp_name: DeepSeek-16b-a3b
++  exp_name: train_deepseek_v3_16b_a3b
+   seed: 42
+-  save_steps: 10000
+-  load: null
+-  exp_dir: xxx
+-  ckpt_format: torch
++  save_steps: 1000
++  exp_dir: ./${experiment.exp_name}
+   task:
+     type: train
+     backend: megatron
+     entrypoint: flagscale/train/train_gpt.py
+   runner:
+-    per_node_task: false
+-    no_shared_fs: false
++    backend: torchrun
++    nnodes: 4
++    nproc_per_node: 8
++    hostfile: /share/project/hostfile
++    master_port: xxxxx
++    ssh_port: xxxxxx
++    master_addr: xx.x.xx.xxx
+     rdzv_backend: static
+-    hostfile: null
+-  cmds:
+-    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
+   envs:
+-    LOGLEVEL: "INFO"
+-    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
++    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
++    NVTE_APPLY_QK_LAYER_SCALING: 0
++    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
++    NCCL_NET_GDR_LEVEL: 7
++    NCCL_NET_GDR_READ: 1
++    NCCL_MAX_NCHANNELS: 32
++    NCCL_MIN_NCHANNELS: 32
++    RCCL_SDMA_COPY_ENABLE: 0
++    NCCL_ALGO: Ring
++    HSA_FORCE_FINE_GRAIN_PCIE: 1
++    OMP_NUM_THREADS: 1
++    NCCL_SOCKET_IFNAME: enp225s0f0np0
++    GLOO_SOCKET_IFNAME: enp225s0f0np0
++    NCCL_IB_HCA: mlx5_0:1,mlx5_6:1
++    ALLREDUCE_STREAM_WITH_COMPUTE: 1
++    SENDRECV_STREAM_WITH_COMPUTE: 1
++    cache_size_limit: 64
++    GPU_MAX_HW_QUEUES: 20
++  cmds:
++    before_start: |-
++      source /opt/dtk/env.sh
++      export LD_LIBRARY_PATH=/root/xxx01/lib:$LD_LIBRARY_PATH
++      export LD_LIBRARY_PATH=/root/xxx02/lib:$LD_LIBRARY_PATH
++    #before_start: "ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train"
+ 
+ action: run
+ 
+

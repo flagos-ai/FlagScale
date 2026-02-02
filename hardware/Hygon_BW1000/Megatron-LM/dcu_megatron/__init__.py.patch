@@ -1,0 +1,9 @@
+diff --git a/dcu_megatron/__init__.py b/dcu_megatron/__init__.py
+new file mode 100644
+index 000000000..6e4407674
+--- /dev/null
++++ b/dcu_megatron/__init__.py
+@@ -0,0 +1 @@
++from .adaptor import megatron_adaptor
+\ No newline at end of file
+
