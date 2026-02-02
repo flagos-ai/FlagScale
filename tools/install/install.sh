@@ -3,49 +3,47 @@
 # FlagScale Dependency Installation
 # =============================================================================
 #
-# Installs dependencies for FlagScale tasks. By default, all phases run.
-# Use --no-* flags to skip phases, or --pip-deps/--src-deps to install specific deps.
+# Main entry point for installing FlagScale dependencies.
+# Orchestrates four installation phases: system, dev, base, task.
 #
 # Usage:
 #   ./install.sh --platform PLATFORM --task TASK [OPTIONS]
 #
 # Examples:
 #   ./install.sh --platform cuda --task train                    # Full installation
-#   ./install.sh --platform cuda --task train --src-deps megatron-lm  # Source dep only
-#   ./install.sh --platform cuda --task train --pip-deps torch,numpy  # Pip packages only
+#   ./install.sh --platform cuda --task train --no-system        # Skip system phase
+#   ./install.sh --platform cuda --task train --src-deps megatron-lm  # Only megatron-lm
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils/utils.sh"
 source "$SCRIPT_DIR/utils/versions.sh"
 source "$SCRIPT_DIR/utils/pkg_utils.sh"
-source "$SCRIPT_DIR/utils/retry_utils.sh"
-source "$SCRIPT_DIR/utils/pyenv_utils.sh"
 
 PROJECT_ROOT=$(get_project_root)
 
 # =============================================================================
-# Configuration
+# Configuration (defaults)
 # =============================================================================
 TASK=""
 PLATFORM=""
-RETRY_COUNT=3
 PKG_MGR="uv"
 ENV_NAME=""
 DEBUG=false
+RETRY_COUNT=3
+FORCE_BUILD=false
 PYTHON_VERSION="$(get_common "python")"
 FLAGSCALE_HOME="${FLAGSCALE_HOME:-/opt/flagscale}"
 
-# Installation phases (default: install all)
+# Phase flags (default: install all)
 INSTALL_SYSTEM=true
 INSTALL_DEV=true
 INSTALL_BASE=true
 INSTALL_TASK=true
 
-# Selective installation (empty = use phase defaults)
-SRC_DEPS=""           # Comma-separated source deps (e.g., "megatron-lm")
-PIP_DEPS=""           # Comma-separated pip packages (e.g., "torch,numpy")
-FORCE_BUILD=false
+# Override flags (selective installation)
+SRC_DEPS=""
+PIP_DEPS=""
 
 # PyPI index URLs
 INDEX_URL="${PIP_INDEX_URL:-}"
@@ -67,127 +65,76 @@ get_valid_tasks() {
     echo "${tasks[@]}"
 }
 
-# =============================================================================
-# Installation Functions
-# =============================================================================
-install_system_deps() {
-    set_step "Installing system dependencies"
+# Export all configuration as environment variables for phase scripts
+export_config() {
+    # Paths
+    export FLAGSCALE_HOME
+    export FLAGSCALE_CONDA="$FLAGSCALE_HOME/miniconda3"
+    export FLAGSCALE_DEPS="$FLAGSCALE_HOME/deps"
+    export FLAGSCALE_DOWNLOADS="$FLAGSCALE_HOME/downloads"
+    export UV_PROJECT_ENVIRONMENT="$FLAGSCALE_HOME/venv"
 
-    local system_script="$SCRIPT_DIR/install_system.sh"
-    [ ! -f "$system_script" ] && die "install_system.sh not found"
+    # Phase flags (for should_install functions)
+    export FLAGSCALE_INSTALL_SYSTEM="$INSTALL_SYSTEM"
+    export FLAGSCALE_INSTALL_DEV="$INSTALL_DEV"
+    export FLAGSCALE_INSTALL_BASE="$INSTALL_BASE"
+    export FLAGSCALE_INSTALL_TASK="$INSTALL_TASK"
 
-    local args=""
-    [ "$INSTALL_DEV" = false ] && args="--no-dev"
-    [ -n "$PLATFORM" ] && args="$args --platform $PLATFORM"
-    [ -n "$PKG_MGR" ] && args="$args --pkg-mgr $PKG_MGR"
+    # Override flags
+    export FLAGSCALE_SRC_DEPS="$SRC_DEPS"
+    export FLAGSCALE_PIP_DEPS="$PIP_DEPS"
+    export FLAGSCALE_FORCE_BUILD="$FORCE_BUILD"
+
+    # Other config
+    export FLAGSCALE_PLATFORM="$PLATFORM"
+    export FLAGSCALE_TASK="$TASK"
+    export FLAGSCALE_PKG_MGR="$PKG_MGR"
+    export FLAGSCALE_DEBUG="$DEBUG"
+    export FLAGSCALE_RETRY_COUNT="$RETRY_COUNT"
+
+    # PyPI index
+    [ -n "$INDEX_URL" ] && { export PIP_INDEX_URL="$INDEX_URL" UV_INDEX_URL="$INDEX_URL"; }
+    [ -n "$EXTRA_INDEX_URL" ] && { export PIP_EXTRA_INDEX_URL="$EXTRA_INDEX_URL" UV_EXTRA_INDEX_URL="$EXTRA_INDEX_URL"; }
+}
+
+# =============================================================================
+# Phase Execution
+# =============================================================================
+run_phase() {
+    local phase="$1"
+    local script="$2"
+    local args="${3:-}"
+
+    # Check if phase should run (enabled OR has overrides)
+    local phase_enabled
+    case "$phase" in
+        system) phase_enabled="$INSTALL_SYSTEM" ;;
+        dev)    phase_enabled="$INSTALL_DEV" ;;
+        base)   phase_enabled="$INSTALL_BASE" ;;
+        task)   phase_enabled="$INSTALL_TASK" ;;
+    esac
+
+    # Skip if phase disabled and no relevant overrides
+    if [ "$phase_enabled" = false ]; then
+        case "$phase" in
+            dev|base|task)
+                # These phases can have pip/src overrides
+                [ -z "$PIP_DEPS" ] && [ -z "$SRC_DEPS" ] && { log_info "Skipping $phase phase"; return 0; }
+                ;;
+            system)
+                # System phase has no overrides currently
+                log_info "Skipping $phase phase"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Run the phase script
+    [ ! -f "$script" ] && { log_warn "Phase script not found: $script"; return 0; }
+
+    print_header "${phase^} Phase"
     [ "$DEBUG" = true ] && args="$args --debug"
-
-    FLAGSCALE_HOME="$FLAGSCALE_HOME" "$system_script" $args || die "System dependencies installation failed"
-}
-
-install_dev_deps() {
-    set_step "Installing dev dependencies"
-
-    local dev_req="$PROJECT_ROOT/requirements/dev.txt"
-    [ ! -f "$dev_req" ] && [ "$DEBUG" != true ] && { log_warn "dev.txt not found, skipping"; return 0; }
-
-    log_info "Dev requirements: dev.txt"
-    retry_pip_install -d $DEBUG "$dev_req" "$RETRY_COUNT" || die "Dev requirements installation failed"
-    log_success "Dev dependencies installed"
-}
-
-install_base_requirements() {
-    set_step "Installing base requirements"
-
-    local base_req="$PROJECT_ROOT/requirements/$PLATFORM/base.txt"
-    [ ! -f "$base_req" ] && [ "$DEBUG" != true ] && return 0
-
-    log_info "Base requirements: base.txt"
-    retry_pip_install -d $DEBUG "$base_req" "$RETRY_COUNT" || die "Base requirements installation failed"
-}
-
-install_base_source() {
-    set_step "Installing base source dependencies"
-
-    local base_script="$SCRIPT_DIR/$PLATFORM/install_base.sh"
-    [ ! -f "$base_script" ] && return 0
-
-    local args=""
-    [ "$DEBUG" = true ] && args="--debug"
-    "$base_script" $args || die "Base source installation failed"
-}
-
-install_base_deps() {
-    print_header "Base: $PLATFORM"
-    install_base_requirements
-    install_base_source
-}
-
-install_task_requirements() {
-    local task=$1
-    set_step "Installing $task requirements"
-
-    local req_file="$PROJECT_ROOT/requirements/$PLATFORM/${task}.txt"
-    [ ! -f "$req_file" ] && [ "$DEBUG" != true ] && return 0
-
-    log_info "Requirements: $(basename "$req_file")"
-    retry_pip_install -d $DEBUG "$req_file" "$RETRY_COUNT" || die "Task requirements installation failed: $task"
-}
-
-install_task_source() {
-    local task=$1
-    set_step "Installing $task source dependencies"
-
-    local source_script="$SCRIPT_DIR/$PLATFORM/install_${task}.sh"
-    [ ! -f "$source_script" ] && return 0
-
-    local args=""
-    [ "$DEBUG" = true ] && args="--debug"
-    "$source_script" $args || die "Task source installation failed: $task"
-}
-
-install_task_deps() {
-    local task=$1
-    print_header "Task: $task ($PLATFORM)"
-    install_task_requirements "$task"
-    install_task_source "$task"
-}
-
-install_task() {
-    local task=$1
-
-    [ "$INSTALL_BASE" = true ] && install_base_deps
-    [ "$INSTALL_TASK" = true ] && install_task_deps "$task"
-
-    log_success "Task complete: $task"
-}
-
-# Install specific pip packages (when --pip-deps is used)
-install_pip_deps() {
-    [ -z "$PIP_DEPS" ] && return 0
-
-    set_step "Installing pip packages"
-    log_info "Pip packages: $PIP_DEPS"
-
-    # Convert comma-separated to space-separated
-    local packages=$(echo "$PIP_DEPS" | tr ',' ' ')
-    run_cmd -d $DEBUG pip install --root-user-action=ignore $packages || die "Pip packages installation failed"
-    log_success "Pip packages installed"
-}
-
-# Install specific source deps (when --src-deps is used)
-install_src_deps() {
-    [ -z "$SRC_DEPS" ] && return 0
-
-    set_step "Installing source dependencies"
-    log_info "Source deps: $SRC_DEPS"
-
-    local source_script="$SCRIPT_DIR/$PLATFORM/install_${TASK}.sh"
-    [ ! -f "$source_script" ] && { log_warn "No source script for task: $TASK"; return 0; }
-
-    local args=""
-    [ "$DEBUG" = true ] && args="--debug"
-    "$source_script" $args || die "Source dependencies installation failed"
+    "$script" $args || die "${phase^} phase failed"
 }
 
 # =============================================================================
@@ -203,16 +150,16 @@ OPTIONS:
     --task TASK            Task: ${tasks[*]} (required)
 
   Phase Control (default: install all):
-    --no-system            Skip system packages (apt, python, openmpi)
-    --no-dev               Skip dev dependencies
-    --no-base              Skip base dependencies
-    --no-task              Skip task dependencies
+    --no-system            Skip system phase (apt, python, openmpi)
+    --no-dev               Skip dev phase (dev requirements)
+    --no-base              Skip base phase (base requirements + source)
+    --no-task              Skip task phase (task requirements + source)
 
-  Selective Installation:
+  Selective Installation (overrides --no-* for specific packages):
     --pip-deps PKGS        Install specific pip packages (comma-separated)
     --src-deps DEPS        Install specific source deps (comma-separated)
-                           Available for train: apex,flash-attn,transformer-engine,megatron-lm
-                           Available for serve: vllm
+                           train: apex,flash-attn,transformer-engine,megatron-lm
+                           serve: vllm
 
   Environment:
     --pkg-mgr MGR          Package manager: pip, uv, conda (default: uv)
@@ -229,10 +176,8 @@ OPTIONS:
 
 EXAMPLES:
     $0 --platform cuda --task train                                # Full installation
-    $0 --platform cuda --task train --no-system                    # Skip system deps
-    $0 --platform cuda --task train --src-deps megatron-lm         # Only Megatron-LM source
-    $0 --platform cuda --task train --pip-deps torch,numpy         # Only pip packages
-    $0 --platform cuda --task train --pkg-mgr conda --env-name train
+    $0 --platform cuda --task train --no-system                    # Skip system phase
+    $0 --platform cuda --task train --no-system --no-dev --no-base --no-task --src-deps megatron-lm
 EOF
 }
 
@@ -262,22 +207,9 @@ parse_args() {
 }
 
 validate_inputs() {
-    if [ -z "$PLATFORM" ]; then
-        log_error "Platform required (use --platform)"
-        usage
-        exit 1
-    fi
-
-    if [ ! -d "$SCRIPT_DIR/$PLATFORM" ]; then
-        log_error "Invalid platform: $PLATFORM"
-        exit 1
-    fi
-
-    if [ -z "$TASK" ]; then
-        log_error "Task required (use --task)"
-        usage
-        exit 1
-    fi
+    [ -z "$PLATFORM" ] && { log_error "Platform required (use --platform)"; usage; exit 1; }
+    [ ! -d "$SCRIPT_DIR/$PLATFORM" ] && { log_error "Invalid platform: $PLATFORM"; exit 1; }
+    [ -z "$TASK" ] && { log_error "Task required (use --task)"; usage; exit 1; }
 
     local valid_tasks=($(get_valid_tasks))
     local valid=false
@@ -287,104 +219,39 @@ validate_inputs() {
     [ "$valid" = false ] && { log_error "Invalid task: $TASK. Valid: ${valid_tasks[*]}"; exit 1; }
 }
 
-setup_package_manager() {
-    case "$PKG_MGR" in
-        pip|uv|conda) set_pkg_manager "$PKG_MGR" ;;
-        *) log_error "Invalid package manager: $PKG_MGR"; exit 1 ;;
-    esac
-}
-
-setup_environment() {
-    local manager=$(get_pkg_manager)
-
-    case "$manager" in
-        conda)
-            if [ ! -f "$FLAGSCALE_CONDA/bin/conda" ]; then
-                log_error "Conda not found at $FLAGSCALE_CONDA"
-                return 1
-            fi
-            [ -n "$ENV_NAME" ] && { activate_conda -d $DEBUG "$ENV_NAME" "$FLAGSCALE_CONDA" "$PYTHON_VERSION" || return 1; }
-            ;;
-        uv)
-            if [ ! -d "$UV_PROJECT_ENVIRONMENT" ]; then
-                log_error "UV venv not found at $UV_PROJECT_ENVIRONMENT"
-                return 1
-            fi
-            activate_uv_env -d $DEBUG "$UV_PROJECT_ENVIRONMENT"
-            ;;
-        pip)
-            has_pip || { log_warn "pip not found"; return 1; }
-            ;;
-    esac
-    return 0
-}
-
-setup_exports() {
-    export FLAGSCALE_HOME
-    export FLAGSCALE_CONDA="$FLAGSCALE_HOME/miniconda3"
-    export FLAGSCALE_DEPS="$FLAGSCALE_HOME/deps"
-    export FLAGSCALE_DOWNLOADS="$FLAGSCALE_HOME/downloads"
-    export FLAGSCALE_FORCE_BUILD="$FORCE_BUILD"
-    export FLAGSCALE_SRC_DEPS="$SRC_DEPS"
-    export UV_PROJECT_ENVIRONMENT="$FLAGSCALE_HOME/venv"
-
-    [ -n "$INDEX_URL" ] && { export PIP_INDEX_URL="$INDEX_URL" UV_INDEX_URL="$INDEX_URL"; }
-    [ -n "$EXTRA_INDEX_URL" ] && { export PIP_EXTRA_INDEX_URL="$EXTRA_INDEX_URL" UV_EXTRA_INDEX_URL="$EXTRA_INDEX_URL"; }
-}
-
 main() {
     parse_args "$@"
+    validate_inputs
 
     [ "$DEBUG" = true ] && log_info "Dry-run mode"
 
-    validate_inputs
-
     print_header "FlagScale Installation"
-    log_info "Task: $TASK | Platform: $PLATFORM | Pkg: $PKG_MGR"
-    [ -n "$SRC_DEPS" ] && log_info "Source deps: $SRC_DEPS"
-    [ -n "$PIP_DEPS" ] && log_info "Pip deps: $PIP_DEPS"
+    log_info "Platform: $PLATFORM | Task: $TASK | Pkg: $PKG_MGR"
+    [ -n "$SRC_DEPS" ] && log_info "Source deps override: $SRC_DEPS"
+    [ -n "$PIP_DEPS" ] && log_info "Pip deps override: $PIP_DEPS"
     log_info "Install dir: $FLAGSCALE_HOME"
 
-    setup_exports
+    export_config
 
-    # Phase 1: System dependencies
-    [ "$INSTALL_SYSTEM" = true ] && install_system_deps
+    # Phase 1: System (apt, python, openmpi)
+    run_phase system "$SCRIPT_DIR/install_system.sh" "--platform $PLATFORM --pkg-mgr $PKG_MGR"
 
-    # Check if we need environment setup
-    local needs_env=false
-    [ "$INSTALL_DEV" = true ] || [ "$INSTALL_BASE" = true ] || [ "$INSTALL_TASK" = true ] && needs_env=true
-    [ -n "$PIP_DEPS" ] || [ -n "$SRC_DEPS" ] && needs_env=true
+    # Phase 2: Dev (dev requirements)
+    run_phase dev "$SCRIPT_DIR/install_dev.sh"
 
-    if [ "$needs_env" = false ]; then
-        log_success "Installation complete"
-        print_header "Installation Complete"
-        return 0
-    fi
+    # Phase 3: Base (base requirements + source for platform)
+    run_phase base "$SCRIPT_DIR/$PLATFORM/install_base.sh"
 
-    # Phase 2: Environment setup
-    setup_package_manager
-    setup_environment || die "Environment setup failed"
-    log_info "Env: $(get_current_env) | $(python --version 2>/dev/null || echo 'Python: N/A')"
-
-    # Phase 3: Dev dependencies
-    [ "$INSTALL_DEV" = true ] && { print_header "Dev Dependencies"; install_dev_deps; }
-
-    # Phase 4: Task dependencies (or selective installation)
-    if [ -n "$PIP_DEPS" ] || [ -n "$SRC_DEPS" ]; then
-        # Selective installation mode
-        print_header "Selective Installation"
-        install_pip_deps
-        install_src_deps
+    # Phase 4: Task (task requirements + source)
+    if [ "$TASK" = "all" ]; then
+        for task in $(get_valid_tasks); do
+            [ "$task" = "all" ] && continue
+            FLAGSCALE_TASK="$task"
+            export FLAGSCALE_TASK
+            run_phase task "$SCRIPT_DIR/$PLATFORM/install_${task}.sh"
+        done
     else
-        # Normal phase-based installation
-        if [ "$TASK" = "all" ]; then
-            for task in $(get_valid_tasks); do
-                [ "$task" = "all" ] && continue
-                install_task "$task"
-            done
-        else
-            install_task "$TASK"
-        fi
+        run_phase task "$SCRIPT_DIR/$PLATFORM/install_${TASK}.sh"
     fi
 
     print_header "Installation Complete"

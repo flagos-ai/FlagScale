@@ -286,26 +286,177 @@ should_build_package() {
     return 0
 }
 
-# Check if a specific source dependency should be installed
-# Usage: should_install_dep <dep_name>
+# =============================================================================
+# Unified Installation Decision Functions
+# =============================================================================
+# These functions consider both phase flags (--no-system, --no-dev, etc.)
+# and override flags (--pip-deps, --src-deps) to decide whether to install.
+#
+# Environment variables (exported by install.sh):
+#   FLAGSCALE_INSTALL_SYSTEM - true/false for system phase
+#   FLAGSCALE_INSTALL_DEV    - true/false for dev phase
+#   FLAGSCALE_INSTALL_BASE   - true/false for base phase
+#   FLAGSCALE_INSTALL_TASK   - true/false for task phase
+#   FLAGSCALE_PIP_DEPS       - comma-separated pip packages to override
+#   FLAGSCALE_SRC_DEPS       - comma-separated source deps to override
+
+# Check if a phase is enabled
+# Usage: is_phase_enabled <phase>
+# phase: system, dev, base, task
+is_phase_enabled() {
+    local phase="$1"
+    case "$phase" in
+        system) [ "${FLAGSCALE_INSTALL_SYSTEM:-true}" = true ] ;;
+        dev)    [ "${FLAGSCALE_INSTALL_DEV:-true}" = true ] ;;
+        base)   [ "${FLAGSCALE_INSTALL_BASE:-true}" = true ] ;;
+        task)   [ "${FLAGSCALE_INSTALL_TASK:-true}" = true ] ;;
+        *)      return 1 ;;
+    esac
+}
+
+# Check if item is in override list
+# Usage: is_in_override <type> <item>
+# type: pip, src
+is_in_override() {
+    local type="$1"
+    local item="$2"
+    local list=""
+
+    case "$type" in
+        pip) list="${FLAGSCALE_PIP_DEPS:-}" ;;
+        src) list="${FLAGSCALE_SRC_DEPS:-}" ;;
+        *)   return 1 ;;
+    esac
+
+    [ -n "$list" ] && echo ",$list," | grep -q ",$item,"
+}
+
+# Unified decision: should install this item?
+# Usage: should_install <type> <phase> [item_name]
+# type: apt, pip, src
+# phase: system, dev, base, task
+# item_name: specific package name (required for pip/src override check)
 # Returns: 0 if should install, 1 if skip
-# When FLAGSCALE_SRC_DEPS is empty, all deps are installed (default behavior)
-# When set, only specified deps are installed (e.g., "megatron-lm" or "apex,megatron-lm")
-# Environment: FLAGSCALE_SRC_DEPS - Comma-separated list of deps to install
-should_install_dep() {
-    local dep_name="$1"
-    local src_deps="${FLAGSCALE_SRC_DEPS:-}"
+should_install() {
+    local type="$1"
+    local phase="$2"
+    local item="${3:-}"
 
-    # Empty means install all
-    if [ -z "$src_deps" ]; then
+    # If phase is enabled, install all items in that phase
+    if is_phase_enabled "$phase"; then
         return 0
     fi
 
-    # Check if dep_name is in the comma-separated list
-    if echo ",$src_deps," | grep -q ",$dep_name,"; then
-        return 0
+    # Phase disabled, check override flags
+    if [ -n "$item" ]; then
+        case "$type" in
+            pip) is_in_override pip "$item" && return 0 ;;
+            src) is_in_override src "$item" && return 0 ;;
+        esac
     fi
 
-    log_info "Skipping $dep_name (not in --src-deps list)"
+    # Phase disabled and no override match
+    [ -n "$item" ] && log_info "Skipping $item ($phase phase disabled, not in override list)"
     return 1
+}
+
+# Convenience: should install pip package?
+# Usage: should_install_pip <phase> <package>
+should_install_pip() {
+    should_install pip "$1" "$2"
+}
+
+# Convenience: should install source dep?
+# Usage: should_install_src <phase> <dep_name>
+should_install_src() {
+    should_install src "$1" "$2"
+}
+
+# Convenience: should install apt package?
+# Usage: should_install_apt <phase> [package]
+should_install_apt() {
+    should_install apt "$1" "${2:-}"
+}
+
+# Legacy: should_install_dep for backward compatibility
+# Usage: should_install_dep <dep_name>
+# Note: Assumes task phase, use should_install_src for explicit phase
+should_install_dep() {
+    should_install_src task "$1"
+}
+
+# =============================================================================
+# Phase-Scoped Package Filtering
+# =============================================================================
+# These functions filter pip-deps and src-deps to only packages defined in
+# the current phase.
+
+# Check if a pip package is in a requirements file
+# Usage: is_pip_in_requirements <package> <requirements_file>
+is_pip_in_requirements() {
+    local package="$1"
+    local req_file="$2"
+
+    [ ! -f "$req_file" ] && return 1
+
+    # Match package name at start of line, with optional version specifier
+    # Handles: package, package==1.0, package>=1.0, package[extra], etc.
+    grep -qiE "^${package}([=<>!~\[]|$)" "$req_file" 2>/dev/null
+}
+
+# Get pip-deps that belong to a specific requirements file
+# Usage: get_pip_deps_for_requirements <requirements_file>
+# Returns: space-separated list of matching packages
+get_pip_deps_for_requirements() {
+    local req_file="$1"
+    local pip_deps="${FLAGSCALE_PIP_DEPS:-}"
+    local matched=""
+
+    [ -z "$pip_deps" ] && return 0
+    [ ! -f "$req_file" ] && return 0
+
+    for pkg in $(echo "$pip_deps" | tr ',' ' '); do
+        if is_pip_in_requirements "$pkg" "$req_file"; then
+            matched="$matched $pkg"
+        fi
+    done
+
+    echo "$matched" | xargs  # trim whitespace
+}
+
+# Check if any pip-deps match a requirements file
+# Usage: has_pip_deps_for_requirements <requirements_file>
+has_pip_deps_for_requirements() {
+    local req_file="$1"
+    local matched=$(get_pip_deps_for_requirements "$req_file")
+    [ -n "$matched" ]
+}
+
+# Get src-deps that are in a predefined list
+# Usage: get_src_deps_for_phase <dep1> <dep2> ...
+# Returns: space-separated list of matching deps
+get_src_deps_for_phase() {
+    local valid_deps="$*"
+    local src_deps="${FLAGSCALE_SRC_DEPS:-}"
+    local matched=""
+
+    [ -z "$src_deps" ] && return 0
+
+    for dep in $(echo "$src_deps" | tr ',' ' '); do
+        for valid in $valid_deps; do
+            if [ "$dep" = "$valid" ]; then
+                matched="$matched $dep"
+                break
+            fi
+        done
+    done
+
+    echo "$matched" | xargs  # trim whitespace
+}
+
+# Check if any src-deps match the valid list
+# Usage: has_src_deps_for_phase <dep1> <dep2> ...
+has_src_deps_for_phase() {
+    local matched=$(get_src_deps_for_phase "$@")
+    [ -n "$matched" ]
 }
