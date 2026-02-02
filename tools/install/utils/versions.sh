@@ -68,6 +68,26 @@ get_common() {
     echo "$version"
 }
 
+# Get version from dev section (with fallback defaults)
+# Usage: sccache_ver=$(get_dev "sccache")
+get_dev() {
+    local name=$1
+    local version=""
+
+    if _check_jq && [ -f "$VERSIONS_FILE" ]; then
+        version=$(jq -r ".dev.\"${name}\".version // empty" "$VERSIONS_FILE")
+    fi
+
+    # Fallback defaults for critical dev tools when jq unavailable
+    if [ -z "$version" ]; then
+        case "$name" in
+            sccache) version="0.8.1" ;;
+        esac
+    fi
+
+    echo "$version"
+}
+
 # Get version from platform section
 # Usage: torch_ver=$(get_platform "cuda" "torch")
 #        cuda_ver=$(get_platform "cuda" "cuda")

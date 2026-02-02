@@ -54,7 +54,7 @@ EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-}"
 # =============================================================================
 get_valid_tasks() {
     local tasks=()
-    if [ -d "$SCRIPT_DIR/$PLATFORM" ]; then
+    if [ -n "$PLATFORM" ] && [ -d "$SCRIPT_DIR/$PLATFORM" ]; then
         for script in "$SCRIPT_DIR/$PLATFORM"/install_*.sh; do
             [ -f "$script" ] || continue
             local task=$(basename "$script" | sed 's/^install_//' | sed 's/\.sh$//')
@@ -141,13 +141,12 @@ run_phase() {
 # Main
 # =============================================================================
 usage() {
-    local tasks=($(get_valid_tasks))
     cat << EOF
 Usage: $0 --platform PLATFORM --task TASK [OPTIONS]
 
 OPTIONS:
     --platform NAME        Platform (required, e.g., cuda)
-    --task TASK            Task: ${tasks[*]} (required)
+    --task TASK            Task (required, e.g., train, serve, inference, rl, all)
 
   Phase Control (default: install all):
     --no-system            Skip system phase (apt, python, openmpi)
@@ -158,6 +157,7 @@ OPTIONS:
   Selective Installation (overrides --no-* for specific packages):
     --pip-deps PKGS        Install specific pip packages (comma-separated)
     --src-deps DEPS        Install specific source deps (comma-separated)
+                           dev: sccache
                            train: apex,flash-attn,transformer-engine,megatron-lm
                            serve: vllm
 

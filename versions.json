@@ -16,6 +16,7 @@
     "regex": {"version": "2025.10.22", "pip": true}
   },
   "dev": {
+    "sccache": {"version": "0.8.1", "pip": false},
     "setuptools": {"version": "77.0.3", "pip": true},
     "wheel": {"version": "0.45.1", "pip": true},
     "pip": {"version": "25.0.1", "pip": true},
