@@ -9,6 +9,6 @@ device_type: Kunlunxin_R310p
 models:
 - Qwen2.5 VL 7B
 - Llama3 70B
-- Qwen3 0.6B
+- Qwen3 0.6B  
 task:
 - train
