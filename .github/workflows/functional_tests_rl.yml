@@ -130,7 +130,6 @@ jobs:
 
           # Source environment utilities
           source ./tools/install/utils/pyenv_utils.sh
-          source ./tools/install/utils/pkg_utils.sh
 
           # Activate environment based on package manager
           case "$PKG_MGR" in
@@ -185,7 +184,6 @@ jobs:
 
           # Source environment utilities
           source ./tools/install/utils/pyenv_utils.sh
-          source ./tools/install/utils/pkg_utils.sh
 
           # Activate environment based on package manager
           case "$PKG_MGR" in
