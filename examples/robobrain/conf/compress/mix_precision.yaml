@@ -1,45 +1,20 @@
-# @package _global_
-
 defaults:
-  - model
-  - _self_
+  - model 
+  - _self_  
 
-# 1. 实验配置
-experiment:
-  exp_name: robobrain_mix_precision
-  exp_dir: outputs/${experiment.exp_name}
-  task:
-    type: compress
-    # 指向自定义脚本
-    entrypoint: flagscale/compress/compressor_mix_precision.py
-  runner:
-    hostfile: null
-  cmds:
-    before_start: source activate flagscale_env
-  envs:
-    CUDA_VISIBLE_DEVICES: 0
+system:
+  save_dir: Qwen3_30B_MixPrecision_Search
 
-# 2. 模型配置
-model:
-  save_dir: ${experiment.exp_dir}/mixed_precision_model
+compress_args:
+  scheme: "mix_precision_search"
+  targets: ["Linear"]
 
-# 3. 压缩配置 (构建伪造结构以通过 Backend 检查)
-compress:
-  system:
-    type: "mix_precision"
-    # [新增] 必须包含 logging 字段以通过 backend_native_compress.py 第42行的检查
-    logging:
-      wandb_save_dir: null
-      use_wandb: false
+data:
+  num_calibration_samples: 128
+  batch_size: 1
   
-  # 我们的实际参数
-  compress_args:
-    targets: ["Linear"]
-    ignore: ["re:.*vision_model*", "re:.*mm_projector*", "re:.*lm_head"]
-    
-    quantization:
-      - algo:
-          gptq: 
-            blocksize: 128
-        scheme: W8A16
+  tokenizer_args:
+    #tokenizer_path: ${model.model_path}
+    use_fast: true
+    trust_remote_code: true
 

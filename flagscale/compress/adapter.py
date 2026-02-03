@@ -1,106 +1,92 @@
 import torch
-from typing import List, Optional, Dict, Any
+import os
+from typing import Optional, Dict, Any, Union
 from transformers import PreTrainedModel, PreTrainedTokenizer
 from flagscale.logger import logger
 
-# 尝试导入必要的库，处理不同版本的路径差异
-try:
-    from llmcompressor.modifiers.quantization import QuantizationModifier
-except ImportError:
-    QuantizationModifier = None
-
-try:
-    # 优先尝试从 transformers 导入 oneshot
-    from llmcompressor.transformers import oneshot
-except ImportError:
-    try:
-        # 备选：尝试从根目录或其他路径导入
-        from llmcompressor import oneshot
-    except ImportError:
-        oneshot = None
-
-try:
-    from llmcompressor.modifiers import ScheduledModifierManager
-except ImportError:
-    ScheduledModifierManager = None
-
+from llmcompressor import oneshot
 
 class LLMCompressorAdapter:
-    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, config: Dict[str, Any]):
+    def __init__(
+        self,
+        model: PreTrainedModel,
+        tokenizer: Optional[PreTrainedTokenizer] = None,
+        dataset: Optional[Any] = None,
+        output_dir: str = "./output",
+        num_calibration_steps: int = 512,
+        **kwargs  
+    ):
         self.model = model
         self.tokenizer = tokenizer
-        self.config = config
+        self.dataset = dataset
+        self.output_dir = output_dir
+        self.num_calibration_steps = num_calibration_steps
         
-        if hasattr(config, "compress") and hasattr(config.compress, "compress_args"):
-             self.compress_args = config.compress.compress_args
+        self.algo = kwargs.get("algo", {})
+        self.scheme = kwargs.get("scheme", "W8A16")
+        self.targets = kwargs.get("targets", ["Linear"])
+        self.ignore = kwargs.get("ignore", [])
+        
+        self.is_mix_precision = (self.scheme == "mix_precision_search") or (isinstance(self.algo, str) and self.algo == "mix_precision")
+
+    def _prepare_recipe(self):
+        from llmcompressor.modifiers.quantization import QuantizationModifier
+        
+        if not self.is_mix_precision:
+            modifier = QuantizationModifier(
+                targets=self.targets,
+                ignore=self.ignore,
+                scheme=self.scheme,
+                **(self.algo if isinstance(self.algo, dict) else {})
+            )
+            return [modifier]
+        
         else:
-             self.compress_args = config.get("compress_args", config)
+            logger.info("Detected Mixed Precision Mode. Recipe will be handled by the pipeline.")
+            return None
 
     def run(self):
-        logger.info("Starting LLMCompressor Adapter...")
+        logger.info(f"Starting compression with scheme: {self.scheme}")
         
-        if QuantizationModifier is None:
-            raise ImportError("Could not import QuantizationModifier from llmcompressor.modifiers.quantization")
+        if self.is_mix_precision:
+            try:
+                import flagscale.compress.pipelines.mix_precision_pipeline
+                logger.info("Successfully registered MixPrecisionPipeline.")
+            except ImportError as e:
+                raise ImportError(f"Failed to import mix_precision_pipeline: {e}. Please check your PYTHONPATH.")
 
-        targets = self.compress_args.get("targets", ["Linear"])
-        if hasattr(targets, "to_container"): 
-            targets = targets.to_container()
-        
-        ignore_layers = self.compress_args.get("ignore", [])
-        if hasattr(ignore_layers, "to_container"): 
-            ignore_layers = ignore_layers.to_container()
+        recipe = self._prepare_recipe()
 
-        quant_config_list = self.compress_args.get("quantization", [])
-        if not quant_config_list:
-            logger.warning("No quantization config found.")
-            return
+        oneshot_args = {
+            "model": self.model,
+            "dataset": self.dataset,
+            "output_dir": self.output_dir,
+            "num_calibration_batches": self.num_calibration_steps,
+        }
 
-        q_cfg = quant_config_list[0]
-        scheme_name = q_cfg.get("scheme", "W8A16")
-
-        logger.info(f"Applying Scheme: {scheme_name}")
-        
-        # 初始化 Modifier
-        # 注意：scheme 必须是字符串
-        modifier = QuantizationModifier(
-            targets=targets,
-            ignore=ignore_layers,
-            scheme=scheme_name
-        )
-
-        logger.info("Applying quantization modifier...")
-
-        # 策略 1: 使用 oneshot (首选)
-        if oneshot is not None:
-            logger.info("Using 'oneshot' API.")
-            oneshot(
-                model=self.model,
-                recipe=modifier,
-            )
-        
-        # 策略 2: 使用 ScheduledModifierManager (备选)
-        elif ScheduledModifierManager is not None:
-            logger.info("Using 'ScheduledModifierManager' API.")
-            manager = ScheduledModifierManager([modifier])
-            manager.apply(self.model)
+        if self.is_mix_precision:
             
-        # 策略 3: 如果 Modifier 有 apply 方法 (旧版)
-        elif hasattr(modifier, "apply"):
-            logger.info("Using 'modifier.apply' directly.")
-            modifier.apply(self.model)
+            from llmcompressor.pipelines.registry import CalibrationPipeline
+            #pipeline_cls = CalibrationPipeline.load("mix_precision_search")
+            pipeline_cls = CalibrationPipeline.load_from_registry("mix_precision_search")
+
+            logger.info("Invoking MixPrecisionPipeline manually...")
+            pipeline_cls(
+                model=self.model,
+                dataloader=self.dataset, 
+                dataset_args=None,
+                output_dir=self.output_dir
+            )
             
         else:
-            raise ImportError(
-                "Could not find a valid method to apply the quantization. "
-                "'oneshot' not found in llmcompressor.transformers, "
-                "and ScheduledModifierManager not available."
-            )
-        
-        logger.info("Quantization complete.")
+            oneshot_args["recipe"] = recipe
+            oneshot(**oneshot_args)
 
-    def save(self, save_dir: str):
-        logger.info(f"Saving quantized model to {save_dir}...")
-        self.model.save_pretrained(save_dir)
-        self.tokenizer.save_pretrained(save_dir)
-        logger.info(f"Model saved successfully.")
+        self.save_artifacts()
+
+    def save_artifacts(self):
+
+        if self.tokenizer:
+            self.tokenizer.save_pretrained(self.output_dir)
+        logger.info(f"Artifacts saved to {self.output_dir}")
 

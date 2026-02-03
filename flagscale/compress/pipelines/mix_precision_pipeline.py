@@ -7,23 +7,24 @@ import os
 from typing import Optional, Dict, Any, List, Union
 from torch.utils.data.dataloader import DataLoader
 
-# === Core Imports from llmcompressor ===
 from llmcompressor.core.session_functions import LifecycleCallbacks
 from llmcompressor.core import active_session
 from llmcompressor.pipelines.registry import CalibrationPipeline
-from llmcompressor.pipelines.sequential.helpers import get_sequential_targets
-from llmcompressor.pipelines.layer_sequential.helpers import match_modules
+
+try:
+    from llmcompressor.pipelines.sequential.helpers import get_sequential_targets, match_modules
+except ImportError:
+    from llmcompressor.pipelines.layer_sequential.helpers import get_sequential_targets, match_modules
+
 from llmcompressor.modifiers.quantization import QuantizationModifier
 from llmcompressor.modifiers.transform import QuIPModifier
 
-# === Quantization Utilities ===
 try:
     from compressed_tensors.quantization.lifecycle.forward import fake_quantize
     from compressed_tensors.quantization.quant_args import QuantizationArgs
 except ImportError:
     raise ImportError("Could not import quantization functions. Please ensure llmcompressor/compressed-tensors is installed.")
 
-# === Hadamard Matrix Utility ===
 try:
     from llmcompressor.modifiers.transform.utils.hadamard import get_hadamard_matrix
 except ImportError:
@@ -31,10 +32,6 @@ except ImportError:
         from scipy.linalg import hadamard
         H = torch.tensor(hadamard(n), dtype=dtype, device=device)
         return H / math.sqrt(n)
-
-# =============================================================================
-# Pipeline Class Registration
-# =============================================================================
 
 @CalibrationPipeline.register("mix_precision_search")
 class MixPrecisionPipeline(CalibrationPipeline):
@@ -47,15 +44,38 @@ class MixPrecisionPipeline(CalibrationPipeline):
         **kwargs
     ):
         session = active_session()
-        modifiers = session.lifecycle.recipe.modifiers
         
-        # 1. 获取目标层
+        session.initialize(model=model)
+
+        modifiers = session.lifecycle.recipe.modifiers
+
+        # quant_mod = next((m for m in modifiers if isinstance(m, QuantizationModifier)), None)
+        # if quant_mod is None:
+        #     raise RuntimeError("QuantizationModifier not found in recipe")
+
+        # quip_mod = next((m for m in modifiers if isinstance(m, QuIPModifier)), None)
+        # if quip_mod is None:
+        #     # minimal: add one so exporter can serialize transform_config
+        #     quip_mod = QuIPModifier(
+        #         targets=[],  # will be filled after search
+        #         ignore=["lm_head"],
+        #         rotations=["v", "u"],
+        #         transform_type="hadamard",
+        #         transform_block_size=128,
+        #     )
+        #     modifiers.append(quip_mod)
+
+       
+        if dataset_args is None:
+            from types import SimpleNamespace
+            dataset_args = SimpleNamespace(sequential_targets=None)
+
         sequential_targets = get_sequential_targets(modifiers, model, dataset_args)
         found_modules = match_modules(model, sequential_targets)
         
         module_to_name = {m: n for n, m in model.named_modules()}
         layers_to_process = []
-        
+
         if isinstance(found_modules, dict):
             layers_to_process = list(found_modules.items())
         elif isinstance(found_modules, list):
@@ -63,7 +83,25 @@ class MixPrecisionPipeline(CalibrationPipeline):
                 real_name = module_to_name.get(m, "unknown_layer")
                 layers_to_process.append((real_name, m))
 
-        # 2. 自然排序 (Layer 0, Layer 1, ... Layer 10)
+        if len(layers_to_process) == 0:
+            print(">>> [DEBUG] Standard discovery failed (0 layers). Activating Manual Fallback...")
+            candidates = ["model.layers", "model.decoder.layers", "transformer.h", "layers", "blocks"]
+            target_module_list = None
+            list_name = ""
+
+            for name, module in model.named_modules():
+                if any(name.endswith(c) for c in candidates) and isinstance(module, torch.nn.ModuleList):
+                    target_module_list = module
+                    list_name = name
+                    break
+            if target_module_list is not None:
+                print(f">>> [DEBUG] Manually found ModuleList: {list_name} with {len(target_module_list)} layers.")
+                for i, layer in enumerate(target_module_list):
+                    layer_name = f"{list_name}.{i}"
+                    layers_to_process.append((layer_name, layer))
+            else:
+                print(">>> [ERROR] Manual Fallback failed: Could not find any Transformer Block List.")
+
         def natural_keys(item):
             text = item[0]
             return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', text)]
@@ -77,7 +115,6 @@ class MixPrecisionPipeline(CalibrationPipeline):
         search_results = [] 
         global_quip_targets = [] 
 
-        # 3. 逐层搜索
         for i, (layer_name, layer) in enumerate(sorted_layers):
             match = re.search(r"\.(\d+)(?:\.|$)", layer_name)
             real_layer_idx = int(match.group(1)) if match else i
@@ -90,21 +127,18 @@ class MixPrecisionPipeline(CalibrationPipeline):
             ]
             
             best_score = -1.0
-            best_config = candidate_configs[1] # 默认回退到 8bit
+            best_config = candidate_configs[1]
             
             ACCEPTANCE_THRESHOLD = 0.009 
             layer_stats = {} 
 
-            # 测试两种配置
             for config in candidate_configs:
                 bit = config["bits"]
                 use_quip = config["quip"]
                 name = config["name"]
                 
-                # 设置当前层的量化位宽
                 _set_layer_quantization_bits(session, layer, layer_name, bit)
                 
-                # 计算指标 (Cos Sim & Size)
                 current_score, func_name, param_bytes = _calculate_layer_metrics(
                     layer, bit, use_quip=use_quip
                 )
@@ -118,7 +152,6 @@ class MixPrecisionPipeline(CalibrationPipeline):
                 
                 print(f"  - Testing {name:<10} | Cos Sim: {current_score:.6f} | Size: {param_bytes/1024/1024:.2f} MB | Func: {func_name}")
 
-            # 决策逻辑
             score_8bit = layer_stats["Std-8bit"]["score"]
             score_4bit = layer_stats["QuIP-4bit"]["score"]
             
@@ -137,13 +170,10 @@ class MixPrecisionPipeline(CalibrationPipeline):
             print(f"  >>> Decision: {best_config['name']} | {decision_reason}")
             print(f"  >>> Comparison: Saved {size_diff_mb:.2f} MB | Score Drop: {score_diff:.6f}")
 
-            # 应用最终决策
             if best_config["quip"]:
-                # 如果选中 QuIP，需要真正应用旋转矩阵
                 _apply_official_quip_transform(model, layer_name, layer, block_size=128)
                 _set_layer_quantization_bits(session, layer, layer_name, best_config["bits"])
                 
-                # 记录哪些层用了 QuIPconfig.json) (用
                 for sub_name, sub_mod in layer.named_modules():
                     if "quip" in sub_name: continue 
                     if isinstance(sub_mod, torch.nn.Linear) or "proj" in sub_name:
@@ -152,7 +182,6 @@ class MixPrecisionPipeline(CalibrationPipeline):
                         full_target_string = f"re:{layer_name}.{sub_name}"
                         global_quip_targets.append(full_target_string)
             else:
-                # 如果选中 8bit，确保设置回 8bit
                 _set_layer_quantization_bits(session, layer, layer_name, best_config["bits"])
             
             search_results.append({
@@ -163,7 +192,6 @@ class MixPrecisionPipeline(CalibrationPipeline):
                 "score_drop": score_diff
             })
             
-            # 清理缓存
             dummy_input = _create_dummy_input(layer, model)
             with torch.no_grad():
                 try:
@@ -174,9 +202,9 @@ class MixPrecisionPipeline(CalibrationPipeline):
                     del dummy_input
                     if torch.cuda.is_available(): torch.cuda.empty_cache()
             
-            LifecycleCallbacks.sequential_epoch_end()
+            #LifecycleCallbacks.sequential_epoch_end()
+            LifecycleCallbacks.sequential_epoch_end(subgraph=layer)
         
-        # 4. 输出摘要
         print("\n+++++++++++++++++++++++++++++++++++++++++++++")
         print("Auto-Search Summary (Standard 8-bit vs QuIP 4-bit):")
         print(f"{'Layer':<40} | {'Mode':<10} | {'Cos Sim':<10} | {'Save(MB)':<10} | {'Drop'}")
@@ -184,18 +212,12 @@ class MixPrecisionPipeline(CalibrationPipeline):
             print(f"{res['layer']:<40} | {res['best_mode']:<10} | {res['score']:.6f}   | {res['size_saved_mb']:.2f}       | {res['score_drop']:.6f}")
         print("+++++++++++++++++++++++++++++++++++++++++++++\n")
 
-        # 5. 同步配�config.json 并保存
         _sync_modifier_config_to_model(session, model, global_quip_targets)
 
-        # 6. 最终模拟验证
         tokenizer = kwargs.get("tokenizer", None)
         _simulate_and_verify(model, tokenizer)
     
         LifecycleCallbacks.calibration_epoch_end()
-
-# =============================================================================
-# Helper Functions (QuIP Logic & Metrics)
-# =============================================================================
 
 def _apply_official_quip_transform(model, layer_name, layer_module, block_size=128):
     print(f"  >>> [QuIP Fix] Applying official QuIPModifier logic to {layer_name}...")
@@ -229,14 +251,12 @@ def _ensure_quip_weights_materialized(module):
         if "quip" in name:
             for param_name, param in child.named_parameters(recurse=False):
                 if param.device.type == 'meta':
-                    # print(f"    [WARNING] Found meta parameter in {name}.{param_name}, materializing...")
                     dim = param.shape[0]
                     H = get_hadamard_matrix(dim).to(dtype=torch.float16, device=device)
                     delattr(child, param_name)
                     child.register_parameter(param_name, torch.nn.Parameter(H))
             for buf_name, buf in child.named_buffers(recurse=False):
                 if buf.device.type == 'meta':
-                    # print(f"    [WARNING] Found meta buffer in {name}.{buf_name}, materializing...")
                     dim = buf.shape[0]
                     H = get_hadamard_matrix(dim).to(dtype=torch.float16, device=device)
                     setattr(child, buf_name, H)
@@ -325,7 +345,7 @@ def _calculate_layer_metrics(layer, bits, use_quip=False):
     q_args = QuantizationArgs(num_bits=bits, symmetric=True)
     
     for name, submodule in layer.named_modules():
-        # === [CRITICAL FIX] 严格过滤 QuIP 生成的子模块 ===
+
         if any(x in name for x in ["observer", "v_input", "u_output", "quip"]): 
             continue
         if "Hadamard" in submodule.__class__.__name__:
@@ -523,6 +543,20 @@ def _set_layer_quantization_bits(session, layer, layer_name, target_bits, transf
             target_group['targets'].append(full_target_name)
     modifier.config_groups = current_groups
 
+def _collapse_moe_targets(target_list):
+    if not target_list: return []
+    
+    non_experts = [t for t in target_list if ".experts." not in t]
+    
+    collapsed_experts = set()
+    for t in target_list:
+        if ".experts." in t:
+            new_t = re.sub(r'\.experts\.\d+\.', '.experts.*.', t)
+            collapsed_experts.add(new_t)
+            
+    return sorted(non_experts + list(collapsed_experts))
+
+
 def _sync_modifier_config_to_model(session, model, quip_layers_list):
     modifier = None
     for m in session.lifecycle.recipe.modifiers:
@@ -572,13 +606,17 @@ def _sync_modifier_config_to_model(session, model, quip_layers_list):
         v = to_dict_safe(v)
         v = copy.deepcopy(v)
         if "targets" in v and v["targets"]:
+            v["targets"] = _collapse_moe_targets(v["targets"])
             v["targets"] = sorted(v["targets"], key=layer_sort_key)
         final_groups["group_1"] = v
 
     transform_config_dict = {}
     if quip_layers_list:
         unique_targets = list(set(quip_layers_list))
-        sorted_targets = sorted(unique_targets, key=layer_sort_key)
+
+        collapsed_targets = _collapse_moe_targets(unique_targets)
+        sorted_targets = sorted(collapsed_targets, key=layer_sort_key)
+        
         transform_config_dict = {
             "config_groups": {
                 "u": {
@@ -756,3 +794,4 @@ def _simulate_and_verify(model, tokenizer=None):
         if hasattr(module, "_saved_weight_ref"): del module._saved_weight_ref
     if torch.cuda.is_available(): torch.cuda.empty_cache()
     print("+++++++++++++++++++++++++++++++++++++++++++++\n")
+
