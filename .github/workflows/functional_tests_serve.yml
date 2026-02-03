@@ -30,16 +30,21 @@ on:
         required: true
         type: string
         description: Name of the artifact containing source code
-      conda_env:
+      pkg_mgr:
         required: false
         type: string
-        description: Conda environment name (optional, skips conda if not provided)
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
         default: ""
-      conda_path:
+      env_path:
         required: false
         type: string
-        description: Conda installation path (optional, auto-detects if not provided)
-        default: "/root/miniconda3"
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
 
 jobs:
   functional_test_serve:
@@ -89,13 +94,13 @@ jobs:
       - name: Verify artifact download
         run: |
           if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 1"
+            echo "Artifact downloaded successfully on attempt 1"
           elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
+            echo "Artifact downloaded successfully on attempt 2 (retried once)"
           elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
+            echo "Artifact downloaded successfully on attempt 3 (retried twice)"
           else
-            echo "❌ Error: All 3 download attempts failed"
+            echo "Error: All 3 download attempts failed"
             echo "Artifact name: ${{ inputs.source_artifact }}"
             exit 1
           fi
@@ -109,52 +114,47 @@ jobs:
         run: |
           git config --global --add safe.directory $PROJECT_ROOT
 
-      - name: Check sccache installation and get path
-        id: get_sccache_path
-        timeout-minutes: 15
-        run: |
-          set -euo pipefail
-          cd $PROJECT_ROOT
-
-          if ! command -v sccache &> /dev/null; then
-            echo "❌ sccache not found in PATH, running auto-installer..."
-            source ./tools/install/utils/install-sccache.sh
-          fi
-
-          SCCACHE_PATH=$(command -v sccache)
-          echo "sccache_path=${SCCACHE_PATH}" >> $GITHUB_OUTPUT
-
-          echo "Found sccache at: ${SCCACHE_PATH}"
-
       - name: Install dependencies for serve
-        env:
-          SCCACHE_CPP2: 1
-          CUDA_CCACHE: 1
-          SCCACHE_VERBOSE: 0
-          SCCACHE_CACHE_SIZE: 20G
-          SCCACHE_DIR: /github/home/.cache/sccache
-          CMAKE_C_COMPILER_LAUNCHER: ${{ steps.get_sccache_path.outputs.sccache_path }}
-          CMAKE_CXX_COMPILER_LAUNCHER: ${{ steps.get_sccache_path.outputs.sccache_path }}
-          CMAKE_CUDA_COMPILER_LAUNCHER: ${{ steps.get_sccache_path.outputs.sccache_path }}
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
-          # Build install command with optional conda parameters
-          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task serve --retry-count 3"
-          if [ -n "$CONDA_ENV" ]; then
-            INSTALL_CMD="$INSTALL_CMD --conda-env $CONDA_ENV"
-            if [ -n "$CONDA_PATH" ]; then
-              INSTALL_CMD="$INSTALL_CMD --conda-path $CONDA_PATH"
-            fi
-          fi
+          echo "Installing dependencies for serve"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
 
-          # Run install script (handles conda activation internally if needed)
-          eval $INSTALL_CMD
-        timeout-minutes: 90
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # For serve task: all dependencies are pre-installed in the env
+          # No additional installation needed
+          echo "Environment ready for serve tests"
+        timeout-minutes: 5
 
       - name: Run functional tests
         id: functional_test
@@ -167,8 +167,9 @@ jobs:
           TASK='${{ matrix.test_config.task }}'
           MODEL='${{ matrix.test_config.model }}'
           CASE='${{ matrix.test_config.case }}'
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
           echo "Running functional tests for serve"
           echo "Platform: $PLATFORM"
@@ -176,22 +177,30 @@ jobs:
           echo "Task: $TASK"
           echo "Model: $MODEL"
           echo "Case: ${CASE:-all}"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
           echo "Project root: $PROJECT_ROOT"
 
-          # Source conda utilities for reusable functions
-          source ./tools/install/utils/conda_utils.sh
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
 
-          # Conditionally activate conda environment if specified
-          if [ -n "$CONDA_ENV" ]; then
-            if activate_conda "$CONDA_ENV" "$CONDA_PATH"; then
-              : # Success message already displayed by activate_conda
-            else
-              echo "⚠️  Conda environment requested but conda not found"
-              echo "Continuing without conda activation..."
-            fi
-          else
-            echo "ℹ️  Running tests with system Python"
-          fi
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "Running tests with pip/system Python"
+              ;;
+          esac
 
           # Display Python environment info
           echo "Python location: $(which python)"
@@ -208,9 +217,9 @@ jobs:
           exit_code=$?
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
+            echo "Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
           else
-            echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+            echo "Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT

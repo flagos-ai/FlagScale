@@ -28,11 +28,12 @@ load_platform_config() {
     ENV_PATH=$(/usr/local/bin/yq -r '.env_path // "/opt/venv"' "$CONFIG_FILE")
     ENV_NAME_TRAIN=$(/usr/local/bin/yq -r '.env_names.train // "flagscale-train"' "$CONFIG_FILE")
     ENV_NAME_INFERENCE=$(/usr/local/bin/yq -r '.env_names.inference // "flagscale-inference"' "$CONFIG_FILE")
+    ENV_NAME_SERVE=$(/usr/local/bin/yq -r '.env_names.serve // "flagscale-serve"' "$CONFIG_FILE")
     ENV_NAME_RL=$(/usr/local/bin/yq -r '.env_names.rl // "flagscale-rl"' "$CONFIG_FILE")
 
     echo "Package manager: $PKG_MGR"
     echo "Environment path: $ENV_PATH"
-    echo "Environment names: train=$ENV_NAME_TRAIN, inference=$ENV_NAME_INFERENCE, rl=$ENV_NAME_RL"
+    echo "Environment names: train=$ENV_NAME_TRAIN, inference=$ENV_NAME_INFERENCE, serve=$ENV_NAME_SERVE, rl=$ENV_NAME_RL"
 
     # Validate required fields
     if [ -z "$CI_IMAGE" ] || [ "$CI_IMAGE" = "null" ]; then
@@ -102,5 +103,6 @@ load_platform_config() {
     echo "env_path=$ENV_PATH" >> $GITHUB_OUTPUT
     echo "env_name_train=$ENV_NAME_TRAIN" >> $GITHUB_OUTPUT
     echo "env_name_inference=$ENV_NAME_INFERENCE" >> $GITHUB_OUTPUT
+    echo "env_name_serve=$ENV_NAME_SERVE" >> $GITHUB_OUTPUT
     echo "env_name_rl=$ENV_NAME_RL" >> $GITHUB_OUTPUT
 }

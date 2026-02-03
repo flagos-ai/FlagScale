@@ -29,6 +29,7 @@ jobs:
       env_path: ${{ steps.config.outputs.env_path }}
       env_name_train: ${{ steps.config.outputs.env_name_train }}
       env_name_inference: ${{ steps.config.outputs.env_name_inference }}
+      env_name_serve: ${{ steps.config.outputs.env_name_serve }}
       env_name_rl: ${{ steps.config.outputs.env_name_rl }}
     steps:
       - name: Checkout code
@@ -185,8 +186,9 @@ jobs:
   #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
   #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
   #     source_artifact: flagscale-source-${{ github.sha }}
-  #     conda_env: flagscale-inference
-  #     conda_path: "/root/miniconda3"
+  #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+  #     env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
+  #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
   # functional_tests_rl:
   #   needs:
