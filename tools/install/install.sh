@@ -17,7 +17,6 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils/utils.sh"
-source "$SCRIPT_DIR/utils/versions.sh"
 source "$SCRIPT_DIR/utils/pkg_utils.sh"
 
 PROJECT_ROOT=$(get_project_root)
@@ -32,7 +31,7 @@ ENV_NAME=""
 DEBUG=false
 RETRY_COUNT=3
 FORCE_BUILD=false
-PYTHON_VERSION="$(get_common "python")"
+PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 FLAGSCALE_HOME="${FLAGSCALE_HOME:-/opt/flagscale}"
 
 # Phase flags (default: install all)
@@ -89,6 +88,7 @@ export_config() {
     export FLAGSCALE_PLATFORM="$PLATFORM"
     export FLAGSCALE_TASK="$TASK"
     export FLAGSCALE_PKG_MGR="$PKG_MGR"
+    export FLAGSCALE_ENV_NAME="$ENV_NAME"
     export FLAGSCALE_DEBUG="$DEBUG"
     export FLAGSCALE_RETRY_COUNT="$RETRY_COUNT"
 

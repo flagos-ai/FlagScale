@@ -1,6 +1,10 @@
 #!/bin/bash
-# Retry utilities for network-dependent operations
-# Extracted from .github/workflows/scripts/retry_functions.sh
+# =============================================================================
+# Retry Utilities
+# =============================================================================
+#
+# Retry wrappers for network-dependent operations (pip install, git clone).
+# =============================================================================
 
 # Source utils for logging functions and package manager
 _RETRY_UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,23 +38,6 @@ retry() {
     return 0
 }
 
-# Retry batch of commands
-# Usage: retry_commands -d <debug> <retries> <cmd1> <cmd2> ...
-retry_commands() {
-    local debug=false
-    if [[ "$1" == "-d" ]]; then
-        debug="$2"; shift 2
-    fi
-
-    local retries=$1
-    shift
-
-    for cmd in "$@"; do
-        retry -d $debug $retries "$cmd" || return $?
-    done
-    return 0
-}
-
 # Retry pip/uv install from requirements file
 # Usage: retry_pip_install -d <debug> <requirements_file> [retries]
 retry_pip_install() {
@@ -66,42 +53,11 @@ retry_pip_install() {
     [ ! -f "$requirements_file" ] && [ "$debug" != true ] && { log_error "Not found: $requirements_file"; return 1; }
 
     log_info "Installing $(basename "$requirements_file")..."
+    local pip_cmd=$(get_pip_cmd)
     case "$manager" in
         uv)    retry -d $debug $retries "uv pip install -r '$requirements_file'" ;;
-        *)     retry -d $debug $retries "pip install --root-user-action=ignore -r '$requirements_file'" ;;
+        *)     retry -d $debug $retries "$pip_cmd install --root-user-action=ignore -r '$requirements_file'" ;;
     esac
-}
-
-# Retry package install
-# Usage: retry_pkg_install -d <debug> <retries> <packages...>
-retry_pkg_install() {
-    local debug=false
-    if [[ "$1" == "-d" ]]; then
-        debug="$2"; shift 2
-    fi
-
-    local retries=$1
-    shift
-    local manager=$(get_pkg_manager)
-
-    case "$manager" in
-        uv)    retry -d $debug $retries "uv pip install $*" ;;
-        *)     retry -d $debug $retries "pip install --root-user-action=ignore $*" ;;
-    esac
-}
-
-# Retry conda install
-# Usage: retry_conda_install -d <debug> <retries> <packages...>
-retry_conda_install() {
-    local debug=false
-    if [[ "$1" == "-d" ]]; then
-        debug="$2"; shift 2
-    fi
-
-    local retries=$1
-    shift
-    [ "$debug" != true ] && ! command -v conda &>/dev/null && { log_error "Conda not available"; return 1; }
-    retry -d $debug $retries "conda install -y $*"
 }
 
 # Retry git clone with options

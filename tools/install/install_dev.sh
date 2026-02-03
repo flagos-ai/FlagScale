@@ -3,7 +3,6 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils/utils.sh"
-source "$SCRIPT_DIR/utils/versions.sh"
 source "$SCRIPT_DIR/utils/pkg_utils.sh"
 source "$SCRIPT_DIR/utils/retry_utils.sh"
 
@@ -15,8 +14,8 @@ REQ_FILE="$PROJECT_ROOT/requirements/dev.txt"
 # Source deps available for dev phase
 SRC_DEPS_LIST="sccache"
 
-# Versions from versions.json
-SCCACHE_VERSION=$(get_dev "sccache")
+# Default versions (override via environment variables)
+SCCACHE_VERSION="${SCCACHE_VERSION:-0.8.1}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in --debug) DEBUG=true; shift ;; *) shift ;; esac
@@ -35,7 +34,7 @@ install_pip() {
         local pkgs=$(get_pip_deps_for_requirements "$REQ_FILE")
         [ -z "$pkgs" ] && return 0
         set_step "Installing dev pip packages (override)"
-        run_cmd -d $DEBUG pip install --root-user-action=ignore $pkgs || return 1
+        run_cmd -d $DEBUG $(get_pip_cmd) install --root-user-action=ignore $pkgs || return 1
         log_success "Dev pip packages installed"
     fi
 }

@@ -3,7 +3,6 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../utils/utils.sh"
-source "$SCRIPT_DIR/../utils/versions.sh"
 source "$SCRIPT_DIR/../utils/pkg_utils.sh"
 source "$SCRIPT_DIR/../utils/retry_utils.sh"
 
@@ -34,7 +33,7 @@ install_pip() {
         local pkgs=$(get_pip_deps_for_requirements "$REQ_FILE")
         [ -z "$pkgs" ] && return 0
         set_step "Installing train pip packages (override)"
-        run_cmd -d $DEBUG pip install --root-user-action=ignore $pkgs || return 1
+        run_cmd -d $DEBUG $(get_pip_cmd) install --root-user-action=ignore $pkgs || return 1
         log_success "Train pip packages installed"
     fi
 }
@@ -47,34 +46,37 @@ install_apex() {
     set_step "Installing NVIDIA Apex"
     mkdir -p "$FLAGSCALE_DEPS"
     retry_git_clone -d $DEBUG "https://github.com/NVIDIA/apex.git" "$FLAGSCALE_DEPS/apex" "$RETRY_COUNT" || return 1
+    local pip_cmd=$(get_pip_cmd)
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/apex' && \
         NVCC_APPEND_FLAGS='--threads 4' APEX_PARALLEL_BUILD=8 APEX_CPP_EXT=1 APEX_CUDA_EXT=1 \
-        pip install --root-user-action=ignore --no-build-isolation . -v" || return 1
+        $pip_cmd install --root-user-action=ignore --no-build-isolation . -v" || return 1
     log_success "NVIDIA Apex ready"
 }
 
 install_flash_attn() {
     should_build_package "flash_attn" || return 0
     set_step "Installing Flash-Attention 2"
-    local version=$(get_task "cuda" "train" "flash-attn")
+    local version="${FLASH_ATTN_VERSION:-2.8.1}"
     mkdir -p "$FLAGSCALE_DEPS"
-    retry_git_clone -d $DEBUG --branch "v${version:-2.8.1}" --depth 1 \
+    retry_git_clone -d $DEBUG --branch "v${version}" --depth 1 \
         "https://github.com/Dao-AILab/flash-attention.git" "$FLAGSCALE_DEPS/flash-attention" "$RETRY_COUNT" || return 1
+    local pip_cmd=$(get_pip_cmd)
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/flash-attention' && \
         FLASH_ATTENTION_FORCE_BUILD=TRUE MAX_JOBS=4 \
-        pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
+        $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
     log_success "Flash-Attention 2 ready"
 }
 
 install_transformer_engine() {
     should_build_package "transformer_engine" || return 0
     set_step "Installing TransformerEngine"
-    run_cmd -d $DEBUG pip install --root-user-action=ignore nvidia-mathdx --extra-index-url https://pypi.nvidia.com || return 1
+    local pip_cmd=$(get_pip_cmd)
+    run_cmd -d $DEBUG $pip_cmd install --root-user-action=ignore nvidia-mathdx --extra-index-url https://pypi.nvidia.com || return 1
     mkdir -p "$FLAGSCALE_DEPS"
     retry_git_clone -d $DEBUG --recursive \
         "https://github.com/NVIDIA/TransformerEngine.git" "$FLAGSCALE_DEPS/TransformerEngine" "$RETRY_COUNT" || return 1
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/TransformerEngine' && \
-        NVTE_FRAMEWORK=pytorch pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
+        NVTE_FRAMEWORK=pytorch $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
     log_success "TransformerEngine ready"
 }
 
@@ -83,8 +85,9 @@ install_megatron_lm() {
     set_step "Installing Megatron-LM-FL"
     mkdir -p "$FLAGSCALE_DEPS"
     retry_git_clone -d $DEBUG "https://github.com/flagos-ai/Megatron-LM-FL.git" "$FLAGSCALE_DEPS/Megatron-LM-FL" "$RETRY_COUNT" || return 1
+    local pip_cmd=$(get_pip_cmd)
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/Megatron-LM-FL' && \
-        pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
+        $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
     log_success "Megatron-LM-FL ready"
 }
 

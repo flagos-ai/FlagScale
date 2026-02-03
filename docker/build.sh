@@ -1,8 +1,8 @@
 #!/bin/bash
 # FlagScale Docker Build Script
 #
-# Reads version configuration from versions.json. To change versions
-# (CUDA, Python, Ubuntu, etc.), edit versions.json directly.
+# NOTE: This script is experimental and requires further testing.
+#       Please report issues at https://github.com/FlagOpen/FlagScale/issues
 #
 # Usage: ./docker/build.sh [OPTIONS]
 #
@@ -15,7 +15,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-VERSIONS_FILE="$PROJECT_ROOT/versions.json"
 
 # =============================================================================
 # Logging functions
@@ -27,6 +26,15 @@ log_info() {
 log_error() {
     echo "[ERROR] $*" >&2
 }
+
+# =============================================================================
+# Default versions (same as tools/install, override via environment variables)
+# =============================================================================
+PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+UV_VERSION="${UV_VERSION:-0.7.2}"
+OPENMPI_VERSION="${OPENMPI_VERSION:-4.1.6}"
+CUDA_VERSION="${CUDA_VERSION:-12.8.1}"
+UBUNTU_VERSION="${UBUNTU_VERSION:-22.04}"
 
 # =============================================================================
 # Default values
@@ -42,71 +50,8 @@ PIP_INDEX_URL="${PIP_INDEX_URL:-}"
 PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-}"
 
 # =============================================================================
-# Prerequisites
-# =============================================================================
-check_jq() {
-    if ! command -v jq &> /dev/null; then
-        log_error "jq is required but not installed. Please install jq."
-        exit 1
-    fi
-}
-
-check_versions_file() {
-    if [ ! -f "$VERSIONS_FILE" ]; then
-        log_error "versions.json not found: $VERSIONS_FILE"
-        exit 1
-    fi
-}
-
-# =============================================================================
-# Version getters (handles nested structure)
-# =============================================================================
-
-# Get version from common section
-get_common() {
-    local name=$1
-    jq -r ".common.\"${name}\".version // empty" "$VERSIONS_FILE"
-}
-
-# Get version from platform section (handles nested base and platform-level props)
-# Usage: get_platform "cuda" "torch"  -> looks in cuda.base.torch
-#        get_platform "cuda" "cuda"   -> looks in cuda.cuda (platform-level)
-get_platform() {
-    local platform=$1
-    local name=$2
-    # First try platform.base.<name> (for packages like torch)
-    local version=$(jq -r ".\"${platform}\".base.\"${name}\".version // empty" "$VERSIONS_FILE")
-    # If not found, try platform.<name> (for platform-level props like cuda version)
-    if [ -z "$version" ]; then
-        version=$(jq -r ".\"${platform}\".\"${name}\".version // empty" "$VERSIONS_FILE")
-    fi
-    echo "$version"
-}
-
-# Check if entry is a pip package (pip: true means pip package, false means tool)
-is_pip_package() {
-    local section=$1
-    local name=$2
-    # First check common/dev sections
-    local result=$(jq -r ".\"${section}\".\"${name}\".pip // empty" "$VERSIONS_FILE")
-    if [ -z "$result" ]; then
-        # For platform sections, check base subsection first, then platform level
-        result=$(jq -r ".\"${section}\".base.\"${name}\".pip // empty" "$VERSIONS_FILE")
-        if [ -z "$result" ]; then
-            result=$(jq -r ".\"${section}\".\"${name}\".pip // empty" "$VERSIONS_FILE")
-        fi
-    fi
-    [ "$result" = "true" ]
-}
-
-# =============================================================================
 # Platform and task discovery
 # =============================================================================
-
-# Get available platforms from versions.json (excluding "common" and "dev")
-get_platforms() {
-    jq -r 'keys[] | select(. != "common" and . != "dev")' "$VERSIONS_FILE"
-}
 
 # Get available tasks by scanning Dockerfile.* files
 get_platform_tasks() {
@@ -126,11 +71,6 @@ get_default_task() {
 # Validate platform exists
 validate_platform() {
     local platform=$1
-    if ! jq -e ".\"${platform}\"" "$VERSIONS_FILE" > /dev/null 2>&1; then
-        log_error "Platform '$platform' not found in versions.json"
-        log_error "Available platforms: $(get_platforms | tr '\n' ' ')"
-        exit 1
-    fi
     if [ ! -d "$SCRIPT_DIR/$platform" ]; then
         log_error "Platform directory not found: $SCRIPT_DIR/$platform"
         exit 1
@@ -153,14 +93,10 @@ validate_task() {
 # Usage
 # =============================================================================
 usage() {
-    check_jq
-    check_versions_file
-
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Build FlagScale Docker images. Configuration is read from versions.json.
-To change versions, edit versions.json directly.
+Build FlagScale Docker images.
 
 OPTIONS:
     --platform PLATFORM  Platform to build (default: cuda)
@@ -172,52 +108,18 @@ OPTIONS:
     --no-cache           Build without cache
     --help               Show this help message
 
-VERSIONS (from versions.json):
-
-  [common]
-EOF
-    for key in $(jq -r '.common | keys[]' "$VERSIONS_FILE"); do
-        local value=$(get_common "$key")
-        local is_pip=$(jq -r ".common.\"${key}\".pip" "$VERSIONS_FILE")
-        local type_label="tool"
-        [ "$is_pip" = "true" ] && type_label="pip"
-        printf "    %-16s = %-10s (%s)\n" "$key" "$value" "$type_label"
-    done
-
-    for platform in $(get_platforms); do
-        echo ""
-        echo "  [$platform]"
-        echo "    Tasks: $(get_platform_tasks "$platform" | tr '\n' ' ')"
-
-        # Show platform-level properties (cuda, ubuntu)
-        for key in $(jq -r ".\"${platform}\" | to_entries[] | select(.value | type == \"object\" and has(\"version\")) | .key" "$VERSIONS_FILE"); do
-            local value=$(get_platform "$platform" "$key")
-            local is_pip=$(jq -r ".\"${platform}\".\"${key}\".pip" "$VERSIONS_FILE")
-            local type_label="tool"
-            [ "$is_pip" = "true" ] && type_label="pip"
-            printf "    %-16s = %-10s (%s)\n" "$key" "$value" "$type_label"
-        done
-
-        # Show base packages
-        if jq -e ".\"${platform}\".base" "$VERSIONS_FILE" > /dev/null 2>&1; then
-            echo "    [base]"
-            for key in $(jq -r ".\"${platform}\".base | keys[]" "$VERSIONS_FILE"); do
-                local value=$(jq -r ".\"${platform}\".base.\"${key}\".version // empty" "$VERSIONS_FILE")
-                local is_pip=$(jq -r ".\"${platform}\".base.\"${key}\".pip" "$VERSIONS_FILE")
-                local type_label="tool"
-                [ "$is_pip" = "true" ] && type_label="pip"
-                printf "      %-14s = %-10s (%s)\n" "$key" "$value" "$type_label"
-            done
-        fi
-    done
-
-    cat << EOF
+VERSIONS (override via environment variables):
+    PYTHON_VERSION       Python version (default: ${PYTHON_VERSION})
+    UV_VERSION           uv version (default: ${UV_VERSION})
+    OPENMPI_VERSION      OpenMPI version (default: ${OPENMPI_VERSION})
+    CUDA_VERSION         CUDA version (default: ${CUDA_VERSION})
+    UBUNTU_VERSION       Ubuntu version (default: ${UBUNTU_VERSION})
 
 EXAMPLES:
     $0 --platform cuda
     $0 --platform cuda --task train
     $0 --platform cuda --task train --target dev
-    $0 --platform cuda --task all --target release
+    CUDA_VERSION=12.4.0 $0 --platform cuda --task train
 
 EOF
 }
@@ -255,15 +157,13 @@ get_image_tag() {
 
     # Add CUDA version suffix for cuda platform
     if [ "$platform" = "cuda" ]; then
-        local cuda_version=$(get_platform "$platform" "cuda")
-        local cuda_major=$(echo "$cuda_version" | cut -d. -f1)
-        local cuda_minor=$(echo "$cuda_version" | cut -d. -f2)
+        local cuda_major=$(echo "$CUDA_VERSION" | cut -d. -f1)
+        local cuda_minor=$(echo "$CUDA_VERSION" | cut -d. -f2)
         tag="${tag}-cu${cuda_major}${cuda_minor}"
     fi
 
     # Add python version
-    local python_version=$(get_common "python")
-    tag="${tag}-py${python_version}"
+    tag="${tag}-py${PYTHON_VERSION}"
 
     echo "$tag"
 }
@@ -287,36 +187,24 @@ build_image() {
     # Build command
     local build_cmd="docker build -f $dockerfile --target $TARGET -t $image_tag"
 
-    # Add common tool versions as build args (only non-Python packages)
-    for key in $(jq -r '.common | keys[]' "$VERSIONS_FILE"); do
-        if ! is_pip_package "common" "$key"; then
-            local value=$(get_common "$key")
-            local arg_name=$(echo "$key" | tr '[:lower:]' '[:upper:]' | tr '-' '_')_VERSION
-            log_info "${arg_name}: $value"
-            build_cmd="$build_cmd --build-arg ${arg_name}=$value"
-        fi
-    done
-
-    # Add platform-specific tool versions as build args (platform-level properties only)
-    for key in $(jq -r ".\"${platform}\" | to_entries[] | select(.value | type == \"object\" and has(\"version\")) | .key" "$VERSIONS_FILE"); do
-        if ! is_pip_package "$platform" "$key"; then
-            local value=$(get_platform "$platform" "$key")
-            local arg_name=$(echo "$key" | tr '[:lower:]' '[:upper:]' | tr '-' '_')_VERSION
-            log_info "${arg_name}: $value"
-            build_cmd="$build_cmd --build-arg ${arg_name}=$value"
-        fi
-    done
+    # Add version build args
+    log_info "PYTHON_VERSION: $PYTHON_VERSION"
+    log_info "UV_VERSION: $UV_VERSION"
+    log_info "OPENMPI_VERSION: $OPENMPI_VERSION"
+    build_cmd="$build_cmd --build-arg PYTHON_VERSION=$PYTHON_VERSION"
+    build_cmd="$build_cmd --build-arg UV_VERSION=$UV_VERSION"
+    build_cmd="$build_cmd --build-arg OPENMPI_VERSION=$OPENMPI_VERSION"
 
     # Compute and add derived values for CUDA platform
     if [ "$platform" = "cuda" ]; then
-        local cuda_version=$(get_platform "$platform" "cuda")
-        local ubuntu_version=$(get_platform "$platform" "ubuntu")
-        local cuda_major=$(echo "$cuda_version" | cut -d. -f1)
-        local cuda_minor=$(echo "$cuda_version" | cut -d. -f2)
+        local cuda_major=$(echo "$CUDA_VERSION" | cut -d. -f1)
+        local cuda_minor=$(echo "$CUDA_VERSION" | cut -d. -f2)
 
-        local base_image="nvidia/cuda:${cuda_version}-devel-ubuntu${ubuntu_version}"
+        local base_image="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
         local pytorch_index="https://download.pytorch.org/whl/cu${cuda_major}${cuda_minor}"
 
+        log_info "CUDA_VERSION: $CUDA_VERSION"
+        log_info "UBUNTU_VERSION: $UBUNTU_VERSION"
         log_info "BASE_IMAGE: $base_image"
         log_info "PYTORCH_INDEX: $pytorch_index"
         build_cmd="$build_cmd --build-arg BASE_IMAGE=$base_image"
@@ -346,9 +234,6 @@ build_image() {
 # Main
 # =============================================================================
 main() {
-    check_jq
-    check_versions_file
-
     parse_args "$@"
 
     # Validate platform

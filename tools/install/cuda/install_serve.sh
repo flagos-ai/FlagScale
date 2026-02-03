@@ -33,7 +33,7 @@ install_pip() {
         local pkgs=$(get_pip_deps_for_requirements "$REQ_FILE")
         [ -z "$pkgs" ] && return 0
         set_step "Installing serve pip packages (override)"
-        run_cmd -d $DEBUG pip install --root-user-action=ignore $pkgs || return 1
+        run_cmd -d $DEBUG $(get_pip_cmd) install --root-user-action=ignore $pkgs || return 1
         log_success "Serve pip packages installed"
     fi
 }
@@ -46,8 +46,9 @@ install_vllm() {
     set_step "Installing vLLM-FL"
     mkdir -p "$FLAGSCALE_DEPS"
     retry_git_clone -d $DEBUG "https://github.com/flagos-ai/vllm-FL.git" "$FLAGSCALE_DEPS/vllm-FL" "$RETRY_COUNT" || return 1
+    local pip_cmd=$(get_pip_cmd)
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/vllm-FL' && \
-        pip install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
+        $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
     log_success "vLLM-FL ready"
 }
 

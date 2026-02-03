@@ -25,7 +25,7 @@ install_pip() {
         local pkgs=$(get_pip_deps_for_requirements "$REQ_FILE")
         [ -z "$pkgs" ] && return 0
         set_step "Installing inference pip packages (override)"
-        run_cmd -d $DEBUG pip install --root-user-action=ignore $pkgs || return 1
+        run_cmd -d $DEBUG $(get_pip_cmd) install --root-user-action=ignore $pkgs || return 1
         log_success "Inference pip packages installed"
     fi
 }

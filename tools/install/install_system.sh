@@ -19,8 +19,6 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils/utils.sh"
-source "$SCRIPT_DIR/utils/versions.sh"
-source "$SCRIPT_DIR/utils/pyenv_utils.sh"
 
 # =============================================================================
 # Configuration
@@ -30,23 +28,10 @@ PLATFORM="${PLATFORM:-}"  # Required: use --platform to specify
 PKG_MGR="${PKG_MGR:-uv}"  # pip, uv, conda (default: uv)
 DEBUG=false
 
-# Versions (from versions.json - single source of truth)
-# Warn if env var differs from versions.json, then use versions.json value
-warn_version_mismatch() {
-    local name=$1 expected=$2
-    local actual=${!name:-}
-    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-        log_warn "Version mismatch: $name=$actual (env) vs $expected (versions.json)"
-    fi
-}
-
-PYTHON_VERSION="$(get_common "python")"
-UV_VERSION="$(get_common "uv")"
-OPENMPI_VERSION="$(get_common "openmpi")"
-
-warn_version_mismatch "PYTHON_VERSION" "$PYTHON_VERSION"
-warn_version_mismatch "UV_VERSION" "$UV_VERSION"
-warn_version_mismatch "OPENMPI_VERSION" "$OPENMPI_VERSION"
+# Default versions (override via environment variables)
+PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+UV_VERSION="${UV_VERSION:-0.7.2}"
+OPENMPI_VERSION="${OPENMPI_VERSION:-4.1.6}"
 
 # Root installation directory (single source of truth)
 FLAGSCALE_HOME="${FLAGSCALE_HOME:-/opt/flagscale}"
@@ -143,6 +128,8 @@ install_python_uv() {
 install_python_conda() {
     set_step "Installing Python ${PYTHON_VERSION} (conda)"
 
+    local env_name="${FLAGSCALE_ENV_NAME:-}"
+
     # Skip if conda already installed at FLAGSCALE_CONDA
     if [ -f "${FLAGSCALE_CONDA}/bin/conda" ]; then
         log_info "Conda already installed at ${FLAGSCALE_CONDA}"
@@ -163,19 +150,30 @@ install_python_conda() {
     fi
 
     log_info "Configuring conda..."
-    # Use CONDA_NO_PLUGINS=true to avoid archspec module issues, ANACONDA_ACCEPT_TOS=yes for TOS
     run_cmd -d $DEBUG env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" init bash
     run_cmd -d $DEBUG env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" config --set auto_activate_base false
     run_cmd -d $DEBUG env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" config --set channel_priority flexible
     run_cmd -d $DEBUG env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" config --set solver classic
-    run_cmd -d $DEBUG -m "Installing Python ${PYTHON_VERSION}..." \
-        env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" install -y python="${PYTHON_VERSION}"
-    log_info "Setting up symlinks..."
-    run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/bin/python3" /usr/bin/python3
-    run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/bin/python3-config" /usr/bin/python3-config
-    run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/bin/pip" /usr/bin/pip
+
+    # Create named environment if specified, otherwise install to base
+    if [ -n "$env_name" ]; then
+        run_cmd -d $DEBUG -m "Creating conda env: $env_name (python=${PYTHON_VERSION})..." \
+            env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" create -y -n "$env_name" "python=${PYTHON_VERSION}"
+        log_info "Setting up symlinks to $env_name env..."
+        run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/envs/${env_name}/bin/python3" /usr/bin/python3
+        run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/envs/${env_name}/bin/python3-config" /usr/bin/python3-config
+        run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/envs/${env_name}/bin/pip" /usr/bin/pip
+        log_success "Conda env '$env_name' ready: ${FLAGSCALE_CONDA}/envs/${env_name}"
+    else
+        run_cmd -d $DEBUG -m "Installing Python ${PYTHON_VERSION} to base..." \
+            env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" install -y python="${PYTHON_VERSION}"
+        log_info "Setting up symlinks to base..."
+        run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/bin/python3" /usr/bin/python3
+        run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/bin/python3-config" /usr/bin/python3-config
+        run_cmd -d $DEBUG ln -sf "${FLAGSCALE_CONDA}/bin/pip" /usr/bin/pip
+        log_success "Conda base ready: ${FLAGSCALE_CONDA}"
+    fi
     run_cmd -d $DEBUG ln -sf /usr/bin/python3 /usr/bin/python
-    log_success "Conda ready: ${FLAGSCALE_CONDA}"
 }
 
 install_python_pip() {
@@ -320,7 +318,6 @@ main() {
 
     [ "$DEBUG" = true ] && log_info "Dry-run mode: commands printed, not executed"
 
-    print_header "System Dependencies"
     log_info "Python ${PYTHON_VERSION} | ${PKG_MGR} | OpenMPI ${OPENMPI_VERSION}"
 
     configure_timezone || die "Timezone configuration failed"
