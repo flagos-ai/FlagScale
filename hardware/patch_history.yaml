@@ -19,12 +19,15 @@ BI_V150:
     FlagScale+Megatron-LM:
     - bc57c7643c05da338251f31d203c9fdc66710a17
     - 31614d56ace759fdec4d790f1322d54e21107695
+    - 096ecee25cdbb63c1e2f937d75eb7cefbc67dec
     Megatron-LM:
     - bc57c7643c05da338251f31d203c9fdc66710a17
     - 31614d56ace759fdec4d790f1322d54e21107695
+    - 096ecee25cdbb63c1e2f937d75eb7cefbc67dec
     FlagScale:
     - bc57c7643c05da338251f31d203c9fdc66710a17
     - 31614d56ace759fdec4d790f1322d54e21107695
+    - 096ecee25cdbb63c1e2f937d75eb7cefbc67dec
 Cambricon_MLU:
   inference:
     FlagScale+vllm:
