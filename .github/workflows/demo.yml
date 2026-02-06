@@ -20,6 +20,9 @@ jobs:
       - gpu-8
     container:
       image: localhost:5000/flagscale:cuda12.8.1-cudnn9.15.1-python3.12-torch2.7.1-time2512031616-train
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout source code
@@ -50,5 +53,7 @@ jobs:
 
       - name: test_ddp
         run: |
+          source /root/miniconda3/etc/profile.d/conda.sh
           conda activate flagscale-train
-          torchrun --nproc_per_node=8 -m pytest -v  tests/unit_tests/distributed/test_distributed_data_parallel.py
+          cd Megatron-LM-FL
+          torchrun --nproc_per_node=8 -m pytest -v tests/unit_tests/distributed/test_distributed_data_parallel.py
