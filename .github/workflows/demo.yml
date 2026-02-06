@@ -19,7 +19,7 @@ jobs:
       - nvidia
       - gpu-8
     container:
-      image: localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515
+      image: flagscale:cuda12.8.1-cudnn9.15.1-python3.12-torch2.7.1-time2512031616-train
 
     steps:
       - name: Checkout source code
