@@ -29,8 +29,6 @@ jobs:
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
-          ssh-strict: true
-          ssh-user: git
           persist-credentials: false
           clean: true
           sparse-checkout-cone-mode: true
