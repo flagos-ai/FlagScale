@@ -24,11 +24,6 @@ jobs:
       - gpu-8
 
     steps:
-      - name: Clean workspace
-        run: |
-          # Clean up any leftover state from previous runs
-          rm -rf ${{ github.workspace }}/* ${{ github.workspace }}/.[!.]* 2>/dev/null || true
-
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
