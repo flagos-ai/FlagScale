@@ -48,8 +48,8 @@ jobs:
           pip install --no-build-isolation . --verbose
           
           mkdir -p /opt/data
-          wget -O /opt/data/datasets.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/datasets.zip && unzip /opt/data/datasets.zip && rm /opt/data/datasets.zip
-          wget -O /opt/data/tokenizers.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/tokenizers.zip && unzip /opt/data/tokenizers.zip && rm /opt/data/tokenizers.zip
+          wget -O /opt/data/datasets.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/datasets.zip && unzip /opt/data/datasets.zip -d /opt/data && rm /opt/data/datasets.zip
+          wget -O /opt/data/tokenizers.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/tokenizers.zip && unzip /opt/data/tokenizers.zip -d /opt/data && rm /opt/data/tokenizers.zip
 
       - name: test_ddp
         run: |
