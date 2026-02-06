@@ -38,7 +38,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          /root/miniconda3/condabin/conda activate flagscale-train
+          source /root/miniconda3/etc/profile.d/conda.sh
+          conda activate flagscale-train
           git clone https://github.com/flagos-ai/Megatron-LM-FL.git
           cd Megatron-LM-FL
           pip install --no-build-isolation . --verbose
@@ -49,5 +50,5 @@ jobs:
 
       - name: test_ddp
         run: |
-          /root/miniconda3/condabin/conda activate flagscale-train
+          conda activate flagscale-train
           torchrun --nproc_per_node=8 -m pytest -v  tests/unit_tests/distributed/test_distributed_data_parallel.py
