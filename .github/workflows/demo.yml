@@ -5,6 +5,7 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
@@ -37,9 +38,44 @@ jobs:
           show-progress: true
           lfs: false
 
-      - name: Set safe directory
+      - name: Check environment
         run: |
-          git config --global --add safe.directory ${{ github.workspace }}
+          echo "=== Runner environment ==="
+          echo "Hostname: $(hostname)"
+          echo "User: $(whoami)"
+          echo "PWD: $(pwd)"
+          echo ""
+          echo "=== Check if running in container ==="
+          if [ -f /.dockerenv ]; then
+            echo "⚠️  Runner is inside a Docker container (DinD scenario)"
+          else
+            echo "✅ Runner is on host machine"
+          fi
+          echo ""
+          echo "=== Host GPU check ==="
+          nvidia-smi || echo "nvidia-smi not available on host"
+          echo ""
+          echo "=== Docker info ==="
+          docker info | grep -E "Runtime|Server Version" || true
+          echo ""
+          echo "=== Available NVIDIA runtimes ==="
+          docker info | grep -i nvidia || echo "No NVIDIA runtime found"
+
+      - name: Test GPU in container
+        run: |
+          echo "=== Testing GPU access in container ==="
+          docker run --rm \
+            --gpus all \
+            ${{ env.DOCKER_IMAGE }} \
+            nvidia-smi || echo "❌ --gpus all failed"
+          
+          echo ""
+          echo "=== Trying with --runtime=nvidia ==="
+          docker run --rm \
+            --runtime=nvidia \
+            -e NVIDIA_VISIBLE_DEVICES=all \
+            ${{ env.DOCKER_IMAGE }} \
+            nvidia-smi || echo "❌ --runtime=nvidia failed"
 
       - name: Install dependencies and run tests
         run: |
@@ -54,6 +90,11 @@ jobs:
             ${{ env.DOCKER_IMAGE }} \
             bash -c "
               set -e
+              
+              # Verify GPU is accessible
+              echo '=== GPU Check inside container ==='
+              nvidia-smi
+              python -c 'import torch; print(f\"CUDA available: {torch.cuda.is_available()}, Device count: {torch.cuda.device_count()}\")'
               
               # Activate conda environment
               source /root/miniconda3/etc/profile.d/conda.sh
