@@ -5,14 +5,10 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
   cancel-in-progress: true
-
-env:
-  DOCKER_IMAGE: flagscale:cuda12.8.1-cudnn9.15.1-python3.12-torch2.7.1-time2512031616-train
 
 jobs:
   run_train:
@@ -22,86 +18,36 @@ jobs:
       - X64
       - nvidia
       - gpu-8
+    container:
+      image: localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          clean: false
-          fetch-depth: 1
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
 
-      - name: Check environment
+      - name: Install dependencies
         run: |
-          echo "=== Runner environment ==="
-          echo "Hostname: $(hostname)"
-          echo "User: $(whoami)"
-          echo "PWD: $(pwd)"
-          echo ""
-          echo "=== Check if running in container ==="
-          if [ -f /.dockerenv ]; then
-            echo "⚠️  Runner is inside a Docker container (DinD scenario)"
-          else
-            echo "✅ Runner is on host machine"
-          fi
-          echo ""
-          echo "=== Host GPU check ==="
-          nvidia-smi || echo "nvidia-smi not available on host"
-          echo ""
-          echo "=== Docker info ==="
-          docker info | grep -E "Runtime|Server Version" || true
-          echo ""
-          echo "=== Available NVIDIA runtimes ==="
-          docker info | grep -i nvidia || echo "No NVIDIA runtime found"
-
-      - name: Test GPU in container
-        run: |
-          echo "=== Testing GPU access in container ==="
-          docker run --rm \
-            --gpus all \
-            ${{ env.DOCKER_IMAGE }} \
-            nvidia-smi || echo "❌ --gpus all failed"
+          conda activate flagscale-train
+          git clone https://github.com/flagos-ai/Megatron-LM-FL.git
+          cd Megatron-LM-FL
+          pip install --no-build-isolation . --verbose
           
-          echo ""
-          echo "=== Trying with --runtime=nvidia ==="
-          docker run --rm \
-            --runtime=nvidia \
-            -e NVIDIA_VISIBLE_DEVICES=all \
-            ${{ env.DOCKER_IMAGE }} \
-            nvidia-smi || echo "❌ --runtime=nvidia failed"
+          mkdir -p /opt/data
+          wget -O /opt/data/datasets.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/datasets.zip && unzip /opt/data/datasets.zip && rm /opt/data/datasets.zip
+          wget -O /opt/data/tokenizers.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/tokenizers.zip && unzip /opt/data/tokenizers.zip && rm /opt/data/tokenizers.zip
 
-      - name: Install dependencies and run tests
+      - name: test_ddp
         run: |
-          docker run --rm \
-            --gpus all \
-            --shm-size=16g \
-            --ulimit nofile=65535:65535 \
-            -e HOME=/workspace \
-            -e PYTHONDONTWRITEBYTECODE=1 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            ${{ env.DOCKER_IMAGE }} \
-            bash -c "
-              set -e
-              
-              # Verify GPU is accessible
-              echo '=== GPU Check inside container ==='
-              nvidia-smi
-              python -c 'import torch; print(f\"CUDA available: {torch.cuda.is_available()}, Device count: {torch.cuda.device_count()}\")'
-              
-              # Activate conda environment
-              source /root/miniconda3/etc/profile.d/conda.sh
-              conda activate flagscale-train
-              
-              # Clone and install Megatron-LM-FL
-              git clone https://github.com/flagos-ai/Megatron-LM-FL.git
-              cd Megatron-LM-FL
-              pip install --no-build-isolation . --verbose
-              
-              # Download test data
-              mkdir -p /opt/data
-              wget -O /opt/data/datasets.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/datasets.zip && unzip /opt/data/datasets.zip -d /opt/data && rm /opt/data/datasets.zip
-              wget -O /opt/data/tokenizers.zip https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/temp/tokenizers.zip && unzip /opt/data/tokenizers.zip -d /opt/data && rm /opt/data/tokenizers.zip
-              
-              # Run tests
-              torchrun --nproc_per_node=8 -m pytest -v tests/unit_tests/distributed/test_distributed_data_parallel.py
-            "
+          conda activate flagscale-train
+          torchrun --nproc_per_node=8 -m pytest -v  tests/unit_tests/distributed/test_distributed_data_parallel.py
