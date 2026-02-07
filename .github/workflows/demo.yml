@@ -41,11 +41,6 @@ jobs:
           show-progress: true
           lfs: false
 
-      - name: check gpu available
-        run: |
-          ls /usr/bin
-          nvidia-smi
-
       - name: Install dependencies
         run: |
           source /root/miniconda3/etc/profile.d/conda.sh
