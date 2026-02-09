@@ -3,23 +3,141 @@ requires = [
     "setuptools>=77.0",
     "wheel>=0.45.1",
     "pip>=25.3",
+    "pybind11==2.13.6",
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flag_scale"
 version = "1.0.0"
-description = "FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI)."
+description = "FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models."
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
-dynamic = ["dependencies"]
+dependencies = [
+    "aiohttp==3.13.3",  # Apache-2.0, MIT. Async HTTP framework.
+    "click==8.3.1",  # BSD-3. Command line processing.
+    "compressed-tensors==0.13.0",  # Apache-2.0. For compress tasks.
+    "hydra-core==1.3.2",  # MIT. Configuration management
+    "llmcompressor==0.9.0",  #  Apache-2.0. LLM compressor for (post-)training.
+    "numpy==2.4.1",  # BSD-3. Array computing.
+    "omegaconf==2.3.0",  # BSD. Configuration library.
+    "openai==2.15.0",  # Apache-2.0. Official lib for OpenAI API.
+    "Pillow==12.1.0",  # MIT-CMU. Aka. 'PIL'. Image library.
+    "PyYAML==6.0.3",  # MIT. YAML processor. Aka. 'yaml'.
+    "packaging==25.0",  # Apache-2.0, BSD. Version parsing/comparison util.
+    "psutil==7.2.1",  # BSD-3. Process and system monitoring.
+    "pydantic==2.12.5",  # MIT. Data validation.
+    "torch==2.9.1",  # BSD-3. Tensor & DNN framework.
+    "torchvision==0.24.1",  # BSD. Image and video for Torch deep learning.
+    "tqdm==4.67.1",  # MIT. Progress meter.
+    "transformers==4.57.6",  # Apache-2.0.
+    "webdataset==1.0.2",  # BSD-3. Data storage and I/O.
+]
 
 [project.urls]
 Homepage = "https://github.com/flagos-ai/FlagScale"
 
 [project.scripts]
 flagscale = "flag_scale.flagscale.cli:flagscale"
+
+[project.optional-dependencies]
+
+training = [
+    "accelerate==1.12.0",  # Apache-2.0. PyTorch util for training loops.
+    "av==16.1.0",  # BSD-3. Video training.
+    "datasets==4.5.0",  # Apache-2.0. HuggingFace library for datasets.
+    "deepspeed=0.18.4",  # Apache-2.0. LLava-OneVision and checkpoint.
+    "einops==0.8.1",  # MIT. Deep learning operations.
+    "fsspec==2026.1.0",   # BSD-3. Filesystem specification used in video training tools.
+    "huggingface-hub==1.3.2",  # Apache-2.0. Client library for huggingface.co hub.
+    "llava-torch==1.2.2.post1",  # Apache-2.0. Visual instruction tuning.
+    "nvidia-resiliency-ext==0.5.0",  # Apache-2.0. NVIDIA resiliency extension.
+    "pandas==2.3.3",  # BSD. Data analysis package.
+    "pyarrow==23.0.0",  # Apache-2.0. Library for Apache Arrow.
+    "pytorch_lightning==2.6.0",  # Apache-2.0. PyTorch wrapper.
+    "regex==2026.1.15",  # Apache-2.0. Regular expression.
+    "safetensors==0.7.0",  # Apache-2.0. Model file processing.
+    "sentencepiece==0.2.1",  # Apache-2.0. Text tokenizer and detokenizer.
+    "tiktoken==0.12.0",  # MIT. BPE tokenizer for OpenAI models.
+    "timm==1.0.24",  # Apache-2.0. Image model, used in legacy training.
+    "tokenizers==0.22.2",  # Apache-2.0.
+    "torchcodec==0.9.1",  # BSD-3. Video decoder for PyTorch.
+    "transformer-engine==2.11.0",  # Apache-2.0.
+    "wandb==0.24.0",  # MIT. Weights & biases library.
+]
+
+training_addon = [
+    # TODO(Qiming): Confirm that `accimage` is outdated and can be removed.
+    # "accimage",
+    "faiss==1.5.3",  # BSD. Search and clustering of dense vectors, for megatron legacy.
+    "flag_gems==4.2.0",  # Apache-2.0.
+    "flagcx==0.8.0",  # Apache-2.0.
+    "flash_attn==2.8.3",  # BSD. Fast and memory-efficient exact attention.
+    "flash_mla==1.0.0.dev0",  # Unknown. Megatron qwen3 vision.
+    "nvidia-modelopt=0.41.0",  # Apache-2.0. Nvidia model optimizer.
+    "peft==0.18.1",  # Apache-2.0. Parameter-efficient fine-tuning lib.
+    # TODO(Qiming): handle the `apex` dependency.
+    # https://github.com/NVIDIA/apex  # BSD-3. Mixed precision and distributed training.
+    # TODO(Qiming): Check the 'flashattn_hopper' package referenced in
+    # `flagscale/models/megatron/qwen3_vl/vision_attention.py`.
+]
+
+inference = [
+    "diffusers==0.36.0",  # Apache-2.0. Diffusion models for inference & training.
+    "fastapi==0.128.0",  # MIT. Web framework for serve mode run.
+    "jsonlines==4.0.0",  # BSD. Used by Aquila model only.
+    "matplotlib==3.10.8",  # Python Software Foundation License. Visualization for serving.
+    "msgpack==1.1.2",  # Apache-2.0. MessagePack serializer. Used for serving.
+    "pynvml==13.0.1",  # BSD-3. Utility for NVIDIA management library.
+    "pyzmq==27.1.0",  # BSD-3. Python binding for ZeroMQ. Aka. 'zmq'.
+    "quart==0.20.0",  # MIT. ASGI web framework.
+    "ray==2.53.0",  # Apache-2.0. Framework for distributed apps.
+    "scikit_learn==1.8.0",  # BSD-3. Aka. 'sklearn'. Machine learing and data mining, for visual serving.
+    "scipy==1.17.0",  # BSD. Fundamental algorithms, used in serve mode.
+    "sglang==0.5.7",  # Apache-2.0. Serving framework for LLM and VLM.
+    "six==1.17.0",  # MIT. Python 2 and 3 compatibility, used in tokernizer.
+    "vllm==0.13.0",   # Apache-2.0.
+]
+
+robotics = [
+    "draccus==0.11.5",   # MIT. Configuration management framework, for pi0, pi05.
+    "epath==0.7",  # MIT. Dynamic import partent files, used in robotrain.
+    "Flask==3.1.2",  # BSD-3. Web framework.
+    "flask-cors==6.0.2",  # MIT. Flask extension.
+    "qwen_vl_utils==0.0.14",  # Apache-2.0. Qwen vision language model utils - PyTorch.
+    "redis==7.1.0",  # MIT. Client library for Redis.
+    "Requests==2.32.5",  # Apache-2.0. HTTP library.
+    "sentence-transformers==5.2.0",  # Apache-2.0. Embedding, retrieval, reranking.
+    "typing-extensions==4.15.0",  # PSF-2.0. Type hints for Python 3.9+.
+    # TODO(Qiming): handle the following case.
+    # git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
+]
+
+lint = [
+    "pre-commit>=4.2.0",  # MIT. Pre-commit hook.
+    # TODO(Qiming): Check if `black` is actually used.
+    # "black==24.4.2",  # MIT. Code formatter.
+    # TODO(Qiming): Check if `black` is actually used.
+    # "flake8==7.1.0",  # MIT. Modular source code checker.
+    "isort==5.13.2",  # MIT. Sorting Python imports. Referenced by pre-commit.
+    # TODO(Qiming): Determine if `pylint` should be removed.
+    # "pylint==4.0.4",  # GPL-2.0. Static checker.
+    "ruff==0.14.13",  # MIT. Linter and code formatter. Referenced by pre-commit.
+    "typos==1.42.1",  # MIT. Source code spelling checker.
+]
+
+test = [
+    "pytest==9.0.2",  # MIT. Testing framework.
+    "pytest-mock==3.15.1",  # MIT. Mock wrapper for pytest.
+    # "pytest-asyncio==1.3.0",  # Apache-2.0, usage pattern "@pytest.mark.asyncio"
+    # "pytest-cov==7.0.0",  # MIT, usage pattern "pytest --cov=foo dir/"
+    # "coverage==7.13.1",
+]
+
+util = [
+    "modelscope==1.34.0",  # Apache-2.0. ModelScope client, also used in pi0 example as library.
+]
 
 [tool.ruff]
 line-length = 100
@@ -83,6 +201,7 @@ select = [
     "Q003",
     "Q004",
 ]
+
 ignore = [
     "E402",         # Module level import not at top of file
     "E501",         # Line too long
