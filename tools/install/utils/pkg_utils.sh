@@ -130,7 +130,33 @@ should_install_src() {
 # Phase-Scoped Filtering
 # =============================================================================
 
-# Get pip-deps that match a requirements file
+# Expand requirements file content, resolving -r includes recursively
+# Usage: expand_requirements_file <req_file>
+expand_requirements_file() {
+    local req_file="$1"
+    local base_dir
+    base_dir="$(dirname "$req_file")"
+
+    [ ! -f "$req_file" ] && return 0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Handle -r includes (e.g., "-r ../common.txt" or "-r common.txt")
+        if echo "$line" | grep -qE '^-r[[:space:]]+'; then
+            local included_file
+            included_file="$(echo "$line" | sed 's/^-r[[:space:]]*//')"
+            # Resolve relative path from the base directory
+            if [ "${included_file#/}" = "$included_file" ]; then
+                included_file="$base_dir/$included_file"
+            fi
+            # Recursively expand the included file
+            expand_requirements_file "$included_file"
+        else
+            echo "$line"
+        fi
+    done < "$req_file"
+}
+
+# Get pip-deps that match a requirements file (resolves -r includes)
 get_pip_deps_for_requirements() {
     local req_file="$1"
     local pip_deps="${FLAGSCALE_PIP_DEPS:-}"
@@ -138,8 +164,12 @@ get_pip_deps_for_requirements() {
 
     [ -z "$pip_deps" ] || [ ! -f "$req_file" ] && return 0
 
+    # Expand requirements file to include all -r references
+    local expanded_content
+    expanded_content="$(expand_requirements_file "$req_file")"
+
     for pkg in $(echo "$pip_deps" | tr ',' ' '); do
-        grep -qiE "^${pkg}([=<>!~\[]|$)" "$req_file" 2>/dev/null && matched="$matched $pkg"
+        echo "$expanded_content" | grep -qiE "^${pkg}([=<>!~\[]|$)" 2>/dev/null && matched="$matched $pkg"
     done
     echo "$matched" | xargs
 }
