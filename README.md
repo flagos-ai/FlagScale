@@ -1,7 +1,6 @@
-[中文](./README_cn.md)
+[<img width="2182" height="602" alt="github+banner-20260130" src=".github/assets/banner-20260130.png" />](https://flagos.io/)
 
-<!--TODO(Qiming): replace this banner-->
-[<img width="4750" height="958" alt="github+banner__2025-11-11+13_27_10" src="https://github.com/user-attachments/assets/e63014d8-ac72-4b82-98f7-aeed9833672a" />](https://www.flagopen.ac.cn/)
+[[中文版](./README_cn.md)|English]
 
 <!--Begin Announcements.-->
 

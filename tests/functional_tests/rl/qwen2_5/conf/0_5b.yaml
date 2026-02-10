@@ -1,0 +1,26 @@
+defaults:
+  - rl: 0_5b
+  - _self_
+
+experiment:
+  exp_name: 0_5b
+  exp_dir: tests/functional_tests/rl/qwen2_5/results_test/0_5b
+  task:
+    type: rl
+    backend: verl
+    entrypoint: verl.trainer.main_ppo
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-RL
+  runner:
+    nnodes: 1
+    nproc_per_node: 8
+    hostfile: null
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    TORCH_DEVICE_BACKEND_AUTOLOAD: 0
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

@@ -1,5 +1,22 @@
 # Common dependencies used by all tasks
 # Platform-agnostic packages including configuration management and experiment tracking
 
-hydra-core
-wandb
+# Configuration and experiment tracking
+hydra-core==1.3.2
+wandb==0.19.1
+
+# Data science essentials (common across deepspeed, vllm, sglang, megatron)
+numpy==1.26.4
+scipy==1.14.1
+pandas==2.2.3
+matplotlib==3.9.4
+
+# Utilities
+tqdm==4.67.1
+requests==2.32.3
+aiohttp==3.11.11
+pyyaml==6.0.2
+regex==2025.10.22
+
+# CLI
+typer>=0.9.0
