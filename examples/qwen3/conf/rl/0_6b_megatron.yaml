@@ -1,0 +1,83 @@
+#default verl config path
+config-path: config
+
+#default verl config name
+config-name: ppo_megatron_trainer.yaml
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+data:
+  train_files: /workspace/gsm8k/train.parquet
+  val_files: /workspace/gsm8k/test.parquet
+  train_batch_size: 256
+  max_prompt_length: 1024
+  max_response_length: 1024
+  filter_overlong_prompts: true
+  truncation: "error"
+  return_raw_chat: True
+
+actor_rollout_ref:
+  model:
+    path: /workspace/Qwen3-0.6B
+    use_fused_kernels: True
+
+  actor:
+    optim:
+      lr: 1e-6
+    ppo_mini_batch_size: 256
+    ppo_micro_batch_size_per_gpu: 4
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    megatron:
+      pipeline_model_parallel_size: 2
+      tensor_model_parallel_size: 2
+      dtype: bfloat16
+    profiler:
+      enable: true
+      all_ranks: true
+
+  rollout:
+    log_prob_micro_batch_size_per_gpu: 4
+    tensor_model_parallel_size: 2
+    name: vllm
+    mode: async
+    profiler:
+      enable: true
+      all_ranks: true
+    gpu_memory_utilization: 0.2
+    n: 5
+    temperature: 1.0
+    top_p: 1.0
+    top_k: -1
+    calculate_log_probs: true
+    enforce_eager: true
+    dtype: bfloat16
+  ref:
+    log_prob_micro_batch_size_per_gpu: 4
+    megatron:
+      pipeline_model_parallel_size: 2
+      tensor_model_parallel_size: 2
+    profiler:
+      enable: true
+      all_ranks: true
+
+trainer:
+  critic_warmup: 0
+  logger: ["console"]
+  project_name: "verl_grpo_example_gsm8k"
+  experiment_name: "qwen3-0_6b_megatron"
+  n_gpus_per_node: 4
+  nnodes: 1
+  save_freq: -1
+  test_freq: -1
+  total_epochs: 10
+  default_local_dir: ${experiment.exp_dir}/checkpoints
+
+global_profiler:
+  tool: nsys
+  save_path: /workspace/profile
+  steps: [1, 2, 3]

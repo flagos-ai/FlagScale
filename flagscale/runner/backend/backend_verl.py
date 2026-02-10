@@ -117,6 +117,7 @@ class VerlBackend(BackendBase):
             f.write(f"cd {root_dir}\n")
             f.write("\n")
             f.write("export PYTHONPATH=${PYTHONPATH}\n")
+            f.write("export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0\n")
             f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
