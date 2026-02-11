@@ -1,0 +1,27 @@
+defaults:
+  - _self_
+  - serve: 0.5b
+
+experiment:
+  exp_name: qwen2_5
+  exp_dir: tests/functional_tests/serve/qwen2_5/results_test/0.5b
+  task:
+    type: serve
+    entrypoint: null
+  runner:
+    hostfile: null
+    deploy:
+      port: 6703
+      use_fs_serve: false
+  envs:
+    CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    no_proxy: "127.0.0.1,localhost"
+  cmds:
+    before_start: ulimit -n 65535 && source /root/miniconda3/bin/activate flagscale-inference
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

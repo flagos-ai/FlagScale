@@ -1,0 +1,7 @@
+# serve development dependencies
+# Includes build tools, linting, testing, and serve packages
+
+-r ../build.txt
+-r ../lint.txt
+-r ../test.txt
+-r ./serve.txt

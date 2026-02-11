@@ -1,4 +1,0 @@
-# Build dependencies - should be mirrored in pyproject.toml [build-system]
-setuptools>=77.0
-wheel>=0.45.1
-pip>=25.3

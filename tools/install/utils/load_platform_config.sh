@@ -23,6 +23,18 @@ load_platform_config() {
     VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
     CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
 
+    # Extract package manager configuration
+    PKG_MGR=$(/usr/local/bin/yq -r '.pkg_mgr // "uv"' "$CONFIG_FILE")
+    ENV_PATH=$(/usr/local/bin/yq -r '.env_path // "/opt/venv"' "$CONFIG_FILE")
+    ENV_NAME_TRAIN=$(/usr/local/bin/yq -r '.env_names.train // "flagscale-train"' "$CONFIG_FILE")
+    ENV_NAME_INFERENCE=$(/usr/local/bin/yq -r '.env_names.inference // "flagscale-inference"' "$CONFIG_FILE")
+    ENV_NAME_SERVE=$(/usr/local/bin/yq -r '.env_names.serve // "flagscale-serve"' "$CONFIG_FILE")
+    ENV_NAME_RL=$(/usr/local/bin/yq -r '.env_names.rl // "flagscale-rl"' "$CONFIG_FILE")
+
+    echo "Package manager: $PKG_MGR"
+    echo "Environment path: $ENV_PATH"
+    echo "Environment names: train=$ENV_NAME_TRAIN, inference=$ENV_NAME_INFERENCE, serve=$ENV_NAME_SERVE, rl=$ENV_NAME_RL"
+
     # Validate required fields
     if [ -z "$CI_IMAGE" ] || [ "$CI_IMAGE" = "null" ]; then
         echo "❌ Error: ci_image not found in $CONFIG_FILE"
@@ -62,11 +74,13 @@ load_platform_config() {
     TRAIN_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "train")]')
     HETERO_TRAIN_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "hetero_train")]')
     INFERENCE_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "inference")]')
+    SERVE_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "serve")]')
     RL_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "rl")]')
 
     echo "Train tests: $(echo "$TRAIN_TESTS" | jq 'length') test(s)"
     echo "Hetero train tests: $(echo "$HETERO_TRAIN_TESTS" | jq 'length') test(s)"
     echo "Inference tests: $(echo "$INFERENCE_TESTS" | jq 'length') test(s)"
+    echo "Serve tests: $(echo "$SERVE_TESTS" | jq 'length') test(s)"
     echo "RL tests: $(echo "$RL_TESTS" | jq 'length') test(s)"
 
     echo "✅ Loaded config for platform: $PLATFORM"
@@ -81,5 +95,14 @@ load_platform_config() {
     { echo 'train_test_matrix<<EOFTRAIN'; echo "$TRAIN_TESTS"; echo 'EOFTRAIN'; } >> $GITHUB_OUTPUT
     { echo 'hetero_train_test_matrix<<EOFHETEROTRAIN'; echo "$HETERO_TRAIN_TESTS"; echo 'EOFHETEROTRAIN'; } >> $GITHUB_OUTPUT
     { echo 'inference_test_matrix<<EOFINFERENCE'; echo "$INFERENCE_TESTS"; echo 'EOFINFERENCE'; } >> $GITHUB_OUTPUT
+    { echo 'serve_test_matrix<<EOFINFERENCE'; echo "$SERVE_TESTS"; echo 'EOFINFERENCE'; } >> $GITHUB_OUTPUT
     { echo 'rl_test_matrix<<EOFRL'; echo "$RL_TESTS"; echo 'EOFRL'; } >> $GITHUB_OUTPUT
+
+    # Output package manager configuration
+    echo "pkg_mgr=$PKG_MGR" >> $GITHUB_OUTPUT
+    echo "env_path=$ENV_PATH" >> $GITHUB_OUTPUT
+    echo "env_name_train=$ENV_NAME_TRAIN" >> $GITHUB_OUTPUT
+    echo "env_name_inference=$ENV_NAME_INFERENCE" >> $GITHUB_OUTPUT
+    echo "env_name_serve=$ENV_NAME_SERVE" >> $GITHUB_OUTPUT
+    echo "env_name_rl=$ENV_NAME_RL" >> $GITHUB_OUTPUT
 }

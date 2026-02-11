@@ -1,0 +1,42 @@
+defaults:
+  - _self_
+  - serve: 0.5b_multiple_instance
+
+experiment:
+  exp_name: qwen2_5
+  exp_dir: tests/functional_tests/serve/qwen2_5/results_test/0.5b_multiple_instance
+  task:
+    type: serve
+    entrypoint: null
+  runner:
+    hostfile: null # /path/to/hostfile.txt
+    docker: ds
+    ssh_port: 22
+    nnodes: 1
+    nproc_per_node: 2
+    deploy:
+      port: 6702
+      use_fs_serve: true
+  auto_tuner:
+    space:
+      tensor_model_parallel_size: [1]
+      pipeline_model_parallel_size: [1]
+      instance: [2]
+      block_size: [16] # [8, 16, 32]
+      max_num_batched_tokens: [512]
+      max_num_seqs: [128] # [128, 256]
+    control:
+      interval: 20
+      run_best: false
+  cmds:
+    before_start: ulimit -n 65535 && source /root/miniconda3/bin/activate flagscale-inference
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1
+    no_proxy: "127.0.0.1,localhost"
+    RAY_DEDUP_LOGS: 0
+
+action: auto_tune
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

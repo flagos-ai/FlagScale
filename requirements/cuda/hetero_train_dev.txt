@@ -1,7 +1,0 @@
-# Heterogeneous training development dependencies
-# Includes build tools, linting, testing, and heterogeneous training packages
-
--r ../build.txt
--r ../lint.txt
--r ../test.txt
--r ./hetero_train.txt

@@ -22,7 +22,36 @@ container_volumes:
   - /home/flagscale_cicd/flask/config:/workspace/config
   - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
   - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
-  - /home/flagscale_cicd/sccache:/root/.cache/sccache
+  - /home/flagscale_cicd/sccache:/github/home/.cache/sccache
 
 # Container options (hardware-specific settings)
 container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"
+
+# =============================================================================
+# Package Manager Configuration
+# =============================================================================
+# Supported package managers: pip, uv, conda
+#   - pip:   Use pip directly (standard Python)
+#   - uv:    Use uv pip (fast, modern package manager)
+#   - conda: Use conda environment with pip for PyPI packages
+#
+# Unified environment parameters:
+#   - env_name: Conda environment name (for conda only)
+#   - env_path: Environment path (venv path for uv, conda installation path for conda)
+#
+# To transition to uv in the future:
+#   1. Change pkg_mgr to "uv"
+#   2. Ensure uv is installed in the Docker image
+#   3. Set env_path to the virtual environment path (e.g., "/opt/venv")
+#
+pkg_mgr: "conda"  # Current: conda for CI/CD compatibility
+
+# Environment path (venv path for uv, conda installation path for conda)
+env_path: "/root/miniconda3"
+
+# Conda environment name (for conda only)
+env_names:
+  train: "flagscale-train"
+  hetero_train: "flagscale-train"
+  inference: "flagscale-inference"
+  rl: "flagscale-rl"
