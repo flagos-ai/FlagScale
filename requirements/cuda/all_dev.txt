@@ -1,4 +1,0 @@
--r ../build.txt
--r ../lint.txt
--r ../test.txt
--r ./all.txt

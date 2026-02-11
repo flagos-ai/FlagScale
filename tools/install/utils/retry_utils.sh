@@ -1,81 +1,90 @@
 #!/bin/bash
-# Retry utilities for network-dependent operations
-# Extracted from .github/workflows/scripts/retry_functions.sh
+# =============================================================================
+# Retry Utilities
+# =============================================================================
+#
+# Retry wrappers for network-dependent operations (pip install, git clone).
+# =============================================================================
 
-# Source utils for logging functions
+# Source utils for logging functions and package manager
 _RETRY_UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_RETRY_UTILS_DIR/utils.sh"
+source "$_RETRY_UTILS_DIR/pkg_utils.sh"
 
-# Retry a single command with a specified number of attempts
-# Usage: retry <retry_count> <command>
+# Retry command with specified attempts
+# Usage: retry -d <debug> <retries> <cmd>
 retry() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local retries=$1
     shift
     local cmd="$*"
     local count=0
 
+    if [ "$debug" = true ]; then
+        echo "    [dry-run] $cmd" >&2
+        return 0
+    fi
+
     until eval "$cmd"; do
         count=$((count + 1))
-        if [ $count -ge $retries ]; then
-            log_error "Command failed after $retries retries: $cmd"
-            return 1
-        fi
-        log_warn "Command failed (attempt $count/$retries), retrying in 5 seconds..."
+        [ $count -ge $retries ] && { log_error "Failed after $retries attempts"; return 1; }
+        log_warn "Retry $count/$retries in 5s..."
         sleep 5
     done
-
-    if [ $count -gt 0 ]; then
-        log_success "Command succeeded after $count retries: $cmd"
-    fi
     return 0
 }
 
-# Retry a batch of commands sequentially
-# Usage: retry_commands <retry_count> <command1> <command2> ...
-retry_commands() {
-    local retries=$1
-    shift
-    local -a cmds=("$@")
-
-    log_info "Retry config: max retries = $retries"
-    log_info "Total commands to execute: ${#cmds[@]}"
-
-    for cmd in "${cmds[@]}"; do
-        log_info "Executing command: $cmd"
-        retry $retries "$cmd"
-        local cmd_exit_code=$?
-        if [ $cmd_exit_code -ne 0 ]; then
-            log_error "Batch commands failed at: $cmd"
-            return $cmd_exit_code
-        fi
-    done
-
-    log_success "All batch commands executed successfully!"
-    return 0
-}
-
-# Retry pip install with a requirements file
-# Usage: retry_pip_install <requirements_file> [retry_count]
+# Retry pip/uv install from requirements file
+# Usage: retry_pip_install -d <debug> <requirements_file> [retries]
 retry_pip_install() {
+    local debug=false
+    if [[ "$1" == "-d" ]]; then
+        debug="$2"; shift 2
+    fi
+
     local requirements_file=$1
     local retries=${2:-3}
+    local manager=$(get_pkg_manager)
 
-    if [ ! -f "$requirements_file" ]; then
-        log_error "Requirements file not found: $requirements_file"
-        return 1
-    fi
+    [ ! -f "$requirements_file" ] && [ "$debug" != true ] && { log_error "Not found: $requirements_file"; return 1; }
 
-    log_info "Installing from $requirements_file with $retries retries"
-    retry $retries "pip install -r '$requirements_file'"
+    log_info "Installing $(basename "$requirements_file")..."
+    local pip_cmd=$(get_pip_cmd)
+    case "$manager" in
+        uv)    retry -d $debug $retries "uv pip install -r '$requirements_file'" ;;
+        *)     retry -d $debug $retries "$pip_cmd install --root-user-action=ignore -r '$requirements_file'" ;;
+    esac
 }
 
-# Retry git clone operation
-# Usage: retry_git_clone <repo_url> <target_dir> [retry_count]
+# Retry git clone with options
+# Usage: retry_git_clone -d <debug> [--branch BRANCH] [--depth N] [--recursive] <repo_url> <target_dir> [retries]
 retry_git_clone() {
+    local debug=false branch="" depth="" recursive=""
+
+    while [[ "$1" == -* ]]; do
+        case "$1" in
+            -d) debug="$2"; shift 2 ;;
+            --branch) branch="$2"; shift 2 ;;
+            --depth) depth="$2"; shift 2 ;;
+            --recursive) recursive="--recursive"; shift ;;
+            *) break ;;
+        esac
+    done
+
     local repo_url=$1
     local target_dir=$2
     local retries=${3:-3}
 
-    log_info "Cloning $repo_url to $target_dir with $retries retries"
-    retry $retries "rm -rf '$target_dir' && git clone '$repo_url' '$target_dir'"
+    # Build clone options
+    local opts=""
+    [ -n "$branch" ] && opts="$opts --branch $branch"
+    [ -n "$depth" ] && opts="$opts --depth $depth"
+    [ -n "$recursive" ] && opts="$opts $recursive"
+
+    log_info "Cloning $(basename "$repo_url" .git)"
+    retry -d $debug $retries "rm -rf '$target_dir' && git clone$opts '$repo_url' '$target_dir'"
 }

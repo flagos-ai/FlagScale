@@ -1,0 +1,12 @@
+- serve_id: vllm_model
+  engine: vllm
+  engine_args:
+    model: /home/gitlab-runner/data/Qwen2.5-0.5B-Instruct
+    tensor_parallel_size: 1
+    pipeline_parallel_size: 1
+    gpu_memory_utilization: 0.9
+    max_model_len: 32768
+    max_num_seqs: 256
+    enforce_eager: true
+    trust_remote_code: true
+    enable_chunked_prefill: true

@@ -1,0 +1,8 @@
+# serve-specific dependencies
+
+-r ./base.txt
+
+# support 0.5b_multiple_instance ci test
+ray==2.49.1
+gymnasium
+dm-tree

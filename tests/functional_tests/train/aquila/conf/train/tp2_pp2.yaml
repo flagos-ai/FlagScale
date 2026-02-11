@@ -1,6 +1,3 @@
-defaults:
-  - data
-
 system:
   tensor_model_parallel_size: 2
   pipeline_model_parallel_size: 2
@@ -45,6 +42,8 @@ model:
   weight_decay: 0.1
   clip_grad: 1.0
   train_iters: 10
+  eval_iters: 1
+  eval_interval: 5
   micro_batch_size: 4
   global_batch_size: 1024
   seed: 42
@@ -59,3 +58,14 @@ model:
       lr_warmup_samples: 0
       lr_warmup_fraction: 0.01
       lr_decay_style: cosine
+
+data:
+  data_path: /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo
+  split: 80, 10, 10
+  tokenizer:
+    legacy_tokenizer: true
+    tokenizer_type: AquilaTokenizerFS
+    vocab_file: ./examples/aquila/tokenizer/vocab.json
+    merge_file: ./examples/aquila/tokenizer/merges.txt
+    special_tokens_file: ./examples/aquila/tokenizer/special_tokens.txt
+    vocab_size: 100008

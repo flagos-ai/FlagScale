@@ -1,94 +1,95 @@
 import os
-import sys
+import subprocess
 
 from setuptools import setup
-from setuptools._distutils._log import log
 
-# Add current directory to path to import version
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-if _current_dir not in sys.path:
-    sys.path.insert(0, _current_dir)
-
-from version import FLAGSCALE_VERSION
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def _read_requirements_file(requirements_path):
-    """Read the requirements file and return the dependency list"""
-    requirements = []
+def _get_version() -> str:
+    """Read version from pyproject.toml (single source of truth, Python 3.11+)."""
     try:
-        with open(requirements_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                requirements.append(line)
-    except FileNotFoundError:
-        print(f"[WARNING] Requirements file not found: {requirements_path}")
-        return []
-    return requirements
+        import tomllib
+
+        pyproject_path = os.path.join(SCRIPT_DIR, "pyproject.toml")
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+            return data.get("project", {}).get("version", "0.0.0")
+    except Exception:
+        return "0.0.0"
 
 
-def deduplicate_dependencies(dependencies):
-    """Deduplicate the dependencies"""
-    seen = set()
-    result = []
-    for dep in dependencies:
-        pkg_name = (
-            dep.split("==")[0]
-            .split(">=")[0]
-            .split("<=")[0]
-            .split(">")[0]
-            .split("<")[0]
-            .split("!=")[0]
-            .strip()
-        )
-        pkg_name_lower = pkg_name.lower()
-        if pkg_name_lower not in seen:
-            seen.add(pkg_name_lower)
-            result.append(dep)
-    return result
+FLAGSCALE_VERSION = _get_version()
+INSTALL_SCRIPT = os.path.join(SCRIPT_DIR, "tools", "install", "install.sh")
 
 
-def _get_install_requires():
-    """get install_requires list"""
-    install_requires = []
+def is_pip_isolated_build():
+    """Check if we're running in pip's isolated build environment.
 
-    install_requires.extend(_read_requirements_file("requirements/requirements-base.txt"))
-    install_requires.extend(_read_requirements_file("requirements/requirements-common.txt"))
-    core_deps = ["setuptools==79.0.1", "packaging>=24.2", "importlib_metadata>=8.5.0"]
+    Prefer detection via pip/PEP 517 specific environment variables rather than
+    fragile filesystem heuristics that can misclassify user code directories.
+    """
+    # Common environment markers set by pip during isolated/PEP 517 builds.
+    pip_env_markers = (
+        "PEP517_BUILD_BACKEND",
+        "PIP_BUILD_TRACKER",
+        "PIP_REQ_TRACKER",
+        "PIP_ISOLATED_ENV",
+    )
+    for var in pip_env_markers:
+        if os.environ.get(var):
+            return True
+    return False
 
-    all_deps = install_requires + core_deps
-    result = deduplicate_dependencies(all_deps)
-    log.info(f"[build] install_requires Unique dependencies: {result}")
 
-    return result
+def run_install_script():
+    """Invoke tools/install/install.sh for dependency installation."""
+    if not os.path.exists(INSTALL_SCRIPT):
+        print(f"[flagscale] Warning: Install script not found: {INSTALL_SCRIPT}")
+        return
 
+    platform = os.environ.get("FLAGSCALE_PLATFORM", "cuda")
+    task = os.environ.get("FLAGSCALE_TASK", "all")
+
+    cmd = [
+        INSTALL_SCRIPT,
+        "--platform",
+        platform,
+        "--task",
+        task,
+        "--pkg-mgr",
+        "pip",
+        "--no-system",
+        "--only-pip",
+        "--src-deps",
+        "megatron-lm",
+    ]
+
+    print(f"[flagscale] Running: {' '.join(cmd)}")
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"Installation failed with exit code {exc.returncode}") from exc
+
+
+# Run install.sh when using: pip install --no-build-isolation .
+# Control via env vars: FLAGSCALE_PLATFORM (default: cuda), FLAGSCALE_TASK (default: all)
+if not is_pip_isolated_build():
+    run_install_script()
+
+# NOTE: Installation methods:
+# 1. pip install .                      -> Installs flagscale CLI only (isolated build)
+# 2. pip install --no-build-isolation . -> Installs CLI + pip deps + megatron-lm (no apt)
+#    Control with: FLAGSCALE_PLATFORM=cuda FLAGSCALE_TASK=train pip install --no-build-isolation .
+# 3. flagscale install                  -> Full installation (apt + pip + all source deps)
 
 setup(
-    name="flag_scale",
+    name="flagscale",
     version=FLAGSCALE_VERSION,
-    description="FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI). ",
+    description="FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI).",
     url="https://github.com/FlagOpen/FlagScale",
-    packages=[
-        "flag_scale",
-        "flag_scale.flagscale",
-        "flag_scale.examples",
-        "flag_scale.tools",
-        "flag_scale.tests",
-    ],
-    package_dir={
-        "flag_scale": "",
-        "flag_scale.flagscale": "flagscale",
-        "flag_scale.examples": "examples",
-        "flag_scale.tools": "tools",
-        "flag_scale.tests": "tests",
-    },
-    package_data={
-        "flag_scale.flagscale": ["**/*"],
-        "flag_scale.examples": ["**/*"],
-        "flag_scale.tools": ["**/*"],
-        "flag_scale.tests": ["**/*"],
-    },
-    install_requires=_get_install_requires(),
-    entry_points={"console_scripts": ["flagscale=flag_scale.flagscale.cli:flagscale"]},
+    packages=["flagscale"],
+    package_dir={"flagscale": "flagscale"},
+    install_requires=["typer>=0.9.0"],
+    entry_points={"console_scripts": ["flagscale=flagscale.cli:flagscale"]},
 )
