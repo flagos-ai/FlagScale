@@ -104,6 +104,8 @@ def _get_runner_cmd_train(
         del runner_args["enable_monitoring"]
     if "enable_gpu_health_check" in runner_args:
         del runner_args["enable_gpu_health_check"]
+    if "deploy" in runner_args:
+        del runner_args["deploy"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port

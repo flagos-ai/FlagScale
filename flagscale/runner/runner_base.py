@@ -47,9 +47,11 @@ class Runner(ABC):
         # normalize native → native_{task_type}
         if backend_type == "native":
             backend_type = f"native_{self.task_type}"
+
+        if backend_type == "native_serve":
             if self.config.experiment.runner.get(
                 "deploy", None
-            ) is None or self.config.experiment.runner.deploy.get("use_fs_serve", False):
+            ) is None or not self.config.experiment.runner.deploy.get("use_fs_serve", False):
                 raise ValueError("config.experiment.deploy.use_fs_serve in YAML should be true")
 
         self.backend_type = backend_type
