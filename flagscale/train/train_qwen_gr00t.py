@@ -19,7 +19,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch.optim import Optimizer
-from torchvision.transforms.functional import resize, InterpolationMode
 # from torch.nn.parallel import DistributedDataParallel as DDP  # Commented out: using accelerate instead
 
 # Accelerate for distributed training (matching starVLA)
@@ -393,14 +392,41 @@ def make_dataset(cfg: DataConfig):
 
     # image_transforms = ImageTransforms(cfg.image_transforms) if enable_image_transform else None
 
-    # TODO: (yupu) Hard-coded size 224x224
-    def _resize_bilinear_224(frames: torch.Tensor) -> torch.Tensor:
-        """Resize CHW or BCHW float tensors to 224x224 with bilinear interpolation."""
-        if frames.dim() < 3:
-            raise ValueError("image tensor should have at least 3 dims")
-        return resize(frames, [224, 224], interpolation=InterpolationMode.BILINEAR, antialias=True)
+    # Match starVLA: resize uint8 via PIL, then normalize to [0,1]
+    def _resize_like_starvla(frames: torch.Tensor) -> torch.Tensor:
+        if not isinstance(frames, torch.Tensor):
+            return frames
+        is_single = False
+        if frames.dim() == 3:
+            frames = frames.unsqueeze(0)
+            is_single = True
+        if frames.dim() != 4:
+            return frames
+        from PIL import Image
+        import numpy as np
 
-    image_transforms = _resize_bilinear_224
+        resized_frames = []
+        for frame in frames:
+            channel_last = frame.shape[-1] in (1, 3, 4)
+            if channel_last:
+                frame_hwc = frame
+            elif frame.shape[0] in (1, 3, 4):
+                frame_hwc = frame.permute(1, 2, 0)
+            else:
+                frame_hwc = frame
+                channel_last = True
+            frame_uint8 = (frame_hwc * 255).round().clamp(0, 255).to(torch.uint8)
+            pil = Image.fromarray(frame_uint8.cpu().numpy()).resize(
+                (224, 224), resample=Image.BILINEAR
+            )
+            out = torch.from_numpy(np.array(pil)).to(frames.device).float() / 255.0
+            if not channel_last:
+                out = out.permute(2, 0, 1)
+            resized_frames.append(out)
+        output = torch.stack(resized_frames, dim=0)
+        return output[0] if is_single else output
+
+    image_transforms = _resize_like_starvla
     # Leave the revision to None
     ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
     delta_timestamps = resolve_delta_timestamps(cfg, ds_meta)
@@ -1082,6 +1108,12 @@ def main(config: TrainConfig, seed: int):
     samples_per_epoch = len(dataset) // effective_batch_size
     sampler.set_epoch(epoch)
 
+    action_stats = dataset.meta.stats.get("action", {})
+    if is_main_process:
+        print(f"[DEBUG GRIPPER] action stats min: {action_stats.get('min', 'N/A')}")
+        print(f"[DEBUG GRIPPER] action stats max: {action_stats.get('max', 'N/A')}")
+    _debug_dumped = False
+
     for _ in range(step, config.system.train_steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
@@ -1089,16 +1121,19 @@ def main(config: TrainConfig, seed: int):
             k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
             for k, v in batch.items()
         }
-        # print(f"batch: {batch}")
 
-        # torch.save(batch, "batch_resized.pt")
-        # assert 0
+        if not _debug_dumped and is_main_process and "action" in batch:
+            print(f"[DEBUG GRIPPER] BEFORE preproc action[0,0,:]: {batch['action'][0, 0, :].tolist()}")
+            print(f"[DEBUG GRIPPER] BEFORE preproc action[:,: ,6] (gripper): {batch['action'][:, :, 6].flatten()[:16].tolist()}")
 
         if preprocessor is not None:
             batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
 
-        # print(f"batch: {batch}")
+        if not _debug_dumped and is_main_process and "action" in batch:
+            print(f"[DEBUG GRIPPER] AFTER preproc action[0,0,:]: {batch['action'][0, 0, :].tolist()}")
+            print(f"[DEBUG GRIPPER] AFTER preproc action[:,:,6] (gripper): {batch['action'][:, :, 6].flatten()[:16].tolist()}")
+            _debug_dumped = True
 
         st = time.perf_counter()
         train_tracker = update_policy(

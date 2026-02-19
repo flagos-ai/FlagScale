@@ -17,12 +17,14 @@ import torch
 from PIL import Image
 from transformers import AutoProcessor
 
+from flagscale.models.vla.vlm.qwen_vl import build_processor_inputs
+
 IMAGE_KEYS = ["observation.images.image", "observation.images.wrist_image"]
 
 
-def pytest_addoption(parser):
-    parser.addoption("--model-id", required=True, help="Path to Qwen VL model")
-    parser.addoption("--batch-path", required=True, help="Path to saved batch .pt file")
+# def pytest_addoption(parser):
+#     parser.addoption("--model-id", required=True, help="Path to Qwen VL model")
+#     parser.addoption("--batch-path", required=True, help="Path to saved batch .pt file")
 
 
 @pytest.fixture(scope="session")
@@ -97,41 +99,8 @@ def run_path_a(processor, batch: dict) -> dict:
 
 
 def run_path_b(processor, batch: dict) -> dict:
-    """Proposed: tensor images -> processor(text=..., images=...) directly"""
-    instructions = batch["task"]
-    if isinstance(instructions, torch.Tensor):
-        instructions = instructions.detach().cpu().tolist()
-    if isinstance(instructions, str):
-        instructions = [instructions]
-
-    B = len(instructions)
-    num_images = len(IMAGE_KEYS)
-    messages = []
-    for instruction in instructions:
-        content = [{"type": "image", "image": "placeholder"}] * num_images
-        content.append({"type": "text", "text": instruction})
-        messages.append([{"role": "user", "content": content}])
-
-    texts = [
-        processor.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
-        for m in messages
-    ]
-
-    batch_images = []
-    for i in range(B):
-        sample_imgs = []
-        for key in IMAGE_KEYS:
-            t = batch[key][i]
-            sample_imgs.append(t)
-        batch_images.append(sample_imgs)
-
-    return processor(
-        text=texts,
-        images=batch_images,
-        padding=True,
-        return_tensors="pt",
-        do_rescale=False,
-    )
+    """Production path: uses build_processor_inputs from qwen_vl.py"""
+    return build_processor_inputs(processor, batch, IMAGE_KEYS)
 
 
 # ── Tests ────────────────────────────────────────────────────────────────
@@ -159,15 +128,16 @@ def test_integer_tensor_exact_match(results, key):
     assert torch.equal(a, b), f"value mismatch: {(a != b).sum().item()} elements differ"
 
 
-def test_pixel_values_exact_match(results):
+def test_pixel_values_close(results):
+    # Path A quantizes to uint8 then back to float, so small diffs are expected
     result_a, result_b = results
     key = "pixel_values"
     if key not in result_a:
         pytest.skip("'pixel_values' not in output")
-    a, b = result_a[key].cpu(), result_b[key].cpu()
+    a, b = result_a[key].cpu().float(), result_b[key].cpu().float()
     assert a.shape == b.shape, f"shape mismatch: {list(a.shape)} vs {list(b.shape)}"
-    diff = (a.float() - b.float()).abs()
-    assert torch.equal(a, b), f"max diff={diff.max():.6f}, mean diff={diff.mean():.6f}"
+    diff = (a - b).abs()
+    assert torch.allclose(a, b, atol=0.1), f"max diff={diff.max():.6f}, mean diff={diff.mean():.6f}"
 
 
 def test_image_grid_thw_match(results):

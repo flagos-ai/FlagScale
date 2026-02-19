@@ -8,6 +8,7 @@ from transformers import (
 )
 
 from flagscale.train.train_config import TrainConfig
+from flagscale.train.utils.image_tools import to_pil_preserve
 
 IGNORE_INDEX = -100
 IMAGE_TOKEN_INDEX = 151655
@@ -52,88 +53,6 @@ class QwenVLBackbone(nn.Module):
     def prepare_input(self, batch: dict) -> dict[str, torch.Tensor]:
         raise NotImplementedError
 
-    def build_qwenvl_inputs(self, examples: dict, image_keys, solutions=None):
-        """Build Qwen VL model inputs from a batch dict.
-
-        Accepts images as tensors (float [0,1]), numpy uint8, or PIL directly.
-        No intermediate PIL conversion — images go straight to the processor.
-        """
-        # TODO: (yupu) hard-code task key to "task"
-        instructions = examples["task"]
-        if isinstance(instructions, torch.Tensor):
-            instructions = instructions.detach().cpu().tolist()
-        if isinstance(instructions, str):
-            instructions = [instructions]
-
-        B = len(instructions)
-
-        # Collect images per sample — keep original format (tensor, numpy, or PIL)
-        batch_images = []
-        for i in range(B):
-            batch_images.append([examples[key][i] for key in image_keys if key in examples])
-
-        # Build messages for text template (placeholder images for token insertion)
-        n_imgs = len(batch_images[0])
-        messages = []
-        for instruction in instructions:
-            if "CoT_prompt" in self._config.data.vla_data:
-                CoT_prompt = self._config.data.vla_data.get("CoT_prompt", "")
-                prompt = CoT_prompt.replace("{instruction}", instruction)
-            else:
-                prompt = instruction
-
-            content = [{"type": "image", "image": "placeholder"}] * n_imgs
-            content.append({"type": "text", "text": prompt})
-            msg = [{"role": "user", "content": content}]
-
-            if solutions is not None:
-                solution = solutions[len(messages)]
-                msg.append({"role": "assistant", "content": [{"type": "text", "text": solution}]})
-            messages.append(msg)
-
-        texts = [
-            self.processor.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
-            for m in messages
-        ]
-
-        # Skip rescale when images are float [0,1] tensors (already in normalized range)
-        sample = batch_images[0][0]
-        do_rescale = not (isinstance(sample, torch.Tensor) and sample.is_floating_point())
-
-        batch_inputs = self.processor(
-            text=texts,
-            images=batch_images,
-            padding=True,
-            return_tensors="pt",
-            do_rescale=do_rescale,
-        )
-
-        # if solutions, mask out the non-solution tokens in labels
-        # here only for fast_tokenizer, see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md
-        if solutions is not None:
-            labels = batch_inputs["input_ids"].clone()
-            # For each sequence in the batch, find the first occurrence of an action token.
-            for i in range(labels.size(0)):
-                seq = labels[i]
-                # Create a mask for tokens within the action token range.
-                mask_seq = (seq >= self._ACTION_TOKEN_MIN) & (seq <= self._ACTION_TOKEN_MAX)
-                nonzero_indices = torch.nonzero(mask_seq, as_tuple=False)
-                if nonzero_indices.numel() > 0:
-                    # Mask out all tokens before the first action token.
-                    seq[: nonzero_indices[0].item()] = IGNORE_INDEX
-                else:
-                    # If no action token is found, mask the entire sequence.
-                    seq[:] = IGNORE_INDEX
-                    RuntimeWarning(
-                        "action token are on in your tokenizer, plz see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md."
-                    )
-
-            # Mask out pad tokens as well
-            labels[labels == self.processor.tokenizer.pad_token_id] = IGNORE_INDEX
-            batch_inputs["labels"] = labels
-
-        return batch_inputs.to(self.model.device)
-
     def forward(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         with torch.autocast("cuda", dtype=torch.bfloat16):
             outputs = self.model(
@@ -167,6 +86,114 @@ class Qwen25VLBackbone(QwenVLBackbone):
         image_keys = self._config.data.vla_data.image_features
         return self.build_qwenvl_inputs(examples=batch, image_keys=image_keys)
 
+    def build_qwenvl_inputs(
+        self,
+        examples,
+        images=None,
+        instructions=None,
+        image_keys=None,
+        solutions=None,
+        **kwargs,
+    ):
+        # TODO: (yupu) This is so ugly, we should find a better way to handle this.
+        def _tensor_to_pil_list(batch_tensor):
+            if not isinstance(batch_tensor, torch.Tensor):
+                return batch_tensor
+            if batch_tensor.ndim == 3:
+                batch_tensor = batch_tensor.unsqueeze(0)
+            if batch_tensor.ndim != 4:
+                raise ValueError(f"Expected image tensor with 4 dims, got {batch_tensor.shape}")
+            pil_images = []
+            for item in batch_tensor:
+                if item.shape[-1] in (1, 3, 4):
+                    img = item
+                else:
+                    img = item.permute(1, 2, 0)
+                pil_images.append(to_pil_preserve(img.detach().cpu().numpy()))
+            return pil_images
+
+        if examples is not None and (images is None or instructions is None):
+            # TODO: (yupu) hard-code task key to "task"
+            instructions = examples["task"]
+            if isinstance(instructions, torch.Tensor):
+                instructions = instructions.detach().cpu().tolist()
+            if isinstance(instructions, str):
+                instructions = [instructions]
+
+            batch_images = None
+            for key in image_keys:
+                key_images = _tensor_to_pil_list(examples[key])
+                if batch_images is None:
+                    batch_images = [[img] for img in key_images]
+                else:
+                    for sample_images, img in zip(batch_images, key_images):
+                        sample_images.append(img)
+
+            for idx, sample_images in enumerate(batch_images):
+                batch_images[idx] = [img for img in sample_images if img is not None]
+
+            images = batch_images
+
+        from qwen_vl_utils import process_vision_info
+
+        # Create messages: one message per sample
+        messages = []
+        assert len(images) == len(instructions)
+        for imgs, instruction in zip(images, instructions):
+            content = [{"type": "image", "image": img} for img in imgs]
+
+            if "CoT_prompt" in self._config.data.vla_data:
+                CoT_prompt = self._config.data.vla_data.get("CoT_prompt", "")
+                prompt = CoT_prompt.replace("{instruction}", instruction)
+            else:
+                prompt = instruction
+
+            content.append({"type": "text", "text": prompt})
+            msg = [{"role": "user", "content": content}]
+
+            if solutions is not None:
+                solution = solutions[len(messages)]
+                msg.append({"role": "assistant", "content": [{"type": "text", "text": solution}]})
+            messages.append(msg)
+
+        # Prepare text prompts using processor
+        # default process is json --> message --> texts --> input_ids
+        texts = [
+            self.processor.apply_chat_template(m, tokenize=False, add_generation_prompt=True)
+            for m in messages
+        ]
+
+        # image_inputs = list of PIL
+        image_inputs, video_inputs = process_vision_info(messages)
+        batch_input = self.processor(
+            text=texts, images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt"
+        )
+
+        # if solutions, mask out the non solution tokens in labels --> @JinhuiYE can we mask out system prompt?
+        if solutions is not None:
+            # how can we know this range? --> we has other way for this, but is slower see qwenhelix branch
+            # here only for fast_tokenizer, see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md
+            labels = batch_input["input_ids"].clone()
+            # For each sequence in the batch, find the first occurrence of an action token.
+            for i in range(labels.size(0)):
+                seq = labels[i]
+                # Create a mask for tokens within the action token range.
+                mask_seq = (seq >= self._ACTION_TOKEN_MIN) & (seq <= self._ACTION_TOKEN_MAX)
+                nonzero_indices = torch.nonzero(mask_seq, as_tuple=False)
+                if nonzero_indices.numel() > 0:
+                    first_action_index = nonzero_indices[0].item()
+                    # Mask out all tokens before the first action token.
+                    seq[:first_action_index] = IGNORE_INDEX
+                else:
+                    seq[:] = IGNORE_INDEX
+                    RuntimeWarning(
+                        "action token are on in your tokenizer, plz see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md."
+                    )
+            labels[labels == self.processor.tokenizer.pad_token_id] = IGNORE_INDEX
+            batch_input["labels"] = labels
+
+        return batch_input.to(self.model.device)
+
 
 class Qwen3VLBackbone(QwenVLBackbone):
     """Qwen3-VL backend."""
@@ -195,4 +222,128 @@ class Qwen3VLBackbone(QwenVLBackbone):
         # TODO: (yupu) This is a hack, we should find a better way to handle this.
         # image_keys = self._config.data.vla_data.image_features.keys()
         image_keys = ["observation.images.image", "observation.images.wrist_image"]
+
+        # Extract data in starVLA format (list of dicts)
+        # examples = batch
+        # batch_images = [example["image"] for example in examples]  # [B, [PIL]]
+        # instructions = [example["lang"] for example in examples]  # [B, str]
+        # actions = [example["action"] for example in examples]  # [B, T, action_dim]
+        # state = None
+
+        # return self.build_qwenvl_inputs(
+        #     examples=None, images=batch_images, instructions=instructions
+        # )
+
         return self.build_qwenvl_inputs(examples=batch, image_keys=image_keys)
+
+    # TODO: (yupu) Refactor this args
+    def build_qwenvl_inputs(
+        self,
+        examples,
+        images=None,
+        instructions=None,
+        image_keys=None,
+        solutions=None,
+        **kwargs,
+    ):
+        # TODO: (yupu) This is so ugly, we should find a better way to handle this.
+        def _tensor_to_pil_list(batch_tensor):
+            if not isinstance(batch_tensor, torch.Tensor):
+                return batch_tensor
+            if batch_tensor.ndim == 3:
+                batch_tensor = batch_tensor.unsqueeze(0)
+            if batch_tensor.ndim != 4:
+                raise ValueError(f"Expected image tensor with 4 dims, got {batch_tensor.shape}")
+            pil_images = []
+            for item in batch_tensor:
+                if item.shape[-1] in (1, 3, 4):
+                    img = item
+                else:
+                    img = item.permute(1, 2, 0)
+                pil_images.append(to_pil_preserve(img.detach().cpu().numpy()))
+            return pil_images
+
+        if examples is not None and (images is None or instructions is None):
+            # TODO: (yupu) hard-code task key to "task"
+            instructions = examples["task"]
+            if isinstance(instructions, torch.Tensor):
+                instructions = instructions.detach().cpu().tolist()
+            if isinstance(instructions, str):
+                instructions = [instructions]
+
+            batch_images = None
+            for key in image_keys:
+                key_images = _tensor_to_pil_list(examples[key])
+                if batch_images is None:
+                    batch_images = [[img] for img in key_images]
+                else:
+                    for sample_images, img in zip(batch_images, key_images):
+                        sample_images.append(img)
+
+            for idx, sample_images in enumerate(batch_images):
+                batch_images[idx] = [img for img in sample_images if img is not None]
+
+            images = batch_images
+
+        # import numpy as np
+
+        # torch.save(np.array([np.array(img) for img in images[0]]), "raw_images.pt")
+        # assert False
+
+        # Create messages: one message per sample
+        messages = []
+        assert len(images) == len(instructions)
+        for imgs, instruction in zip(images, instructions):
+            content = [{"type": "image", "image": img} for img in imgs]
+
+            if "CoT_prompt" in self._config.data.vla_data:
+                CoT_prompt = self._config.data.vla_data.get("CoT_prompt", "")
+                prompt = CoT_prompt.replace("{instruction}", instruction)
+            else:
+                prompt = instruction
+
+            content.append({"type": "text", "text": prompt})
+            msg = [{"role": "user", "content": content}]
+
+            if solutions is not None:
+                solution = solutions[len(messages)]
+                msg.append({"role": "assistant", "content": [{"type": "text", "text": solution}]})
+            messages.append(msg)
+
+        # Preparation for inference
+        batch_inputs = self.processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            padding=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+
+        # if solutions, mask out the solution tokens in labels
+        # here only for fast_tokenizer now.
+        if solutions is not None:
+            # how can we know this range? --> we has other way for this, but is slower see qwenhelix branch
+            # here only for fast_tokenizer, see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md
+            labels = batch_inputs["input_ids"].clone()
+            # For each sequence in the batch, find the first occurrence of an action token.
+            for i in range(labels.size(0)):
+                seq = labels[i]
+                # Create a mask for tokens within the action token range.
+                mask_seq = (seq >= self._ACTION_TOKEN_MIN) & (seq <= self._ACTION_TOKEN_MAX)
+                nonzero_indices = torch.nonzero(mask_seq, as_tuple=False)
+                if nonzero_indices.numel() > 0:
+                    # Mask out all tokens before the first action token.
+                    seq[: nonzero_indices[0].item()] = IGNORE_INDEX
+                else:
+                    # If no action token is found, mask the entire sequence.
+                    seq[:] = IGNORE_INDEX
+                    RuntimeWarning(
+                        "action token are on in your tokenizer, plz see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md."
+                    )
+
+            # Mask out pad tokens as well
+            labels[labels == self.processor.tokenizer.pad_token_id] = IGNORE_INDEX
+            batch_inputs["labels"] = labels
+
+        return batch_inputs.to(self.model.device)

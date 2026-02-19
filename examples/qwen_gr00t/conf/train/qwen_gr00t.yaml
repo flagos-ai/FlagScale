@@ -159,6 +159,9 @@ data:
         config:
           eps: 1e-8
           features: {}
+          # Only normalize first 6 action dims (x,y,z,roll,pitch,yaw).
+          # Gripper (dim 6) is left raw, matching starVLA's Libero4in1DataConfig.
+          normalize_action_dims: 6
           norm_map:
             VISUAL: IDENTITY
             STATE: MIN_MAX
