@@ -96,6 +96,7 @@ FROM base AS deps
 ARG PYTORCH_INDEX
 ARG PKG_MGR
 ARG FLAGSCALE_HOME=/opt/flagscale
+ARG PYTHON_VERSION=3.12
 
 # PyPI index URLs (re-declare to use in this stage)
 ARG PIP_INDEX_URL
@@ -121,6 +122,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chmod +x /workspace/tools/install/*.sh && \
     chmod +x /workspace/tools/install/utils/*.sh && \
     chmod +x /workspace/tools/install/cuda/*.sh && \
+    ( [ "$PKG_MGR" != "uv" ] || [ -f "${FLAGSCALE_HOME}/venv/bin/python3" ] ) || \
+    ( mkdir -p "${FLAGSCALE_HOME}" && "$HOME/.local/bin/uv" venv "${FLAGSCALE_HOME}/venv" --python "${PYTHON_VERSION}" ) && \
     cd /workspace && \
     if [ "$PKG_MGR" = "uv" ]; then \
         UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
@@ -158,6 +161,7 @@ FROM base AS release
 ARG PYTORCH_INDEX
 ARG PKG_MGR
 ARG FLAGSCALE_HOME=/opt/flagscale
+ARG PYTHON_VERSION=3.12
 
 # PyPI index URLs
 ARG PIP_INDEX_URL
@@ -181,6 +185,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chmod +x /workspace/tools/install/*.sh && \
     chmod +x /workspace/tools/install/utils/*.sh && \
     chmod +x /workspace/tools/install/cuda/*.sh && \
+    ( [ "$PKG_MGR" != "uv" ] || [ -f "${FLAGSCALE_HOME}/venv/bin/python3" ] ) || \
+    ( mkdir -p "${FLAGSCALE_HOME}" && "$HOME/.local/bin/uv" venv "${FLAGSCALE_HOME}/venv" --python "${PYTHON_VERSION}" ) && \
     cd /workspace && \
     if [ "$PKG_MGR" = "uv" ]; then \
         UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
