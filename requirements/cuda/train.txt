@@ -1,3 +1,4 @@
 # Training-specific dependencies
 
 -r ./base.txt
+megatron_core @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/megatron-core/0.16.0rc0/megatron_core-0.16.0rc0-cp312-cp312-linux_x86_64.whl
