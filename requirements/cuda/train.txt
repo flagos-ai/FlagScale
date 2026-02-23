@@ -2,3 +2,4 @@
 
 -r ./base.txt
 megatron_core @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/megatron-core/0.16.0rc0/megatron_core-0.16.0rc0-cp312-cp312-linux_x86_64.whl
+transformer_engine @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/transformer-engine/2.9.0%2B12b20778/transformer_engine-2.9.0%2B12b20778-cp312-cp312-linux_x86_64.whl
