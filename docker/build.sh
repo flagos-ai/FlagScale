@@ -165,6 +165,9 @@ get_image_tag() {
     # Add python version
     tag="${tag}-py${PYTHON_VERSION}"
 
+    # Add timestamp
+    tag="${tag}-$(date +%Y%m%d%H%M%S)"
+
     echo "$tag"
 }
 
