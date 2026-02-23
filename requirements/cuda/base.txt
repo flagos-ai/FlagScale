@@ -4,6 +4,6 @@
 -r ../common.txt
 
 # PyTorch
-torch==2.9.1
-torchaudio==2.9.1
-torchvision==0.24.1
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0

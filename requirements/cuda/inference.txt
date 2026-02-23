@@ -2,3 +2,4 @@
 
 -r ./base.txt
 vllm @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/vllm/0.11.0%2Bfl.0.1.cu124/vllm-0.11.0%2Bfl.0.1.cu124-cp312-cp312-linux_x86_64.whl
+transformers==4.57.6
