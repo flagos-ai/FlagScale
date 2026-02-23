@@ -100,21 +100,21 @@ ARG PYTHON_VERSION=3.12
 RUN . /etc/profile.d/flagscale-env.sh && \
     if [ "$PKG_MGR" = "uv" ]; then \
         if [ ! -f "${FLAGSCALE_HOME}/venv/bin/python3" ]; then \
-            echo \"[ENV] Creating uv venv at ${FLAGSCALE_HOME}/venv (python=${PYTHON_VERSION})\"; \
-            \"$HOME/.local/bin/uv\" venv \"${FLAGSCALE_HOME}/venv\" --python \"${PYTHON_VERSION}\"; \
+            echo "[ENV] Creating uv venv at ${FLAGSCALE_HOME}/venv (python=${PYTHON_VERSION})"; \
+            "$HOME/.local/bin/uv" venv "${FLAGSCALE_HOME}/venv" --python "${PYTHON_VERSION}"; \
         else \
-            echo \"[ENV] Found uv venv at ${FLAGSCALE_HOME}/venv\"; \
+            echo "[ENV] Found uv venv at ${FLAGSCALE_HOME}/venv"; \
         fi; \
     elif [ "$PKG_MGR" = "conda" ]; then \
-        CONDA_ENV_NAME=\"flagscale-train\"; \
-        if [ -d \"${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}\" ]; then \
-            echo \"[ENV] Found conda env ${CONDA_ENV_NAME} at ${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}\"; \
+        CONDA_ENV_NAME=flagscale-train; \
+        if [ -d "${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}" ]; then \
+            echo "[ENV] Found conda env ${CONDA_ENV_NAME} at ${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}"; \
         else \
-            echo \"[ENV] Creating conda env ${CONDA_ENV_NAME} (python=${PYTHON_VERSION})\"; \
-            env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes \"${FLAGSCALE_CONDA}/bin/conda\" create -y -n \"${CONDA_ENV_NAME}\" \"python=${PYTHON_VERSION}\"; \
+            echo "[ENV] Creating conda env ${CONDA_ENV_NAME} (python=${PYTHON_VERSION})"; \
+            env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" create -y -n "${CONDA_ENV_NAME}" "python=${PYTHON_VERSION}"; \
         fi; \
     else \
-        echo \"[ENV] Using system pip (no dedicated env to create)\"; \
+        echo "[ENV] Using system pip (no dedicated env to create)"; \
     fi
 
 # =============================================================================
