@@ -49,7 +49,7 @@ container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user 
 pkg_mgr: "conda"  # Current: conda for CI/CD compatibility
 
 # Environment path (venv path for uv, conda installation path for conda)
-env_path: "/opt/flagscale/miniconda3"
+env_path: "/root/miniconda3"
 
 # Conda environment name (for conda only)
 env_names:
