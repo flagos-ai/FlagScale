@@ -52,7 +52,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: ${{ github.workspace }}
+      PROJECT_ROOT: /tmp/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     strategy:
       fail-fast: false
@@ -105,10 +105,10 @@ jobs:
             exit 1
           fi
 
-      - name: Extract source code
-        run: |
-          mkdir -p $PROJECT_ROOT
-          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+      # - name: Extract source code
+      #   run: |
+      #     mkdir -p $PROJECT_ROOT
+      #     tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
 
       - name: Set safe directory
         run: |
