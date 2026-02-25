@@ -1,0 +1,245 @@
+diff --git a/megatron-lm-musa-patch/musa_patch/__init__.py b/megatron-lm-musa-patch/musa_patch/__init__.py
+new file mode 100644
+index 000000000..bdcc28764
+--- /dev/null
++++ b/megatron-lm-musa-patch/musa_patch/__init__.py
+@@ -0,0 +1,238 @@
++import os
++import sys
++import torch
++import torch.utils
++import torch.utils.data
++import torch_musa
++from contextlib import nullcontext
++
++def patch_before_import_megatron():
++    # Import fused_layer_norm before transformer_engine
++    def patched_get_device_arch_version():
++        return torch.musa.get_device_properties(torch.musa.current_device()).major
++    import megatron.training.utils
++    megatron.training.utils.get_device_arch_version = patched_get_device_arch_version
++    import importlib
++    importlib.reload(megatron.training.arguments)
++    
++    from . import fused_layer_norm
++
++    from transformer_engine.pytorch.utils import get_device_compute_capability
++    def _get_device_compute_capability():
++        return (8, 0)
++    get_device_compute_capability = _get_device_compute_capability
++    from packaging.version import Version as PkgVersion
++    # from transformer_engine.pytorch.attention import _flash_attn_version
++    # _flash_attn_version = PkgVersion("2.5.0")
++    # Import other necessary modules to patch
++    # from . import transformer_config
++    from . import dot_product_attention
++    from . import checkpointing
++    from . import training
++    from . import linear_with_grad_accumulation_and_async_allreduce
++    from . import rotary_pos_embedding
++    from . import p2p_communication
++    from . import fused_bias_swiglu
++    # if int(os.getenv("USE_MUSA_MOE", 0)):
++    #     from . import moe_utils
++    from . import router
++    from . import arguments
++    if int(os.getenv("USE_RECOMPUTE_VARIANCE", 0)):
++        from . import recomupte_variance
++    if int(os.getenv("USE_EPX", 0)):
++        from . import fault_tolerance_epx
++        from . import parallel_state
++    from . import optimizer
++    if int(os.getenv("USE_EPX", 0)):
++        from . import parallel_state
++        from . import fault_tolerance_epx
++    # if int(os.getenv("ENABLE_D2H_IN_PERMUTATION", 0)):
++    #     from . import token_dispatcher
++    from . import token_dispatcher
++
++    from . import core_pipeline_parallel_schedules
++    from . import yarn_rotary_pos_embedding
++    
++    # Disable some unsupprted features
++    # set_jit_fusion_options
++    def set_jit_fusion_options():
++        pass
++    import megatron.training.initialize
++    megatron.training.training.set_jit_fusion_options = set_jit_fusion_options
++    megatron.training.initialize.set_jit_fusion_options = set_jit_fusion_options
++    # Disable fused_kernels
++    import megatron.legacy.fused_kernels
++    megatron.legacy.fused_kernels.load = lambda args : None
++    # Disable _compile_dependencies
++    def _compile_dependencies():
++        pass
++    megatron.training.initialize._compile_dependencies = _compile_dependencies
++
++
++def patch_after_import_torch():
++    # 1. Patch for torch.xxx
++    torch.cuda.is_available = torch.musa.is_available
++    torch.cuda.current_device = lambda : f'musa:{torch.musa.current_device()}'
++    torch.cuda.device_count = torch.musa.device_count
++    torch.cuda.set_device = torch.musa.set_device
++    torch.cuda.DoubleTensor = torch.musa.DoubleTensor
++    torch.cuda.FloatTensor = torch.musa.FloatTensor
++    torch.cuda.LongTensor = torch.musa.LongTensor
++    torch.cuda.HalfTensor = torch.musa.HalfTensor
++    torch.cuda.BFloat16Tensor = torch.musa.BFloat16Tensor
++    torch.cuda.IntTensor = torch.musa.IntTensor
++    torch.cuda.synchronize = torch.musa.synchronize
++    torch.cuda.get_rng_state = torch.musa.get_rng_state
++    torch.cuda.set_rng_state = torch.musa.set_rng_state
++    torch.cuda.random.get_rng_state = torch.musa.get_rng_state
++    torch.cuda.synchronize = torch.musa.synchronize
++    torch.cuda.empty_cache = torch.musa.empty_cache
++    torch.Tensor.cuda = torch.Tensor.musa
++    torch.cuda.manual_seed = torch.musa.manual_seed
++    torch.cuda.Event = torch.musa.Event
++    torch.cuda.Stream = torch.musa.Stream
++    torch.cuda.stream = torch.musa.stream
++    torch.cuda.get_device_properties = torch.musa.get_device_properties
++    # add torch.musa.current_devce() to activate torch.musa.default_generators
++    d = torch.musa.current_device()
++    torch.cuda.default_generators = torch.musa.default_generators
++    # torch.cuda.amp = torch.musa.amp
++    # Memory
++    torch.cuda.memory_allocated = torch.musa.memory_allocated
++    torch.cuda.max_memory_allocated = torch.musa.max_memory_allocated
++    torch.cuda.memory_reserved = torch.musa.memory_reserved
++    torch.cuda.max_memory_reserved = torch.musa.max_memory_reserved
++    torch.cuda.memory._record_memory_history = torch.musa.memory._record_memory_history
++    torch.cuda.memory._snapshot = torch.musa.memory._snapshot
++
++    # (yehua.zhang) replace lazy_call to avoid cpu memory leak,
++    # because failure of cuda init in lazy_call will cause endless operation of emplace back.
++    torch.cuda._lazy_call = torch.musa.core._lazy_init._lazy_call
++    torch.cuda._lazy_init = torch.musa.core._lazy_init._lazy_init
++
++    # 2.Patch for torch args related to cuda/musa
++    def hook_cuda_device(device):
++        if isinstance(device, str) and device.startswith("cuda"):
++            return device.replace("cuda", "musa")
++        if isinstance(device, torch.device) and device.type == "cuda":
++            return torch.device("musa", device.index)
++        return device
++
++    def maybe_hook_cuda_args(args, kwargs):
++        new_args = []
++        for arg in args:
++            new_args.append(hook_cuda_device(arg))
++        if "device" in kwargs:
++            v = kwargs["device"]
++            kwargs['device'] = hook_cuda_device(v)
++        return tuple(new_args), kwargs
++    
++    # retain torch.full reference
++    original_full = torch.full
++    # redeine torch.zeros
++    def patched_full(*args, **kwargs):
++        args, kwargs = maybe_hook_cuda_args(args, kwargs)
++        result = original_full(*args, **kwargs)
++        return result
++    torch.full = patched_full
++
++    # retain torch.tensor reference
++    original_tensor = torch.tensor
++    # redefine torch.tensor
++    def patched_tensor(*args, **kwargs):
++        if 'device' in kwargs and kwargs['device'] == 'cuda':
++            kwargs['device'] = 'musa'
++        result = original_tensor(*args, **kwargs)
++        return result
++    torch.tensor = patched_tensor
++
++    # redefine torch.Tensor type
++    orig_type = torch.Tensor.type
++    def musa_type(*args, **kwargs):
++        result = orig_type(*args, **kwargs)
++        if isinstance(result, str):
++            result = result.replace("musa", "cuda")
++        return result
++    torch.Tensor.type = musa_type
++
++    # retain torch.zeros reference
++    original_zeros = torch.zeros
++    # redeine torch.zeros
++    def patched_zeros(*args, **kwargs):
++        if 'device' in kwargs and kwargs['device'] == 'cuda':
++            kwargs['device'] = 'musa'
++        result = original_zeros(*args, **kwargs)
++        return result
++    torch.zeros = patched_zeros
++
++    # retain torch.empty reference
++    original_empty = torch.empty
++    # redifine torch.empty
++    def patched_empty(*args, **kwargs):
++        if 'device' in kwargs and kwargs['device'] == 'cuda':
++            kwargs['device'] = 'musa'
++        result = original_empty(*args, **kwargs)
++        return result
++    torch.empty = patched_empty
++
++    # Original tensor class
++    original_is_cuda = torch.Tensor.is_cuda
++    def always_cuda(self):
++        return self.is_musa
++
++    # TODO : this patch may be override by transformer_engine patch
++    # we'd better unify this patch with transformer_engine patch.
++    torch.Tensor.is_cuda = property(always_cuda)
++
++    # 3. Patch for nccl/mccl
++    origin_init_process_group = torch.distributed.init_process_group
++    def patched_init_process_group(*args, **kwargs):
++        if 'backend' in kwargs and kwargs['backend'] == 'nccl':
++            kwargs['backend'] = 'mccl'
++        result = origin_init_process_group(*args, **kwargs)
++        return result
++    torch.distributed.init_process_group = patched_init_process_group
++
++    # 3. disable pin memory
++    # def pin_memory(data, device=None):
++    #     return data
++    # torch.utils.data._utils.pin_memory.pin_memory = pin_memory
++
++    # 4. disable nvtx
++    def _pass_pvtx(*args, **kwargs):
++        return
++    torch.cuda.nvtx.range_push = _pass_pvtx
++    torch.cuda.nvtx.range_pop = _pass_pvtx
++
++    # 5. disable dynamo
++    import os
++    #HACK(sherry): enable torch.compile
++    os.environ["NVTE_TORCH_COMPILE"] = "1"
++    os.environ["TORCHDYNAMO_DISABLE"] = "0"
++    #HACK(sherry)
++
++    def get_device_capability_musa():
++        return [8, 3]
++    torch.cuda.get_device_capability = get_device_capability_musa
++
++def py_patch():
++    if sys.version_info >= (3.9, 0):
++        return
++    import math
++    def lcm(a, b):
++        return abs(a * b) // math.gcd(a, b)
++    math.lcm = lcm
++    return
++
++# Apply patch
++py_patch()
++
++patch_after_import_torch()
++
++if os.getenv("ENABLE_ZERO_BUBBLE", "0") == "1":
++    from .import zbb_light
++    zbb_light.patch_megatron()
++
++patch_before_import_megatron()
++
++
+

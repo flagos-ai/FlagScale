@@ -1,0 +1,331 @@
+diff --git a/megatron-lm-musa-patch/musa_patch/moe_monitor.py b/megatron-lm-musa-patch/musa_patch/moe_monitor.py
+new file mode 100644
+index 000000000..ce4e9b1d9
+--- /dev/null
++++ b/megatron-lm-musa-patch/musa_patch/moe_monitor.py
+@@ -0,0 +1,324 @@
++"""
++================================== MoE Monitor ====================================
++# 开启观测：数字代表统计和观测频率 (来自 args)
++# --router-prob-var-mointor-freq 2
++# --router-logit-var-mointor-freq 2
++# --router-maxvio-mointor-freq 2
++===================================================================================
++"""
++
++
++import re
++from collections import defaultdict
++import types
++import functools
++from abc import ABC, abstractmethod
++from typing import Dict, Optional
++
++import torch
++import torch.distributed as dist
++
++from megatron.core.parallel_state import (
++    get_data_parallel_rank,
++    get_data_parallel_group,
++    get_data_parallel_world_size,
++    get_pipeline_model_parallel_rank,
++    get_pipeline_model_parallel_world_size,
++)
++
++from megatron.training.global_vars import (
++    get_args,
++    get_tensorboard_writer,
++)
++
++from megatron.core.transformer.moe.router import TopKRouter
++
++
++class MoEMonitor():
++    def __init__(self, model, iteration):
++        self.model = model
++        self.iteration = iteration
++
++        self.args = get_args()
++        self.router_prob_var_mointor_freq  = int(self.args.router_prob_var_mointor_freq)
++        self.router_logit_var_mointor_freq = int(self.args.router_logit_var_mointor_freq)
++        self.router_maxvio_mointor_freq    = int(self.args.router_maxvio_mointor_freq)
++
++        if self.router_prob_var_mointor_freq > 0:
++            self.prob_var_mointor = MoERouterProbVarianceMonitor(
++                model, global_iteration=iteration, log_every=self.router_prob_var_mointor_freq
++            )
++        if self.router_logit_var_mointor_freq > 0:
++            self.logit_var_mointor = MoEGatingLogitVarianceMonitor(
++                model, global_iteration=iteration, log_every=self.router_logit_var_mointor_freq
++            )
++        if self.router_maxvio_mointor_freq > 0:
++            self.maxvio_mointor = MoELoadBalanceMaxVioMonitor(
++                model, global_iteration=iteration, log_every=self.router_maxvio_mointor_freq
++            )
++    
++    def step(self):
++        if self.router_prob_var_mointor_freq > 0:
++            self.prob_var_mointor.step()
++        if self.router_logit_var_mointor_freq > 0:
++            self.logit_var_mointor.step()
++        if self.router_maxvio_mointor_freq > 0:
++            self.maxvio_mointor.step()
++        
++
++class _MoEMonitorBase(ABC):
++    LAYER_NAME_RE = re.compile(r"(?:^|\.)(decoder)\.layers\.(\d+)\.mlp\.router$")
++
++    def __init__(self, model, global_iteration, *, log_every: int = 1, tag_prefix: str):
++        self.global_iteration = global_iteration
++        if TopKRouter is None:
++            raise RuntimeError("TopKRouter is not available/importable.")
++        
++        self.log_every = max(1, int(log_every))
++        self._tag_prefix = tag_prefix
++
++        self.dp_rank = get_data_parallel_rank()
++        self.dp_world_size = get_data_parallel_world_size()
++        self.dp_group = get_data_parallel_group()
++        self.pp_rank = get_pipeline_model_parallel_rank()
++        self.pp_world_size = get_pipeline_model_parallel_world_size()
++
++        self.local_sum: Dict[int, torch.Tensor] = {}
++        self.local_count: Dict[int, int] = defaultdict(int)
++
++        self.writer = get_tensorboard_writer()
++        self.has_tb_writer = self.writer is not None
++
++        self._writer_rank: int = -1
++
++        self.pp_layer_offset = self._compute_pp_layer_offset()
++        self._orig_methods: Dict[tuple, callable] = {}
++
++        root = model[0] if isinstance(model, (list, tuple)) else model
++        self._install(root)
++
++    @abstractmethod
++    def _install(self, model):
++        ...
++
++    def _accumulate(self, global_layer_idx: int, value: torch.Tensor):
++        v = value.detach().to(torch.float32)
++        prev = self.local_sum.get(global_layer_idx)
++        if prev is None:
++            self.local_sum[global_layer_idx] = v
++        else:
++            self.local_sum[global_layer_idx] = prev + v
++        self.local_count[global_layer_idx] += 1
++
++    def _parse_layer_index_from_name(self, name: str) -> Optional[int]:
++        m = self.LAYER_NAME_RE.search(name)
++        if not m:
++            return None
++        return int(m.group(2))  # local idx, 0-based
++
++    def _compute_pp_layer_offset(self) -> int:
++        args = get_args()
++        total_layers = getattr(args, "num_decoder_layers", None)
++        if total_layers is None:
++            total_layers = getattr(args, "num_layers", None)
++        if total_layers is None:
++            return 0
++
++        pp_size = max(1, self.pp_world_size)
++        base = total_layers // pp_size
++        rem = total_layers % pp_size
++        if self.pp_rank < rem:
++            return self.pp_rank * (base + 1)
++        else:
++            return rem * (base + 1) + (self.pp_rank - rem) * base
++
++    def _resolve_writer_rank(self) -> int:
++        if self._writer_rank >= 0:
++            return self._writer_rank
++
++        if not (dist.is_available() and dist.is_initialized()):
++            self._writer_rank = 0
++            return self._writer_rank
++
++        world = dist.get_world_size()
++        has = 1 if self.has_tb_writer else 0
++
++        tensor = torch.tensor([has, dist.get_rank()], dtype=torch.int64, device="cuda" if torch.cuda.is_available() else "cpu")
++        gather_list = [torch.zeros_like(tensor) for _ in range(world)]
++        dist.all_gather(gather_list, tensor)
++
++        candidates = [int(t[1].item()) for t in gather_list if int(t[0].item()) == 1]
++        self._writer_rank = min(candidates) if len(candidates) > 0 else 0
++        return self._writer_rank
++
++    def step(self):
++        if (self.global_iteration % self.log_every) != 0:
++            if self.local_sum:
++                self.local_sum.clear()
++                self.local_count.clear()
++            self.global_iteration += 1
++            return
++
++        if not self.local_sum:
++            raise ValueError(
++                f"[{self._tag_prefix}] No accumulated data to log at iteration {self.global_iteration}."
++            )
++
++        device = "cuda" if torch.cuda.is_available() else "cpu"
++
++        indices: list[int] = []
++        vals: list[torch.Tensor] = []
++        for layer_idx in sorted(self.local_sum.keys()):
++            cnt = self.local_count.get(layer_idx, 0)
++            if cnt <= 0:
++                continue
++            local_mean = self.local_sum[layer_idx] / cnt
++            t = local_mean.to(torch.float32).to(device)
++            indices.append(layer_idx)
++            vals.append(t)
++
++        self.local_sum.clear()
++        self.local_count.clear()
++
++        if not indices:
++            raise ValueError(
++                f"[{self._tag_prefix}] No valid layers to log at iteration {self.global_iteration}."
++            )
++
++        vec = torch.stack(vals, dim=0)  # shape: [num_local_layers]
++        if dist.is_available() and dist.is_initialized() and self.dp_world_size > 1:
++            dist.all_reduce(vec, op=dist.ReduceOp.SUM, group=self.dp_group)
++            vec /= float(self.dp_world_size)
++
++        writer_rank = self._resolve_writer_rank()
++        is_dist = dist.is_available() and dist.is_initialized()
++        am_writer = (not is_dist or dist.get_rank() == writer_rank) and self.has_tb_writer        
++
++        if am_writer:
++            for layer_idx, v in zip(indices, vec):
++                dp_mean = float(v.item())
++                tag = f"{self._tag_prefix}/layer{layer_idx}"
++                self.writer.add_scalar(tag, dp_mean, self.global_iteration)
++            self.writer.flush()
++
++        self.global_iteration += 1
++
++
++# ============== scores（softmax 后） ==============
++class MoERouterProbVarianceMonitor(_MoEMonitorBase):
++    def __init__(self, model, global_iteration, log_every: int = 1):
++        super().__init__(model, global_iteration, log_every=log_every, tag_prefix="router_score_variance")
++
++    def _install(self, model):
++        for name, module in model.named_modules():
++            if not isinstance(module, TopKRouter):
++                continue
++            local_idx = self._parse_layer_index_from_name(name)
++            if local_idx is None:
++                continue
++
++            global_idx = self.pp_layer_offset + local_idx  # 0-based
++            module_id  = id(module)
++            key = (module_id , "routing")
++            if key in self._orig_methods:
++                continue
++
++            orig_routing = module.routing
++
++            def make_wrapped(orig_fn, layer_idx: int):
++                @functools.wraps(orig_fn)
++                def wrapped_routing(this: TopKRouter, *args, **kwargs):
++                    scores, routing_map = orig_fn(*args, **kwargs)
++                    if (self.global_iteration % self.log_every) == 0 and torch.is_grad_enabled():
++                        with torch.no_grad():
++                            s = scores.to(torch.float32)
++                            token_var = s.var(dim=-1, unbiased=False).mean()
++                            self._accumulate(layer_idx, token_var)
++                    return scores, routing_map
++                return wrapped_routing
++
++            module.routing = types.MethodType(make_wrapped(orig_routing, global_idx), module)
++            self._orig_methods[key] = orig_routing
++
++
++# ============== logits（softmax 前） ==============
++class MoEGatingLogitVarianceMonitor(_MoEMonitorBase):
++    def __init__(self, model, global_iteration, log_every: int = 1):
++        super().__init__(model, global_iteration, log_every=log_every, tag_prefix="router_logit_variance")
++
++    def _install(self, model):
++        for name, module in model.named_modules():
++            if not isinstance(module, TopKRouter):
++                continue
++            local_idx = self._parse_layer_index_from_name(name)
++            if local_idx is None:
++                continue
++
++            global_idx = self.pp_layer_offset + local_idx  # 0-based
++            module_id  = id(module)
++            key = (module_id , "gating")
++            if key in self._orig_methods:
++                continue
++
++            orig_gating = module.gating
++
++            def make_wrapped(orig_fn, layer_idx: int):
++                @functools.wraps(orig_fn)
++                def wrapped_gating(this: TopKRouter, *args, **kwargs):
++                    logits = orig_fn(*args, **kwargs)
++                    if (self.global_iteration % self.log_every) == 0 and torch.is_grad_enabled():
++                        with torch.no_grad():
++                            s = logits.to(torch.float32)
++                            token_var = s.var(dim=-1, unbiased=False).mean()
++                            self._accumulate(layer_idx, token_var)
++                    return logits
++                return wrapped_gating
++
++            module.gating = types.MethodType(make_wrapped(orig_gating, global_idx), module)
++            self._orig_methods[key] = orig_gating
++
++
++# ============== MaxVio(基于 routing_map) ==============
++class MoELoadBalanceMaxVioMonitor(_MoEMonitorBase):
++    def __init__(self, model, global_iteration, log_every: int = 1, eps: float = 1e-6):
++        self.eps = float(eps)
++        super().__init__(model, global_iteration, log_every=log_every, tag_prefix="router_maxvio")
++
++    def _install(self, model):
++        for name, module in model.named_modules():
++            if not isinstance(module, TopKRouter):
++                continue
++            local_idx = self._parse_layer_index_from_name(name)
++            if local_idx is None:
++                continue
++
++            global_idx = self.pp_layer_offset + local_idx
++            module_id  = id(module)
++            key = (module_id , "routing")
++            if key in self._orig_methods:
++                continue
++
++            orig_routing = module.routing
++
++            def make_wrapped(orig_fn, layer_idx: int):
++                @functools.wraps(orig_fn)
++                def wrapped_routing(this: TopKRouter, *args, **kwargs):
++                    scores, routing_map = orig_fn(*args, **kwargs)
++                    if (self.global_iteration % self.log_every) == 0 and torch.is_grad_enabled():
++                        with torch.no_grad():
++                            counts = routing_map.sum(dim=0, dtype=torch.float32)
++                            total  = counts.sum()
++                            max_c  = counts.amax(dim=0)
++                            E = counts.numel()
++                            # MaxVio = max/mean - 1 = (max * E / total) - 1；total==0 时置 0
++                            maxvio = torch.where(
++                                total > 0,
++                                (max_c * E / total) - 1.0,
++                                torch.zeros((), dtype=counts.dtype, device=counts.device)
++                            )
++                            self._accumulate(layer_idx, maxvio)
++                    return scores, routing_map
++                return wrapped_routing
++
++            module.routing = types.MethodType(make_wrapped(orig_routing, global_idx), module)
++            self._orig_methods[key] = orig_routing
+

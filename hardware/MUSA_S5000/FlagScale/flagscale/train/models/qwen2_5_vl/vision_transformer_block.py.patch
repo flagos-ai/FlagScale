@@ -1,0 +1,32 @@
+diff --git a/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py b/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py
+index 3ba04864..d439f4f3 100644
+--- a/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py
++++ b/flagscale/train/models/qwen2_5_vl/vision_transformer_block.py
+@@ -16,7 +16,7 @@ from megatron.core.fp8_utils import get_fp8_context
+ from megatron.core.fusions.fused_layer_norm import FusedLayerNorm
+ from megatron.core.inference.contexts import BaseInferenceContext
+ from megatron.core.packed_seq_params import PackedSeqParams
+-from megatron.core.process_groups_config import ProcessGroupCollection
++# from megatron.core.process_groups_config import ProcessGroupCollection
+ from megatron.core.transformer.spec_utils import ModuleSpec
+ from megatron.core.transformer.transformer_block import TransformerBlock, TransformerBlockSubmodules
+ from megatron.core.transformer.transformer_config import TransformerConfig
+@@ -52,7 +52,7 @@ class VisionTransformerBlock(TransformerBlock):
+         post_layer_norm: bool = True,
+         pre_process: bool = True,
+         post_process: bool = True,
+-        pg_collection: ProcessGroupCollection = None,
++        # pg_collection: ProcessGroupCollection = None,
+     ):
+         super().__init__(
+             config=config,
+@@ -60,7 +60,7 @@ class VisionTransformerBlock(TransformerBlock):
+             post_layer_norm=post_layer_norm,
+             pre_process=pre_process,
+             post_process=post_process,
+-            pg_collection=pg_collection,
++            # pg_collection=pg_collection,
+         )
+ 
+     def _checkpointed_forward(
+

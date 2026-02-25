@@ -1,0 +1,13 @@
+diff --git a/megatron/core/dist_checkpointing/serialization.py b/megatron/core/dist_checkpointing/serialization.py
+index 0469949c6..e3feb8ce0 100644
+--- a/megatron/core/dist_checkpointing/serialization.py
++++ b/megatron/core/dist_checkpointing/serialization.py
+@@ -8,6 +8,7 @@ Additionally, `load` expects the sharded state dict argument as a guidance for
+ loading the sharded tensors.
+ """
+ 
++import os
+ import logging
+ from pathlib import Path
+ from typing import Callable, Dict, Optional, Set, Tuple, Union
+

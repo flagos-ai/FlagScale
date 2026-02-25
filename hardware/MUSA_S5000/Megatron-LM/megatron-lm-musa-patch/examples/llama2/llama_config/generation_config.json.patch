@@ -1,0 +1,9 @@
+diff --git a/megatron-lm-musa-patch/examples/llama2/llama_config/generation_config.json b/megatron-lm-musa-patch/examples/llama2/llama_config/generation_config.json
+new file mode 100644
+index 000000000..fcac46fde
+--- /dev/null
++++ b/megatron-lm-musa-patch/examples/llama2/llama_config/generation_config.json
+@@ -0,0 +1 @@
++{"_from_model_config": true, "bos_token_id": 0, "eos_token_id": 1, "pad_token_id": 0, "transformers_version": "4.27.0.dev0"}
+\ No newline at end of file
+

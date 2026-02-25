@@ -1,0 +1,87 @@
+diff --git a/examples/qwen3/conf/train/0_6b.yaml b/examples/qwen3/conf/train/0_6b.yaml
+index f5e42acf..65c44b0c 100644
+--- a/examples/qwen3/conf/train/0_6b.yaml
++++ b/examples/qwen3/conf/train/0_6b.yaml
+@@ -8,7 +8,7 @@ system:
+   reset_position_ids: True
+   reset_attention_mask: True
+   qk_layernorm: true
+-  sequence_parallel: true
++  sequence_parallel: False
+   use_distributed_optimizer: true
+   overlap_grad_reduce: true
+   overlap_param_gather: true
+@@ -20,8 +20,8 @@ system:
+   logging:
+     log_interval: 1
+     tensorboard_log_interval: 1
+-    wandb_project: ${experiment.exp_name}
+-    wandb_exp_name: ${experiment.exp_name}
++    # wandb_project: ${experiment.exp_name}
++    # wandb_exp_name: ${experiment.exp_name}
+     log_timers_to_tensorboard: true
+     log_validation_ppl_to_tensorboard: true
+     log_throughput: true
+@@ -29,12 +29,15 @@ system:
+     log_num_zeros_in_grad: true
+     log_memory_to_tensorboard: true
+   checkpoint:
+-    save_interval: ${experiment.save_steps}
++    save_interval: 1000
+     load: ${experiment.load}
+     ckpt_format: ${experiment.ckpt_format}
+ 
+ model:
+   transformer_impl: transformer_engine
++  use_transformer_engine_fl: true
++  # enable_flag_gems: true
++  # flag_gems_unused: ['mm','bmm','addmm','_attn']
+   num_layers: 28
+   hidden_size: 1024
+   ffn_hidden_size: 3072
+@@ -45,10 +48,12 @@ model:
+   max_position_embeddings: 40960
+   norm_epsilon: 1e-6
+   use_rotary_position_embeddings: true
++  no_gradient_accumulation_fusion: True
++
+   rotary_base: 1000000
+   swiglu: true
+   normalization: RMSNorm
+-  init_method_std: 0.02
++  init_method_std: 6e-3
+   attention_dropout: 0.0
+   hidden_dropout: 0.0
+   clip_grad: 1.0
+@@ -58,12 +63,12 @@ model:
+   no_rope_fusion: true
+ 
+   # training
+-  seed: ${experiment.seed}
++  seed: 42
+   # finetune: false
+-  micro_batch_size: 1
++  micro_batch_size: 4
+   global_batch_size: 2048
+   eval_iters: 0
+-  train_samples: 244141056 #1T #29297664 #120B tokens
++  train_samples: 29297664 #1T #29297664 #120B tokens
+ 
+   optimizer:
+     weight_decay: 0.1
+@@ -77,11 +82,11 @@ model:
+ 
+ 
+ data:
+-  data_path: /path/to/dataset
++  data_path: /data/train-data/
+   split: 1
+   no_mmap_bin_files: true
+   tokenizer:
+     tokenizer_type: QwenTokenizerFS
+-    tokenizer_path: Qwen3-0.6B
+-    vocab_size: 151936
++    tokenizer_path: /data/train-data/qwentokenizer/
++    vocab_size: 151851
+     make_vocab_size_divisible_by: 64
+

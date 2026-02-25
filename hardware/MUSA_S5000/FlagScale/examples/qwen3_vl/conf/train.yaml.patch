@@ -1,0 +1,41 @@
+diff --git a/examples/qwen3_vl/conf/train.yaml b/examples/qwen3_vl/conf/train.yaml
+index f717db7a..9c5eac71 100644
+--- a/examples/qwen3_vl/conf/train.yaml
++++ b/examples/qwen3_vl/conf/train.yaml
+@@ -4,7 +4,8 @@ defaults:
+ 
+ experiment:
+   exp_name: train_qwen3_vl_8b
+-  exp_dir: ./${experiment.exp_name}
++  exp_dir: ./outputs_qwen3_vl
++  ckpt_format: torch
+   task:
+     type: train
+     backend: megatron
+@@ -19,12 +20,20 @@ experiment:
+   envs:
+     # NCCL_DEBUG: INFO
+     # NCCL_DEBUG_SUBSYSTEM: ALL
+-    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+-    # CUDA_VISIBLE_DEVICES: 0,1,2,3
+-    # CUDA_VISIBLE_DEVICES: 4,5,6,7
++    LOGLEVEL: INFO
++    MUSA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+-    NVTE_APPLY_QK_LAYER_SCALING: 0
+-    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
++    MUSA_KERNEL_TIMEOUT: 3200000
++    ACCELERATOR_BACKEND: musa
++    MCCL_PROTOS: 2
++    MCCL_CHECK_POINTERS: 0
++    OMP_NUM_THREADS: 4
++    MCCL_ALGOS: 1
++    MCCL_BUFFSIZE: 20971520
++    MUSA_BLOCK_SCHEDULE_MODE: 1
++    MCCL_IB_GID_INDEX: 3
++    MCCL_NET_SHARED_BUFFERS: 0
++
+ 
+ action: run
+ 
+

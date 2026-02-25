@@ -1,0 +1,9 @@
+diff --git a/megatron-lm-musa-patch/examples/llama2/llama_config/tokenizer_config.json b/megatron-lm-musa-patch/examples/llama2/llama_config/tokenizer_config.json
+new file mode 100644
+index 000000000..1aabb918c
+--- /dev/null
++++ b/megatron-lm-musa-patch/examples/llama2/llama_config/tokenizer_config.json
+@@ -0,0 +1 @@
++{"bos_token": "", "eos_token": "", "model_max_length": 1000000000000000019884624838656, "tokenizer_class": "LLaMATokenizer", "unk_token": ""}
+\ No newline at end of file
+

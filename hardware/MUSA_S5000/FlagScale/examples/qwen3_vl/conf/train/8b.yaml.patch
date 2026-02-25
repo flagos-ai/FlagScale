@@ -1,0 +1,76 @@
+diff --git a/examples/qwen3_vl/conf/train/8b.yaml b/examples/qwen3_vl/conf/train/8b.yaml
+index c13cbfa4..2c9d432e 100644
+--- a/examples/qwen3_vl/conf/train/8b.yaml
++++ b/examples/qwen3_vl/conf/train/8b.yaml
+@@ -4,13 +4,13 @@ system:
+   vision_ration: 0.1
+   num_workers: 1
+   calculate_per_token_loss: true
+-  tensor_model_parallel_size: 2
+-  pipeline_model_parallel_size: 1
++  tensor_model_parallel_size: 1
++  pipeline_model_parallel_size: 2
+   context_parallel_size: 1
+   # decoder_first_pipeline_num_layers: 12
+   use_flash_attn: True
+   use_distributed_optimizer: True
+-  sequence_parallel: True
++  sequence_parallel: False
+   tp_comm_overlap: False
+   overlap_grad_reduce: False # if has text-only must be false
+   overlap_param_gather: False # if has text-only must be false
+@@ -27,13 +27,13 @@ system:
+     log_interval: 1
+     tensorboard_log_interval: 1
+     log_throughput: True
+-    wandb_project: ${experiment.exp_name}
+-    wandb_exp_name: ${experiment.exp_name}
++    # wandb_project: ${experiment.exp_name}
++    # wandb_exp_name: ${experiment.exp_name}
+     log_params_norm: True
+     log_num_zeros_in_grad: True
+   checkpoint:
+     save_interval: 1000
+-    pretrained_checkpoint: ${pretrained_checkpoint ???}
++    # pretrained_checkpoint: ${pretrained_checkpoint ???}
+     dataloader_save: ${experiment.exp_dir}/checkpoints/dataloader
+     # use_dist_ckpt: False
+     ckpt_format: torch
+@@ -70,13 +70,15 @@ model:
+   group_query_attention: True
+   no_masked_softmax_fusion: True
+   untie_embeddings_and_output_weights: True
++  use_cpu_initialization: False
+ 
+   # position embedding
+   position_embedding_type: mrope
+   rotary_percent: 1.0
+   rotary_base: 5000000
+   rotary_seq_len_interpolation_factor: 1
+-  no_rope_fusion: False
++  no_rope_fusion: True
++  no_gradient_accumulation_fusion: True
+   mrope_section: [24, 20, 20]
+   eod_mask_loss: False
+ 
+@@ -100,13 +102,14 @@ model:
+ 
+ data:
+   no_use_system_prompt: True
+-  data_path: ${data_path ???}
+-  vision_root: ${vision_root ???}
++  # mock_data: True
++  data_path: /home/dist/haoran.huang/FlagScale/llava-datasets/LLaVA-Pretrain/blip_laion_cc_sbu_558k/wds-1
++  vision_root: /home/dist/haoran.huang/FlagScale/llava-datasets/LLaVA-Pretrain
+   dataloader_type: external
+   split: 100,0,0
+   tokenizer:
+-    tokenizer_type: Qwen2VLTokenizer
+-    tokenizer_path: ${tokenizer_path ???}
+-    # vocab_size: 151936 # 
++    # tokenizer_type: MultimodalTokenizer
++    tokenizer_model: /home/dist/haoran.huang/FlagScale/qwen3_vl_tokenizer
++    vocab_size: 151963 # 
+     extra_vocab_size: 293 # Qwen3-VL specific. total vocab size = 151643 + extra_vocab_size
+     make_vocab_size_divisible_by: 64
+
