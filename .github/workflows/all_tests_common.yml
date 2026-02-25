@@ -15,7 +15,9 @@ jobs:
         shell: bash
     runs-on: ubuntu-latest
     outputs:
-      ci_image: ${{ steps.config.outputs.ci_image }}
+      # ci_image: ${{ steps.config.outputs.ci_image }}
+      ci_train_image: ${{ steps.config.outputs.ci_train_image }}
+      ci_inference_image: ${{ steps.config.outputs.ci_inference_image }}
       runs_on: ${{ steps.config.outputs.runs_on }}
       container_volumes: ${{ steps.config.outputs.container_volumes }}
       container_options: ${{ steps.config.outputs.container_options }}
@@ -108,7 +110,7 @@ jobs:
     with:
       platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
-      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
@@ -126,7 +128,7 @@ jobs:
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.train_test_matrix }}
-      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
@@ -144,7 +146,7 @@ jobs:
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.hetero_train_test_matrix }}
-      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
@@ -154,41 +156,41 @@ jobs:
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
   # NOTE: Inference, serve, and rl functional tests are temporarily disabled
-  # functional_tests_inference:
-  #   needs:
-  #     - checkout_and_config
-  #     - unit_tests
-  #   if: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
-  #   uses: ./.github/workflows/functional_tests_inference.yml
-  #   with:
-  #     platform: ${{ inputs.platform }}
-  #     test_matrix: ${{ needs.checkout_and_config.outputs.inference_test_matrix }}
-  #     image: ${{ needs.checkout_and_config.outputs.ci_image }}
-  #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
-  #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
-  #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-  #     source_artifact: flagscale-source-${{ github.sha }}
-  #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
-  #     env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
-  #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+  functional_tests_inference:
+    needs:
+      - checkout_and_config
+      - unit_tests
+    if: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
+    uses: ./.github/workflows/functional_tests_inference.yml
+    with:
+      platform: ${{ inputs.platform }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.inference_test_matrix }}
+      image: ${{ needs.checkout_and_config.outputs.ci_inference_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
-  # functional_tests_serve:
-  #   needs:
-  #     - checkout_and_config
-  #     - unit_tests
-  #   if: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
-  #   uses: ./.github/workflows/functional_tests_serve.yml
-  #   with:
-  #     platform: ${{ inputs.platform }}
-  #     test_matrix: ${{ needs.checkout_and_config.outputs.serve_test_matrix }}
-  #     image: ${{ needs.checkout_and_config.outputs.ci_image }}
-  #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
-  #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
-  #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-  #     source_artifact: flagscale-source-${{ github.sha }}
-  #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
-  #     env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
-  #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+  functional_tests_serve:
+    needs:
+      - checkout_and_config
+      - unit_tests
+    if: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
+    uses: ./.github/workflows/functional_tests_serve.yml
+    with:
+      platform: ${{ inputs.platform }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.serve_test_matrix }}
+      image: ${{ needs.checkout_and_config.outputs.ci_inference_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
   # functional_tests_rl:
   #   needs:

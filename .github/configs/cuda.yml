@@ -7,6 +7,8 @@ display_name: "CUDA Tests"
 
 # Docker image for this hardware
 ci_image: localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515
+ci_train_image: localhost:5000/flagscale-train:dev-cu128-py3.12-20260223152306
+ci_inference_image: localhost:5000/flagscale-inference:dev-cu128-py3.12-20260224144136
 
 # Runner labels for this hardware
 runner_labels:
@@ -47,7 +49,7 @@ container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user 
 pkg_mgr: "conda"  # Current: conda for CI/CD compatibility
 
 # Environment path (venv path for uv, conda installation path for conda)
-env_path: "/root/miniconda3"
+env_path: "/opt/flagscale/miniconda3"
 
 # Conda environment name (for conda only)
 env_names:
