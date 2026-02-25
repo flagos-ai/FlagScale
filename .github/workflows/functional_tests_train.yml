@@ -148,25 +148,24 @@ jobs:
           echo "Python location: $(which python)"
           echo "Python version: $(python --version)"
 
-          # Install task source dependencies (pip deps are pre-installed in the env)
-          echo "Installing task source dependencies..."
+          # # Install task source dependencies (pip deps are pre-installed in the env)
+          # echo "Installing task source dependencies..."
 
-          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
-          INSTALL_DIR=""
-          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
-            INSTALL_DIR=$(dirname "$ENV_PATH")
-          fi
+          # # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          # INSTALL_DIR=""
+          # if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+          #   INSTALL_DIR=$(dirname "$ENV_PATH")
+          # fi
 
-          # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
-          ./tools/install/install.sh \
-            --platform ${{ inputs.platform }} \
-            --task train \
-            --pkg-mgr "$PKG_MGR" \
-            ${ENV_NAME:+--env-name "$ENV_NAME"} \
-            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
-            --no-system --no-dev --no-base --no-task \
-            --src-deps megatron-lm \
-            --retry-count 3
+          # # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
+          # ./tools/install/install.sh \
+          #   --platform ${{ inputs.platform }} \
+          #   --task train \
+          #   --pkg-mgr "$PKG_MGR" \
+          #   ${ENV_NAME:+--env-name "$ENV_NAME"} \
+          #   ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
+          #   --no-system --no-dev --no-base --no-task \
+          #   --retry-count 3
         timeout-minutes: 30
 
       - name: Run functional tests
