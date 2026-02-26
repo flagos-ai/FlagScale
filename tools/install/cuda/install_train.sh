@@ -74,7 +74,6 @@ install_transformer_engine() {
     run_cmd -d $DEBUG $pip_cmd install --root-user-action=ignore nvidia-mathdx --extra-index-url https://pypi.nvidia.com || return 1
     mkdir -p "$FLAGSCALE_DEPS"
     retry_git_clone -d $DEBUG --recursive \
-        --branch "v2.9.0+fl.0.1.0" \
         "https://github.com/flagos-ai/TransformerEngine-FL.git" "$FLAGSCALE_DEPS/TransformerEngine" "$RETRY_COUNT" || return 1
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/TransformerEngine' && \
         NVTE_FRAMEWORK=pytorch $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1

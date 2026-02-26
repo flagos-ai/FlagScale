@@ -258,7 +258,7 @@ def test_inference_equal(path, task, model, case):
     - Perform exact line-by-line content matching (ignoring newline character differences)
     """
     # Construct test result path: concatenate base path, task, model, test result directory and case name
-    test_result_path = os.path.join(path, task, model, "results_test", case)
+    test_result_path = os.path.join(path, task, model, "test_results", case)
     # Locate the inference output log file (host_0_localhost.output)
     result_path = os.path.join(test_result_path, "inference_logs/host_0_localhost.output")
 
@@ -432,7 +432,7 @@ def test_rl_equal(path, task, model, case):
       between actual and golden values
     """
     # 1. Construct file paths and validate file existence
-    test_result_path = os.path.join(path, task, model, "results_test", case)
+    test_result_path = os.path.join(path, task, model, "test_results", case)
     result_path = os.path.join(test_result_path, "logs/host_0_localhost.output")
     print("result_path:", result_path)
 
