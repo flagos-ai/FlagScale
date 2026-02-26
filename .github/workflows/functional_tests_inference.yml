@@ -220,12 +220,11 @@ jobs:
             echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
           else
             echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
-            sleep 3600
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 60
+        timeout-minutes: 15
 
       - name: Upload Functional Test Logs
         if: always() && steps.functional_test.outcome == 'failure'

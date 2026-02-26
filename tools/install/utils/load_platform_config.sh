@@ -30,7 +30,7 @@ load_platform_config() {
     ENV_PATH=$(/usr/local/bin/yq -r '.env_path // "/opt/venv"' "$CONFIG_FILE")
     ENV_NAME_TRAIN=$(/usr/local/bin/yq -r '.env_names.train // "flagscale-train"' "$CONFIG_FILE")
     ENV_NAME_INFERENCE=$(/usr/local/bin/yq -r '.env_names.inference // "flagscale-inference"' "$CONFIG_FILE")
-    ENV_NAME_SERVE=$(/usr/local/bin/yq -r '.env_names.serve // "flagscale-serve"' "$CONFIG_FILE")
+    ENV_NAME_SERVE=$(/usr/local/bin/yq -r '.env_names.serve // "flagscale-inference"' "$CONFIG_FILE")
     ENV_NAME_RL=$(/usr/local/bin/yq -r '.env_names.rl // "flagscale-rl"' "$CONFIG_FILE")
 
     echo "Package manager: $PKG_MGR"
