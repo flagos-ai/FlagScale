@@ -105,10 +105,10 @@ jobs:
             exit 1
           fi
 
-      # - name: Extract source code
-      #   run: |
-      #     mkdir -p $PROJECT_ROOT
-      #     tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+      - name: Extract source code
+        run: |
+          mkdir -p $PROJECT_ROOT
+          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
 
       - name: Set safe directory
         run: |
@@ -220,11 +220,12 @@ jobs:
             echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
           else
             echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+            sleep 3600
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 15
+        timeout-minutes: 60
 
       - name: Upload Functional Test Logs
         if: always() && steps.functional_test.outcome == 'failure'
