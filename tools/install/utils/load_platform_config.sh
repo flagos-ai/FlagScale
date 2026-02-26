@@ -96,6 +96,7 @@ load_platform_config() {
     # Output values to $GITHUB_OUTPUT
     echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
     echo "ci_train_image=$CI_TRAIN_IMAGE" >> $GITHUB_OUTPUT
+    echo "ci_inference_image=$CI_INFERENCE_IMAGE" >> $GITHUB_OUTPUT
     echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
 
     { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT
