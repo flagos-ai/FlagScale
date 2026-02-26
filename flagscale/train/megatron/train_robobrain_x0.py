@@ -15,6 +15,7 @@
 
 
 import logging
+import math
 import os
 import sys
 
@@ -23,6 +24,7 @@ from copy import deepcopy
 from functools import partial
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch._dynamo
 
@@ -111,6 +113,9 @@ from flagscale.models.megatron.qwen2_5_vl.transformer_config import (
     get_vision_projection_config,
 )
 
+# LeRobotDataset support
+from flagscale.train.datasets.lerobot_dataset import LeRobotDataset
+
 #### especially for qwen2.5-vl ####
 IGNORE_IDX = -100
 FIRST_MAX_PADDING_FLAG = True
@@ -134,7 +139,7 @@ def model_provider(
         args.rotary_seq_len_interpolation_factor is not None
         or args.rotary_seq_len_interpolation_factor != 1
     ):
-        print_rank_0('Multimodal RoPE currently not support RoPE interpolation, set to None...')
+        print_rank_0("Multimodal RoPE currently not support RoPE interpolation, set to None...")
         args.rotary_seq_len_interpolation_factor = None
 
     vision_config = get_vision_model_config(args, deepcopy(config))
@@ -162,7 +167,7 @@ def model_provider(
         drop_vision_class_token=False,  # NOTE: no class token to drop?
         vision_projection_config=vision_projector_config,
         vision_projection_layer_spec=vision_projector_spec,
-        vision_projection_type='mlp',
+        vision_projection_type="mlp",
         allow_missing_vision_projection_checkpoint=args.allow_missing_vision_projection_checkpoint,
         language_position_embedding_type=args.position_embedding_type,
         language_rotary_percent=args.rotary_percent,
@@ -181,15 +186,12 @@ def model_provider(
         freeze_vision_model=args.freeze_ViT,
         freeze_vision_projection=False,
     )
-    # ========== 打印模型embedding层信息 ==========
     print_rank_0("=" * 50)
     print_rank_0("Model Embedding Information:")
     print_rank_0("=" * 50)
 
-    # 方法1: 直接查看模型结构中的embedding相关信息
     try:
-        # 语言模型的embedding
-        if hasattr(model, 'language_model') and hasattr(model.language_model, 'embedding'):
+        if hasattr(model, "language_model") and hasattr(model.language_model, "embedding"):
             lang_embedding = model.language_model.embedding
             print_rank_0(
                 f"Language model embedding shape: {lang_embedding.word_embeddings.weight.shape}"
@@ -200,21 +202,17 @@ def model_provider(
             print(
                 f"Actual embedding allocated: {model.language_model.embedding.word_embeddings.weight.shape[0]}"
             )
-
-        # 视觉模型的embedding
-        if hasattr(model, 'vision_model') and hasattr(model.vision_model, 'embeddings'):
+        if hasattr(model, "vision_model") and hasattr(model.vision_model, "embeddings"):
             vision_embedding = model.vision_model.embeddings
             print_rank_0(f"Vision model embedding type: {type(vision_embedding)}")
-            if hasattr(vision_embedding, 'patch_embedding'):
+            if hasattr(vision_embedding, "patch_embedding"):
                 print_rank_0(
                     f"Vision patch embedding shape: {vision_embedding.patch_embedding.weight.shape}"
                 )
-
-        # 位置编码信息
-        if hasattr(model, 'language_model') and hasattr(model.language_model, 'rotary_pos_emb'):
+        if hasattr(model, "language_model") and hasattr(model.language_model, "rotary_pos_emb"):
             print_rank_0(f"Language model uses rotary position embedding")
-        elif hasattr(model, 'language_model') and hasattr(
-            model.language_model.embedding, 'position_embeddings'
+        elif hasattr(model, "language_model") and hasattr(
+            model.language_model.embedding, "position_embeddings"
         ):
             pos_emb = model.language_model.embedding.position_embeddings
             print_rank_0(f"Language position embedding shape: {pos_emb.weight.shape}")
@@ -501,8 +499,8 @@ def get_batch(data_iterator):
     # shape: n_video_samples
     video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
     # shape: n_video_samples
-    second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)[
-        'second_per_grid_ts'
+    second_per_grid_ts = broadcast_data(["second_per_grid_ts"], data, torch.float32)[
+        "second_per_grid_ts"
     ]
 
     image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
@@ -603,7 +601,7 @@ def loss_func(
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
     reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
 
-    return (loss, num_tokens, {'lm loss': reporting_loss})
+    return (loss, num_tokens, {"lm loss": reporting_loss})
 
 
 def forward_step(data_iterator, model: Qwen2_5VLModel):
@@ -617,7 +615,7 @@ def forward_step(data_iterator, model: Qwen2_5VLModel):
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    timers("batch-generator", log_level=2).start()
     global stimer
     with stimer(bdata=True):
         (
@@ -633,7 +631,7 @@ def forward_step(data_iterator, model: Qwen2_5VLModel):
             image_input_mask,
             video_input_mask,
         ) = get_batch(data_iterator)
-    timers('batch-generator').stop()
+    timers("batch-generator").stop()
     # print(f"LZY imags: {imgs.shape}, content: {imgs.sum()}, {imgs}")
     vision_data = torch.cat([imgs, videos], dim=0)
     vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
@@ -667,6 +665,421 @@ def write_online_eval_to_tensorboard(data, iteration, writer):
     for item in data:
         for k, v in item.items():
             writer.add_scalar(k, v, iteration)
+
+
+class LeRobotDatasetWrapper(torch.utils.data.Dataset):
+    """
+    A wrapper to convert LeRobotDataset samples to the format expected by RoboBrain-X0.
+
+    This wrapper handles:
+    - Loading images/videos from LeRobotDataset
+    - Converting observation and action data to the expected format
+    - Building conversation tokens with action tokens
+    """
+
+    ACTION_TOKEN_START_ID = 149595
+    ACTION_TOKEN_END_ID = ACTION_TOKEN_START_ID + 2048
+
+    def __init__(self, lerobot_dataset: LeRobotDataset, args):
+        self.dataset = lerobot_dataset
+        self.args = args
+        self.tokenizer = get_tokenizer()
+        self.seq_len = args.max_padding_length
+        self.temporal_patch_size = args.temporal_patch_size
+        self.merge_size = args.spatial_merge_size
+        self.patch_size = args.patch_size
+
+        # Build token cache
+        self._token_cache = self._build_token_cache()
+        self._action_token_cache = self._build_action_token_cache()
+
+        # Get action dimension from dataset features
+        self.action_dim = None
+        for key, feat in self.dataset.meta.features.items():
+            if key == "action":
+                self.action_dim = feat.get("shape", [7])[0]
+                break
+        if self.action_dim is None:
+            self.action_dim = 7  # Default action dimension
+
+    def _build_token_cache(self):
+        return {
+            "im_start": self.tokenizer.vocab["<|im_start|>"],
+            "im_end": self.tokenizer.vocab["<|im_end|>"],
+            "user": self.tokenizer.vocab["user"],
+            "assistant": self.tokenizer.vocab["assistant"],
+            "system": self.tokenizer.vocab["system"],
+            "vision_start": self.tokenizer.vocab.get("<|vision_start|>"),
+            "vision_end": self.tokenizer.vocab.get("<|vision_end|>"),
+            "image_pad": self.tokenizer.vocab.get("<|image_pad|>"),
+            "video_pad": self.tokenizer.vocab.get("<|video_pad|>"),
+            "newline": self._safe_encode("\n")[0],
+            "space": self._safe_encode(" ")[0],
+            "boa": self.tokenizer.vocab.get("<boa>", 151665),
+            "EOA": self.tokenizer.vocab.get("<EOA>", 151666),
+            "action_split": self.tokenizer.vocab.get("<action_split>", 151667),
+        }
+
+    def _build_action_token_cache(self):
+        action_cache = {}
+        for action_id in range(2048):
+            token_string = f"<action_token_{action_id}>"
+            token_id = self.tokenizer.vocab.get(
+                token_string, self.ACTION_TOKEN_START_ID + action_id
+            )
+            if token_id is not None:
+                action_cache[action_id] = token_id
+        return action_cache
+
+    def _safe_encode(self, text):
+        try:
+            return self.tokenizer.encode(text, add_special_tokens=False)
+        except TypeError:
+            return self.tokenizer.encode(text)
+
+    def _discretize_action(self, action: np.ndarray, num_bins: int = 2048) -> list:
+        """Discretize continuous action values to token indices."""
+        # Normalize action to [0, 1] range (assuming action is in [-1, 1])
+        normalized = (action + 1) / 2
+        # Clip to valid range
+        normalized = np.clip(normalized, 0, 1)
+        # Convert to bin indices
+        bin_indices = (normalized * (num_bins - 1)).astype(int)
+        return bin_indices.tolist()
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        # Get sample from LeRobotDataset
+        sample = self.dataset[idx]
+
+        # Process images from camera keys
+        imgs = []
+        image_thw_grids = []
+
+        for cam_key in self.dataset.meta.camera_keys:
+            if cam_key in sample:
+                img_tensor = sample[cam_key]
+                # img_tensor shape: (C, H, W) or (T, C, H, W) for video
+                if img_tensor.dim() == 3:
+                    # Single image
+                    img_np = img_tensor.numpy()
+                    # Process through image processor
+                    from PIL import Image
+
+                    img_pil = Image.fromarray((img_np.transpose(1, 2, 0) * 255).astype(np.uint8))
+                    imgs_info = self.tokenizer.processor.image_processor(
+                        [img_pil], return_tensors="pt"
+                    )
+                    flattened_imgs = imgs_info["pixel_values"]
+                    grid_thw = imgs_info["image_grid_thw"]
+                    imgs.append(flattened_imgs)
+                    image_thw_grids.extend(grid_thw.tolist())
+
+        if len(imgs) > 0:
+            imgs = np.concatenate(imgs, axis=0)
+            image_thw_grids = np.array(image_thw_grids, dtype=np.int64)
+        else:
+            imgs = np.empty(
+                [0, 3 * self.temporal_patch_size * self.patch_size * self.patch_size],
+                dtype=np.float32,
+            )
+            image_thw_grids = np.empty([0, 3], dtype=np.int64)
+
+        # Process action
+        action = sample.get("action", None)
+        if action is not None:
+            if isinstance(action, torch.Tensor):
+                action = action.numpy()
+            action_tokens = self._discretize_action(action)
+        else:
+            action_tokens = []
+
+        # Get task description
+        task = sample.get("task", "Execute the robot manipulation task.")
+
+        # Build conversation
+        num_images = len(image_thw_grids)
+        image_placeholder = "<image>" * num_images
+
+        conversation = [
+            {"role": "system", "content": "You are a helpful robot assistant."},
+            {
+                "role": "user",
+                "content": [{"type": "image", "image": "0"} for _ in range(num_images)]
+                + [{"type": "text", "text": task}],
+            },
+            {"role": "assistant", "content": ""},
+        ]
+
+        # Build input tokens
+        input_ids = self._build_conversation_tokens(conversation, [[], [], action_tokens])
+
+        # Build target (shifted input_ids with masking)
+        target = input_ids.copy()
+        target = np.roll(target, shift=-1)
+        target[-1] = IGNORE_IDX
+
+        # Mask system and user turns
+        system_end = self._find_turn_end(input_ids, 0)
+        user_end = self._find_turn_end(input_ids, system_end)
+        target[: user_end + 3] = IGNORE_IDX  # Mask up to assistant prefix
+
+        # Expand image placeholders
+        merge_length = self.merge_size**2
+        image_token_id = self.tokenizer.image_token_id
+
+        image_token_indices = np.where(input_ids == image_token_id)[0]
+
+        target_length = (
+            input_ids.shape[0]
+            - len(image_token_indices)
+            + image_thw_grids.prod(axis=-1).sum() // merge_length
+            if len(image_thw_grids) > 0
+            else input_ids.shape[0]
+        )
+
+        final_input_ids = np.zeros(target_length, dtype=input_ids.dtype)
+        final_target = np.full(target_length, IGNORE_IDX, dtype=target.dtype)
+
+        if len(image_token_indices) > 0:
+            cur_x, cur_y, image_idx = 0, 0, 0
+            for idx in image_token_indices:
+                size = image_thw_grids[image_idx].prod() // merge_length
+                image_idx += 1
+                final_input_ids[cur_y : cur_y + idx - cur_x] = input_ids[cur_x:idx]
+                final_target[cur_y : cur_y + idx - cur_x] = target[cur_x:idx]
+                cur_y += idx - cur_x
+                final_input_ids[cur_y : cur_y + size] = image_token_id
+                final_target[cur_y : cur_y + size] = IGNORE_IDX
+                cur_y += size
+                cur_x = idx + 1
+            if cur_x < len(input_ids):
+                final_input_ids[cur_y:] = input_ids[cur_x:]
+                final_target[cur_y:] = target[cur_x:]
+        else:
+            final_input_ids = input_ids
+            final_target = target
+
+        image_input_mask = final_input_ids == self.tokenizer.image_token_id
+        video_input_mask = np.zeros_like(final_input_ids, dtype=bool)
+
+        return {
+            "text": final_input_ids,
+            "target": final_target,
+            "imgs": imgs,
+            "videos": np.empty(
+                [0, 3 * self.temporal_patch_size * self.patch_size * self.patch_size],
+                dtype=np.float32,
+            ),
+            "image_thw_grids": image_thw_grids,
+            "video_thw_grids": np.empty([0, 3], dtype=np.int64),
+            "image_input_mask": image_input_mask,
+            "video_input_mask": video_input_mask,
+            "second_per_grid_ts": np.zeros(0, dtype=np.float32),
+        }
+
+    def _build_conversation_tokens(self, conversation, action_tokens_list):
+        """Build token sequence from conversation."""
+        final_token_ids = []
+
+        im_start_id = self._token_cache["im_start"]
+        im_end_id = self._token_cache["im_end"]
+        newline_id = self._token_cache["newline"]
+        user_id = self._token_cache["user"]
+        assistant_id = self._token_cache["assistant"]
+        system_id = self._token_cache["system"]
+        image_pad_id = self._token_cache["image_pad"]
+        vision_start_id = self._token_cache["vision_start"]
+        vision_end_id = self._token_cache.get("vision_end")
+
+        for turn_idx, turn in enumerate(conversation):
+            role = turn["role"]
+            content = turn["content"]
+            action_tokens = (
+                action_tokens_list[turn_idx] if turn_idx < len(action_tokens_list) else []
+            )
+
+            final_token_ids.append(im_start_id)
+
+            if role == "system":
+                final_token_ids.append(system_id)
+                final_token_ids.append(newline_id)
+                if content.strip():
+                    text_ids = self._safe_encode(content)
+                    final_token_ids.extend(text_ids)
+
+            elif role == "user":
+                final_token_ids.append(user_id)
+                final_token_ids.append(newline_id)
+                if isinstance(content, list):
+                    for item in content:
+                        if item["type"] == "text":
+                            if item["text"].strip():
+                                text_ids = self._safe_encode(item["text"])
+                                final_token_ids.extend(text_ids)
+                        elif item["type"] == "image":
+                            if vision_start_id:
+                                final_token_ids.append(vision_start_id)
+                            final_token_ids.append(image_pad_id)
+                            if vision_end_id:
+                                final_token_ids.append(vision_end_id)
+                else:
+                    if content.strip():
+                        text_ids = self._safe_encode(content)
+                        final_token_ids.extend(text_ids)
+
+            elif role == "assistant":
+                final_token_ids.append(assistant_id)
+                final_token_ids.append(newline_id)
+                if content.strip():
+                    text_ids = self._safe_encode(content)
+                    final_token_ids.extend(text_ids)
+                if action_tokens and len(action_tokens) > 0:
+                    boa_id = self._token_cache["boa"]
+                    for action_id in action_tokens:
+                        correct_token_id = self._action_token_cache.get(action_id)
+                        if correct_token_id is not None:
+                            final_token_ids.append(correct_token_id)
+
+            final_token_ids.append(im_end_id)
+            final_token_ids.append(newline_id)
+
+        return np.array(final_token_ids, dtype=np.int64)
+
+    def _find_turn_end(self, input_ids, start_idx):
+        """Find the end index of a conversation turn."""
+        im_end_id = self._token_cache["im_end"]
+        for i in range(start_idx, len(input_ids)):
+            if input_ids[i] == im_end_id:
+                return i
+        return len(input_ids) - 1
+
+
+def lerobot_collate_fn(samples):
+    """Collate function for LeRobotDatasetWrapper samples."""
+    args = get_args()
+    tokenizer = get_tokenizer()
+
+    # Get max sequence length
+    max_seq_len = args.max_padding_length
+    if args.enable_variable_seq_lengths:
+        max_seq_len = max(len(s["text"]) for s in samples)
+        max_seq_len = min(max_seq_len, args.max_padding_length)
+
+    tp_size = args.tensor_model_parallel_size
+    cp_size = args.context_parallel_size
+    if cp_size > 1 or args.sequence_parallel:
+        max_seq_len = math.ceil(max_seq_len / (tp_size * cp_size)) * (tp_size * cp_size)
+
+    batch_size = len(samples)
+
+    # Initialize tensors
+    text_mat = np.full((batch_size, max_seq_len), tokenizer.pad_token_id, dtype=np.int64)
+    target_mat = np.full((batch_size, max_seq_len), IGNORE_IDX, dtype=np.int64)
+    image_input_masks = np.zeros((batch_size, max_seq_len), dtype=bool)
+    video_input_masks = np.zeros((batch_size, max_seq_len), dtype=bool)
+
+    # Collect all images and grids
+    all_imgs = []
+    all_videos = []
+    all_image_grids = []
+    all_video_grids = []
+    all_second_per_grid_ts = []
+
+    for i, s in enumerate(samples):
+        text_len = min(max_seq_len, len(s["text"]))
+        target_len = min(max_seq_len, len(s["target"]))
+
+        text_mat[i, :text_len] = s["text"][:text_len]
+        target_mat[i, :target_len] = s["target"][:target_len]
+
+        if s["image_input_mask"] is not None:
+            image_input_masks[i, :text_len] = s["image_input_mask"][:text_len]
+        if s["video_input_mask"] is not None:
+            video_input_masks[i, :text_len] = s["video_input_mask"][:text_len]
+
+        if len(s["imgs"]) > 0:
+            all_imgs.append(s["imgs"])
+        if len(s["videos"]) > 0:
+            all_videos.append(s["videos"])
+        if len(s["image_thw_grids"]) > 0:
+            all_image_grids.extend(s["image_thw_grids"].tolist())
+        if len(s["video_thw_grids"]) > 0:
+            all_video_grids.extend(s["video_thw_grids"].tolist())
+        if len(s["second_per_grid_ts"]) > 0:
+            all_second_per_grid_ts.extend(s["second_per_grid_ts"].tolist())
+
+    # Concatenate images and videos
+    if len(all_imgs) > 0:
+        imgs = torch.from_numpy(np.concatenate(all_imgs, axis=0))
+    else:
+        temporal_patch_size = args.temporal_patch_size
+        patch_size = args.patch_size
+        imgs = torch.empty(
+            [0, 3 * temporal_patch_size * patch_size * patch_size], dtype=torch.float32
+        )
+
+    if len(all_videos) > 0:
+        videos = torch.from_numpy(np.concatenate(all_videos, axis=0))
+    else:
+        temporal_patch_size = args.temporal_patch_size
+        patch_size = args.patch_size
+        videos = torch.empty(
+            [0, 3 * temporal_patch_size * patch_size * patch_size], dtype=torch.float32
+        )
+
+    if len(all_image_grids) > 0:
+        image_thw_grids = torch.from_numpy(np.array(all_image_grids)).long()
+    else:
+        image_thw_grids = torch.empty([0, 3], dtype=torch.long)
+
+    if len(all_video_grids) > 0:
+        video_thw_grids = torch.from_numpy(np.array(all_video_grids)).long()
+    else:
+        video_thw_grids = torch.empty([0, 3], dtype=torch.long)
+
+    if len(all_second_per_grid_ts) > 0:
+        second_per_grid_ts = torch.from_numpy(np.array(all_second_per_grid_ts)).float()
+    else:
+        second_per_grid_ts = torch.empty([0], dtype=torch.float32)
+
+    return {
+        "text": torch.from_numpy(text_mat),
+        "target": torch.from_numpy(target_mat),
+        "imgs": imgs,
+        "videos": videos,
+        "image_thw_grids": image_thw_grids,
+        "video_thw_grids": video_thw_grids,
+        "image_input_mask": torch.from_numpy(image_input_masks),
+        "video_input_mask": torch.from_numpy(video_input_masks),
+        "second_per_grid_ts": second_per_grid_ts,
+    }
+
+
+def lerobot_datasets_provider():
+    """Create train, validation and test datasets from LeRobotDataset format."""
+    args = get_args()
+    data_path = args.data_path[0] if isinstance(args.data_path, list) else args.data_path
+
+    # Load LeRobotDataset
+    train_dataset = LeRobotDataset(
+        root=data_path,
+        episodes=None,
+        revision=None,
+        video_backend=getattr(args, "video_backend", "pyav"),
+    )
+
+    # Wrap with our converter
+    wrapped_train_dataset = LeRobotDatasetWrapper(train_dataset, args)
+
+    # For now, we don't support separate validation/test datasets from LeRobot format
+    # Users should prepare separate datasets if needed
+    val_datasets = None
+    test_dataset = None
+
+    return wrapped_train_dataset, val_datasets, test_dataset
 
 
 def datasets_provider(worker_config=None):
@@ -750,6 +1163,54 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples):
     if not is_dataloader_rank(args.transformer_pipeline_model_parallel_size):
         return None, None, None
 
+    # Check dataset type
+    dataset_type = getattr(args, "dataset_type", "energon")
+
+    if dataset_type == "lerobot":
+        # Use LeRobotDataset format
+        return _build_lerobot_dataloaders(args)
+    else:
+        # Use default Energon/WebDataset format
+        return _build_energon_dataloaders(args)
+
+
+def _build_lerobot_dataloaders(args):
+    """Build dataloaders for LeRobotDataset format."""
+    rank = parallel_state.get_data_parallel_rank()
+    world_size = parallel_state.get_data_parallel_world_size()
+
+    train_ds, valid_ds, test_ds = lerobot_datasets_provider()
+
+    # Create distributed sampler
+    train_sampler = torch.utils.data.distributed.DistributedSampler(
+        train_ds,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=True,
+        drop_last=True,
+    )
+
+    # Create dataloader
+    train_dataloader = torch.utils.data.DataLoader(
+        train_ds,
+        batch_size=args.micro_batch_size,
+        sampler=train_sampler,
+        num_workers=args.num_workers,
+        collate_fn=lerobot_collate_fn,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    # Wrap with LeRobotDataloader for compatibility
+    wrapped_train = LeRobotDataloader(train_dataloader, train_sampler)
+    wrapped_valid = LeRobotDataloader(None) if valid_ds is None else None
+    wrapped_test = LeRobotDataloader(None)
+
+    return wrapped_train, wrapped_valid, wrapped_test
+
+
+def _build_energon_dataloaders(args):
+    """Build dataloaders for Energon/WebDataset format."""
     worker_debug_path = None
     worker_log_level = 0
 
@@ -814,6 +1275,43 @@ class EnergonDataloader:
 
     def save_state(self):
         return self._dataloader.save_state_rank()
+
+
+class LeRobotDataloader:
+    """A wrapper to use LeRobotDataset dataloader with the Megatron-LM training loop."""
+
+    def __init__(self, dataloader, sampler=None):
+        self._dataloader = dataloader
+        self._sampler = sampler
+        self._epoch = 0
+        if dataloader is not None:
+            self._iter = iter(self._cyclic_iter())
+        else:
+            self._iter = iter([])
+
+    def _cyclic_iter(self):
+        """Create a cyclic iterator that properly handles epoch changes."""
+        while True:
+            if self._sampler is not None:
+                self._sampler.set_epoch(self._epoch)
+            for x in self._dataloader:
+                yield x
+            self._epoch += 1
+
+    def __next__(self):
+        return next(self._iter)
+
+    def __iter__(self):
+        return self
+
+    def save_state(self):
+        """Return current state for checkpointing."""
+        return {"epoch": self._epoch}
+
+    def restore_state(self, state_dict):
+        """Restore state from checkpoint."""
+        if state_dict is not None and "epoch" in state_dict:
+            self._epoch = state_dict["epoch"]
 
 
 def cyclic_iter(iter):
@@ -909,6 +1407,28 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--use-te", action="store_true", default=False, help="Use transformer engine"
     )
+
+    # LeRobotDataset support
+    group.add_argument(
+        "--dataset-type",
+        type=str,
+        default="energon",
+        choices=["energon", "lerobot"],
+        help="Dataset format type: 'energon' for WebDataset/Energon format, 'lerobot' for LeRobotDataset format (default: energon)",
+    )
+    group.add_argument(
+        "--video-backend",
+        type=str,
+        default="pyav",
+        choices=["pyav", "torchcodec", "video_reader"],
+        help="Video decoding backend for LeRobotDataset (default: pyav)",
+    )
+    group.add_argument(
+        "--action-discretization-bins",
+        type=int,
+        default=2048,
+        help="Number of bins for action discretization in LeRobotDataset (default: 2048)",
+    )
     return parser
 
 
@@ -920,7 +1440,7 @@ if __name__ == "__main__":
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
+        args_defaults={"tokenizer_type": "Qwen2VLTokenizer"},
         extra_args_provider=add_multimodal_extra_args,
         process_non_loss_data_func=write_online_eval_to_tensorboard,
         non_loss_data_func=run_online_eval,

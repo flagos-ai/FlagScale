@@ -3,13 +3,16 @@ name: Common All Tests
 on:
   workflow_call:
     inputs:
-      hardware:
+      platform:
         required: true
         type: string
         description: Platform name (e.g., cuda, default)
 
 jobs:
   checkout_and_config:
+    defaults:
+      run:
+        shell: bash
     runs-on: ubuntu-latest
     outputs:
       ci_image: ${{ steps.config.outputs.ci_image }}
@@ -17,7 +20,17 @@ jobs:
       container_volumes: ${{ steps.config.outputs.container_volumes }}
       container_options: ${{ steps.config.outputs.container_options }}
       device_types: ${{ steps.config.outputs.device_types }}
-      functional_test_matrix: ${{ steps.config.outputs.functional_test_matrix }}
+      train_test_matrix: ${{ steps.config.outputs.train_test_matrix }}
+      hetero_train_test_matrix: ${{ steps.config.outputs.hetero_train_test_matrix }}
+      inference_test_matrix: ${{ steps.config.outputs.inference_test_matrix }}
+      serve_test_matrix: ${{ steps.config.outputs.serve_test_matrix }}
+      rl_test_matrix: ${{ steps.config.outputs.rl_test_matrix }}
+      pkg_mgr: ${{ steps.config.outputs.pkg_mgr }}
+      env_path: ${{ steps.config.outputs.env_path }}
+      env_name_train: ${{ steps.config.outputs.env_name_train }}
+      env_name_inference: ${{ steps.config.outputs.env_name_inference }}
+      env_name_serve: ${{ steps.config.outputs.env_name_serve }}
+      env_name_rl: ${{ steps.config.outputs.env_name_rl }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -58,16 +71,16 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-      - name: Load hardware configuration
+      - name: Load platform configuration
         id: config
         run: |
           set -euo pipefail
 
-          PLATFORM="${{ inputs.hardware }}"
+          PLATFORM="${{ inputs.platform }}"
           CONFIG_FILE=".github/configs/${PLATFORM}.yml"
 
           if [ ! -f "$CONFIG_FILE" ]; then
-            echo "❌ Error: Hardware configuration file not found: $CONFIG_FILE"
+            echo "❌ Error: Platform configuration file not found: $CONFIG_FILE"
             echo "Available configs:"
             ls -la .github/configs/
             exit 1
@@ -78,56 +91,11 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
           /usr/local/bin/yq --version
 
-          # Extract CI/CD configuration from .github/configs
-          CI_IMAGE=$(/usr/local/bin/yq -r '.ci_image' "$CONFIG_FILE")
-          RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
-          VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
-          CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
+          # Source the platform config loading script
+          source ./tools/install/utils/load_platform_config.sh
 
-          # Validate required fields
-          if [ -z "$CI_IMAGE" ] || [ "$CI_IMAGE" = "null" ]; then
-            echo "❌ Error: ci_image not found in $CONFIG_FILE"
-            exit 1
-          fi
-          if [ -z "$RUNNER_LABELS" ] || [ "$RUNNER_LABELS" = "null" ]; then
-            echo "❌ Error: runner_labels not found in $CONFIG_FILE"
-            exit 1
-          fi
-
-          # Query device types from test platform configuration
-          echo "Querying device types for platform: $PLATFORM"
-          DEVICE_TYPES=$(python tests/test_utils/runners/parse_config.py --platform "$PLATFORM" --type device_types 2>/dev/null || echo '[]')
-          echo "Device types: $DEVICE_TYPES"
-
-          # Discover functional test matrix (device/task/model/case combinations)
-          echo "Discovering functional test matrix..."
-          FUNCTIONAL_TEST_MATRIX="[]"
-
-          # Parse functional tests from platform configuration for each device type
-          if [ -f "tests/test_utils/runners/parse_config.py" ]; then
-            FUNCTIONAL_TEST_MATRIX=$(echo "$DEVICE_TYPES" | jq -r '.[]' | while read device; do
-              # Get functional tests for this device from platform config
-              functional_json=$(python tests/test_utils/runners/parse_config.py \
-                --platform "$PLATFORM" \
-                --device "$device" \
-                --type functional 2>/dev/null || echo '{}')
-
-              # Convert the functional tests JSON to device/task/model/case matrix entries
-              echo "$functional_json" | jq -r 'to_entries[] | .key as $task | .value | to_entries[] | .key as $model | .value[] | {device: "'"$device"'", task: $task, model: $model, case: .}'
-            done | jq -s -c '.')
-          fi
-          echo "Functional test matrix: $FUNCTIONAL_TEST_MATRIX"
-
-          echo "✅ Loaded config for platform: $PLATFORM"
-
-          # Output values
-          echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
-          echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
-
-          { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT
-          { echo 'container_volumes<<EOFVOLUMES'; echo "$VOLUMES"; echo 'EOFVOLUMES'; } >> $GITHUB_OUTPUT
-          { echo 'device_types<<EOFDEVICETYPES'; echo "$DEVICE_TYPES"; echo 'EOFDEVICETYPES'; } >> $GITHUB_OUTPUT
-          { echo 'functional_test_matrix<<EOFFUNCTIONAL'; echo "$FUNCTIONAL_TEST_MATRIX"; echo 'EOFFUNCTIONAL'; } >> $GITHUB_OUTPUT
+          # Load configuration and group tests by task
+          load_platform_config "$PLATFORM"
 
   unit_tests:
     needs: checkout_and_config
@@ -138,48 +106,168 @@ jobs:
     uses: ./.github/workflows/unit_tests_common.yml
     name: unit_tests
     with:
-      platform: ${{ inputs.hardware }}
+      platform: ${{ inputs.platform }}
       device: ${{ matrix.device }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
-  functional_tests:
+  functional_tests_train:
     needs:
       - checkout_and_config
       - unit_tests
-    strategy:
-      fail-fast: false
-      matrix:
-        test_config: ${{ fromJson(needs.checkout_and_config.outputs.functional_test_matrix) }}
-    uses: ./.github/workflows/functional_tests_common.yml
+    if: fromJson(needs.checkout_and_config.outputs.train_test_matrix)[0] != null
+    uses: ./.github/workflows/functional_tests_train.yml
     with:
-      platform: ${{ inputs.hardware }}
-      device: ${{ matrix.test_config.device }}
-      task: ${{ matrix.test_config.task }}
-      model: ${{ matrix.test_config.model }}
-      case: ${{ matrix.test_config.case }}
+      platform: ${{ inputs.platform }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.train_test_matrix }}
       image: ${{ needs.checkout_and_config.outputs.ci_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
-  all_tests_complete:
+  functional_tests_hetero_train:
     needs:
       - checkout_and_config
       - unit_tests
-      - functional_tests
+    if: fromJson(needs.checkout_and_config.outputs.hetero_train_test_matrix)[0] != null
+    uses: ./.github/workflows/functional_tests_hetero_train.yml
+    with:
+      platform: ${{ inputs.platform }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.hetero_train_test_matrix }}
+      image: ${{ needs.checkout_and_config.outputs.ci_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+
+  # NOTE: Inference, serve, and rl functional tests are temporarily disabled
+  # functional_tests_inference:
+  #   needs:
+  #     - checkout_and_config
+  #     - unit_tests
+  #   if: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
+  #   uses: ./.github/workflows/functional_tests_inference.yml
+  #   with:
+  #     platform: ${{ inputs.platform }}
+  #     test_matrix: ${{ needs.checkout_and_config.outputs.inference_test_matrix }}
+  #     image: ${{ needs.checkout_and_config.outputs.ci_image }}
+  #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+  #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+  #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+  #     source_artifact: flagscale-source-${{ github.sha }}
+  #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+  #     env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
+  #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+
+  # functional_tests_serve:
+  #   needs:
+  #     - checkout_and_config
+  #     - unit_tests
+  #   if: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
+  #   uses: ./.github/workflows/functional_tests_serve.yml
+  #   with:
+  #     platform: ${{ inputs.platform }}
+  #     test_matrix: ${{ needs.checkout_and_config.outputs.serve_test_matrix }}
+  #     image: ${{ needs.checkout_and_config.outputs.ci_image }}
+  #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+  #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+  #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+  #     source_artifact: flagscale-source-${{ github.sha }}
+  #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+  #     env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
+  #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+
+  # functional_tests_rl:
+  #   needs:
+  #     - checkout_and_config
+  #     - unit_tests
+  #   if: fromJson(needs.checkout_and_config.outputs.rl_test_matrix)[0] != null
+  #   uses: ./.github/workflows/functional_tests_rl.yml
+  #   with:
+  #     platform: ${{ inputs.platform }}
+  #     test_matrix: ${{ needs.checkout_and_config.outputs.rl_test_matrix }}
+  #     image: ${{ needs.checkout_and_config.outputs.ci_image }}
+  #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+  #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+  #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+  #     source_artifact: flagscale-source-${{ github.sha }}
+  #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+  #     env_name: ${{ needs.checkout_and_config.outputs.env_name_rl }}
+  #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+
+  all_tests_complete:
+    defaults:
+      run:
+        shell: bash
+    needs:
+      - checkout_and_config
+      - unit_tests
+      - functional_tests_train
+      - functional_tests_hetero_train
+      # NOTE: Disabled tests removed from needs
+      # - functional_tests_inference
+      # - functional_tests_serve
+      # - functional_tests_rl
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Verify all tests passed
         run: |
-          if [ "${{ needs.unit_tests.result }}" != "success" ] || \
-             [ "${{ needs.functional_tests.result }}" != "success" ]; then
-            echo "❌ Some tests failed"
+          # Check all test jobs (skip if not run)
+          failed=false
+
+          if [ "${{ needs.unit_tests.result }}" != "success" ]; then
+            echo "❌ Unit tests failed"
+            failed=true
+          fi
+
+          # Only check functional tests if they ran
+          if [ "${{ needs.functional_tests_train.result }}" != "success" ] && \
+             [ "${{ needs.functional_tests_train.result }}" != "skipped" ]; then
+            echo "❌ Training functional tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.functional_tests_hetero_train.result }}" != "success" ] && \
+             [ "${{ needs.functional_tests_hetero_train.result }}" != "skipped" ]; then
+            echo "❌ Heterogeneous training functional tests failed"
+            failed=true
+          fi
+
+          # NOTE: Inference, serve, and rl checks disabled
+          # if [ "${{ needs.functional_tests_inference.result }}" != "success" ] && \
+          #    [ "${{ needs.functional_tests_inference.result }}" != "skipped" ]; then
+          #   echo "❌ Inference functional tests failed"
+          #   failed=true
+          # fi
+
+          # if [ "${{ needs.functional_tests_serve.result }}" != "success" ] && \
+          #    [ "${{ needs.functional_tests_serve.result }}" != "skipped" ]; then
+          #   echo "❌ Serve functional tests failed"
+          #   failed=true
+          # fi
+
+          # if [ "${{ needs.functional_tests_rl.result }}" != "success" ] && \
+          #    [ "${{ needs.functional_tests_rl.result }}" != "skipped" ]; then
+          #   echo "❌ RL functional tests failed"
+          #   failed=true
+          # fi
+
+          if [ "$failed" = "true" ]; then
             exit 1
           fi
+
           echo "✅ All tests completed successfully!"

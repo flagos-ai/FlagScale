@@ -1,0 +1,8 @@
+**************************************************
+output.prompt='What is shown in this image?'
+output.outputs[0].text='The image shows a large glass container filled with yellow'
+output.outputs[0].token_ids=[13708, 766, 1472, 26865, 1784, 9217, 16357, 2168, 4933, 264, 3460, 8991, 5476, 10199, 448, 13753]
+**************************************************
+output.prompt='What food is in the picture?'
+output.outputs[0].text='The image shows a bowl of food in front of'
+output.outputs[0].token_ids=[13708, 766, 1472, 26865, 1784, 9217, 16357, 2168, 4933, 264, 19212, 315, 3607, 304, 4065, 315]

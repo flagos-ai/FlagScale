@@ -75,7 +75,7 @@ run_unit_tests_for_device() {
     INCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^INCLUDE=" | cut -d= -f2-)
     EXCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^EXCLUDE=" | cut -d= -f2-)
 
-    # Build pytest command
+    # Build pytest command with torchrun for distributed test support
     PYTEST_CMD="torchrun --nproc_per_node=8 -m pytest tests/unit_tests/ -v --tb=short"
 
     # Apply exclude patterns if any

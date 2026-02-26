@@ -266,6 +266,8 @@ Require verl-FL env
     experiment:
         exp_name: 0_6b
         exp_dir: /workspace/qwen3-rl/ # modify: Set your experiment directory
+        runner:
+          runtime_env: /path/to/verl-FL/verl/trainer/runtime_env.yaml # modify: Set your runtime_env.yaml
     ```
 
 4. Start rl:

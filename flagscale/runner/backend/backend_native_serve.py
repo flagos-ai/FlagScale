@@ -50,7 +50,8 @@ def _reset_serve_port(config):
         if item.get("serve_id", None) is not None:
             if deploy_port:
                 model_port = deploy_port
-                item.engine_args["port"] = deploy_port
+                if item.get("engine_args", None) is not None:
+                    item.engine_args["port"] = deploy_port
             else:
                 model_port = item.engine_args.get("port", 8000)
             break
@@ -118,10 +119,11 @@ class NativeServeBackend(BackendBase):
         self.user_args = _get_args_ray(self.config)
         self.user_envs = self.config.experiment.get("envs", {})
         entrypoint = self.config.experiment.task.get("entrypoint", None)
+        enable_composition = self.config.experiment.runner.deploy.get("enable_composition", False)
 
         if entrypoint:
             self.user_script = entrypoint
-        elif self.use_fs_serve:
+        elif self.use_fs_serve and not enable_composition:
             self.user_script = "flagscale/serve/run_fs_serve_vllm.py"
         else:
             self.user_script = "flagscale/serve/run_serve.py"
@@ -422,6 +424,7 @@ class NativeServeBackend(BackendBase):
             f.write("pkill -f 'run_fs_serve_vllm'\n")
             f.write("pkill -f 'vllm serve'\n")
             f.write("pkill -f multiprocessing\n")
+            f.write("pkill -f VLLM\n")
 
             f.write("if [ -f " + host_pid_file + " ]; then\n")
             f.write("    pid=$(cat " + host_pid_file + ")\n")

@@ -104,6 +104,8 @@ def _get_runner_cmd_train(
         del runner_args["enable_monitoring"]
     if "enable_gpu_health_check" in runner_args:
         del runner_args["enable_gpu_health_check"]
+    if "deploy" in runner_args:
+        del runner_args["deploy"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port
@@ -232,9 +234,7 @@ class SshLauncher(LauncherBase):
         elif self.task_type == "rl":
             ray_cmd = []
             if self.resources is not None:
-                runtime_env = self.config.experiment.runner.get(
-                    "runtime_env", "third_party/verl/verl/trainer/runtime_env.yaml"
-                )
+                runtime_env = self.config.experiment.runner.get("runtime_env", None)
                 ray_dashboard_port = self.config.experiment.runner.get("ray_dashboard_port", 8265)
                 ray_cmd = [
                     "ray",
@@ -844,8 +844,11 @@ class SshLauncher(LauncherBase):
         # Build command
         if nnodes > 1 or nproc_per_node > 1:
             # Use torchrun for distributed health check
+            import shutil
+
+            TORCHRUN = shutil.which("torchrun")
             cmd = [
-                "torchrun",
+                TORCHRUN,
                 f"--nnodes={nnodes}",
                 f"--nproc_per_node={nproc_per_node}",
                 f"--node_rank={node_rank}",  # Use the correct node rank for this node
@@ -885,7 +888,7 @@ class SshLauncher(LauncherBase):
 
             try:
                 # Waiting for the health check to complete and get the actual return code
-                result = run_ssh_command(host, cmd_str, ssh_port, query=True)
+                result = run_ssh_command(host, cmd_str, ssh_port, query=True, background=False)
                 success = result.returncode == 0 if hasattr(result, "returncode") else False
                 if not success:
                     logger.error(

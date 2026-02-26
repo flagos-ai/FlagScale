@@ -11,7 +11,7 @@ experiment:
   ckpt_format: torch
   task:
     type: train
-    backend: robotics
+    backend: native
     entrypoint: flagscale/train/megatron/train_robobrain_x0.5_qwengroot.py
   runner:
     per_node_task: false

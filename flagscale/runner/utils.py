@@ -243,29 +243,51 @@ def run_local_command(cmd, dryrun=False, query=False):
             sys.exit(result.returncode)
 
 
-def run_ssh_command(host, cmd, port=None, dryrun=False, query=False):
-    if port:
-        ssh_cmd = f"ssh -f -n -p {port} {host} '{cmd}'"
+def run_ssh_command(host, cmd, port=None, dryrun=False, query=False, background=True):
+    if background:
+        if port:
+            ssh_cmd = f"ssh -f -n -p {port} {host} '{cmd}'"
+        else:
+            ssh_cmd = f"ssh -f -n {host} '{cmd}'"
     else:
-        ssh_cmd = f"ssh -f -n {host} '{cmd}'"
+        if port:
+            ssh_cmd = f"ssh -n -p {port} {host} '{cmd}'"
+        else:
+            ssh_cmd = f"ssh -n {host} '{cmd}'"
     if not query:
         logger.info(f"Running the ssh command: {ssh_cmd}")
     if dryrun:
         return
-    result = subprocess.run(
-        ssh_cmd,
-        shell=True,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode != 0:
-        print(f"SSH command {ssh_cmd} failed with return code {result.returncode}.")
-        print(f"Output: {result.stdout}")
-        print(f"Error: {result.stderr}")
-        sys.exit(result.returncode)
+    if background:
+        result = subprocess.run(
+            ssh_cmd,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0:
+            print(f"SSH command {ssh_cmd} failed with return code {result.returncode}.")
+            print(f"Output: {result.stdout}")
+            print(f"Error: {result.stderr}")
+            sys.exit(result.returncode)
+    else:
+        result = subprocess.run(
+            ssh_cmd,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0 and not query:
+            print(f"SSH command {ssh_cmd} failed with return code {result.returncode}.")
+            print(f"Output: {result.stdout}")
+            print(f"Error: {result.stderr}")
+            sys.exit(result.returncode)
     if query:
         return result
 

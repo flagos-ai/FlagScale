@@ -27,9 +27,29 @@ on:
         required: true
         type: string
         description: Name of the artifact containing source code
+      pkg_mgr:
+        required: false
+        type: string
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
+        default: ""
+      env_path:
+        required: false
+        type: string
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
 
 jobs:
   unit_test:
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: /workspace/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     name: unit-${{ inputs.device }}
     container:
@@ -39,58 +59,161 @@ jobs:
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: ${{ inputs.container_options }}
     steps:
-      - name: Download source code artifact
+      - name: Download source code artifact (attempt 1)
         uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_1
         with:
           name: ${{ inputs.source_artifact }}
           path: /tmp
 
-      - name: Extract source code
-        shell: bash
+      - name: Download source code artifact (attempt 2)
+        if: steps.download_attempt_1.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_2
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 3)
+        if: steps.download_attempt_2.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        id: download_attempt_3
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Verify artifact download
         run: |
-          mkdir -p /__w/FlagScale/FlagScale
-          tar -xzf /tmp/flagscale-source.tar.gz -C /__w/FlagScale/FlagScale
+          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 1"
+          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
+          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
+          else
+            echo "❌ Error: All 3 download attempts failed"
+            echo "Artifact name: ${{ inputs.source_artifact }}"
+            exit 1
+          fi
+
+      - name: Extract source code
+        run: |
+          mkdir -p $PROJECT_ROOT
+          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
 
       - name: Set safe directory
-        shell: bash
         run: |
-          git config --global --add safe.directory /__w/FlagScale/FlagScale
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Install dependencies for unit tests
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Installing dependencies for unit tests"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install task source dependencies (pip deps are pre-installed in the env)
+          echo "Installing task source dependencies..."
+
+          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          INSTALL_DIR=""
+          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            INSTALL_DIR=$(dirname "$ENV_PATH")
+          fi
+
+          # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
+          ./tools/install/install.sh \
+            --platform ${{ inputs.platform }} \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
+            --pip-deps typer \
+            --retry-count 3
+
+          # Copy test data (keep existing logic)
+          mkdir -p /opt/data
+          cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
+          cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
+        timeout-minutes: 30
 
       - name: Run unit tests
         id: unit_test
-        shell: bash
         run: |
           set -euo pipefail
-          cd /__w/FlagScale/FlagScale
+          cd $PROJECT_ROOT
 
           PLATFORM='${{ inputs.platform }}'
           DEVICE='${{ inputs.device }}'
-          PROJECT_ROOT="/__w/FlagScale/FlagScale"
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
           echo "Running unit tests"
           echo "Platform: $PLATFORM"
           echo "Device: $DEVICE"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
           echo "Project root: $PROJECT_ROOT"
 
-          # Setup backend
-          source /root/miniconda3/bin/activate flagscale-train
-          source "$PROJECT_ROOT/.github/workflows/scripts/retry_functions.sh"
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
 
-          # For megatron unit tests
-          mkdir -p /opt/data
-          cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
-          cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "⚠️  Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "⚠️  UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "ℹ️  Running tests with pip/system Python"
+              ;;
+          esac
 
-          # Install megatron.core with retry
-          COMMANDS=(
-            "rm -rf ${GITHUB_WORKSPACE}/Megatron-LM-FL"
-            "git clone https://github.com/flagos-ai/Megatron-LM-FL.git"
-            "cd ${GITHUB_WORKSPACE}/Megatron-LM-FL && pip install --no-build-isolation . -vvv"
-          )
-          retry_commands 3 "${COMMANDS[@]}"
-
-          # Ensure we're back in the project root
-          cd "$PROJECT_ROOT"
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
 
           # Run unit tests using run_tests.sh
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
@@ -107,4 +230,4 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 90
+        timeout-minutes: 15

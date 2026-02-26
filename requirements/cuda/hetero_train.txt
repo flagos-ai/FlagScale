@@ -1,0 +1,4 @@
+# Heterogeneous training-specific dependencies
+# Currently extends training dependencies but separated for future flexibility
+
+-r ./train.txt
