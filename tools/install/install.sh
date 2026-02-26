@@ -40,6 +40,9 @@ INSTALL_DEV=true
 INSTALL_BASE=true
 INSTALL_TASK=true
 
+# Only pip flag (skip apt and source builds, only install pip packages)
+ONLY_PIP=false
+
 # Override flags (selective installation)
 SRC_DEPS=""
 PIP_DEPS=""
@@ -83,6 +86,7 @@ export_config() {
     export FLAGSCALE_SRC_DEPS="$SRC_DEPS"
     export FLAGSCALE_PIP_DEPS="$PIP_DEPS"
     export FLAGSCALE_FORCE_BUILD="$FORCE_BUILD"
+    export FLAGSCALE_ONLY_PIP="$ONLY_PIP"
 
     # Other config
     export FLAGSCALE_PLATFORM="$PLATFORM"
@@ -153,8 +157,9 @@ OPTIONS:
     --no-dev               Skip dev phase (dev requirements)
     --no-base              Skip base phase (base requirements + source)
     --no-task              Skip task phase (task requirements + source)
+    --only-pip             Only install pip packages (skip apt and source builds)
 
-  Selective Installation (overrides --no-* for specific packages):
+  Selective Installation (HIGHEST PRIORITY - overrides --no-* and --only-pip):
     --pip-deps PKGS        Install specific pip packages (comma-separated)
     --src-deps DEPS        Install specific source deps (comma-separated)
                            dev: sccache
@@ -177,6 +182,8 @@ OPTIONS:
 EXAMPLES:
     $0 --platform cuda --task train                                # Full installation
     $0 --platform cuda --task train --no-system                    # Skip system phase
+    $0 --platform cuda --task train --only-pip                     # Only pip packages
+    $0 --platform cuda --task train --only-pip --src-deps megatron-lm  # Pip + megatron-lm only
     $0 --platform cuda --task train --no-system --no-dev --no-base --no-task --src-deps megatron-lm
 EOF
 }
@@ -190,6 +197,7 @@ parse_args() {
             --no-dev)          INSTALL_DEV=false; shift ;;
             --no-base)         INSTALL_BASE=false; shift ;;
             --no-task)         INSTALL_TASK=false; shift ;;
+            --only-pip)        ONLY_PIP=true; shift ;;
             --pkg-mgr)         PKG_MGR="$2"; shift 2 ;;
             --env-name)        ENV_NAME="$2"; shift 2 ;;
             --install-dir)     FLAGSCALE_HOME="$2"; shift 2 ;;
@@ -227,6 +235,7 @@ main() {
 
     print_header "FlagScale Installation"
     log_info "Platform: $PLATFORM | Task: $TASK | Pkg: $PKG_MGR"
+    [ "$ONLY_PIP" = true ] && log_info "Only pip mode: skipping apt and source builds"
     [ -n "$SRC_DEPS" ] && log_info "Source deps override: $SRC_DEPS"
     [ -n "$PIP_DEPS" ] && log_info "Pip deps override: $PIP_DEPS"
     log_info "Install dir: $FLAGSCALE_HOME"

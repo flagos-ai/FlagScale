@@ -17,3 +17,6 @@ requests==2.32.3
 aiohttp==3.11.11
 pyyaml==6.0.2
 regex==2025.10.22
+
+# CLI
+typer>=0.9.0

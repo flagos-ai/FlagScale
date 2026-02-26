@@ -19,6 +19,8 @@ done
 
 install_apt() {
     is_phase_enabled base || return 0
+    # Skip apt in only-pip mode
+    is_only_pip && { log_info "Skipping apt packages (only-pip mode)"; return 0; }
     set_step "Installing CUDA apt packages"
     run_cmd -d $DEBUG apt-get install -y --no-install-recommends $APT_PACKAGES || return 1
     log_success "CUDA apt packages installed"

@@ -162,6 +162,7 @@ jobs:
             ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
             --no-system --no-dev --no-base --no-task \
             --src-deps megatron-lm \
+            --pip-deps typer \
             --retry-count 3
 
           # Copy test data (keep existing logic)

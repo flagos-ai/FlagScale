@@ -92,6 +92,11 @@ install_megatron_lm() {
 }
 
 install_src() {
+    # Skip in only-pip mode unless we have matching src-deps overrides
+    if is_only_pip && ! has_src_deps_for_phase $SRC_DEPS_LIST; then
+        log_info "Skipping source deps (only-pip mode)"
+        return 0
+    fi
     # Skip if phase disabled and no matching src-deps
     is_phase_enabled task || has_src_deps_for_phase $SRC_DEPS_LIST || return 0
 

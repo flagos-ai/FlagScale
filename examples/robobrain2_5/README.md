@@ -78,7 +78,7 @@ python run.py --config-path ./examples/robobrain2_5/conf --config-name inference
 
 ```sh
 cd FlagScale/
-tail -f outputs/robobrain2.5_4b/serve_logs/host_0_localhost.output
+tail -f outputs/robobrain2.5_8b/inference_logs/host_0_localhost.output
 ```
 
 ## Serving
