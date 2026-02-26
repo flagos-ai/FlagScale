@@ -1,0 +1,28 @@
+diff --git a/flagscale/train/models/qwen2_5_vl/transformer_config.py b/flagscale/train/models/qwen2_5_vl/transformer_config.py
+index c138dbef..3dc620f2 100644
+--- a/flagscale/train/models/qwen2_5_vl/transformer_config.py
++++ b/flagscale/train/models/qwen2_5_vl/transformer_config.py
+@@ -24,9 +24,9 @@ def get_vision_model_config(args, config):
+     # mlp: hidden_size -> intermediate_size -> embed_dim, silu
+     # NOTE: here we provide a workaround to solve the wrong layer amount when VPP of decoder is on
+     if config.num_layers in[28, 36]:
+-        config.ffn_hidden_size = 3420 # 7B 72B
++        config.ffn_hidden_size = 3420 # 7B num_layers: 28
+     else:
+-        config.ffn_hidden_size = 3456 # 32B
++        config.ffn_hidden_size = 3456
+ 
+     if parallel_state.get_virtual_pipeline_model_parallel_world_size() is not None:
+         config.num_layers = 32 * parallel_state.get_virtual_pipeline_model_parallel_world_size() # depth
+@@ -67,10 +67,6 @@ def get_vision_model_config(args, config):
+     config.first_pipeline_num_layers = None
+     config.num_layers_in_first_pipeline_stage = None
+     config.num_layers_in_last_pipeline_stage = None
+-    if args.vision_recompute_layer_steps != 0:
+-        config.recompute_method="uniform"
+-        config.recompute_granularity="full"
+-        config.recompute_num_layers=args.vision_recompute_layer_steps # 16 for 32B
+     return config
+ 
+ 
+

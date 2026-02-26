@@ -1,5 +1,5 @@
 diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
-index 5ff62f74c..3c0571b2d 100644
+index 5ff62f74c..4ceccfdd9 100644
 --- a/megatron/core/transformer/transformer_config.py
 +++ b/megatron/core/transformer/transformer_config.py
 @@ -317,6 +317,15 @@ class TransformerConfig(ModelParallelConfig):
@@ -66,9 +66,9 @@ index 5ff62f74c..3c0571b2d 100644
 +    """Lora b init method"""
 +
 +    ####################
-+    # TransformerEngine-FL
++    # TE_FL
 +    ####################
-+    use_transformer_engine_fl: Optional[bool] = False
++    te_fl_prefer: Optional[str] = 'vendor'
 +
      def __post_init__(self):
          """Python dataclass method that is used to modify attributes after initialization.

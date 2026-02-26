@@ -1,0 +1,490 @@
+diff --git a/dcu_megatron/training/training.py b/dcu_megatron/training/training.py
+new file mode 100644
+index 000000000..998d14dc4
+--- /dev/null
++++ b/dcu_megatron/training/training.py
+@@ -0,0 +1,483 @@
++import gc
++import sys
++
++import torch.distributed
++import torch
++
++from megatron.core import mpu
++from megatron.core.utils import (
++    check_param_hashes_across_dp_replicas,
++    StragglerDetector,
++)
++from megatron.core.distributed import DistributedDataParallel as DDP
++from megatron.core.distributed.custom_fsdp import FullyShardedDataParallel as custom_FSDP
++
++from megatron.core.distributed import finalize_model_grads
++from megatron.core.rerun_state_machine import get_rerun_state_machine
++from megatron.training.initialize import write_args_to_tensorboard
++from megatron.core.num_microbatches_calculator import (
++    get_current_global_batch_size,
++    get_current_running_global_batch_size,
++    get_num_microbatches,
++    update_num_microbatches)
++
++from megatron.training.async_utils import maybe_finalize_async_save
++from megatron.training.utils import (
++    calc_params_l2_norm,
++    print_rank_0,
++)
++from megatron.training.global_vars import (
++    get_args,
++    get_timers,
++    get_tensorboard_writer,
++    get_wandb_writer,
++    get_one_logger,
++)
++from megatron.training import one_logger_utils
++
++from megatron.training import ft_integration
++from megatron.training.training import (
++    print_datetime,
++    should_disable_forward_pre_hook,
++    disable_forward_pre_hook,
++    train_step,
++    save_checkpoint_and_time,
++    enable_forward_pre_hook,
++    num_floating_point_operations,
++    training_log,
++    evaluate_and_print_results,
++    post_training_step_callbacks,
++    checkpoint_and_decide_exit,
++)
++
++stimer = StragglerDetector()
++
++
++def train(
++    forward_step_func,
++    model,
++    optimizer,
++    opt_param_scheduler,
++    train_data_iterator,
++    valid_data_iterator,
++    process_non_loss_data_func,
++    config,
++    checkpointing_context,
++    non_loss_data_func,
++):
++    """Training function: run train_step desired number of times, run validation, checkpoint."""
++    args = get_args()
++    timers = get_timers()
++    one_logger = get_one_logger()
++
++    if args.run_workload_inspector_server:
++        try:
++            from workload_inspector.utils.webserver import run_server
++            import threading
++
++            threading.Thread(
++                target=run_server, daemon=True, args=(torch.distributed.get_rank(),)
++            ).start()
++        except ModuleNotFoundError:
++            print_rank_0("workload inspector module not found.")
++
++    # Write args to tensorboard
++    write_args_to_tensorboard()
++
++    # Turn on training mode which enables dropout.
++    for model_module in model:
++        model_module.train()
++
++    # Tracking loss.
++    total_loss_dict = {}
++
++    # Iterations.
++    iteration = args.iteration
++    # Make sure rerun_state_machine has the right iteration loaded from checkpoint.
++    rerun_state_machine = get_rerun_state_machine()
++    if rerun_state_machine.current_iteration != iteration:
++        print_rank_0(f"Setting rerun_state_machine.current_iteration to {iteration}...")
++        rerun_state_machine.current_iteration = iteration
++
++    # Track E2E metrics at the start of training.
++    one_logger_utils.on_train_start(
++        iteration=iteration,
++        consumed_train_samples=args.consumed_train_samples,
++        train_samples=args.train_samples,
++        seq_length=args.seq_length,
++        train_iters=args.train_iters,
++        save=args.save,
++        async_save=args.async_save,
++        log_throughput=args.log_throughput,
++        num_floating_point_operations_so_far=args.num_floating_point_operations_so_far,
++    )
++
++    num_floating_point_operations_so_far = args.num_floating_point_operations_so_far
++
++    # Setup some training config params.
++    config.grad_scale_func = optimizer.scale_loss
++    config.timers = timers
++    if isinstance(model[0], (custom_FSDP, DDP)) and args.overlap_grad_reduce:
++        assert config.no_sync_func is None, (
++            'When overlap_grad_reduce is True, config.no_sync_func must be None; '
++            'a custom no_sync_func is not supported when overlapping grad-reduce'
++        )
++        config.no_sync_func = [model_chunk.no_sync for model_chunk in model]
++        if len(model) == 1:
++            config.no_sync_func = config.no_sync_func[0]
++        if args.align_grad_reduce:
++            config.grad_sync_func = [model_chunk.start_grad_sync for model_chunk in model]
++            if len(model) == 1:
++                config.grad_sync_func = config.grad_sync_func[0]
++    if args.overlap_param_gather and args.align_param_gather:
++        config.param_sync_func = [model_chunk.start_param_sync for model_chunk in model]
++        if len(model) == 1:
++            config.param_sync_func = config.param_sync_func[0]
++    config.finalize_model_grads_func = finalize_model_grads
++
++    timers('interval-time', log_level=0).start(barrier=True)
++    print_datetime('before the start of training step')
++    report_memory_flag = True
++    pre_hook_enabled = False
++    should_exit = False
++    exit_code = 0
++
++    if args.manual_gc:
++        # Disable the default garbage collector and perform the collection manually.
++        # This is to align the timing of garbage collection across ranks.
++        assert (
++            args.manual_gc_interval >= 0
++        ), 'Manual garbage collection interval should be larger than or equal to 0'
++        gc.disable()
++        gc.collect()
++
++    # Singleton initialization of straggler detector.
++    if args.log_straggler:
++        global stimer
++        world = torch.distributed.get_world_size()
++        rank = torch.distributed.get_rank()
++        mmcnt = args.straggler_minmax_count
++        stimer.configure(
++            world,
++            rank,
++            mmcnt=mmcnt,
++            enabled=not args.disable_straggler_on_startup,
++            port=args.straggler_ctrlr_port,
++        )
++    num_floating_point_operations_since_last_log_event = 0.0
++
++    num_microbatches = get_num_microbatches()
++    eval_duration = 0.0
++    eval_iterations = 0
++
++    def get_e2e_base_metrics():
++        """Get base metrics values for one-logger to calculate E2E tracking metrics."""
++        num_floating_point_operations_since_current_train_start = (
++            num_floating_point_operations_so_far - args.num_floating_point_operations_so_far
++        )
++        return {
++            'iteration': iteration,
++            'train_duration': timers('interval-time').active_time(),
++            'eval_duration': eval_duration,
++            'eval_iterations': eval_iterations,
++            'total_flops_since_current_train_start': num_floating_point_operations_since_current_train_start,
++            'num_floating_point_operations_so_far': num_floating_point_operations_so_far,
++            'consumed_train_samples': args.consumed_train_samples,
++            'world_size': args.world_size,
++            'seq_length': args.seq_length,
++        }
++    # Cache into one-logger for callback.
++    if one_logger:
++        with one_logger.get_context_manager():
++            one_logger.store_set('get_e2e_base_metrics', get_e2e_base_metrics)
++
++    prof = None
++    if (
++        args.profile
++        and torch.distributed.get_rank() in args.profile_ranks
++        and args.use_pytorch_profiler
++    ):
++        def trace_handler(p):
++            from pathlib import Path
++            Path(f"{args.profile_dir}").mkdir(parents=True, exist_ok=True)
++            if args.rank in [0]:
++                print(p.key_averages(group_by_input_shape=True,
++                                     group_by_stack_n=5).table(sort_by="self_cuda_time_total",
++                                                               row_limit=-1,
++                                                               max_src_column_width=100,
++                                                               max_name_column_width=280,
++                                                               max_shapes_column_width=200))
++
++            p.export_chrome_trace("{path}/trace_rank{rank}_step{step}.json".format(
++                path=args.profile_dir, rank=torch.distributed.get_rank(), step=p.step_num))
++
++        prof = torch.profiler.profile(
++            activities=[
++               torch.profiler.ProfilerActivity.CPU,
++               torch.profiler.ProfilerActivity.CUDA,
++            ],
++            schedule=torch.profiler.schedule(
++                wait=max(args.profile_step_start-1, 0),
++                warmup=1 if args.profile_step_start > 0 else 0,
++                active=args.profile_step_end-args.profile_step_start,
++                repeat=1),
++            on_trace_ready=trace_handler,
++            record_shapes=True,
++            )
++        prof.start()
++    elif args.profile and torch.distributed.get_rank() in args.profile_ranks and args.use_hip_profiler:
++        import ctypes
++        roctracer = ctypes.cdll.LoadLibrary("/opt/dtk/roctracer/lib/libroctracer64.so")
++
++    start_iteration = iteration
++    # Disable forward pre-hook to start training to ensure that errors in checkpoint loading
++    # or random initialization don't propagate to all ranks in first all-gather (which is a
++    # no-op if things work correctly).
++    if should_disable_forward_pre_hook(args):
++        disable_forward_pre_hook(model, param_sync=False)
++        # Also remove param_sync_func temporarily so that sync calls made in
++        # `forward_backward_func` are no-ops.
++        param_sync_func = config.param_sync_func
++        config.param_sync_func = None
++        pre_hook_enabled = False
++    # Also, check weight hash across DP replicas to be very pedantic.
++    if args.check_weight_hash_across_dp_replicas_interval is not None:
++        assert check_param_hashes_across_dp_replicas(
++            model, cross_check=True
++        ), "Parameter hashes not matching across DP replicas"
++        torch.distributed.barrier()
++        print_rank_0(f">>> Weight hashes match after {iteration} iterations...")
++
++    # Run training iterations till done.
++    while iteration < args.train_iters:
++        if args.profile and torch.distributed.get_rank() in args.profile_ranks:
++            if args.use_pytorch_profiler:
++                prof.step()
++            elif args.use_hip_profiler:
++                if iteration == args.profile_step_start: roctracer.roctracer_start()
++                if iteration == args.profile_step_end: roctracer.roctracer_stop()
++            elif iteration == args.profile_step_start:
++                torch.cuda.cudart().cudaProfilerStart()
++                torch.autograd.profiler.emit_nvtx(record_shapes=True).__enter__()
++
++        ft_integration.on_checkpointing_start()
++        maybe_finalize_async_save(blocking=False)
++        ft_integration.on_checkpointing_end(is_async_finalization=True)
++
++        # Update number of microbatches first without consistency check to decide if a
++        # checkpoint should be saved. If the number of microbatches is different
++        # from the previous iteration, save a checkpoint. Then run consistency check
++        # to make sure training configuration is still valid.
++        update_num_microbatches(args.consumed_train_samples, consistency_check=False, verbose=True)
++        if get_num_microbatches() != num_microbatches and iteration != 0:
++            assert get_num_microbatches() > num_microbatches, (
++                f"Number of microbatches should be increasing due to batch size rampup; "
++                f"instead going from {num_microbatches} to {get_num_microbatches()}"
++            )
++            if args.save is not None:
++                save_checkpoint_and_time(
++                    iteration,
++                    model,
++                    optimizer,
++                    opt_param_scheduler,
++                    num_floating_point_operations_so_far,
++                    checkpointing_context,
++                    train_data_iterator=train_data_iterator,
++                )
++        num_microbatches = get_num_microbatches()
++        update_num_microbatches(args.consumed_train_samples, consistency_check=True, verbose=True)
++
++        # Completely skip iteration if needed.
++        if iteration in args.iterations_to_skip:
++            # Dummy train_step to fast forward train_data_iterator.
++            dummy_train_step(train_data_iterator)
++            iteration += 1
++            batch_size = (
++                mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
++            )
++            args.consumed_train_samples += batch_size
++            args.skipped_train_samples += batch_size
++            continue
++
++        # Run training step.
++        args.curr_iteration = iteration
++        ft_integration.on_training_step_start()
++        (
++            loss_dict,
++            skipped_iter,
++            should_checkpoint,
++            should_exit,
++            exit_code,
++            grad_norm,
++            num_zeros_in_grad,
++        ) = train_step(
++            forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config
++        )
++        ft_integration.on_training_step_end()
++        if should_checkpoint:
++            save_checkpoint_and_time(
++                iteration,
++                model,
++                optimizer,
++                opt_param_scheduler,
++                num_floating_point_operations_so_far,
++                checkpointing_context,
++                train_data_iterator=train_data_iterator,
++            )
++        if should_exit:
++            break
++
++        # Enable forward pre-hooks after first set of forward and backward passes.
++        # When running in fp16, skip all NaN iterations until steady-state loss scaling value
++        # is reached.
++        if iteration == start_iteration:
++            if skipped_iter:
++                # Only enable forward pre-hook after a training step has successfully run. Relevant
++                # for fp16 codepath where first XX iterations are skipped until steady-state loss
++                # scale value is reached.
++                start_iteration = iteration + 1
++            else:
++                # Enable forward pre-hook after training step has successfully run. All subsequent
++                # forward passes will use the forward pre-hook / `param_sync_func` in
++                # `forward_backward_func`.
++                if should_disable_forward_pre_hook(args):
++                    enable_forward_pre_hook(model)
++                    config.param_sync_func = param_sync_func
++                    pre_hook_enabled = True
++
++        iteration += 1
++        batch_size = (
++            mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
++        )
++        args.consumed_train_samples += batch_size
++        num_skipped_samples_in_batch = (
++            get_current_global_batch_size() - get_current_running_global_batch_size()
++        )
++        if args.decrease_batch_size_if_needed:
++            assert num_skipped_samples_in_batch >= 0
++        else:
++            assert num_skipped_samples_in_batch == 0
++        args.skipped_train_samples += num_skipped_samples_in_batch
++        num_floating_point_operations_in_batch = num_floating_point_operations(args, batch_size)
++        num_floating_point_operations_so_far += num_floating_point_operations_in_batch
++        num_floating_point_operations_since_last_log_event += num_floating_point_operations_in_batch
++
++        # Logging.
++        if not optimizer.is_stub_optimizer:
++            loss_scale = optimizer.get_loss_scale().item()
++        else:
++            loss_scale = 1.0
++        params_norm = None
++
++        if args.log_params_norm:
++            params_norm = calc_params_l2_norm(model)
++        learning_rate = None
++        decoupled_learning_rate = None
++        for param_group in optimizer.param_groups:
++            if param_group['is_decoupled_lr']:
++                decoupled_learning_rate = param_group['lr']
++            else:
++                learning_rate = param_group['lr']
++        report_memory_flag = training_log(
++            loss_dict,
++            total_loss_dict,
++            learning_rate,
++            decoupled_learning_rate,
++            iteration,
++            loss_scale,
++            report_memory_flag,
++            skipped_iter,
++            grad_norm,
++            params_norm,
++            num_zeros_in_grad,
++        )
++
++        # Evaluation.
++        if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid:
++            timers('interval-time').stop()
++            if should_disable_forward_pre_hook(args):
++                disable_forward_pre_hook(model)
++                pre_hook_enabled = False
++            if args.manual_gc and args.manual_gc_eval:
++                # Collect all objects.
++                gc.collect()
++            prefix = f'iteration {iteration}'
++            timers('eval-time', log_level=0).start(barrier=True)
++            evaluate_and_print_results(
++                prefix,
++                forward_step_func,
++                valid_data_iterator,
++                model,
++                iteration,
++                process_non_loss_data_func,
++                config,
++                verbose=False,
++                write_to_tensorboard=True,
++                non_loss_data_func=non_loss_data_func,
++            )
++            eval_duration += timers('eval-time').elapsed()
++            eval_iterations += args.eval_iters
++            timers('eval-time').stop()
++            one_logger_utils.track_e2e_metrics()
++
++            if args.manual_gc and args.manual_gc_eval:
++                # Collect only the objects created and used in evaluation.
++                gc.collect(generation=0)
++            if should_disable_forward_pre_hook(args):
++                enable_forward_pre_hook(model)
++                pre_hook_enabled = True
++            timers('interval-time', log_level=0).start(barrier=True)
++
++        # Miscellaneous post-training-step functions (e.g., FT heartbeats, GC).
++        # Some of these only happen at specific iterations.
++        post_training_step_callbacks(
++            model,
++            optimizer,
++            opt_param_scheduler,
++            iteration,
++            prof,
++            num_floating_point_operations_since_last_log_event,
++        )
++
++        # Checkpoint and decide whether to exit.
++        should_exit = checkpoint_and_decide_exit(
++            model,
++            optimizer,
++            opt_param_scheduler,
++            iteration,
++            num_floating_point_operations_so_far,
++            checkpointing_context,
++            train_data_iterator,
++        )
++        if should_exit:
++            break
++
++    one_logger_utils.track_e2e_metrics()
++
++    # Flush TensorBoard, WandB writers and one-logger.
++    writer = get_tensorboard_writer()
++    if writer:
++        writer.flush()
++
++    # Close out pre-hooks if using distributed optimizer and overlapped param gather.
++    if pre_hook_enabled:
++        disable_forward_pre_hook(model)
++
++    ft_integration.on_checkpointing_start()
++    # This will finalize all unfinalized async request and terminate
++    # a persistent async worker if persistent ckpt worker is enabled
++    maybe_finalize_async_save(blocking=True, terminate=True)
++    ft_integration.on_checkpointing_end(is_async_finalization=True)
++    if args.enable_ft_package and ft_integration.get_rank_monitor_client() is not None:
++        ft_integration.get_rank_monitor_client().shutdown_workload_monitoring()
++
++    # If any exit conditions (signal handler, duration, iterations) have been reached, exit.
++    if should_exit:
++        wandb_writer = get_wandb_writer()
++        if wandb_writer:
++            wandb_writer.finish()
++        ft_integration.shutdown()
++        one_logger_utils.finish()
++        sys.exit(exit_code)
++
++    return iteration, num_floating_point_operations_so_far
+

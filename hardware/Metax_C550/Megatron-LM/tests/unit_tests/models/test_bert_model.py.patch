@@ -1,0 +1,76 @@
+diff --git a/tests/unit_tests/models/test_bert_model.py b/tests/unit_tests/models/test_bert_model.py
+index b30d1413c..cff917385 100644
+--- a/tests/unit_tests/models/test_bert_model.py
++++ b/tests/unit_tests/models/test_bert_model.py
+@@ -6,6 +6,7 @@ from importlib.metadata import version
+ import pytest
+ import torch
+ from packaging.version import Version as PkgVersion
++from packaging.version import parse
+ from pytest_mock import mocker
+ 
+ from megatron.core.models.bert.bert_layer_specs import (
+@@ -16,6 +17,7 @@ from megatron.core.models.bert.bert_model import BertModel
+ from megatron.core.tensor_parallel.random import model_parallel_cuda_manual_seed
+ from megatron.core.transformer.enums import AttnBackend, AttnMaskType
+ from megatron.core.transformer.transformer_config import TransformerConfig
++from megatron.core.utils import is_te_min_version, get_te_version
+ from tests.unit_tests.test_utilities import Utils
+ 
+ 
+@@ -166,14 +168,37 @@ class TestBertModelAttentionDimensions:
+             attn_mask_dimensions == "b11s"
+         ), f"Expected b11s for attn_mask_dimensions but got {attn_mask_dimensions}"
+ 
++    """
++    Author: phoenixdong
++    Date: 2024-12-17
++    Action: Modify the process, exceptions are only thrown between te 1.7 and 1.10.
++    Reason: The new version of TE has already addressed potential exceptions.
++    """
+     @pytest.mark.internal
+     @pytest.mark.flaky_in_dev
+     def test_transformer_engine_version_1_7_to_1_10_rng_error(self, mocker):
+-        bert_layer_with_transformer_engine_spec.submodules.self_attention.params[
+-            'attn_mask_type'
+-        ] == AttnMaskType.padding
+-        mocker.patch("megatron.core.utils.get_te_version", return_value=PkgVersion("1.8"))
+-        with pytest.raises(Exception) as exc_info:
++        # Get the current version of Transformer Engine
++        te_version = f"{get_te_version().major}.{get_te_version().minor}"
++
++        # Check if the version is between 1.7 and 1.10
++        if parse("1.7") <= parse(te_version) <= parse("1.10"):
++            # Expect an exception during BertModel initialization
++            with pytest.raises(Exception) as exc_info:
++                self.bert_model = BertModel(
++                    config=self.transformer_config,
++                    num_tokentypes=0,
++                    transformer_layer_spec=bert_layer_with_transformer_engine_spec,
++                    vocab_size=100,
++                    max_sequence_length=4,
++                )
++            # Verify the exception message matches the expected error
++            assert str(exc_info.value) == (
++                "Linear.__init__() got an unexpected keyword argument 'rng_tracker_name' when "
++                "instantiating TERowParallelLinear when instantiating SelfAttention when "
++                "instantiating TransformerLayer"
++            )
++        else:
++            # For versions outside the range, initialize the model without expecting an exception
+             self.bert_model = BertModel(
+                 config=self.transformer_config,
+                 num_tokentypes=0,
+@@ -181,11 +206,6 @@ class TestBertModelAttentionDimensions:
+                 vocab_size=100,
+                 max_sequence_length=4,
+             )
+-        assert str(exc_info.value) == (
+-            "Linear.__init__() got an unexpected keyword argument 'rng_tracker_name' when "
+-            "instantiating TERowParallelLinear when instantiating SelfAttention when "
+-            "instantiating TransformerLayer"
+-        )
+ 
+     @pytest.mark.internal
+     def test_transformer_engine_version_1_7_to_1_10_unfused_attention(self, mocker):
+

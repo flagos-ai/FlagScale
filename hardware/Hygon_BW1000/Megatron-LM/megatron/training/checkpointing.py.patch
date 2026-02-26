@@ -1,0 +1,53 @@
+diff --git a/megatron/training/checkpointing.py b/megatron/training/checkpointing.py
+index a706c1813..f66415fb2 100644
+--- a/megatron/training/checkpointing.py
++++ b/megatron/training/checkpointing.py
+@@ -239,12 +239,14 @@ def read_metadata(tracker_filename):
+                 print_rank_0('ERROR: Invalid metadata file {}. Exiting'.format(
+                     tracker_filename))
+                 sys.exit()
+-    assert iteration > 0 or release, 'error parsing metadata file {}'.format(
++    # TODO: we use iteration 0 to load checkpoint from other framework.
++    # We should remove this after we have a better way to load checkpoint from other framework.
++    assert iteration >= 0 or release, 'error parsing metadata file {}'.format(
+         tracker_filename)
+ 
+     # Get the max iteration retrieved across the ranks.
+     if torch.distributed.is_initialized():
+-        iters_cuda = torch.tensor([iteration], dtype=torch.long, device='cuda')
++        iters_cuda = torch.tensor([iteration], dtype=torch.long, device='cuda' if 'nccl' in torch.distributed.get_backend() else 'cpu')
+         torch.distributed.all_reduce(iters_cuda, op=torch.distributed.ReduceOp.MAX)
+         max_iter = iters_cuda[0].item()
+ 
+@@ -636,8 +638,8 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
+ 
+     torch.distributed.barrier(group=mpu.get_data_parallel_group())
+ 
+-    if mpu.get_data_parallel_rank() == 0:
+-        ensure_directory_exists(data_state_save_path)
++    #if mpu.get_data_parallel_rank() == 0:
++    ensure_directory_exists(data_state_save_path)
+ 
+     torch.distributed.barrier(group=mpu.get_data_parallel_group())
+ 
+@@ -1056,6 +1058,10 @@ def load_args_from_checkpoint(
+             checkpoint_args, 'add_bias_linear', not getattr(checkpoint_args, 'disable_bias_linear')
+         )
+ 
++    # For backward compatibility.
++    if hasattr(checkpoint_args, 'apply_layernorm_rms'):
++        checkpoint_args.normalization = 'RMSNorm'
++
+     def _set_arg(arg_name, old_arg_name=None, force=False):
+         if not force and getattr(args, arg_name, None) is not None:
+             return
+@@ -1091,6 +1097,8 @@ def load_args_from_checkpoint(
+     _set_arg('add_qkv_bias', force=True)
+     _set_arg('squared_relu', force=True)
+     _set_arg('swiglu', force=True)
++    _set_arg('multiple_of', force=True)
++    _set_arg('hidden_dim_multiplier', force=True)
+     _set_arg('untie_embeddings_and_output_weights', force=True)
+     _set_arg('apply_layernorm_1p', force=True)
+     _set_arg('normalization', force=True)
+

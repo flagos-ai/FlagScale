@@ -1,0 +1,44 @@
+diff --git a/megatron/core/optimizer/optimizer.py b/megatron/core/optimizer/optimizer.py
+index 5d2ec82fc..b88f520bf 100644
+--- a/megatron/core/optimizer/optimizer.py
++++ b/megatron/core/optimizer/optimizer.py
+@@ -393,12 +393,23 @@ class MixedPrecisionOptimizer(MegatronOptimizer):
+             )
+ 
+         # Update across all model parallel instances.
+-        torch.distributed.all_reduce(
+-            self.found_inf,
+-            op=torch.distributed.ReduceOp.MAX,
+-            group=self.get_grad_stats_parallel_group(),
+-        )
+-
++        groups = self.get_grad_stats_parallel_group()
++        if isinstance(groups, list):
++            if "cpu:gloo" == torch.distributed.get_backend(groups[0]):
++                self.found_inf = self.found_inf.cpu()
++        else:
++            if "cpu:gloo" == torch.distributed.get_backend(groups):
++                self.found_inf = self.found_inf.cpu()
++        if not isinstance(groups, list):
++            groups = [groups]
++        for group in groups:
++            torch.distributed.all_reduce(
++                self.found_inf,
++                op=torch.distributed.ReduceOp.MAX,
++                group=group
++            )
++        if self.found_inf.device != torch.device('cuda'):
++            self.found_inf = self.found_inf.cuda()
+         # Check for nan.
+         found_inf_flag = self.found_inf.item() > 0
+ 
+@@ -1193,7 +1204,7 @@ class ChainedOptimizer(MegatronOptimizer):
+ 
+             # Lazy loading checkpoint, state dict is needed only when DP rank = 0.
+             if torch.distributed.get_rank(optimizer.data_parallel_group) == 0 and states is None:
+-                states = torch.load(filename)
++                states = torch.load(filename, weights_only=False)
+ 
+             state_dict = states[idx] if states else None
+             optimizer.load_parameter_state_from_dp_zero(
+
