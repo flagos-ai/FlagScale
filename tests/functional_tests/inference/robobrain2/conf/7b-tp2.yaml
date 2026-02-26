@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: robobrain2
-  exp_dir: tests/functional_tests/inference/robobrain2/results_test/7b-tp2
+  exp_dir: tests/functional_tests/inference/robobrain2/test_results/7b-tp2
   task:
     type: inference
     backend: vllm

@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: deepseek_r1_distill_qwen-flaggems
-  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen-flaggems/results_test/7b-tp2
+  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen-flaggems/test_results/7b-tp2
   task:
     type: inference
     backend: vllm

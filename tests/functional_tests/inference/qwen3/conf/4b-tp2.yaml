@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: qwen3
-  exp_dir: tests/functional_tests/inference/qwen3/results_test/4b-tp2
+  exp_dir: tests/functional_tests/inference/qwen3/test_results/4b-tp2
   task:
     type: inference
     backend: vllm

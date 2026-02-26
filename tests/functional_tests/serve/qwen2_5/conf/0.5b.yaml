@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: qwen2_5
-  exp_dir: tests/functional_tests/serve/qwen2_5/results_test/0.5b
+  exp_dir: tests/functional_tests/serve/qwen2_5/test_results/0.5b
   task:
     type: serve
     entrypoint: null
