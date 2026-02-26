@@ -20,7 +20,7 @@ system:
     decay_lr: 2.5e-6
 
   checkpoint:
-    output_directory: ${experiment.exp_dir}/ckpt
+    output_directory: ${experiment.exp_dir}
     # Whether to save checkpoint
     save_checkpoint: true
     # Number of steps between checkpoints

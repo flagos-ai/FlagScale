@@ -157,7 +157,7 @@ Configure the following fields:
 - `system.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
 - `system.checkpoint.save_checkpoint` - Whether to save checkpoints (default: `true`)
 - `system.checkpoint.save_freq` - Steps between checkpoints (default: `1000`)
-- `system.checkpoint.output_directory` - Checkpoint output directory (default: `${experiment.exp_dir}/ckpt`)
+- `system.checkpoint.output_directory` - Checkpoint output directory (default: `${experiment.exp_dir}`)
 
 **Model settings**:
 - `model.model_name` - Model name: `"pi0"` or `"pi0.5"`
@@ -186,7 +186,7 @@ python run.py --config-path ./examples/pi0/conf --config-name train action=run
 
 Training logs are saved to `outputs/pi0_train/logs/host_0_localhost.output` by default.
 
-Checkpoints are saved to `${experiment.exp_dir}/ckpt` (default: `outputs/pi0_train/ckpt`).
+Checkpoints are saved to `${experiment.exp_dir}/checkpoints` (default: `outputs/pi0_train/checkpoints`).
 
 ### Stop Training
 ```sh
