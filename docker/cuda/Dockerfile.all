@@ -1,0 +1,204 @@
+# FlagScale All-in-One Dockerfile for CUDA Platform
+#
+# NOTE: This Dockerfile is experimental and requires further testing.
+#       Please report issues at https://github.com/FlagOpen/FlagScale/issues
+#
+# Comprehensive image with all task dependencies (train, inference, rl, hetero_train)
+#
+# Multi-stage build producing:
+#   - dev: Development image with all tools and dependencies
+#   - release: Production image with all dependencies
+#
+# Build examples:
+#   ./docker/build.sh --platform cuda --task all --target dev
+#   ./docker/build.sh --platform cuda --task all --target release
+#   ./docker/build.sh --platform cuda --task all --target dev --build-arg PKG_MGR=conda
+
+# =============================================================================
+# BUILD ARGUMENTS
+# =============================================================================
+# Base image versions
+ARG CUDA_VERSION=12.8.1
+ARG UBUNTU_VERSION=22.04
+ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+
+# Tool versions
+ARG PYTHON_VERSION=3.12
+ARG UV_VERSION=0.7.2
+
+# Package manager: pip, uv, or conda (default: uv)
+ARG PKG_MGR=uv
+
+# PyPI index URLs (for custom mirrors)
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG UV_INDEX_URL=${PIP_INDEX_URL}
+ARG UV_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+
+# PyTorch wheel index (derived from CUDA version)
+ARG PYTORCH_INDEX=https://download.pytorch.org/whl/cu128
+
+# =============================================================================
+# BASE STAGE - System dependencies
+# =============================================================================
+FROM ${BASE_IMAGE} AS base
+
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+ARG UV_VERSION
+ARG PKG_MGR
+
+# Root installation directory (single source of truth)
+ARG FLAGSCALE_HOME=/opt/flagscale
+
+# Build-time only environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Shanghai
+
+# Copy install scripts for system dependencies
+COPY tools/install /tmp/tools/install
+
+# Install system dependencies (common for all tasks)
+# Uses: install.sh --no-dev --no-base --no-task to only run system phase
+RUN chmod +x /tmp/tools/install/*.sh && \
+    chmod +x /tmp/tools/install/utils/*.sh && \
+    chmod +x /tmp/tools/install/cuda/*.sh && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    /tmp/tools/install/install.sh \
+        --platform cuda \
+        --task all \
+        --pkg-mgr ${PKG_MGR} \
+        --no-dev --no-base --no-task && \
+    rm -rf /tmp/tools
+
+# Runtime environment variables (mirrors env.sh for non-interactive shell compatibility)
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME}
+ENV UV_PROJECT_ENVIRONMENT=${FLAGSCALE_HOME}/venv
+ENV VIRTUAL_ENV=${FLAGSCALE_HOME}/venv
+ENV FLAGSCALE_CONDA=${FLAGSCALE_HOME}/miniconda3
+ENV FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps
+# UV configuration
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+ENV UV_LINK_MODE=copy
+# System paths
+ENV MPI_HOME=/usr/local/mpi
+ENV CUDA_HOME=/usr/local/cuda
+# Combined PATH (includes both uv venv and conda paths for flexibility)
+ENV PATH="${FLAGSCALE_HOME}/venv/bin:${FLAGSCALE_HOME}/miniconda3/bin:/root/.local/bin:/usr/local/mpi/bin:${CUDA_HOME}/bin:$PATH"
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:/usr/local/lib:/usr/local/mpi/lib:/usr/local/mpi/lib64:$LD_LIBRARY_PATH"
+
+WORKDIR /workspace
+
+# =============================================================================
+# DEPS STAGE - Install all dependencies using install folder
+# =============================================================================
+FROM base AS deps
+
+ARG PYTORCH_INDEX
+ARG PKG_MGR
+ARG FLAGSCALE_HOME=/opt/flagscale
+
+# PyPI index URLs (re-declare to use in this stage)
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG UV_INDEX_URL
+ARG UV_EXTRA_INDEX_URL
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
+# Copy install scripts and requirements
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+# Install all task dependencies based on package manager
+# Note: Source env.sh to ensure environment is available in non-interactive RUN
+# Cache mounts: uv cache, pip cache, conda pkgs cache
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=${FLAGSCALE_HOME}/miniconda3/pkgs \
+    . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh && \
+    chmod +x /workspace/tools/install/utils/*.sh && \
+    chmod +x /workspace/tools/install/cuda/*.sh && \
+    cd /workspace && \
+    if [ "$PKG_MGR" = "uv" ]; then \
+        UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task all --pkg-mgr uv --no-system; \
+    elif [ "$PKG_MGR" = "conda" ]; then \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task all --pkg-mgr conda --env-name flagscale-all --no-system; \
+    else \
+        PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task all --pkg-mgr pip --no-system; \
+    fi
+
+# =============================================================================
+# DEV STAGE - Full development image
+# =============================================================================
+FROM deps AS dev
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME=/opt/flagscale
+
+# Dev dependencies are already installed by default (use --no-dev to skip)
+# Copy FlagScale source
+COPY . /workspace/FlagScale
+WORKDIR /workspace/FlagScale
+
+CMD ["/bin/bash"]
+
+# =============================================================================
+# RELEASE STAGE - Production image (uses same base for consistency)
+# =============================================================================
+FROM base AS release
+
+ARG PYTORCH_INDEX
+ARG PKG_MGR
+ARG FLAGSCALE_HOME=/opt/flagscale
+
+# PyPI index URLs
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG UV_INDEX_URL
+ARG UV_EXTRA_INDEX_URL
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
+# Copy install scripts and requirements
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+# Install all task dependencies without dev tools
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=${FLAGSCALE_HOME}/miniconda3/pkgs \
+    . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh && \
+    chmod +x /workspace/tools/install/utils/*.sh && \
+    chmod +x /workspace/tools/install/cuda/*.sh && \
+    cd /workspace && \
+    if [ "$PKG_MGR" = "uv" ]; then \
+        UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task all --pkg-mgr uv --no-system --no-dev; \
+    elif [ "$PKG_MGR" = "conda" ]; then \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task all --pkg-mgr conda --env-name flagscale-all --no-system --no-dev; \
+    else \
+        PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task all --pkg-mgr pip --no-system --no-dev; \
+    fi
+
+# Copy FlagScale source
+COPY . /workspace/FlagScale
+WORKDIR /workspace/FlagScale
+
+CMD ["/bin/bash"]

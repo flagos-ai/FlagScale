@@ -1,0 +1,50 @@
+defaults:
+  - _self_
+  - inference: 7b-tp2
+
+experiment:
+  exp_name: deepseek_r1_distill_qwen-flaggems
+  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen-flaggems/results_test/7b-tp2
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/inference_llm.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start:
+      source /root/miniconda3/bin/activate flagscale-inference
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+    CUDNN_BENCHMARK: "false"
+    CUDNN_DETERMINISTIC: "true"
+    USE_FLAGGEMS: "true"
+    # Quantitative perception training related
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    NVTE_FLASH_ATTN: 0
+    NVTE_FUSED_ATTN: 0
+    # GPU parallel control
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    NCCL_ALGO: "Ring"
+    NCCL_PROTOCOL: LLC
+    # Basic randomness control
+    SEED: 1234
+    PYTHONHASHSEED: 0
+    MKL_NUM_THREADS: 1
+    OMP_NUM_THREADS: 1
+    NUMEXPR_NUM_THREADS: 1
+    SCIPY_RDRANDOM: 0
+    TF_DETERMINISTIC_OPS: 1
+    TORCH_CUDNN_DETERMINISM: true
+    CUDA_LAUNCH_BLOCKING: 1
+    NCCL_DEBUG: INFO
+    MAGIC_CACHE: disabled
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

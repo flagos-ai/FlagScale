@@ -2,24 +2,28 @@
 requires = [
     "setuptools>=77.0",
     "wheel>=0.45.1",
-    "pip>=25.3",
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "flag_scale"
+name = "flagscale"
 version = "1.0.0"
 description = "FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI)."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
-dynamic = ["dependencies"]
 
 [project.urls]
-Homepage = "https://github.com/flagos-ai/FlagScale"
+Homepage = "https://github.com/flagos-ai/FlagScale.git"
 
 [project.scripts]
-flagscale = "flag_scale.flagscale.cli:flagscale"
+flagscale = "flagscale.cli:flagscale"
+
+[tool.setuptools.packages.find]
+include = ["flagscale*"]
+
+[tool.setuptools.package-data]
+"flagscale" = ["**/*.yaml", "**/*.yml"]
 
 [tool.ruff]
 line-length = 100
@@ -88,7 +92,7 @@ ignore = [
     "E501",         # Line too long
     "E722",         # Use bare except, specify exception instead
     "E731",         # lambda assignment
-    "E741",         # Use variables named ‘l’, ‘O’, or ‘I’
+    "E741",         # Use variables named 'l', 'O', or 'I'
     "F403", "F405", # star imports
     "B905",         # zip strict
     "B007",         # unused loop var
@@ -115,11 +119,3 @@ extend-ignore-identifiers-re = [
     "nd_*",
     "\\d+[Bb][-]?[Aa]\\d+(\\.\\d+)?[Bb]", # protect 30BA3B
 ]
-
-#[tool.mypy]
-#plugins = ["pydantic.mypy"]
-#ignore_missing_imports = true
-#check_untyped_defs = true
-#follow_imports = "silent"
-#mypy_path = "."
-#explicit_package_bases = true

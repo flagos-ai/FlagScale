@@ -1,0 +1,240 @@
+name: Common Functional Tests - Heterogeneous Training
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+        description: Platform name (e.g., cuda, default)
+      test_matrix:
+        required: true
+        type: string
+        description: JSON array of test configurations
+      image:
+        required: true
+        type: string
+      runs_on:
+        required: true
+        type: string
+      container_volumes:
+        required: true
+        type: string
+      container_options:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
+      pkg_mgr:
+        required: false
+        type: string
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
+        default: ""
+      env_path:
+        required: false
+        type: string
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
+
+jobs:
+  functional_test_hetero_train:
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: /workspace/FlagScale
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test_config: ${{ fromJson(inputs.test_matrix) }}
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Download source code artifact (attempt 1)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_1
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 2)
+        if: steps.download_attempt_1.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_2
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 3)
+        if: steps.download_attempt_2.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        id: download_attempt_3
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Verify artifact download
+        run: |
+          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 1"
+          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
+          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
+          else
+            echo "❌ Error: All 3 download attempts failed"
+            echo "Artifact name: ${{ inputs.source_artifact }}"
+            exit 1
+          fi
+
+      - name: Extract source code
+        run: |
+          mkdir -p $PROJECT_ROOT
+          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+
+      - name: Set safe directory
+        run: |
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Install dependencies for heterogeneous training
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Installing dependencies for heterogeneous training"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install task source dependencies (pip deps are pre-installed in the env)
+          echo "Installing task source dependencies..."
+
+          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          INSTALL_DIR=""
+          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            INSTALL_DIR=$(dirname "$ENV_PATH")
+          fi
+
+          # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
+          ./tools/install/install.sh \
+            --platform ${{ inputs.platform }} \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
+            --retry-count 3
+        timeout-minutes: 30
+
+      - name: Run functional tests
+        id: functional_test
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ matrix.test_config.device }}'
+          TASK='${{ matrix.test_config.task }}'
+          MODEL='${{ matrix.test_config.model }}'
+          CASE='${{ matrix.test_config.case }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Running functional tests for heterogeneous training"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
+          echo "Case: ${CASE:-all}"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+          echo "Project root: $PROJECT_ROOT"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "⚠️  Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "⚠️  UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "ℹ️  Running tests with pip/system Python"
+              ;;
+          esac
+
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Run functional tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type functional \
+            --task "$TASK" \
+            --model "$MODEL" \
+            --list "$CASE"
+          exit_code=$?
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
+          else
+            echo "❌ Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+          fi
+
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit $exit_code
+        timeout-minutes: 15

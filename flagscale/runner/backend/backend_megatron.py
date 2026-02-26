@@ -6,7 +6,6 @@ from omegaconf import DictConfig, OmegaConf
 from flagscale.runner.backend.backend_base import BackendBase
 from flagscale.runner.runner_train import (
     _get_args_megatron,
-    _get_args_robotics,
     _update_config_train,
 )
 from flagscale.runner.utils import logger, parse_hostfile
@@ -21,10 +20,7 @@ class MegatronBackend(BackendBase):
 
     def _prepare(self):
         _update_config_train(self.config)
-        if self.config.experiment.task.backend == "megatron":
-            self.user_args = _get_args_megatron(self.config)
-        elif self.config.experiment.task.backend == "robotics":
-            self.user_args = _get_args_robotics(self.config)
+        self.user_args = _get_args_megatron(self.config)
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint

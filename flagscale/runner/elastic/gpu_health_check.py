@@ -18,6 +18,7 @@ Features:
 
 import argparse
 import os
+import time
 from datetime import timedelta
 
 import torch
@@ -42,6 +43,8 @@ _CHECK_RESULTS = {
     "tensor_parallel": {"status": "pending", "error": None},
     "data_parallel": {"status": "pending", "error": None},
     "pipeline_parallel": {"status": "pending", "error": None},
+    "gpu_hardware": {"status": "pending", "error": None},
+    "gpu_computation": {"status": "pending", "error": None},
 }
 
 
@@ -493,6 +496,272 @@ def check_communication():
         print("=" * 60)
 
 
+def check_hardware_single():
+    """Single GPU hardware check without distributed calls"""
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+
+        print("Checking GPU hardware")
+
+        device_count = pynvml.nvmlDeviceGetCount()
+        all_passed = True
+        errors = []
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            gpu_name = pynvml.nvmlDeviceGetName(handle)
+
+            print(f"=== Checking GPU {i}: {gpu_name} ===")
+
+            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+            print(f"Current GPU temperature: {temp}°C")
+            if temp >= 90:
+                all_passed = False
+                errors.append(f"GPU {i} overheat: {temp}°C")
+            elif temp > 85:
+                print(f"Warning: GPU {i} high temperature: {temp}°C")
+
+            power_usage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
+            power_limit = pynvml.nvmlDeviceGetEnforcedPowerLimit(handle) / 1000.0
+            power_ratio = power_usage / power_limit if power_limit > 0 else 0.0
+            print(f"Power usage: {power_usage:.2f}W / {power_limit:.2f}W")
+            if power_ratio > 0.9:
+                print(f"GPU {i} power usage high: {power_usage:.1f}W ({power_ratio:.0%})")
+
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            memory_utilization = (float(mem_info.used) / float(mem_info.total)) * 100
+
+            print(f"Total memory: {float(mem_info.total) / (1024**2):.2f} MB")
+            print(f"Used memory: {float(mem_info.used) / (1024**2):.2f} MB")
+            print(f"GPU {i} memory utilization rate: {memory_utilization:.2f}%")
+
+            if memory_utilization >= 98.0:
+                all_passed = False
+                errors.append(f"GPU {i} memory almost full: {memory_utilization * 100:.1f}%")
+
+        pynvml.nvmlShutdown()
+        if all_passed:
+            log_check_result("gpu_hardware", status="passed")
+            return True
+        else:
+            log_check_result("gpu_hardware", status="failed", error="; ".join(errors))
+            return False
+    except ImportError:
+        log_check_result("gpu_hardware", status="failed", error="pynvml is not installed")
+        return False
+    except Exception as e:
+        log_check_result("gpu_hardware", status="failed", error=str(e))
+        return False
+
+
+def check_hardware():
+    """Distributed wrapper: run single check once per node and summarize result"""
+
+    args = _GLOBAL_ARGS
+    rank = dist.get_rank()
+
+    if rank == 0:
+        print("\n" + "=" * 60)
+        print("PHASE 2: GPU HARDWARE TESTING")
+        print("=" * 60)
+
+    if args.local_rank == 0:
+        check_hardware_single()
+    if rank == 0:
+        print("\nGPU hardware checking phase completed")
+        print("=" * 60)
+
+
+def check_computation_for_different_dtype(dtype, name):
+    args = _GLOBAL_ARGS
+    check_tensor = torch.randn(4096, 4096, dtype=dtype).to(f"cuda:{args.local_rank}")
+    result = torch.matmul(check_tensor, check_tensor)
+    if torch.any(torch.isnan(result)):
+        print(f"{name} failed: nan is detected in result")
+        return False
+    elif torch.any(torch.isinf(result)):
+        print(f"{name} failed: inf is detected in result")
+        return False
+    else:
+        return True
+
+
+def check_computation_endurance():
+    args = _GLOBAL_ARGS
+    start_time = time.time()
+    iteration = 0
+
+    while time.time() - start_time < 60:
+        iteration += 1
+
+        a = torch.randn(4096, 4096).to(f"cuda:{args.local_rank}")
+        b = torch.randn(4096, 4096).to(f"cuda:{args.local_rank}")
+        result1 = torch.matmul(a, b)
+
+        c = torch.randn(4096, 4096).to(f"cuda:{args.local_rank}")
+        result2 = torch.inverse(c)
+
+        if torch.any(torch.isnan(result1)) or torch.any(torch.isnan(result2)):
+            print(f"check_computation_endurance failed: nan detected in iteration {iteration}")
+            return False
+
+    return True
+
+
+def check_ecc_error():
+    """Check ECC Error through matrix multiplication operations"""
+    try:
+        args = _GLOBAL_ARGS
+        rank = dist.get_rank()
+        device = f"cuda:{args.local_rank}"
+
+        # Perform multiple matrix operations to stress check memory
+        for i in range(5):
+            # Create large tensors to stress GPU memory
+            tensor_a = torch.randn(2048, 2048, dtype=torch.float32, device=device)
+            tensor_b = torch.randn(2048, 2048, dtype=torch.float32, device=device)
+
+            # Perform matrix multiplication that could trigger ECC errors
+            result = torch.matmul(tensor_a, tensor_b)
+
+            # Check for abnormal values that might indicate ECC errors
+            if torch.any(torch.isnan(result)):
+                print(f"ECC Error Detection: NaN detected in iteration {i}")
+                return False
+            if torch.any(torch.isinf(result)):
+                print(f"ECC Error Detection: Inf detected in iteration {i}")
+                return False
+
+            torch.cuda.empty_cache()
+        if rank == 0:
+            print("ECC Error Detection: No errors detected")
+        return True
+
+    except torch.cuda.OutOfMemoryError as e:
+        print(f"ECC Error Detection failed: GPU out of memory - {e}")
+        return False
+    except RuntimeError as e:
+        if "cuda" in str(e).lower() or "gpu" in str(e).lower():
+            print(f"ECC Error Detection failed: GPU runtime error - {e}")
+            return False
+        else:
+            print(f"ECC Error Detection failed: Runtime error - {e}")
+            return False
+    except Exception as e:
+        print(f"ECC Error Detection failed: Unexpected error - {e}")
+        return False
+
+
+def check_computation_single():
+    """Single GPU computation check"""
+    print("Checking GPU computation capabilities...")
+    checks = [
+        ("Float", torch.float32),
+        ("Double", torch.double),
+        ("Half", torch.half),
+    ]
+    all_pass = True
+    for display_name, dtype in checks:
+        ok = check_computation_for_different_dtype(
+            dtype=dtype, name=f"check_calculation_{display_name.lower()}"
+        )
+        print(f"{display_name} computation: {'PASS' if ok else 'FAIL'}")
+        if not ok:
+            all_pass = False
+    print("Starting 60-second endurance check...")
+    endurance_result = check_computation_endurance()
+    if not endurance_result:
+        all_pass = False
+    print(f"Endurance check: {'PASS' if endurance_result else 'FAIL'}")
+    ecc_error_result = check_ecc_error()
+    if not ecc_error_result:
+        all_pass = False
+    print(f"ECC error check: {'PASS' if ecc_error_result else 'FAIL'}")
+    if all_pass:
+        log_check_result("gpu_computation", "passed")
+        return True
+    else:
+        log_check_result("gpu_computation", "failed")
+        return False
+
+
+def check_computation():
+    """Test GPU computation capabilities with distributed coordination"""
+    args = _GLOBAL_ARGS
+    rank = dist.get_rank()
+
+    if rank == 0:
+        print("\n" + "=" * 60)
+        print("PHASE 3: GPU COMPUTATION CHECKING")
+        print("=" * 60)
+
+    # Check individual computation capabilities
+    check_functions = [
+        ("Float computation", torch.float32, "check_computation_float"),
+        ("Double computation", torch.double, "check_computation_double"),
+        ("Half computation", torch.half, "check_computation_half"),
+        ("Endurance check (60s)", check_computation_endurance),
+        ("ECC Error Detection", check_ecc_error),
+    ]
+
+    all_passed = True
+    failed_checks = []
+
+    for check_name, *rest in check_functions:
+        if rank == 0:
+            print(f"\nTesting {check_name}...")
+
+        try:
+            if isinstance(rest[0], torch.dtype):
+                _, dtype, report_name = check_name, rest[0], rest[1]
+                result = check_computation_for_different_dtype(dtype, report_name)
+            else:
+                check_func = rest[0]
+                result = check_func()
+            if not result:
+                all_passed = False
+                failed_checks.append(check_name)
+
+        except Exception as e:
+            result = False
+            all_passed = False
+            failed_checks.append(check_name)
+            if rank == 0:
+                print(f"✗ {check_name} failed with exception: {e}")
+
+        try:
+            result_tensor = torch.zeros(args.world_size).to(f"cuda:{args.local_rank}")
+            result_tensor[args.rank] = 1.0 if result else 0.0
+            dist.all_reduce(result_tensor, dist.ReduceOp.SUM)
+
+            if args.rank == 0:
+                expected_tensor = torch.ones_like(result_tensor).to(f"cuda:{args.local_rank}")
+                if torch.allclose(result_tensor, expected_tensor, atol=1e-6):
+                    print(f"{check_name} passed")
+                else:
+                    print(f"{check_name} failed")
+        except Exception as e:
+            if rank == 0:
+                print(f"⚠ Warning: Failed to gather {check_name} results: {e}")
+
+        try:
+            dist.barrier()
+        except Exception as e:
+            if rank == 0:
+                print(f"⚠ Warning: Calculation check barrier failed: {e}")
+
+    if all_passed:
+        log_check_result("gpu_computation", "passed")
+    else:
+        error_msg = f"Failed checks: {', '.join(failed_checks)}"
+        log_check_result("gpu_computation", "failed", error_msg)
+
+    if rank == 0:
+        print("\nGPU computation checking phase completed")
+        print("=" * 60)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="GPU Health Check arguments")
     parser.add_argument(
@@ -535,18 +804,28 @@ def print_check_summary():
     rank = dist.get_rank() if dist.is_initialized() else 0
     if rank != 0:
         return
-
+    args = _GLOBAL_ARGS
+    world_size = args.world_size
     print("=" * 60)
     print("GPU HEALTH CHECK SUMMARY")
     print("=" * 60)
+    if world_size == 1:
+        results = list(_CHECK_RESULTS.items())[-2:]
+        scope_desc = "HARDWARE ONLY (single GPU)"
+    else:
+        results = list(_CHECK_RESULTS.items())
+        scope_desc = "ALL CHECKS (multi GPU)"
 
-    total_checks = len(_CHECK_RESULTS)
-    passed_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "passed")
-    failed_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "failed")
-    skipped_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "skipped")
-    pending_checks = sum(1 for result in _CHECK_RESULTS.values() if result["status"] == "pending")
+    print(f"Scope: {scope_desc}")
+    print("-" * 60)
 
-    for check_name, result in _CHECK_RESULTS.items():
+    total_checks = len(results)
+    passed_checks = sum(1 for _, r in results if r["status"] == "passed")
+    failed_checks = sum(1 for _, r in results if r["status"] == "failed")
+    skipped_checks = sum(1 for _, r in results if r["status"] == "skipped")
+    pending_checks = sum(1 for _, r in results if r["status"] == "pending")
+
+    for check_name, result in results:
         status_icon = (
             "✓" if result["status"] == "passed" else "✗" if result["status"] == "failed" else "⚠"
         )
@@ -595,7 +874,24 @@ def main():
         if rank == 0:
             print("Single process mode detected")
             print("Running basic GPU hardware and computation checks...")
-        # TODO: add GPU hardware and computation checks
+
+        # PHASE 1: Check gpu hardware
+        safe_check_execution(check_hardware_single, "gpu_hardware", timeout_seconds=60)
+        # PHASE 2: Check gpu computation capabilities
+        safe_check_execution(
+            check_computation_single, "gpu_computation", timeout_seconds=300
+        )  # 5 minutes for endurance check
+        # Print final summary
+        if rank == 0:
+            print_check_summary()
+        SINGLE_CHECK_RESULTS = ["gpu_hardware", "gpu_computation"]
+        failed_count = sum(
+            1 for r in SINGLE_CHECK_RESULTS if _CHECK_RESULTS[r]["status"] == "failed"
+        )
+        if failed_count > 0:
+            import sys
+
+            sys.exit(1)
         return
 
     if rank == 0:
@@ -612,7 +908,11 @@ def main():
         # PHASE 1: Check parallel communication
         check_communication()
 
-        # TODO: add GPU hardware and computation checks
+        # PHASE 2: Check gpu hardware
+        check_hardware()
+
+        # PHASE 3: Check gpu computation capabilities
+        check_computation()
 
         if rank == 0:
             print("=" * 60)
@@ -636,11 +936,11 @@ def main():
         if rank == 0:
             print_check_summary()
 
-        failed_count = sum(1 for r in _CHECK_RESULTS.values() if r["status"] == "failed")
-        if failed_count > 0:
-            import sys
+            failed_count = sum(1 for r in _CHECK_RESULTS.values() if r["status"] == "failed")
+            if failed_count > 0:
+                import sys
 
-            sys.exit(1)
+                sys.exit(1)
 
 
 if __name__ == "__main__":

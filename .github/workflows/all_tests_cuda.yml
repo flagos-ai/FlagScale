@@ -1,4 +1,4 @@
-name: tests_cuda
+name: cuda_tests
 
 on:
   push:
@@ -12,9 +12,10 @@ concurrency:
 
 jobs:
   run_tests:
+    # Package manager and environment settings are read from .github/configs/cuda.yml
     uses: ./.github/workflows/all_tests_common.yml
     with:
-      hardware: cuda
+      platform: cuda
 
   all_tests:
     needs: run_tests

@@ -7,7 +7,7 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
-    backend: vllm
+    backend: native
     entrypoint: null
   runner:
     hostfile: null # /path/to/hostfile.txt
@@ -21,6 +21,8 @@ experiment:
           type: str
   cmds:
     before_start: export RAY_DEDUP_LOGS=0
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
 
 action: run
 

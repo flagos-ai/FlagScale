@@ -1,0 +1,7 @@
+# All task dependencies combined
+# Includes train, inference, rl, hetero_train
+
+-r ./train.txt
+-r ./inference.txt
+-r ./rl.txt
+-r ./hetero_train.txt

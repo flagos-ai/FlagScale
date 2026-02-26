@@ -122,6 +122,112 @@ cd FlagScale/
 python run.py --config-path ./examples/robobrain_x0/conf/ --config-name train action=run
 ```
 
+## Training with Lerobot Dataset
+
+**Note**: For better performance, we recommend using WebDataset/Energon format (see [Training](#training) section above). [LeRobotDataset](https://github.com/huggingface/lerobot) support is provided for convenience when working with existing LeRobot datasets.
+
+### LeRobotDataset Structure
+
+A LeRobotDataset directory should have the following structure:
+
+```sh
+your_dataset/
+├── data/
+│   ├── chunk-000/
+│   │   ├── file-000.parquet
+│   │   ├── file-001.parquet
+│   │   └── ...
+│   └── ...
+├── meta/
+│   ├── info.json
+│   ├── stats.json
+│   ├── tasks.parquet
+│   └── episodes/
+│       └── ...
+└── videos/  (optional, for video data)
+    ├── observation.images.laptop/
+    │   ├── chunk-000/
+    │   │   ├── file-000.mp4
+    │   │   └── ...
+    │   └── ...
+    └── ...
+```
+
+### Download LeRobotDataset
+
+You can download existing LeRobotDatasets from HuggingFace Hub:
+
+```sh
+# Example: Download aloha_mobile_cabinet dataset
+pip install huggingface_hub
+huggingface-cli download lerobot/aloha_mobile_cabinet --repo-type dataset --local-dir /datasets/lerobot/aloha_mobile_cabinet
+```
+
+Or use datasets from [HuggingFace LeRobot](https://huggingface.co/lerobot) collection.
+
+### Edit Config
+
+FlagScale provides a pre-configured template for LeRobotDataset training:
+
+```sh
+cd FlagScale/
+vim examples/robobrain_x0/conf/train/robobrain_x0_lerobot.yaml
+```
+
+Change the following fields according to your environment:
+
+- `data.data_path`: Path to your LeRobotDataset directory (e.g., `/datasets/lerobot/aloha_mobile_cabinet`)
+- `data.tokenizer.tokenizer_path`: Path to the RoboBrain-X0 model (e.g., `/models/BAAI/RoboBrain-X0-Preview`)
+- `system.checkpoint.pretrained_checkpoint`: Path to the pretrained checkpoint
+
+Key configuration options:
+
+```yaml
+data:
+  # Path to your LeRobotDataset root directory
+  data_path: /path/to/your/lerobot/dataset
+
+  # Dataset type: use 'lerobot' for LeRobotDataset format
+  dataset_type: lerobot
+
+  # Video decoding backend: pyav (default), torchcodec, or video_reader
+  video_backend: pyav
+
+  # Number of bins for action discretization
+  action_discretization_bins: 2048
+```
+
+### Update train.yaml
+
+Make sure `train.yaml` uses the lerobot configuration:
+
+```sh
+vim examples/robobrain_x0/conf/train.yaml
+```
+
+Set the default config to use lerobot:
+
+```yaml
+defaults:
+  - train: robobrain_x0_lerobot
+  - _self_
+```
+
+### Start Training
+
+```sh
+cd FlagScale/
+python run.py --config-path ./examples/robobrain_x0/conf/ --config-name train action=run
+```
+
+### Supported Video Backends
+
+For decoding video frames from LeRobotDataset, the following backends are supported:
+
+- `pyav`: Default backend, widely compatible
+- `torchcodec`: Faster decoding, requires torchcodec installation
+- `video_reader`: Torchvision's video reader backend
+
 ## Serving
 
 ### Download Tokenzier
