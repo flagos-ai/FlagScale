@@ -140,8 +140,6 @@ class SystemConfig(BaseModel):
     shuffle: bool = False
     num_workers: int = 4
 
-    optimizer: OptimizerConfig
-    scheduler: SchedulerConfig
     checkpoint: CheckpointConfig
     raw: DictConfig | None = Field(default=None, exclude=True)
 
@@ -192,6 +190,8 @@ class ModelConfig(BaseModel):
     model_name: str = Field(..., description="Model name: 'pi0' or 'pi0.5'")
     checkpoint_dir: str = Field(..., description="Path to pretrained model checkpoint")
     freeze: FreezeConfig | None = None
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     raw: DictConfig | None = Field(default=None, exclude=True)
 
     def __getattr__(self, name):
@@ -210,7 +210,9 @@ class ModelConfig(BaseModel):
 
     def get_model_config_dict(self) -> dict[str, Any]:
         """Get all model-specific config fields (excluding train-level fields)."""
-        return self.model_dump(exclude={"model_name", "checkpoint_dir", "freeze"})
+        return self.model_dump(
+            exclude={"model_name", "checkpoint_dir", "freeze", "optimizer", "scheduler"}
+        )
 
 
 class TrainConfig(BaseModel):

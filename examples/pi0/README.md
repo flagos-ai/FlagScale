@@ -147,14 +147,6 @@ Configure the following fields:
 **System settings** (training hyperparameters):
 - `system.batch_size` - Batch size per GPU
 - `system.train_steps` - Total training steps
-- `system.optimizer.name` - Optimizer name (default: `"AdamW"`)
-- `system.optimizer.lr` - Learning rate (default: `2.5e-5`)
-- `system.optimizer.betas` - Optimizer betas (default: `[0.9, 0.95]`)
-- `system.optimizer.eps` - Optimizer epsilon (default: `1.0e-8`)
-- `system.optimizer.weight_decay` - Weight decay (default: `0.01`)
-- `system.scheduler.warmup_steps` - Warmup steps (default: `1000`)
-- `system.scheduler.decay_steps` - Decay steps (default: `30000`)
-- `system.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
 - `system.checkpoint.save_checkpoint` - Whether to save checkpoints (default: `true`)
 - `system.checkpoint.save_freq` - Steps between checkpoints (default: `1000`)
 - `system.checkpoint.output_directory` - Checkpoint output directory (default: `${experiment.exp_dir}/ckpt`)
@@ -165,6 +157,14 @@ Configure the following fields:
 - `model.tokenizer_path` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `model.tokenizer_max_length` - Maximum tokenizer sequence length
 - `model.action_steps` - Number of action steps to predict
+- `model.optimizer.name` - Optimizer name (default: `"AdamW"`)
+- `model.optimizer.lr` - Learning rate (default: `2.5e-5`)
+- `model.optimizer.betas` - Optimizer betas (default: `[0.9, 0.95]`)
+- `model.optimizer.eps` - Optimizer epsilon (default: `1.0e-8`)
+- `model.optimizer.weight_decay` - Weight decay (default: `0.01`)
+- `model.scheduler.warmup_steps` - Warmup steps (default: `1000`)
+- `model.scheduler.decay_steps` - Decay steps (default: `30000`)
+- `model.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
 
 **Data settings**:
 - `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
