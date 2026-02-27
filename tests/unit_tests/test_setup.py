@@ -6,8 +6,8 @@ import pytest
 
 # Mock setuptools.setup before importing setup module to prevent it from
 # running at import time and interfering with pytest.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 with unittest.mock.patch("setuptools.setup"):
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     if PROJECT_ROOT not in sys.path:
         sys.path.insert(0, PROJECT_ROOT)
     from setup import (
@@ -15,7 +15,6 @@ with unittest.mock.patch("setuptools.setup"):
         PIP_OPTIONS,
         PKG_OPTIONS,
         build_extras,
-        get_pip_install_cmd,
         parse_requirements,
     )
 
@@ -42,9 +41,8 @@ ALL_EXTRAS = _discover_extras()
 
 
 @pytest.fixture
-def req_tree(tmp_path, monkeypatch):
-    """Set up a temporary directory as SCRIPT_DIR for isolated tests."""
-    monkeypatch.setattr("setup.SCRIPT_DIR", str(tmp_path))
+def req_tree(tmp_path):
+    """Temporary directory for isolated requirements file tests."""
     return tmp_path
 
 
@@ -54,9 +52,9 @@ def req_tree(tmp_path, monkeypatch):
 class TestParseRequirements:
     """Tests for parse_requirements() function"""
 
-    def test_nonexistent_file(self):
+    def test_nonexistent_file(self, tmp_path):
         """Non-existent file returns empty tuples/dict"""
-        deps, opts, pkg_opts = parse_requirements("nonexistent/file.txt")
+        deps, opts, pkg_opts = parse_requirements(str(tmp_path / "nonexistent" / "file.txt"))
         assert deps == []
         assert opts == []
         assert pkg_opts == {}
@@ -66,7 +64,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("numpy==1.26.4\nscipy==1.14.1\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4", "scipy==1.14.1"]
         assert opts == []
@@ -77,7 +75,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("# comment\nnumpy==1.26.4\n\n# another comment\nscipy==1.14.1\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4", "scipy==1.14.1"]
         assert opts == []
@@ -88,7 +86,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("--find-links /some/path\nnumpy==1.26.4\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4"]
         assert opts == ["--find-links /some/path"]
@@ -101,7 +99,7 @@ class TestParseRequirements:
             "--extra-index-url https://download.pytorch.org/whl/cu128\ntorch==2.9.1\n"
         )
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["torch==2.9.1"]
         assert opts == ["--extra-index-url https://download.pytorch.org/whl/cu128"]
@@ -112,7 +110,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("--index-url https://internal.example.com/simple\nnumpy==1.26.4\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4"]
         assert opts == ["--index-url https://internal.example.com/simple"]
@@ -128,7 +126,7 @@ class TestParseRequirements:
             "torch==2.9.1\n"
         )
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["torch==2.9.1"]
         assert opts == [
@@ -145,7 +143,7 @@ class TestParseRequirements:
             "-i https://internal.example.com/simple\n-f /local/wheels\nnumpy==1.26.4\n"
         )
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4"]
         assert opts == [
@@ -162,7 +160,7 @@ class TestParseRequirements:
         base = req_tree / "base.txt"
         base.write_text("--extra-index-url https://example.com/whl\n-r common.txt\ntorch==2.9.1\n")
 
-        deps, opts, pkg_opts = parse_requirements("base.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "base.txt"))
 
         assert deps == ["typer>=0.9.0", "pyyaml==6.0.2", "torch==2.9.1"]
         assert opts == ["--extra-index-url https://example.com/whl"]
@@ -185,7 +183,7 @@ class TestParseRequirements:
         train = sub / "train.txt"
         train.write_text("-r ./base.txt\nmegatron-core\n")
 
-        deps, opts, pkg_opts = parse_requirements(os.path.join("cuda", "train.txt"))
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "cuda" / "train.txt"))
 
         assert deps == ["numpy==1.26.4", "torch==2.9.1", "megatron-core"]
         assert opts == ["--extra-index-url https://download.pytorch.org/whl/cu128"]
@@ -201,7 +199,7 @@ class TestParseRequirements:
             "scipy==1.14.1\n"
         )
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == [
             "numpy==1.26.4",
@@ -220,7 +218,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("# [--no-build-isolation]\npkg-a\npkg-b\npkg-c\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["pkg-a", "pkg-b", "pkg-c"]
         assert pkg_opts == {"pkg-a": ["--no-build-isolation"]}
@@ -230,7 +228,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("# [--no-build-isolation]\n# [--verbose]\npkg-a\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["pkg-a"]
         assert pkg_opts == {"pkg-a": ["--no-build-isolation", "--verbose"]}
@@ -240,7 +238,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("# [--no-build-isolation --verbose]\npkg-a\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["pkg-a"]
         assert pkg_opts == {"pkg-a": ["--no-build-isolation", "--verbose"]}
@@ -256,7 +254,7 @@ class TestParseRequirements:
         parent = sub / "parent.txt"
         parent.write_text("normal-pkg\n-r ./child.txt\n")
 
-        deps, opts, pkg_opts = parse_requirements(os.path.join("cuda", "parent.txt"))
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "cuda" / "parent.txt"))
 
         assert deps == ["normal-pkg", "child-nbi-pkg"]
         assert pkg_opts == {"child-nbi-pkg": ["--no-build-isolation"]}
@@ -269,7 +267,7 @@ class TestParseRequirements:
         train = req_tree / "train.txt"
         train.write_text("# [--no-build-isolation]\n-r ./base.txt\nmegatron-core\n")
 
-        deps, opts, pkg_opts = parse_requirements("train.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "train.txt"))
 
         assert deps == ["torch==2.9.1", "megatron-core"]
         assert pkg_opts == {"megatron-core": ["--no-build-isolation"]}
@@ -284,7 +282,7 @@ class TestParseRequirements:
             "scipy==1.14.1\n"
         )
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4", "scipy==1.14.1"]
         assert pkg_opts == {}
@@ -294,7 +292,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("# [no-build-isolation]\nnumpy==1.26.4\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["numpy==1.26.4"]
         assert pkg_opts == {}
@@ -304,7 +302,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("megatron-core @ git+https://github.com/flagos-ai/Megatron-LM-FL.git\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["megatron-core @ git+https://github.com/flagos-ai/Megatron-LM-FL.git"]
         assert opts == []
@@ -315,7 +313,7 @@ class TestParseRequirements:
         req_file = req_tree / "req.txt"
         req_file.write_text("some-pkg @ https://internal.example.com/wheels/some-pkg-1.0.whl\n")
 
-        deps, opts, pkg_opts = parse_requirements("req.txt")
+        deps, opts, pkg_opts = parse_requirements(str(req_tree / "req.txt"))
 
         assert deps == ["some-pkg @ https://internal.example.com/wheels/some-pkg-1.0.whl"]
         assert opts == []
@@ -325,13 +323,15 @@ class TestParseRequirements:
     def test_real_platform_base(self, platform):
         """Parse real requirements/<platform>/base.txt successfully"""
         deps, opts, pkg_opts = parse_requirements(
-            os.path.join("requirements", platform, "base.txt")
+            os.path.join(PROJECT_ROOT, "requirements", platform, "base.txt")
         )
         assert len(deps) > 0, f"requirements/{platform}/base.txt produced no deps"
 
     def test_real_common_txt(self):
         """Parse the real requirements/common.txt"""
-        deps, opts, pkg_opts = parse_requirements("requirements/common.txt")
+        deps, opts, pkg_opts = parse_requirements(
+            os.path.join(PROJECT_ROOT, "requirements", "common.txt")
+        )
 
         assert len(deps) > 0
         assert any("typer" in dep for dep in deps)
@@ -420,45 +420,3 @@ class TestBuildExtras:
         """PIP_OPTIONS keys are a subset of EXTRAS keys"""
         for name in PIP_OPTIONS:
             assert name in EXTRAS, f"PIP_OPTIONS has key '{name}' not found in EXTRAS"
-
-
-# --- TestGetPipInstallCmd ---
-
-
-class TestGetPipInstallCmd:
-    """Tests for get_pip_install_cmd() function"""
-
-    def test_nonexistent_extra_returns_none(self):
-        assert get_pip_install_cmd("nonexistent") is None
-
-    def test_extra_without_pip_options(self):
-        """Extras with no pip options produce a plain pip install command"""
-        cmd = get_pip_install_cmd("dev")
-        assert cmd == 'pip install ".[dev]"'
-
-    @pytest.mark.parametrize("extra_name", [k for k in PIP_OPTIONS])
-    def test_extra_with_pip_options(self, extra_name):
-        """Extras with pip options include them in the command"""
-        cmd = get_pip_install_cmd(extra_name)
-        assert cmd is not None
-        for opt in PIP_OPTIONS[extra_name]:
-            assert opt in cmd
-
-    @pytest.mark.parametrize("extra_name", ALL_EXTRAS)
-    def test_all_extras_produce_commands(self, extra_name):
-        """Every known extra produces a non-None command"""
-        cmd = get_pip_install_cmd(extra_name)
-        assert cmd is not None
-        assert cmd.startswith("pip install")
-
-    @pytest.mark.parametrize("extra_name", [k for k in PKG_OPTIONS])
-    def test_pkg_options_extras_produce_separate_commands(self, extra_name):
-        """Extras with pkg_options produce commands with the per-package options"""
-        cmd = get_pip_install_cmd(extra_name)
-        assert cmd is not None
-        assert "&&" in cmd
-        for pkg, opts in PKG_OPTIONS[extra_name].items():
-            for opt in opts:
-                assert opt in cmd
-            # The annotated package specifier should appear in the command
-            assert pkg in cmd

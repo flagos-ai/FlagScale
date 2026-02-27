@@ -134,105 +134,24 @@ should_install_src() {
 #   megatron-core @ git+https://github.com/...
 # The annotation applies to the NEXT package line only, then resets.
 # Multiple annotations before one package stack (options merge).
+#
+# Parsing is handled by the shared Python module parse_requirements.py
+# (also used by setup.py). The shell functions below are thin wrappers.
+
+_PARSE_REQ_PY="$_PKG_UTILS_DIR/parse_requirements.py"
 
 # Parse # [--option] annotations from a requirements file
 # Outputs: PKG_SPEC<TAB>OPTIONS for each annotated package
 # Usage: parse_pkg_annotations <req_file>
 parse_pkg_annotations() {
-    local req_file="$1"
-    local base_dir
-    base_dir="$(dirname "$req_file")"
-    [ ! -f "$req_file" ] && return 0
-
-    local pending_opts=""
-    while IFS= read -r line || [ -n "$line" ]; do
-        # Trim whitespace
-        line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-        [ -z "$line" ] && continue
-
-        if [[ "$line" == "#"* ]]; then
-            # Check for # [--option1 --option2 ...]
-            if [[ "$line" =~ ^#[[:space:]]*\[([^\]]+)\][[:space:]]*$ ]]; then
-                local bracket_content="${BASH_REMATCH[1]}"
-                # Validate all tokens start with --
-                local all_dashes=true
-                for token in $bracket_content; do
-                    [[ "$token" != --* ]] && all_dashes=false && break
-                done
-                if [ "$all_dashes" = true ] && [ -n "$bracket_content" ]; then
-                    pending_opts="$pending_opts $bracket_content"
-                fi
-            fi
-            continue
-        fi
-
-        # Handle -r includes (recurse, pending_opts NOT consumed)
-        if [[ "$line" == "-r "* ]]; then
-            local included="${line#-r }"
-            included="$(echo "$included" | sed 's/^[[:space:]]*//')"
-            if [ "${included#/}" = "$included" ]; then
-                included="$base_dir/$included"
-            fi
-            parse_pkg_annotations "$included"
-            continue
-        fi
-
-        # Skip pip options (lines starting with -)
-        [[ "$line" == -* ]] && continue
-
-        # Package line — emit if annotated, then reset
-        if [ -n "$pending_opts" ]; then
-            pending_opts="$(echo "$pending_opts" | sed 's/^[[:space:]]*//')"
-            printf '%s\t%s\n' "$line" "$pending_opts"
-            pending_opts=""
-        fi
-    done < "$req_file"
+    python3 "$_PARSE_REQ_PY" annotations "$1"
 }
 
 # Create a filtered requirements file excluding annotated packages
 # Normal packages and pip options are kept; annotated packages are commented out.
 # Usage: create_filtered_requirements <req_file> <output_file>
 create_filtered_requirements() {
-    local req_file="$1"
-    local output_file="$2"
-    [ ! -f "$req_file" ] && return 1
-
-    local pending_annotation=""
-    while IFS= read -r line || [ -n "$line" ]; do
-        local trimmed
-        trimmed="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-
-        if [[ "$trimmed" == "#"* ]]; then
-            if [[ "$trimmed" =~ ^#[[:space:]]*\[([^\]]+)\][[:space:]]*$ ]]; then
-                local bracket_content="${BASH_REMATCH[1]}"
-                local all_dashes=true
-                for token in $bracket_content; do
-                    [[ "$token" != --* ]] && all_dashes=false && break
-                done
-                if [ "$all_dashes" = true ] && [ -n "$bracket_content" ]; then
-                    pending_annotation="yes"
-                    # Skip the annotation comment from output
-                    continue
-                fi
-            fi
-            echo "$line" >> "$output_file"
-            continue
-        fi
-
-        if [ -z "$trimmed" ]; then
-            echo "$line" >> "$output_file"
-            continue
-        fi
-
-        # Package or option line
-        if [ -n "$pending_annotation" ] && [[ "$trimmed" != -* ]]; then
-            # Annotated package — skip it (comment out for traceability)
-            echo "# [skipped by installer] $trimmed" >> "$output_file"
-            pending_annotation=""
-        else
-            echo "$line" >> "$output_file"
-        fi
-    done < "$req_file"
+    python3 "$_PARSE_REQ_PY" filter "$1" "$2"
 }
 
 # =============================================================================

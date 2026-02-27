@@ -1,4 +1,5 @@
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -6,6 +7,10 @@ import sys
 from setuptools import setup
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Shared requirements parser (also used by tools/install shell scripts via CLI).
+sys.path.insert(0, os.path.join(SCRIPT_DIR, "tools", "install", "utils"))
+from parse_requirements import parse_requirements
 
 
 def _get_version() -> str:
@@ -21,60 +26,6 @@ def _get_version() -> str:
         return "0.0.0"
 
 
-def parse_requirements(req_file):
-    """Parse a requirements file, recursively resolving -r includes.
-
-    Returns (deps, pip_options, pkg_options) where:
-      - deps: list of PEP 508 dependency specifiers (normal packages)
-      - pip_options: list of pip option strings (e.g. '--extra-index-url https://...',
-        '--trusted-host example.com', '--pre', etc.) preserved as-is from the file
-      - pkg_options: dict mapping package specifier -> list of per-package pip
-        options (e.g. ``{"megatron-core @ git+...": ["--no-build-isolation"]}``)
-
-    A comment line matching ``# [--option1 --option2 ...]`` sets pending
-    per-package options that apply to the **next package line only**, then
-    reset.  Multiple such comments before a package line stack (options merge).
-    The annotations are plain comments so the file remains valid for
-    ``pip install -r``.
-    """
-    req_path = os.path.join(SCRIPT_DIR, req_file)
-    if not os.path.isfile(req_path):
-        return [], [], {}
-    deps = []
-    pip_options = []
-    pkg_options = {}
-    pending_options = []
-    base_dir = os.path.dirname(req_path)
-    with open(req_path) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("#"):
-                m = re.match(r"^#\s*\[([^\]]+)\]\s*$", line)
-                if m:
-                    opts = m.group(1).split()
-                    if opts and all(o.startswith("--") for o in opts):
-                        pending_options.extend(opts)
-                continue
-            if line.startswith("-r "):
-                included = line[3:].strip()
-                included_path = os.path.normpath(os.path.join(base_dir, included))
-                rel_path = os.path.relpath(included_path, SCRIPT_DIR)
-                sub_deps, sub_opts, sub_pkg_opts = parse_requirements(rel_path)
-                deps.extend(sub_deps)
-                pip_options.extend(sub_opts)
-                pkg_options.update(sub_pkg_opts)
-            elif line.startswith("-"):
-                pip_options.append(line)
-            else:
-                deps.append(line)
-                if pending_options:
-                    pkg_options[line] = list(pending_options)
-                    pending_options = []
-    return deps, pip_options, pkg_options
-
-
 def build_extras():
     """Build extras_require by scanning requirements/ directory.
 
@@ -84,10 +35,11 @@ def build_extras():
 
     Returns (extras, pip_options, pkg_options) where:
       - extras: dict mapping extra name -> list of PEP 508 specifiers
-        (excludes packages with per-package options — those are installed
-        separately via get_pip_install_cmd())
+        (excludes packages with per-package options — those are
+        auto-installed after setup() via _auto_install_annotated_packages())
       - pip_options: dict mapping extra name -> list of pip option strings
       - pkg_options: dict mapping extra name -> dict of package -> list of options
+        (these packages are excluded from extras and auto-installed after setup())
     """
     extras = {}
     extra_pip_options = {}
@@ -103,9 +55,9 @@ def build_extras():
                 continue
             task = filename[:-4]  # strip .txt
             extra_name = entry if task == "base" else f"{entry}-{task}"
-            deps, opts, pkg_opts = parse_requirements(os.path.join("requirements", entry, filename))
+            deps, opts, pkg_opts = parse_requirements(os.path.join(req_dir, entry, filename))
             # Exclude annotated packages from extras_require — they need
-            # special pip flags and are installed separately.
+            # special pip flags and are auto-installed after setup().
             normal_deps = [d for d in deps if d not in pkg_opts]
             if normal_deps or pkg_opts:
                 extras[extra_name] = normal_deps
@@ -114,7 +66,7 @@ def build_extras():
             if pkg_opts:
                 extra_pkg_options[extra_name] = pkg_opts
     # Dev extras (platform-independent)
-    dev_deps, dev_opts, dev_pkg_opts = parse_requirements("requirements/dev.txt")
+    dev_deps, dev_opts, dev_pkg_opts = parse_requirements(os.path.join(req_dir, "dev.txt"))
     dev_normal = [d for d in dev_deps if d not in dev_pkg_opts]
     if dev_normal or dev_pkg_opts:
         extras["dev"] = dev_normal
@@ -128,74 +80,9 @@ def build_extras():
 EXTRAS, PIP_OPTIONS, PKG_OPTIONS = build_extras()
 
 
-def get_pip_install_cmd(extra_name):
-    """Return the pip install command(s) for a given extra.
-
-    When an extra contains packages with per-package options (e.g.
-    ``--no-build-isolation``), separate commands are generated for each
-    distinct option set (chained with ``&&``).  Packages with options are
-    NOT in ``extras_require`` so the first ``pip install ".[extra]"``
-    command won't attempt to build them.
-
-    Prints reminder notes to stderr for packages that need special options.
-
-    Includes any pip options (--extra-index-url, --find-links, etc.)
-    extracted from the requirements files.
-    Returns None if the extra doesn't exist.
-    """
-    if extra_name not in EXTRAS and extra_name not in PKG_OPTIONS:
-        return None
-    opts = ""
-    for opt in PIP_OPTIONS.get(extra_name, []):
-        opts += f" {opt}"
-
-    pkg_opts = PKG_OPTIONS.get(extra_name, {})
-    if not pkg_opts:
-        return f'pip install ".[{extra_name}]"{opts}'
-
-    cmds = []
-    # Install normal deps (those without per-package options) via extras
-    if EXTRAS.get(extra_name):
-        cmds.append(f'pip install ".[{extra_name}]"{opts}')
-
-    # Group annotated packages by their option sets
-    groups = {}
-    for pkg, pkg_opt_list in pkg_opts.items():
-        key = tuple(sorted(pkg_opt_list))
-        groups.setdefault(key, []).append(pkg)
-
-    for opt_tuple, pkgs in groups.items():
-        opt_str = " ".join(opt_tuple)
-        pkg_str = " ".join(f'"{p}"' for p in pkgs)
-        cmds.append(f"pip install {opt_str} {pkg_str}{opts}")
-        for p in pkgs:
-            print(f"Note: {p.split('@')[0].strip()} requires: {opt_str}", file=sys.stderr)
-
-    return " && ".join(cmds)
-
-
-# NOTE: Installation methods:
-# 1. pip install .                    -> CLI only (typer)
-# 2. pip install ".[cuda-train]"      -> CLI + pip deps + auto-install annotated packages
-#    Annotated packages (e.g. megatron-core with --no-build-isolation) are excluded from
-#    extras_require and auto-installed via _auto_install_annotated_packages() after setup().
-#    Requires torch to be pre-installed. Use -v/-vvv for detailed install output.
-# 3. pip install ".[cuda-all,dev]"    -> CLI + all CUDA pip deps + dev tools
-# 4. pip install -r requirements/cuda/train.txt  -> pip deps with index URLs (handled natively)
-#    Packages annotated with "# [--option ...]" need separate install with those options.
-#    The shell installer (tools/install) handles this via parse_pkg_annotations().
-# 5. flagscale install                -> Full installation (apt + pip + ALL source deps including apex, flash-attn)
-
-setup(
-    name="flagscale",
-    version=_get_version(),
-    description="FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI).",
-    url="https://github.com/FlagOpen/FlagScale",
-    packages=["flagscale"],
-    package_dir={"flagscale": "flagscale"},
-    extras_require=EXTRAS,
-    entry_points={"console_scripts": ["flagscale=flagscale.cli:flagscale"]},
-)
+# ---------------------------------------------------------------------------
+# Auto-install helpers (run after setup() when invoked by pip)
+# ---------------------------------------------------------------------------
 
 _BUILD_ISOLATION_VARS = (
     "PYTHONPATH",
@@ -233,47 +120,164 @@ def _get_clean_env():
     return env
 
 
+def _get_cmdline(pid):
+    """Get the command line string of a process by PID (cross-platform).
+
+    Returns the command line as a string, or ``None`` on failure.
+    """
+    system = platform.system()
+    try:
+        if system == "Linux":
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                return f.read().decode("utf-8", errors="replace")
+        elif system == "Darwin":
+            output = subprocess.check_output(
+                ["ps", "-o", "args=", "-p", str(pid)],
+                stderr=subprocess.DEVNULL,
+            )
+            return output.decode("utf-8", errors="replace").strip()
+        elif system == "Windows":
+            output = subprocess.check_output(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
+                stderr=subprocess.DEVNULL,
+            )
+            for line in output.decode("utf-8", errors="replace").splitlines():
+                if line.startswith("CommandLine="):
+                    return line[len("CommandLine=") :]
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    return None
+
+
+def _get_ppid(pid):
+    """Get the parent PID of a process (cross-platform).
+
+    Returns the parent PID as an ``int``, or ``None`` on failure.
+    """
+    system = platform.system()
+    try:
+        if system == "Linux":
+            with open(f"/proc/{pid}/stat") as f:
+                stat_content = f.read()
+            # Format: pid (comm) state ppid ... — split after last ')' for spaces in comm
+            return int(stat_content.split(")")[1].split()[1])
+        elif system == "Darwin":
+            output = subprocess.check_output(
+                ["ps", "-o", "ppid=", "-p", str(pid)],
+                stderr=subprocess.DEVNULL,
+            )
+            return int(output.strip())
+        elif system == "Windows":
+            output = subprocess.check_output(
+                [
+                    "wmic",
+                    "process",
+                    "where",
+                    f"ProcessId={pid}",
+                    "get",
+                    "ParentProcessId",
+                    "/value",
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            for line in output.decode("utf-8", errors="replace").splitlines():
+                if line.startswith("ParentProcessId="):
+                    return int(line[len("ParentProcessId=") :].strip())
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        pass
+    return None
+
+
+def _get_requested_extras():
+    """Auto-detect which extras were requested by inspecting the process tree.
+
+    When the user runs ``pip install ".[cuda-train]"``, pip spawns a
+    subprocess to build the wheel.  This function walks up the process tree
+    looking for a pip install argument matching ``.[<extras>]`` and returns
+    the parsed list of extra names.
+
+    Works on Linux (``/proc``), macOS (``ps``), and Windows (``wmic``).
+    Returns ``None`` if no extras specifier is found (e.g. ``pip install .``).
+    """
+    # Match .[extras] at word boundary — the dot may be preceded by a path
+    # separator, NUL (Linux /proc cmdline delimiter), or space (macOS/Windows).
+    extras_re = re.compile(r"(?:^|/|\\|\x00|\s)\.\[([^\]]+)\]")
+    pid = os.getpid()
+    for _ in range(10):  # walk up at most 10 levels
+        cmdline = _get_cmdline(pid)
+        if cmdline is None:
+            break
+        m = extras_re.search(cmdline)
+        if m:
+            return [e.strip() for e in m.group(1).split(",") if e.strip()]
+        ppid = _get_ppid(pid)
+        if ppid is None or ppid <= 1 or ppid == pid:
+            break
+        pid = ppid
+    return None
+
+
 def _auto_install_annotated_packages():
     """Auto-install packages that need special pip flags (e.g. --no-build-isolation).
 
-    These are excluded from extras_require because pip can't pass per-package flags.
-    Assumes build dependencies (e.g. torch) are already installed in the environment.
+    Detects which extras were requested from the parent pip process (e.g.
+    ``pip install ".[cuda-train]"``), then installs only annotated packages
+    belonging to those extras.
+
+    These packages are excluded from extras_require because pip can't pass
+    per-package flags.  Assumes build dependencies (e.g. torch) are already
+    installed in the environment.
     """
+    requested = _get_requested_extras()
+    if not requested:
+        return
+
+    # Filter to extras that actually have annotated packages.
+    requested = [e for e in requested if e in PKG_OPTIONS]
+    if not requested:
+        return
+
     verbose = _get_pip_verbosity()
     clean_env = _get_clean_env()
 
     if verbose:
         print("[flagscale] Auto-installing annotated packages...", file=sys.stderr)
+        print(f"[flagscale]   requested extras: {', '.join(requested)}", file=sys.stderr)
         print(f"[flagscale]   verbosity level: {verbose}", file=sys.stderr)
         print(
-            f"[flagscale]   cleaned env vars: {', '.join(_BUILD_ISOLATION_VARS)}", file=sys.stderr
+            f"[flagscale]   cleaned env vars: {', '.join(_BUILD_ISOLATION_VARS)}",
+            file=sys.stderr,
         )
 
     seen = set()
-    for extra_name, pkg_opts in sorted(PKG_OPTIONS.items()):
+    for extra_name in sorted(requested):
+        pkg_opts = PKG_OPTIONS.get(extra_name, {})
+        pip_opt_list = PIP_OPTIONS.get(extra_name, [])
         for pkg, opts in pkg_opts.items():
             if pkg in seen:
                 continue
             seen.add(pkg)
             pkg_name = pkg.split("@")[0].strip()
             opt_str = " ".join(opts)
-            pip_opts = " ".join(PIP_OPTIONS.get(extra_name, []))
             cmd = ["pip", "install"]
             cmd.extend(opts)
             if verbose:
                 cmd.append("-" + "v" * verbose)
-            if pip_opts:
-                cmd.extend(pip_opts.split())
+            for pip_opt in pip_opt_list:
+                cmd.extend(pip_opt.split())
             cmd.append(pkg)
 
             if verbose:
                 print(f"[flagscale]   command: {' '.join(cmd)}", file=sys.stderr)
             else:
-                print(f"[flagscale] Installing {pkg_name} with {opt_str}...", file=sys.stderr)
+                print(
+                    f"[flagscale] Installing {pkg_name} with {opt_str}...",
+                    file=sys.stderr,
+                )
 
             rc = subprocess.call(cmd, env=clean_env)
             if rc != 0:
-                full_opts = f"{opt_str} {pip_opts}".strip()
+                full_opts = f"{opt_str} {' '.join(pip_opt_list)}".strip()
                 print(
                     f"[flagscale] Warning: auto-install of {pkg_name} failed (exit {rc}).",
                     file=sys.stderr,
@@ -283,6 +287,32 @@ def _auto_install_annotated_packages():
                     file=sys.stderr,
                 )
 
+
+# ---------------------------------------------------------------------------
+# NOTE: Installation methods:
+# 1. pip install .                    -> CLI only (typer)
+# 2. pip install ".[cuda-train]"      -> CLI + pip deps + auto-install annotated packages
+#    Annotated packages (e.g. megatron-core with --no-build-isolation) are excluded from
+#    extras_require and auto-installed by detecting ".[cuda-train]" from the parent pip
+#    process tree (cross-platform: /proc on Linux, ps on macOS, wmic on Windows).
+#    Requires torch to be pre-installed. Use -v/-vvv for detail.
+# 3. pip install ".[cuda-all,dev]"    -> CLI + all CUDA pip deps + dev tools
+# 4. pip install -r requirements/cuda/train.txt  -> pip deps with index URLs (handled natively)
+#    Packages annotated with "# [--option ...]" need separate install with those options.
+#    The shell installer (tools/install) handles this via parse_pkg_annotations().
+# 5. flagscale install                -> Full installation (apt + pip + ALL source deps)
+# ---------------------------------------------------------------------------
+
+setup(
+    name="flagscale",
+    version=_get_version(),
+    description="FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI).",
+    url="https://github.com/FlagOpen/FlagScale",
+    packages=["flagscale"],
+    package_dir={"flagscale": "flagscale"},
+    extras_require=EXTRAS,
+    entry_points={"console_scripts": ["flagscale=flagscale.cli:flagscale"]},
+)
 
 # Only auto-install when setup.py is executed directly (pip install, python setup.py ...),
 # not when imported by tests or other modules.
