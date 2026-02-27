@@ -249,7 +249,6 @@ class TestModelConfig(unittest.TestCase):
         self.assertNotIn("checkpoint_dir", model_dict)
         self.assertNotIn("freeze", model_dict)
         self.assertNotIn("optimizer", model_dict)
-        self.assertNotIn("scheduler", model_dict)
 
         self.assertIn("tokenizer_path", model_dict)
         self.assertIn("action_steps", model_dict)
@@ -270,8 +269,7 @@ class TestTrainConfig(unittest.TestCase):
                 "checkpoint_dir": "/model",
                 "tokenizer_path": "/tokenizer",
                 "action_steps": 50,
-                "optimizer": {"lr": 1e-4},
-                "scheduler": {"warmup_steps": 500},
+                "optimizer": {"lr": 1e-4, "scheduler": {"warmup_steps": 500}},
             },
             "data": {"data_path": "/data", "use_imagenet_stats": True},
         }
@@ -285,7 +283,7 @@ class TestTrainConfig(unittest.TestCase):
         self.assertEqual(config.model.model_name, "pi0")
         self.assertEqual(config.model.checkpoint_dir, "/model")
         self.assertEqual(config.model.optimizer.lr, 1e-4)
-        self.assertEqual(config.model.scheduler.warmup_steps, 500)
+        self.assertEqual(config.model.optimizer.scheduler.warmup_steps, 500)
 
         self.assertEqual(config.data.data_path, "/data")
         self.assertEqual(config.data.use_imagenet_stats, True)
@@ -300,8 +298,7 @@ class TestTrainConfig(unittest.TestCase):
                 "model": {
                     "model_name": "pi0.5",
                     "checkpoint_dir": "/ckpt",
-                    "optimizer": {"lr": 2e-5},
-                    "scheduler": {},
+                    "optimizer": {"lr": 2e-5, "scheduler": {}},
                 },
                 "data": {"data_path": "/dataset"},
             }
@@ -375,7 +372,6 @@ class TestConfigSerialization(unittest.TestCase):
                 checkpoint_dir="/model",
                 action_steps=50,
                 optimizer=OptimizerConfig(),
-                scheduler=SchedulerConfig(),
             ),
             data=DataConfig(data_path="/data"),
         )

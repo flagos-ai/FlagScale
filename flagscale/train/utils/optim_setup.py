@@ -18,12 +18,11 @@ Example config (YAML):
             lr: 1.0e-05
           action_model:
             lr: 1.0e-04
-
-      scheduler:
-        name: cosine_with_min_lr
-        warmup_steps: 5000
-        scheduler_kwargs:
-          min_lr: 1.0e-06
+        scheduler:
+          name: cosine_with_min_lr
+          warmup_steps: 5000
+          scheduler_kwargs:
+            min_lr: 1.0e-06
 
       freeze:
         freeze_patterns:
@@ -334,7 +333,7 @@ def setup_optimizer_and_scheduler(
     )
     scheduler = setup_scheduler(
         optimizer,
-        train_config.model.scheduler,
+        train_config.model.optimizer.scheduler,
         num_training_steps=train_config.system.train_steps,
     )
     return optimizer, scheduler

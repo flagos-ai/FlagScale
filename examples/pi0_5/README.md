@@ -169,9 +169,9 @@ Configure the following fields:
 - `model.optimizer.betas` - Optimizer betas (default: `[0.9, 0.95]`)
 - `model.optimizer.eps` - Optimizer epsilon (default: `1.0e-8`)
 - `model.optimizer.weight_decay` - Weight decay (default: `0.01`)
-- `model.scheduler.warmup_steps` - Warmup steps (default: `1000`)
-- `model.scheduler.decay_steps` - Decay steps (default: `30000`)
-- `model.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
+- `model.optimizer.scheduler.warmup_steps` - Warmup steps (default: `1000`)
+- `model.optimizer.scheduler.decay_steps` - Decay steps (default: `30000`)
+- `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
 
 **Data settings**:
 - `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)

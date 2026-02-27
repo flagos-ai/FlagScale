@@ -28,6 +28,32 @@ class FreezeConfig(BaseModel):
     keep_patterns: list[str] | None = None
 
 
+class SchedulerConfig(BaseModel):
+    """Learning rate scheduler configuration.
+
+    Uses transformers scheduler types when `name` is set. See transformers.SchedulerType for options:
+    linear, cosine, cosine_with_restarts, polynomial, constant,
+    constant_with_warmup, inverse_sqrt, cosine_with_min_lr, etc.
+
+    Example:
+        scheduler:
+          name: cosine
+          warmup_steps: 1000
+          scheduler_kwargs:
+            min_lr: 1e-6
+
+    For backward compatibility with pi0/pi0.5, the legacy fields (decay_steps, decay_lr) are kept.
+    """
+
+    name: str | None = None
+    warmup_steps: int = 1000
+    scheduler_kwargs: dict[str, Any] | None = None
+
+    # Legacy fields for pi0/pi0.5 backward compatibility
+    decay_steps: int = 30000
+    decay_lr: float = 2.5e-6
+
+
 class OptimizerConfig(BaseModel):
     """Optimizer configuration.
 
@@ -39,6 +65,7 @@ class OptimizerConfig(BaseModel):
         weight_decay: Weight decay (L2 penalty).
         param_groups: Per-module optimizer overrides. Maps module paths to optimizer kwargs.
             Example: {"encoder": {"lr": 1e-5}, "decoder": {"lr": 1e-3}}
+        scheduler: LR scheduler config.
 
     Example config (YAML):
         optimizer:
@@ -50,6 +77,9 @@ class OptimizerConfig(BaseModel):
               lr: 1e-5
             action_head:
               lr: 2e-4
+          scheduler:
+            name: cosine
+            warmup_steps: 1000
     """
 
     name: str = "AdamW"
@@ -61,6 +91,7 @@ class OptimizerConfig(BaseModel):
         default=None,
         description="Per-module optimizer settings. Maps module paths to optimizer kwargs.",
     )
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
 
     @field_validator("betas", mode="before")
     @classmethod
@@ -91,32 +122,6 @@ class OptimizerConfig(BaseModel):
             }.items()
             if v is not None
         }
-
-
-class SchedulerConfig(BaseModel):
-    """Learning rate scheduler configuration.
-
-    Uses transformers scheduler types when `name` is set. See transformers.SchedulerType for options:
-    linear, cosine, cosine_with_restarts, polynomial, constant,
-    constant_with_warmup, inverse_sqrt, cosine_with_min_lr, etc.
-
-    Example:
-        scheduler:
-          name: cosine
-          warmup_steps: 1000
-          scheduler_kwargs:
-            min_lr: 1e-6
-
-    For backward compatibility with pi0/pi0.5, the legacy fields (decay_steps, decay_lr) are kept.
-    """
-
-    name: str | None = None
-    warmup_steps: int = 1000
-    scheduler_kwargs: dict[str, Any] | None = None
-
-    # Legacy fields for pi0/pi0.5 backward compatibility
-    decay_steps: int = 30000
-    decay_lr: float = 2.5e-6
 
 
 class CheckpointConfig(BaseModel):
@@ -191,7 +196,6 @@ class ModelConfig(BaseModel):
     checkpoint_dir: str = Field(..., description="Path to pretrained model checkpoint")
     freeze: FreezeConfig | None = None
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     raw: DictConfig | None = Field(default=None, exclude=True)
 
     def __getattr__(self, name):
@@ -211,7 +215,7 @@ class ModelConfig(BaseModel):
     def get_model_config_dict(self) -> dict[str, Any]:
         """Get all model-specific config fields (excluding train-level fields)."""
         return self.model_dump(
-            exclude={"model_name", "checkpoint_dir", "freeze", "optimizer", "scheduler"}
+            exclude={"model_name", "checkpoint_dir", "freeze", "optimizer"}
         )
 
 

@@ -671,10 +671,10 @@ class TestSetupOptimizerAndScheduler(unittest.TestCase):
         train_config.model.optimizer.lr = 1e-4
         train_config.model.optimizer.param_groups = None
         train_config.model.optimizer.get_optimizer_kwargs.return_value = {"lr": 1e-4}
-        train_config.model.scheduler = MagicMock()
-        train_config.model.scheduler.name = "cosine"
-        train_config.model.scheduler.warmup_steps = 100
-        train_config.model.scheduler.scheduler_kwargs = None
+        train_config.model.optimizer.scheduler = MagicMock()
+        train_config.model.optimizer.scheduler.name = "cosine"
+        train_config.model.optimizer.scheduler.warmup_steps = 100
+        train_config.model.optimizer.scheduler.scheduler_kwargs = None
         if freeze_patterns is not None:
             train_config.model.freeze = MagicMock()
             train_config.model.freeze.freeze_patterns = freeze_patterns
@@ -696,8 +696,8 @@ class TestSetupOptimizerAndScheduler(unittest.TestCase):
     def test_with_freeze_config(self):
         """Test with freeze config applied."""
         train_config = self._make_train_config(freeze_patterns=["encoder\\..*"])
-        train_config.model.scheduler.name = "linear"
-        train_config.model.scheduler.warmup_steps = 50
+        train_config.model.optimizer.scheduler.name = "linear"
+        train_config.model.optimizer.scheduler.warmup_steps = 50
         train_config.system.train_steps = 500
 
         optimizer, scheduler = setup_optimizer_and_scheduler(self.model, train_config)
@@ -715,8 +715,8 @@ class TestSetupOptimizerAndScheduler(unittest.TestCase):
     def test_scheduler_uses_train_steps(self):
         """Test that scheduler uses train_steps from TrainConfig."""
         train_config = self._make_train_config()
-        train_config.model.scheduler.name = "linear"
-        train_config.model.scheduler.warmup_steps = 10
+        train_config.model.optimizer.scheduler.name = "linear"
+        train_config.model.optimizer.scheduler.warmup_steps = 10
         train_config.system.train_steps = 100
 
         optimizer, scheduler = setup_optimizer_and_scheduler(self.model, train_config)

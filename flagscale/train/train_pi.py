@@ -632,10 +632,10 @@ def main(config: TrainConfig, seed: int):
         weight_decay=config.model.optimizer.weight_decay,
     )
     scheduler_config = CosineDecayWithWarmupSchedulerConfig(
-        num_warmup_steps=config.model.scheduler.warmup_steps,
-        num_decay_steps=config.model.scheduler.decay_steps,
+        num_warmup_steps=config.model.optimizer.scheduler.warmup_steps,
+        num_decay_steps=config.model.optimizer.scheduler.decay_steps,
         peak_lr=config.model.optimizer.lr,
-        decay_lr=config.model.scheduler.decay_lr,
+        decay_lr=config.model.optimizer.scheduler.decay_lr,
     )
     lr_scheduler = scheduler_config.build(optimizer, config.system.train_steps)
 
