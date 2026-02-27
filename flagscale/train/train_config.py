@@ -99,11 +99,16 @@ class OptimizerConfig(BaseModel):
         """Convert list to tuple for betas if provided.
 
         Accepts both list and tuple inputs, but always stores as tuple.
+        Also validates that betas has exactly two elements.
         """
         if v is None:
             return None
         if isinstance(v, list):
+            if len(v) != 2:
+                raise ValueError(f"betas must have exactly 2 elements, got {len(v)}")
             return tuple(v)
+        if isinstance(v, tuple) and len(v) != 2:
+            raise ValueError(f"betas must have exactly 2 elements, got {len(v)}")
         return v
 
     def get_optimizer_kwargs(self) -> dict[str, Any]:
@@ -149,6 +154,8 @@ class SystemConfig(BaseModel):
     raw: DictConfig | None = Field(default=None, exclude=True)
 
     def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
         raw = self.__dict__.get("raw")
         if raw is not None and hasattr(raw, name):
             return getattr(raw, name)
@@ -168,6 +175,8 @@ class DataConfig(BaseModel):
     raw: DictConfig | None = Field(default=None, exclude=True)
 
     def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
         raw = self.__dict__.get("raw")
         if raw is not None and hasattr(raw, name):
             return getattr(raw, name)
@@ -199,6 +208,8 @@ class ModelConfig(BaseModel):
     raw: DictConfig | None = Field(default=None, exclude=True)
 
     def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
         raw = self.__dict__.get("raw")
         if raw is not None and hasattr(raw, name):
             return getattr(raw, name)

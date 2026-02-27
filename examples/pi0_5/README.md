@@ -164,14 +164,14 @@ Configure the following fields:
 - `model.tokenizer_path` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `model.tokenizer_max_length` - Maximum tokenizer sequence length (default: `200` for pi0.5)
 - `model.action_steps` - Number of action steps to predict
-- `model.optimizer.name` - Optimizer name (default: `"AdamW"`)
-- `model.optimizer.lr` - Learning rate (default: `2.5e-5`)
-- `model.optimizer.betas` - Optimizer betas (default: `[0.9, 0.95]`)
-- `model.optimizer.eps` - Optimizer epsilon (default: `1.0e-8`)
-- `model.optimizer.weight_decay` - Weight decay (default: `0.01`)
-- `model.optimizer.scheduler.warmup_steps` - Warmup steps (default: `1000`)
-- `model.optimizer.scheduler.decay_steps` - Decay steps (default: `30000`)
-- `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
+- `model.optimizer.name` - Optimizer name (for example: `"AdamW"`)
+- `model.optimizer.lr` - Learning rate (for example: `2.5e-5`)
+- `model.optimizer.betas` - Optimizer betas (for example: `[0.9, 0.95]`)
+- `model.optimizer.eps` - Optimizer epsilon (for example: `1.0e-8`)
+- `model.optimizer.weight_decay` - Weight decay (for example: `0.01`)
+- `model.optimizer.scheduler.warmup_steps` - Warmup steps (for example: `1000`)
+- `model.optimizer.scheduler.decay_steps` - Decay steps (for example: `30000`)
+- `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (for example: `2.5e-6`)
 
 **Data settings**:
 - `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)

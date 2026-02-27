@@ -90,6 +90,7 @@ def freeze_and_get_trainable_params(
     keep_matcher = PatternMatcher(keep_patterns or [])
 
     trainable_count, frozen_count = 0, 0
+    previously_frozen_now_trainable = []
 
     for name, param in named_parameters:
         should_freeze = freeze_matcher.matches(name) and not keep_matcher.matches(name)
@@ -98,9 +99,17 @@ def freeze_and_get_trainable_params(
             param.requires_grad = False
             frozen_count += param.numel()
         else:
-            param.requires_grad = True
-            trainable_count += param.numel()
-            yield param
+            # Only force parameters to be trainable if freeze patterns are provided.
+            # Otherwise, preserve the original requires_grad state.
+            if freeze_patterns:
+                if not param.requires_grad:
+                    previously_frozen_now_trainable.append(name)
+                param.requires_grad = True
+            if param.requires_grad:
+                trainable_count += param.numel()
+                yield param
+            else:
+                frozen_count += param.numel()
 
     # Log summary
     total = trainable_count + frozen_count
@@ -109,6 +118,15 @@ def freeze_and_get_trainable_params(
         f"Parameters: trainable={trainable_count:,} ({pct:.2%}) | "
         f"frozen={frozen_count:,} | total={total:,}"
     )
+
+    if previously_frozen_now_trainable:
+        logger.warning(
+            f"{len(previously_frozen_now_trainable)} parameter(s) were already frozen "
+            f"(requires_grad=False) but don't match any freeze pattern and are being "
+            f"made trainable. Add them to freeze_patterns if they should stay frozen:"
+        )
+        for name in previously_frozen_now_trainable:
+            logger.warning(f"  unfrozen: {name}")
 
     # Warn about unused patterns
     unused_freeze = freeze_matcher.get_unused_patterns()
@@ -210,12 +228,37 @@ def build_optim_param_groups(
             )
             continue
 
-        params = [p for p in module.parameters() if p.requires_grad]
-        if not params:
+        # All trainable params for this module (including descendants)
+        module_params = [p for p in module.parameters() if p.requires_grad]
+        if not module_params:
             logger.warning(
                 f"build_optim_param_groups: Module '{module_name}' has no trainable parameters."
             )
             continue
+        # Avoid assigning the same parameter to multiple param groups by
+        # filtering out parameters that are already used by previous groups.
+        params = [p for p in module_params if id(p) not in used_param_ids]
+        if not params:
+            # All trainable params for this module were already included in
+            # previous param groups. This usually indicates overlapping
+            # module paths in the optimizer config (e.g., both "encoder"
+            # and "encoder.layer1").
+            logger.warning(
+                "build_optim_param_groups: All trainable parameters for module "
+                f"'{module_name}' are already assigned to previous param groups. "
+                "This suggests overlapping module paths in the optimizer "
+                "configuration; this group will be skipped."
+            )
+            continue
+        if len(params) < len(module_params):
+            # Some, but not all, parameters were already assigned to previous
+            # groups. Warn the user so they are aware of the partial overlap.
+            logger.warning(
+                "build_optim_param_groups: Some trainable parameters for module "
+                f"'{module_name}' are already assigned to previous param groups "
+                "(overlapping module paths). Only unassigned parameters will be "
+                "included in this group."
+            )
 
         used_param_ids.update(id(p) for p in params)
         param_groups.append({"params": params, "name": module_name, **group_config})
@@ -255,6 +298,13 @@ def setup_optimizer(
         log_trainable_params(model)
 
     param_groups = build_optim_param_groups(model, optimizer_config.param_groups)
+    total_params = sum(len(g["params"]) for g in param_groups)
+    if not total_params:
+        raise ValueError(
+            "No trainable parameters found. All parameters may be frozen, "
+            "or configured param groups have no trainable parameters."
+        )
+
     optimizer_kwargs = {"params": param_groups, **optimizer_config.get_optimizer_kwargs()}
 
     # Get optimizer class by name

@@ -12,6 +12,7 @@ from flagscale.train.utils.optim_setup import (
     freeze_and_get_trainable_params,
     log_trainable_params,
     print_param_names,
+    setup_optimizer,
     setup_optimizer_and_scheduler,
     setup_scheduler,
 )
@@ -503,11 +504,13 @@ class TestBuildOptimParamGroups(unittest.TestCase):
         config = {"encoder": {"lr": 1e-5}}
         param_groups = build_optim_param_groups(self.model, config)
 
-        # Encoder group should be empty (no trainable params)
+        # Encoder group should not be added when it has no trainable params
         encoder_groups = [g for g in param_groups if g.get("name") == "encoder"]
-        # Either no encoder group, or encoder group has no params
-        if encoder_groups:
-            self.assertEqual(len(encoder_groups[0]["params"]), 0)
+        self.assertEqual(
+            len(encoder_groups),
+            0,
+            "Encoder group should not exist when all params are frozen",
+        )
 
     @patch("flagscale.train.utils.optim_setup.logger")
     def test_warns_on_nonexistent_module(self, mock_logger):
@@ -735,3 +738,172 @@ class TestSetupOptimizerAndScheduler(unittest.TestCase):
 
         # After decay, LR should be less than peak
         self.assertLess(final_lr, peak_lr)
+
+
+class TestFreezeRequiresGradPreservation(unittest.TestCase):
+    """Test that freeze logic correctly preserves or overrides requires_grad."""
+
+    def setUp(self):
+        self.model = SimpleModel()
+
+    @patch("flagscale.train.utils.optim_setup.logger")
+    def test_no_freeze_patterns_preserves_requires_grad(self, mock_logger):
+        """Params with requires_grad=False should stay frozen when no freeze patterns provided."""
+        for name, param in self.model.named_parameters():
+            if name.startswith("encoder"):
+                param.requires_grad = False
+
+        params = list(
+            freeze_and_get_trainable_params(
+                self.model.named_parameters(),
+                freeze_patterns=None,
+                keep_patterns=None,
+            )
+        )
+
+        for name, param in self.model.named_parameters():
+            if name.startswith("encoder"):
+                self.assertFalse(param.requires_grad, f"{name} should remain frozen")
+
+        encoder_count = sum(
+            1 for name, _ in self.model.named_parameters() if name.startswith("encoder")
+        )
+        total_count = sum(1 for _ in self.model.parameters())
+        self.assertEqual(len(params), total_count - encoder_count)
+
+    @patch("flagscale.train.utils.optim_setup.logger")
+    def test_freeze_patterns_forces_unmatched_trainable(self, mock_logger):
+        """Params not matching freeze patterns become trainable even if originally frozen."""
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+        params = list(
+            freeze_and_get_trainable_params(
+                self.model.named_parameters(),
+                freeze_patterns=["encoder\\..*"],
+                keep_patterns=None,
+            )
+        )
+
+        for name, param in self.model.named_parameters():
+            if name.startswith("encoder"):
+                self.assertFalse(param.requires_grad, f"{name} should be frozen")
+            else:
+                self.assertTrue(param.requires_grad, f"{name} should be forced trainable")
+
+        encoder_count = sum(
+            1 for name, _ in self.model.named_parameters() if name.startswith("encoder")
+        )
+        total_count = sum(1 for _ in self.model.parameters())
+        self.assertEqual(len(params), total_count - encoder_count)
+
+    @patch("flagscale.train.utils.optim_setup.logger")
+    def test_warns_when_unfreezing_previously_frozen(self, mock_logger):
+        """Should warn about params that were frozen but are being made trainable."""
+        for name, param in self.model.named_parameters():
+            if name.startswith("decoder"):
+                param.requires_grad = False
+
+        list(
+            freeze_and_get_trainable_params(
+                self.model.named_parameters(),
+                freeze_patterns=["encoder\\..*"],
+                keep_patterns=None,
+            )
+        )
+
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        summary_warnings = [w for w in warning_calls if "already frozen" in w]
+        self.assertEqual(len(summary_warnings), 1)
+
+        per_param_warnings = [w for w in warning_calls if "unfrozen:" in w]
+        decoder_param_count = sum(
+            1 for name, _ in self.model.named_parameters() if name.startswith("decoder")
+        )
+        self.assertEqual(len(per_param_warnings), decoder_param_count)
+        for w in per_param_warnings:
+            self.assertIn("decoder", w)
+
+
+class TestBuildOptimParamGroupsOverlap(unittest.TestCase):
+    """Test build_optim_param_groups with overlapping module paths."""
+
+    def setUp(self):
+        self.model = NestedModel()
+
+    @patch("flagscale.train.utils.optim_setup.logger")
+    def test_parent_child_overlap_dedup(self, mock_logger):
+        """Parent module listed before child: child group gets skipped."""
+        config = {
+            "vlm": {"lr": 1e-5},
+            "vlm.visual": {"lr": 2e-5},
+        }
+        param_groups = build_optim_param_groups(self.model, config)
+
+        vlm_group = next(g for g in param_groups if g.get("name") == "vlm")
+        visual_groups = [g for g in param_groups if g.get("name") == "vlm.visual"]
+
+        vlm_params = [p for p in self.model.vlm.parameters() if p.requires_grad]
+        self.assertEqual(len(vlm_group["params"]), len(vlm_params))
+        self.assertEqual(len(visual_groups), 0)
+
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        overlap_warnings = [w for w in warning_calls if "already assigned" in w]
+        self.assertGreater(len(overlap_warnings), 0)
+
+    @patch("flagscale.train.utils.optim_setup.logger")
+    def test_child_parent_overlap_partial(self, mock_logger):
+        """Child module listed before parent: parent group excludes child's params."""
+        config = {
+            "vlm.visual": {"lr": 2e-5},
+            "vlm": {"lr": 1e-5},
+        }
+        param_groups = build_optim_param_groups(self.model, config)
+
+        visual_group = next(g for g in param_groups if g.get("name") == "vlm.visual")
+        vlm_group = next(g for g in param_groups if g.get("name") == "vlm")
+
+        visual_param_count = sum(
+            1 for name, _ in self.model.named_parameters() if name.startswith("vlm.visual")
+        )
+        all_vlm_count = sum(
+            1 for name, _ in self.model.named_parameters() if name.startswith("vlm")
+        )
+        self.assertEqual(len(visual_group["params"]), visual_param_count)
+        self.assertEqual(len(vlm_group["params"]), all_vlm_count - visual_param_count)
+
+    def test_no_duplicate_params_across_groups(self):
+        """No parameter should appear in more than one group."""
+        config = {
+            "vlm.visual": {"lr": 2e-5},
+            "vlm": {"lr": 1e-5},
+            "action_model": {"lr": 1e-4},
+        }
+        param_groups = build_optim_param_groups(self.model, config)
+
+        all_param_ids = []
+        for group in param_groups:
+            all_param_ids.extend(id(p) for p in group["params"])
+        self.assertEqual(len(all_param_ids), len(set(all_param_ids)))
+
+
+class TestSetupOptimizerEmptyParamGroups(unittest.TestCase):
+    """Test setup_optimizer raises ValueError when all params are frozen."""
+
+    def setUp(self):
+        self.model = SimpleModel()
+
+    def test_all_frozen_raises_value_error(self):
+        freeze_config = MagicMock()
+        freeze_config.freeze_patterns = [".*"]
+        freeze_config.keep_patterns = None
+
+        optimizer_config = MagicMock()
+        optimizer_config.name = "AdamW"
+        optimizer_config.param_groups = None
+        optimizer_config.get_optimizer_kwargs.return_value = {"lr": 1e-4}
+
+        with self.assertRaises(ValueError) as context:
+            setup_optimizer(self.model, optimizer_config, freeze_config=freeze_config)
+
+        self.assertIn("No trainable parameters found", str(context.exception))
