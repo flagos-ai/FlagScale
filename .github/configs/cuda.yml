@@ -7,7 +7,7 @@ display_name: "CUDA Tests"
 
 # Docker image for this hardware
 ci_image: localhost:5000/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.1-time2510131515
-ci_train_image: localhost:5000/flagscale-train:dev-cu128-py3.12-20260224162355
+ci_train_image: localhost:5000/flagscale-train:dev-cu128-py3.12-20260227095611
 ci_inference_image: localhost:5000/flagscale-inference:dev-cu128-py3.12-20260225234600
 
 # Runner labels for this hardware
