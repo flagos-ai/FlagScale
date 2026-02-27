@@ -13,19 +13,6 @@ sys.path.insert(0, os.path.join(SCRIPT_DIR, "tools", "install", "utils"))
 from parse_requirements import parse_requirements
 
 
-def _get_version() -> str:
-    """Read version from pyproject.toml (single source of truth, Python 3.11+)."""
-    try:
-        import tomllib
-
-        pyproject_path = os.path.join(SCRIPT_DIR, "pyproject.toml")
-        with open(pyproject_path, "rb") as f:
-            data = tomllib.load(f)
-            return data.get("project", {}).get("version", "0.0.0")
-    except Exception:
-        return "0.0.0"
-
-
 def build_extras():
     """Build extras_require by scanning requirements/ directory.
 
@@ -44,36 +31,36 @@ def build_extras():
     extras = {}
     extra_pip_options = {}
     extra_pkg_options = {}
+
+    def _register(name, req_file):
+        deps, opts, pkg_opts = parse_requirements(req_file)
+        # Exclude annotated packages from extras_require — they need
+        # special pip flags and are auto-installed after setup().
+        normal_deps = [d for d in deps if d not in pkg_opts]
+        if normal_deps or pkg_opts:
+            extras[name] = normal_deps
+        if opts:
+            extra_pip_options[name] = list(dict.fromkeys(opts))
+        if pkg_opts:
+            extra_pkg_options[name] = pkg_opts
+
     req_dir = os.path.join(SCRIPT_DIR, "requirements")
+    # Platform directories (cuda, rocm, ...)
     for entry in sorted(os.listdir(req_dir)):
         entry_path = os.path.join(req_dir, entry)
         if not os.path.isdir(entry_path):
             continue
-        # Platform directory (cuda, rocm, ...)
         for filename in sorted(os.listdir(entry_path)):
             if not filename.endswith(".txt"):
                 continue
             task = filename[:-4]  # strip .txt
             extra_name = entry if task == "base" else f"{entry}-{task}"
-            deps, opts, pkg_opts = parse_requirements(os.path.join(req_dir, entry, filename))
-            # Exclude annotated packages from extras_require — they need
-            # special pip flags and are auto-installed after setup().
-            normal_deps = [d for d in deps if d not in pkg_opts]
-            if normal_deps or pkg_opts:
-                extras[extra_name] = normal_deps
-            if opts:
-                extra_pip_options[extra_name] = list(dict.fromkeys(opts))
-            if pkg_opts:
-                extra_pkg_options[extra_name] = pkg_opts
+            _register(extra_name, os.path.join(entry_path, filename))
     # Dev extras (platform-independent)
-    dev_deps, dev_opts, dev_pkg_opts = parse_requirements(os.path.join(req_dir, "dev.txt"))
-    dev_normal = [d for d in dev_deps if d not in dev_pkg_opts]
-    if dev_normal or dev_pkg_opts:
-        extras["dev"] = dev_normal
-    if dev_opts:
-        extra_pip_options["dev"] = list(dict.fromkeys(dev_opts))
-    if dev_pkg_opts:
-        extra_pkg_options["dev"] = dev_pkg_opts
+    dev_path = os.path.join(req_dir, "dev.txt")
+    if os.path.isfile(dev_path):
+        _register("dev", dev_path)
+
     return extras, extra_pip_options, extra_pkg_options
 
 
@@ -83,6 +70,8 @@ EXTRAS, PIP_OPTIONS, PKG_OPTIONS = build_extras()
 # ---------------------------------------------------------------------------
 # Auto-install helpers (run after setup() when invoked by pip)
 # ---------------------------------------------------------------------------
+
+_SYSTEM = platform.system()  # "Linux", "Darwin", or "Windows"
 
 _BUILD_ISOLATION_VARS = (
     "PYTHONPATH",
@@ -125,18 +114,17 @@ def _get_cmdline(pid):
 
     Returns the command line as a string, or ``None`` on failure.
     """
-    system = platform.system()
     try:
-        if system == "Linux":
+        if _SYSTEM == "Linux":
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 return f.read().decode("utf-8", errors="replace")
-        elif system == "Darwin":
+        elif _SYSTEM == "Darwin":
             output = subprocess.check_output(
                 ["ps", "-o", "args=", "-p", str(pid)],
                 stderr=subprocess.DEVNULL,
             )
             return output.decode("utf-8", errors="replace").strip()
-        elif system == "Windows":
+        elif _SYSTEM == "Windows":
             output = subprocess.check_output(
                 ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
                 stderr=subprocess.DEVNULL,
@@ -154,20 +142,19 @@ def _get_ppid(pid):
 
     Returns the parent PID as an ``int``, or ``None`` on failure.
     """
-    system = platform.system()
     try:
-        if system == "Linux":
+        if _SYSTEM == "Linux":
             with open(f"/proc/{pid}/stat") as f:
                 stat_content = f.read()
             # Format: pid (comm) state ppid ... — split after last ')' for spaces in comm
             return int(stat_content.split(")")[1].split()[1])
-        elif system == "Darwin":
+        elif _SYSTEM == "Darwin":
             output = subprocess.check_output(
                 ["ps", "-o", "ppid=", "-p", str(pid)],
                 stderr=subprocess.DEVNULL,
             )
             return int(output.strip())
-        elif system == "Windows":
+        elif _SYSTEM == "Windows":
             output = subprocess.check_output(
                 [
                     "wmic",
@@ -259,7 +246,7 @@ def _auto_install_annotated_packages():
             seen.add(pkg)
             pkg_name = pkg.split("@")[0].strip()
             opt_str = " ".join(opts)
-            cmd = ["pip", "install"]
+            cmd = [sys.executable, "-m", "pip", "install"]
             cmd.extend(opts)
             if verbose:
                 cmd.append("-" + "v" * verbose)
@@ -303,16 +290,8 @@ def _auto_install_annotated_packages():
 # 5. flagscale install                -> Full installation (apt + pip + ALL source deps)
 # ---------------------------------------------------------------------------
 
-setup(
-    name="flagscale",
-    version=_get_version(),
-    description="FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI).",
-    url="https://github.com/FlagOpen/FlagScale",
-    packages=["flagscale"],
-    package_dir={"flagscale": "flagscale"},
-    extras_require=EXTRAS,
-    entry_points={"console_scripts": ["flagscale=flagscale.cli:flagscale"]},
-)
+# Only extras_require is dynamic — everything else comes from pyproject.toml.
+setup(extras_require=EXTRAS)
 
 # Only auto-install when setup.py is executed directly (pip install, python setup.py ...),
 # not when imported by tests or other modules.
