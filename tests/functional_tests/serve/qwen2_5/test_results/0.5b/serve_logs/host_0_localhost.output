@@ -1,0 +1,80 @@
+INFO 02-28 17:39:56 [__init__.py:216] Automatically detected platform cuda.
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:02 [api_server.py:1839] vLLM API server version 0.11.0+fl.0.1
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:02 [utils.py:233] non-default args: {'model_tag': '/home/gitlab-runner/data/Qwen2.5-0.5B-Instruct', 'port': 6703, 'model': '/home/gitlab-runner/data/Qwen2.5-0.5B-Instruct', 'trust_remote_code': True, 'max_model_len': 32768, 'enforce_eager': True, 'max_num_seqs': 256, 'enable_chunked_prefill': True}
+[1;36m(APIServer pid=650393)[0;0m The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:02 [model.py:547] Resolved architecture: Qwen2ForCausalLM
+[1;36m(APIServer pid=650393)[0;0m `torch_dtype` is deprecated! Use `dtype` instead!
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:02 [model.py:1510] Using max model len 32768
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:02 [scheduler.py:205] Chunked prefill is enabled with max_num_batched_tokens=2048.
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:02 [__init__.py:381] Cudagraph is disabled under eager mode
+INFO 02-28 17:40:07 [__init__.py:216] Automatically detected platform cuda.
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:12 [core.py:644] Waiting for init message from front-end.
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:12 [core.py:77] Initializing a V1 LLM engine (v0.11.0+fl.0.1) with config: model='/home/gitlab-runner/data/Qwen2.5-0.5B-Instruct', speculative_config=None, tokenizer='/home/gitlab-runner/data/Qwen2.5-0.5B-Instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=True, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser=''), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=/home/gitlab-runner/data/Qwen2.5-0.5B-Instruct, enable_prefix_caching=True, chunked_prefill_enabled=True, pooler_config=None, compilation_config={"level":0,"debug_dump_path":"","cache_dir":"","backend":"","custom_ops":[],"splitting_ops":null,"use_inductor":true,"compile_sizes":[],"inductor_compile_config":{"enable_auto_functionalized_v2":false},"inductor_passes":{},"cudagraph_mode":0,"use_cudagraph":true,"cudagraph_num_of_warmups":0,"cudagraph_capture_sizes":[],"cudagraph_copy_inputs":false,"full_cuda_graph":false,"use_inductor_graph_partition":false,"pass_config":{},"max_capture_size":0,"local_cache_dir":null}
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:13 [parallel_state.py:1208] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
+[1;36m(EngineCore_DP0 pid=650584)[0;0m WARNING 02-28 17:40:13 [topk_topp_sampler.py:66] FlashInfer is not available. Falling back to the PyTorch-native implementation of top-p & top-k sampling. For the best performance, please install FlashInfer.
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:13 [gpu_model_runner.py:2659] Starting to load model /home/gitlab-runner/data/Qwen2.5-0.5B-Instruct...
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:13 [gpu_model_runner.py:2691] Loading model from scratch...
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:13 [cuda.py:366] Using Flash Attention backend on V1 engine.
+[1;36m(EngineCore_DP0 pid=650584)[0;0m Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+[1;36m(EngineCore_DP0 pid=650584)[0;0m Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  8.04it/s]
+[1;36m(EngineCore_DP0 pid=650584)[0;0m Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00,  8.02it/s]
+[1;36m(EngineCore_DP0 pid=650584)[0;0m 
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:14 [default_loader.py:267] Loading weights took 0.15 seconds
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:14 [gpu_model_runner.py:2710] Model loading took 0.9271 GiB and 0.301006 seconds
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:15 [gpu_worker.py:298] Available KV cache memory: 33.10 GiB
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:16 [kv_cache_utils.py:1087] GPU KV cache size: 2,892,336 tokens
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:16 [kv_cache_utils.py:1091] Maximum concurrency for 32,768 tokens per request: 88.27x
+[1;36m(EngineCore_DP0 pid=650584)[0;0m WARNING 02-28 17:40:16 [cudagraph_dispatcher.py:106] cudagraph dispatching keys are not initialized. No cudagraph will be used.
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:16 [core.py:210] init engine (profile, create kv cache, warmup model) took 1.48 seconds
+[1;36m(EngineCore_DP0 pid=650584)[0;0m INFO 02-28 17:40:16 [__init__.py:381] Cudagraph is disabled under eager mode
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [loggers.py:147] Engine 000: vllm cache_config_info with initialization after num_gpu_blocks is: 180771
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [api_server.py:1634] Supported_tasks: ['generate']
+[1;36m(APIServer pid=650393)[0;0m WARNING 02-28 17:40:16 [model.py:1389] Default sampling parameters have been overridden by the model's Hugging Face generation config recommended from the model creator. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [serving_responses.py:137] Using default chat sampling params from model: {'repetition_penalty': 1.1, 'temperature': 0.7, 'top_k': 20, 'top_p': 0.8}
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [serving_chat.py:139] Using default chat sampling params from model: {'repetition_penalty': 1.1, 'temperature': 0.7, 'top_k': 20, 'top_p': 0.8}
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [serving_completion.py:76] Using default completion sampling params from model: {'repetition_penalty': 1.1, 'temperature': 0.7, 'top_k': 20, 'top_p': 0.8}
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [api_server.py:1912] Starting vLLM API server 0 on http://0.0.0.0:6703
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:34] Available routes are:
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /openapi.json, Methods: HEAD, GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /docs, Methods: HEAD, GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /docs/oauth2-redirect, Methods: HEAD, GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /redoc, Methods: HEAD, GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /health, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /load, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /ping, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /ping, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /tokenize, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /detokenize, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/models, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /version, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/responses, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/responses/{response_id}, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/responses/{response_id}/cancel, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/chat/completions, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/completions, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/embeddings, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /pooling, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /classify, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /score, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/score, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/audio/transcriptions, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/audio/translations, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /rerank, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v1/rerank, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /v2/rerank, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /scale_elastic_ep, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /is_scaling_elastic_ep, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /invocations, Methods: POST
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:16 [launcher.py:42] Route: /metrics, Methods: GET
+[1;36m(APIServer pid=650393)[0;0m INFO:     Started server process [650393]
+[1;36m(APIServer pid=650393)[0;0m INFO:     Waiting for application startup.
+[1;36m(APIServer pid=650393)[0;0m INFO:     Application startup complete.
+[1;36m(APIServer pid=650393)[0;0m INFO:     127.0.0.1:56932 - "POST /v1/completions HTTP/1.1" 200 OK
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:40:57 [loggers.py:127] Engine 000: Avg prompt throughput: 0.6 tokens/s, Avg generation throughput: 2.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
+[1;36m(APIServer pid=650393)[0;0m INFO 02-28 17:41:07 [loggers.py:127] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%

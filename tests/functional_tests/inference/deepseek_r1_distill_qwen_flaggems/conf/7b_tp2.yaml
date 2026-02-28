@@ -1,14 +1,14 @@
 defaults:
   - _self_
-  - inference: 7b-tp2
+  - inference: 7b_tp2
 
 experiment:
-  exp_name: robobrain2-flaggems
-  exp_dir: tests/functional_tests/inference/robobrain2-flaggems/test_results/7b-tp2
+  exp_name: deepseek_r1_distill_qwen_flaggems
+  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen_flaggems/test_results/7b_tp2
   task:
     type: inference
     backend: vllm
-    entrypoint: flagscale/inference/inference_robobrain2.py
+    entrypoint: flagscale/inference/inference_llm.py
   runner:
     hostfile: null
   cmds:
@@ -42,8 +42,6 @@ experiment:
     CUDA_LAUNCH_BLOCKING: 1
     NCCL_DEBUG: INFO
     MAGIC_CACHE: disabled
-    # Serve specific
-    USE_FS_SERVE: false
 
 action: run
 
