@@ -49,7 +49,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: ${{ github.workspace }}
+      PROJECT_ROOT: /tmp/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     strategy:
       fail-fast: false
