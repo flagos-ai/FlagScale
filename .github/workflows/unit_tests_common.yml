@@ -216,12 +216,12 @@ jobs:
           echo "Python version: $(python --version)"
 
           # Run unit tests using run_tests.sh
+          sleep 3600
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
             --platform "$PLATFORM" \
             --device "$DEVICE" \
             --type unit
           exit_code=$?
-          sleep 3600
           if [ $exit_code -eq 0 ]; then
             echo "✅ Unit tests passed for $PLATFORM/$DEVICE"
           else
