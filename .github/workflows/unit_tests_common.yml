@@ -215,6 +215,7 @@ jobs:
           echo "Python location: $(which python)"
           echo "Python version: $(python --version)"
 
+          sleep 3600
           # Run unit tests using run_tests.sh
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
             --platform "$PLATFORM" \
