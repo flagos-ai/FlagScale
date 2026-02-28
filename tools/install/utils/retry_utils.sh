@@ -39,6 +39,8 @@ retry() {
 }
 
 # Retry pip/uv install from requirements file
+# Handles per-package annotations: if the file contains # [--option] comments,
+# annotated packages are installed separately with their required flags.
 # Usage: retry_pip_install -d <debug> <requirements_file> [retries]
 retry_pip_install() {
     local debug=false
@@ -49,15 +51,48 @@ retry_pip_install() {
     local requirements_file=$1
     local retries=${2:-3}
     local manager=$(get_pkg_manager)
+    local pip_cmd=$(get_pip_cmd)
 
     [ ! -f "$requirements_file" ] && [ "$debug" != true ] && { log_error "Not found: $requirements_file"; return 1; }
 
-    log_info "Installing $(basename "$requirements_file")..."
-    local pip_cmd=$(get_pip_cmd)
-    case "$manager" in
-        uv)    retry -d $debug $retries "uv pip install -r '$requirements_file'" ;;
-        *)     retry -d $debug $retries "$pip_cmd install --root-user-action=ignore -r '$requirements_file'" ;;
-    esac
+    # Check for per-package annotations
+    local annotations=""
+    [ -f "$requirements_file" ] && annotations="$(parse_pkg_annotations "$requirements_file")"
+
+    if [ -z "$annotations" ]; then
+        # No annotations — install normally (fast path)
+        log_info "Installing $(basename "$requirements_file")..."
+        case "$manager" in
+            uv)    retry -d $debug $retries "uv pip install -r '$requirements_file'" ;;
+            *)     retry -d $debug $retries "$pip_cmd install --root-user-action=ignore -r '$requirements_file'" ;;
+        esac
+    else
+        # Has annotations — filter and install separately
+        local filtered
+        filtered="$(mktemp)"
+        create_filtered_requirements "$requirements_file" "$filtered"
+
+        # Install normal packages from filtered file
+        log_info "Installing $(basename "$requirements_file") (normal packages)..."
+        case "$manager" in
+            uv)    retry -d $debug $retries "uv pip install -r '$filtered'" ;;
+            *)     retry -d $debug $retries "$pip_cmd install --root-user-action=ignore -r '$filtered'" ;;
+        esac
+        local rc=$?
+        rm -f "$filtered"
+        [ $rc -ne 0 ] && return $rc
+
+        # Install annotated packages with their per-package options
+        while IFS=$'\t' read -r pkg opts; do
+            local pkg_name
+            pkg_name="$(echo "$pkg" | cut -d@ -f1 | xargs)"
+            log_info "Installing $pkg_name with $opts..."
+            case "$manager" in
+                uv)    retry -d $debug $retries "uv pip install $opts '$pkg'" ;;
+                *)     retry -d $debug $retries "$pip_cmd install --root-user-action=ignore $opts '$pkg'" ;;
+            esac || return 1
+        done <<< "$annotations"
+    fi
 }
 
 # Retry git clone with options

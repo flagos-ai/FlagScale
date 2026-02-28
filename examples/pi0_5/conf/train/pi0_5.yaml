@@ -7,20 +7,8 @@ system:
   shuffle: false
   num_workers: 4
 
-  optimizer:
-    name: AdamW
-    lr: 2.5e-5
-    betas: [0.9, 0.95]
-    eps: 1.0e-8
-    weight_decay: 0.01
-
-  scheduler:
-    warmup_steps: 1000
-    decay_steps: 30000
-    decay_lr: 2.5e-6
-
   checkpoint:
-    output_directory: ${experiment.exp_dir}/ckpt
+    output_directory: ${experiment.exp_dir}
     # Whether to save checkpoint
     save_checkpoint: true
     # Number of steps between checkpoints
@@ -35,6 +23,17 @@ model:
   tokenizer_path: /workspace/models/google/paligemma-3b-pt-224
   tokenizer_max_length: 200
   action_steps: 50
+
+  optimizer:
+    name: AdamW
+    lr: 2.5e-5
+    betas: [0.9, 0.95]
+    eps: 1.0e-8
+    weight_decay: 0.01
+    scheduler:
+      warmup_steps: 1000
+      decay_steps: 30000
+      decay_lr: 2.5e-6
 
 data:
   # Path to the training data

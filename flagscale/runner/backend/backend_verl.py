@@ -3,7 +3,14 @@ import os
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
-from flagscale.runner.utils import flatten_dict_to_args_verl, logger, parse_hostfile
+from flagscale.runner.utils import (
+    flatten_dict_to_args_verl,
+    get_pkg_dir,
+    logger,
+    parse_hostfile,
+    setup_exp_dir,
+    setup_logging_dirs,
+)
 
 
 def _get_args_verl(config: DictConfig):
@@ -23,10 +30,7 @@ def _get_args_verl(config: DictConfig):
 
 
 def _update_config_rl(config: DictConfig):
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
     if config.get("system", None) is None:
@@ -35,17 +39,7 @@ def _update_config_rl(config: DictConfig):
     if config.system.get("logging", None) is None:
         config.system.logging = DictConfig({})
 
-    log_dir = (
-        os.path.abspath(config.system.logging.log_dir)
-        if config.system.logging.get("log_dir", None)
-        else os.path.join(exp_dir, "logs")
-    )
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-
-    config.system.logging.log_dir = log_dir
-    config.system.logging.scripts_dir = scripts_dir
-    config.system.logging.pids_dir = pids_dir
+    setup_logging_dirs(config.system.logging, exp_dir)
 
     OmegaConf.set_struct(config, True)
 
@@ -86,9 +80,7 @@ class VerlBackend(BackendBase):
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-        root_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
+        pkg_dir = get_pkg_dir()
         cmds_config = config.experiment.get("cmds", None)
         if cmds_config:
             before_start = cmds_config.get("before_start", "")
@@ -114,7 +106,7 @@ class VerlBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.log_dir}\n")
             f.write(f"mkdir -p {system_config.logging.pids_dir}\n")
             f.write("\n")
-            f.write(f"cd {root_dir}\n")
+            f.write(f"cd {pkg_dir}\n")
             f.write("\n")
             f.write("export PYTHONPATH=${PYTHONPATH}\n")
             f.write("\n")

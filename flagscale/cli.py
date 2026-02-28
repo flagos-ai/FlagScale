@@ -19,7 +19,13 @@ app = typer.Typer(
 
 
 def resolve_config(model_name: str, yaml_path: Path | None, task: str) -> tuple[str, str]:
-    """Resolve config path and name from model_name or yaml_path"""
+    """Resolve config path and name from model_name or yaml_path.
+
+    When no explicit ``yaml_path`` is given, the config is looked up at
+    ``<cwd>/examples/<model>/conf/<task>.yaml``.  The user is expected to
+    run CLI commands from the repo root — ``examples/`` is not part of the
+    installed package.
+    """
     if yaml_path:
         yaml_path = yaml_path.resolve()
         if not yaml_path.exists():
@@ -27,18 +33,33 @@ def resolve_config(model_name: str, yaml_path: Path | None, task: str) -> tuple[
             raise typer.Exit(1)
         return str(yaml_path.parent), yaml_path.stem
 
-    script_dir = Path(__file__).parent.parent
-    yaml_path = script_dir / "examples" / model_name / "conf" / f"{task}.yaml"
+    yaml_path = Path.cwd() / "examples" / model_name / "conf" / f"{task}.yaml"
     if not yaml_path.exists():
         typer.echo(f"Error: {yaml_path} does not exist", err=True)
         raise typer.Exit(1)
     return str(yaml_path.parent), yaml_path.stem
 
 
-def run_task(
-    task_type: str, config_path: str, config_name: str, action: str, extra_args: list | None = None
-):
-    """Execute task via flagscale.run"""
+def _handle_config_error(error: Exception, config_path: str, config_name: str) -> None:
+    """Format config errors with detailed context and exit."""
+    config_file = f"{config_path}/{config_name}.yaml"
+    typer.secho(f"Config error in: {config_file}", fg="red", err=True)
+    typer.secho(f"Error: {error}", fg="red", err=True)
+    typer.secho(
+        "Hint: Check that the config file exists, all defaults are resolvable, "
+        "and required fields are present.",
+        fg="yellow",
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
+def run_task(config_path: str, config_name: str, action: str, extra_args: list | None = None):
+    """Execute task via flagscale.run.
+
+    The task type is determined from the config at runtime by Hydra,
+    not passed explicitly here.
+    """
     from flagscale.run import main as run_main
 
     args = [
@@ -50,7 +71,13 @@ def run_task(
     if extra_args:
         args.extend(extra_args)
     sys.argv = args
-    run_main()
+    try:
+        run_main()
+    except SystemExit as e:
+        if e.code and e.code != 0:
+            raise
+    except Exception as e:
+        _handle_config_error(e, config_path, config_name)
 
 
 def get_action(stop: bool, dryrun: bool, test: bool, query: bool, tune: bool) -> str:
@@ -105,8 +132,6 @@ def run_cmd(
         flagscale run --config-path ./examples/qwen3/conf --config-name train --action run
         flagscale run -p ./examples/qwen3/conf -n train -a stop
     """
-    from flagscale.run import main as run_main
-
     config_path = config_path.resolve()
     if not config_path.exists():
         typer.echo(f"Error: Config path does not exist: {config_path}", err=True)
@@ -117,18 +142,16 @@ def run_cmd(
         typer.echo(f"Error: Config file does not exist: {config_file}", err=True)
         raise typer.Exit(1)
 
-    args = [
-        "flagscale",
-        f"--config-path={config_path}",
-        f"--config-name={config_name}",
-        f"action={action.value}",
-    ]
-    if overrides:
-        args.extend(overrides)
-
-    typer.echo(f"Running: {' '.join(args)}")
-    sys.argv = args
-    run_main()
+    typer.echo(
+        f"Running: flagscale --config-path={config_path} "
+        f"--config-name={config_name} action={action.value}"
+    )
+    run_task(
+        str(config_path),
+        config_name,
+        action.value,
+        extra_args=list(overrides) if overrides else None,
+    )
 
 
 # ============================================================================
@@ -152,7 +175,7 @@ def train(
     typer.echo(f"Train {model} [{action}]")
     typer.echo(f"config_path: {cfg_path}")
     typer.echo(f"config_name: {cfg_name}")
-    run_task("train", cfg_path, cfg_name, action)
+    run_task(cfg_path, cfg_name, action)
 
 
 @app.command()
@@ -189,7 +212,7 @@ def serve(
             "https://github.com/FlagOpen/FlagScale/blob/main/flagscale/serve/README.md",
             fg="yellow",
         )
-    run_task("serve", cfg_path, cfg_name, action, extra)
+    run_task(cfg_path, cfg_name, action, extra)
 
 
 @app.command()
@@ -204,7 +227,7 @@ def inference(
     action = get_action(stop, dryrun, test, False, False)
     cfg_path, cfg_name = resolve_config(model, config, "inference")
     typer.echo(f"Inference {model} [{action}]")
-    run_task("inference", cfg_path, cfg_name, action)
+    run_task(cfg_path, cfg_name, action)
 
 
 @app.command()
@@ -219,7 +242,7 @@ def rl(
     action = get_action(stop, dryrun, test, False, False)
     cfg_path, cfg_name = resolve_config(model, config, "rl")
     typer.echo(f"RL {model} [{action}]")
-    run_task("rl", cfg_path, cfg_name, action)
+    run_task(cfg_path, cfg_name, action)
 
 
 @app.command()
@@ -233,7 +256,7 @@ def compress(
     action = "stop" if stop else ("dryrun" if dryrun else "run")
     cfg_path, cfg_name = resolve_config(model, config, "compress")
     typer.echo(f"Compress {model} [{action}]")
-    run_task("compress", cfg_path, cfg_name, action)
+    run_task(cfg_path, cfg_name, action)
 
 
 # ============================================================================
@@ -269,8 +292,7 @@ def install(
     debug: bool = typer.Option(False, "--debug", help="Dry-run mode"),
 ):
     """Install dependencies via tools/install/install.sh"""
-    script_dir = Path(__file__).parent.parent
-    install_script = script_dir / "tools" / "install" / "install.sh"
+    install_script = Path.cwd() / "tools" / "install" / "install.sh"
 
     if not install_script.exists():
         typer.echo(f"Error: Install script not found: {install_script}", err=True)
@@ -319,8 +341,7 @@ def run_tests(
     test_list: str | None = typer.Option(None, "--list", help="Specific tests to run"),
 ):
     """Run tests"""
-    script_dir = Path(__file__).parent.parent
-    test_script = script_dir / "tests" / "test_utils" / "runners" / "run_tests.sh"
+    test_script = Path.cwd() / "tests" / "test_utils" / "runners" / "run_tests.sh"
 
     if not test_script.exists():
         typer.echo(f"Error: Test script not found: {test_script}", err=True)

@@ -343,10 +343,10 @@ def test_generate_stop_script_no_after_stop(
             assert "echo 'Stopping'" not in content
 
 
-def test_generate_run_script_custom_root_dir(
+def test_generate_run_script_custom_pkg_dir(
     mock_config, mock_get_args_native, mock_update_config_train
 ):
-    """Test generate_run_script with custom root_dir."""
+    """Test generate_run_script with custom pkg_dir."""
     backend = NativeTrainBackend(mock_config)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -358,7 +358,7 @@ def test_generate_run_script_custom_root_dir(
         mock_config.train.system.logging.pids_dir = os.path.join(tmpdir, "pids")
 
         script_path = backend.generate_run_script(
-            mock_config, "localhost", 0, "test_cmd", root_dir=custom_root
+            mock_config, "localhost", 0, "test_cmd", pkg_dir=custom_root
         )
 
         with open(script_path, "r") as f:

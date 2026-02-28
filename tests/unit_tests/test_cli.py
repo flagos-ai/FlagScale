@@ -105,6 +105,28 @@ class TestResolveConfig:
             pass
 
 
+class TestResolveConfigFromCwd:
+    """Tests for resolve_config() using cwd-based lookup"""
+
+    def test_finds_config_in_cwd(self, tmp_path, monkeypatch):
+        """Resolves config from cwd/examples/<model>/conf/<task>.yaml"""
+        conf_dir = tmp_path / "examples" / "mymodel" / "conf"
+        conf_dir.mkdir(parents=True)
+        (conf_dir / "train.yaml").write_text("test: value")
+        monkeypatch.chdir(tmp_path)
+
+        path, name = resolve_config("mymodel", None, "train")
+        assert path == str(conf_dir)
+        assert name == "train"
+
+    def test_missing_config_in_cwd_raises(self, tmp_path, monkeypatch):
+        """Raises Exit(1) when config not found in cwd"""
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ClickExit) as exc_info:
+            resolve_config("nonexistent_model", None, "train")
+        assert exc_info.value.exit_code == 1
+
+
 class TestResolveConfigEdgeCases:
     """Edge case tests for resolve_config()"""
 

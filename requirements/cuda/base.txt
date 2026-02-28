@@ -1,9 +1,9 @@
 # CUDA platform-specific base dependencies
-# Includes PyTorch with CUDA support and common dependencies
 
 -r ../common.txt
 
 # PyTorch
-torch==2.8.0
-torchaudio==2.8.0
-torchvision==0.23.0
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.9.1
+torchaudio==2.9.1
+torchvision==0.24.1

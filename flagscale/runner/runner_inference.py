@@ -8,11 +8,14 @@ from flagscale.runner.utils import (
     get_free_port,
     get_nnodes,
     get_nproc_per_node,
+    get_pkg_dir,
     logger,
     parse_hostfile,
     run_local_command,
     run_scp_command,
     run_ssh_command,
+    setup_exp_dir,
+    setup_logging_dirs,
 )
 
 
@@ -45,23 +48,14 @@ def _get_args_vllm(config: DictConfig):
 
 
 def _update_config_inference(config: DictConfig):
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
 
     if config.get("logging", None) is None:
         config.inference.logging = DictConfig({})
 
-    log_dir = os.path.join(exp_dir, "inference_logs")
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-
-    config.inference.logging.log_dir = log_dir
-    config.inference.logging.scripts_dir = scripts_dir
-    config.inference.logging.pids_dir = pids_dir
+    setup_logging_dirs(config.inference.logging, exp_dir, log_subdir="inference_logs")
 
     os.makedirs(config.inference.logging.scripts_dir, exist_ok=True)
     OmegaConf.set_struct(config, True)
@@ -82,7 +76,7 @@ def _generate_run_script_inference(config, host, node_rank, cmd, background=True
 
     os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    pkg_dir = get_pkg_dir()
 
     cmds_config = config.experiment.get("cmds", None)
     if cmds_config:
@@ -95,9 +89,9 @@ def _generate_run_script_inference(config, host, node_rank, cmd, background=True
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
         f.write("\n")
-        f.write(f"cd {root_dir}\n")
+        f.write(f"cd {pkg_dir}\n")
         f.write("\n")
-        f.write(f"export PYTHONPATH={root_dir}:${{PYTHONPATH}}\n")
+        f.write(f"export PYTHONPATH={pkg_dir}:${{PYTHONPATH}}\n")
         f.write("\n")
         f.write(f'cmd="{cmd}"\n')
         f.write("\n")

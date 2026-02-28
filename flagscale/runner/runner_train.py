@@ -4,7 +4,6 @@ import shlex
 import time
 from datetime import datetime
 
-import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
@@ -16,11 +15,15 @@ from flagscale.runner.utils import (
     get_host_name_or_ip,
     get_nnodes,
     get_nproc_per_node,
+    get_pkg_dir,
     logger,
     parse_hostfile,
+    resolve_path,
     run_local_command,
     run_scp_command,
     run_ssh_command,
+    setup_exp_dir,
+    setup_logging_dirs,
     update_cmd_with_node_specific_config,
     update_nodes_envs,
 )
@@ -65,70 +68,72 @@ def _get_args_native(config: DictConfig):
     output_dir = hydra_config.runtime.output_dir
     output_subdir = hydra_config.output_subdir
     config_path = os.path.join(output_dir, f"{output_subdir}/config.yaml")
-    config_path = hydra.utils.to_absolute_path(config_path)
+    config_path = resolve_path(config_path, "hydra.config_path", raise_missing=True)
 
     # Return the path to Hydra's config.yaml
     return [f"--config-file={config_path}"]
 
 
 def _update_config_train(config: DictConfig):
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
 
     if config.experiment.runner.get("no_shared_fs", False):
         config.train.system.no_shared_fs = True
 
-    config = config.train.system
+    system = config.train.system
 
-    if config.get("checkpoint", None) is None:
-        config.checkpoint = DictConfig({})
+    if system.get("checkpoint", None) is None:
+        system.checkpoint = DictConfig({})
 
-    if config.get("logging", None) is None:
-        config.logging = DictConfig({})
+    if system.get("logging", None) is None:
+        system.logging = DictConfig({})
 
-    ckpt_save_dir = (
-        os.path.abspath(config.checkpoint.save)
-        if config.checkpoint.get("save", None)
+    # Checkpoint directories
+    system.checkpoint.save = (
+        resolve_path(system.checkpoint.save, "checkpoint.save")
+        if system.checkpoint.get("save", None)
         else os.path.join(exp_dir, "checkpoints")
     )
-    ckpt_load_dir = (
-        os.path.abspath(config.checkpoint.load)
-        if config.checkpoint.get("load", None)
+    system.checkpoint.load = (
+        resolve_path(system.checkpoint.load, "checkpoint.load")
+        if system.checkpoint.get("load", None)
         else os.path.join(exp_dir, "checkpoints")
     )
-    wandb_dir = (
-        os.path.abspath(config.logging.wandb_save_dir)
-        if config.logging.get("wandb_save_dir", None)
-        else os.path.join(exp_dir, "wandb")
-    )
-    tensorboard_dir = (
-        os.path.abspath(config.logging.tensorboard_dir)
-        if config.logging.get("tensorboard_dir", None)
+
+    # Logging directories
+    log_dir = setup_logging_dirs(system.logging, exp_dir)
+    system.logging.details_dir = os.path.join(log_dir, "details")
+    system.logging.tensorboard_dir = (
+        resolve_path(system.logging.tensorboard_dir, "logging.tensorboard_dir")
+        if system.logging.get("tensorboard_dir", None)
         else os.path.join(exp_dir, "tensorboard")
     )
-    log_dir = (
-        os.path.abspath(config.logging.log_dir)
-        if config.logging.get("log_dir", None)
-        else os.path.join(exp_dir, "logs")
+    system.logging.wandb_save_dir = (
+        resolve_path(system.logging.wandb_save_dir, "logging.wandb_save_dir")
+        if system.logging.get("wandb_save_dir", None)
+        else os.path.join(exp_dir, "wandb")
     )
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-    details_dir = os.path.join(log_dir, "details")
 
-    config.checkpoint.save = ckpt_save_dir
-    config.checkpoint.load = ckpt_load_dir
-    config.logging.log_dir = log_dir
-    config.logging.scripts_dir = scripts_dir
-    config.logging.pids_dir = pids_dir
-    config.logging.details_dir = details_dir
-    config.logging.tensorboard_dir = tensorboard_dir
-    config.logging.wandb_save_dir = wandb_dir
+    # Tokenizer file paths — resolve before passing to the training subprocess,
+    # which may run with a different cwd (e.g. site-packages when pip-installed).
+    data = config.train.get("data", None)
+    if data:
+        tokenizer = data.get("tokenizer", None)
+        if tokenizer:
+            _TOKENIZER_FILE_KEYS = (
+                "vocab_file",
+                "merge_file",
+                "special_tokens_file",
+                "tokenizer_model",
+            )
+            for key in _TOKENIZER_FILE_KEYS:
+                val = tokenizer.get(key, None)
+                if val is not None:
+                    tokenizer[key] = resolve_path(val, f"data.tokenizer.{key}", raise_missing=True)
 
-    OmegaConf.set_struct(config, False)
+    OmegaConf.set_struct(system, False)
 
 
 def _get_runner_cmd_train(
@@ -144,7 +149,7 @@ def _get_runner_cmd_train(
 
     rdzv_id = runner_config.get("rdzv_id", "default")
     log_dir = runner_config.get("log_dir", logging_config.details_dir)
-    log_dir = os.path.abspath(log_dir)
+    log_dir = resolve_path(log_dir, "runner.log_dir")
     no_shared_fs = runner_config.get("no_shared_fs", False)
     if no_shared_fs:
         log_dir = os.path.join(log_dir, "host")
@@ -205,7 +210,7 @@ def _generate_run_script_train(
     cmd,
     background=True,
     with_test=False,
-    root_dir=None,
+    pkg_dir=None,
     enable_monitoring=False,
 ):
     system_config = config.train.system
@@ -222,12 +227,11 @@ def _generate_run_script_train(
     host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
 
     os.makedirs(logging_config.scripts_dir, exist_ok=True)
-    if root_dir is not None:
-        root_dir = os.path.abspath(root_dir)
-    else:
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    assert os.path.exists(root_dir), f"ROOT_DIR {root_dir} does not exist."
-    megatron_dir = os.path.join(root_dir, "flagscale", "train")
+    pkg_dir = (
+        get_pkg_dir() if pkg_dir is None else resolve_path(pkg_dir, "build_dir", raise_missing=True)
+    )
+    assert os.path.exists(pkg_dir), f"PKG_DIR {pkg_dir} does not exist."
+    megatron_dir = os.path.join(pkg_dir, "flagscale", "train")
     cmds_config = config.experiment.get("cmds", None)
     if cmds_config:
         before_start = cmds_config.get("before_start", "")
@@ -244,15 +248,15 @@ def _generate_run_script_train(
         f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
         f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
         f.write("\n")
-        f.write(f"cd {root_dir}\n")
+        f.write(f"cd {pkg_dir}\n")
         f.write("\n")
-        f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
+        f.write(f"export PYTHONPATH={pkg_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
         f.write("\n")
         f.write(f'cmd="{cmd}"\n')
         f.write("\n")
         if enable_monitoring:
             monitor_launcher_path = os.path.join(
-                root_dir, "flagscale", "runner", "elastic", "monitor_launcher.py"
+                pkg_dir, "flagscale", "runner", "elastic", "monitor_launcher.py"
             )
             ssh_port = config.experiment.runner.get("ssh_port", 22)
             f.write("# Start monitoring service in background\n")
@@ -436,7 +440,7 @@ class SSHTrainRunner(RunnerBase):
             cmd,
             background=True,
             with_test=with_test,
-            root_dir=node_specific_config.get("build_dir", None),
+            pkg_dir=node_specific_config.get("build_dir", None),
             enable_monitoring=enable_monitoring,
         )
 

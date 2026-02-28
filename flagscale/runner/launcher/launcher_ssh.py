@@ -19,8 +19,10 @@ from flagscale.runner.utils import (
     get_free_port,
     get_nnodes,
     get_nproc_per_node,
+    get_pkg_dir,
     logger,
     parse_hostfile,
+    resolve_path,
     run_local_command,
     run_scp_command,
     run_ssh_command,
@@ -73,7 +75,7 @@ def _get_runner_cmd_train(
 
     rdzv_id = runner_config.get("rdzv_id", "default")
     log_dir = runner_config.get("log_dir", logging_config.details_dir)
-    log_dir = os.path.abspath(log_dir)
+    log_dir = resolve_path(log_dir, "runner.log_dir")
     no_shared_fs = runner_config.get("no_shared_fs", False)
     if no_shared_fs:
         log_dir = os.path.join(log_dir, "host")
@@ -182,10 +184,7 @@ class SshLauncher(LauncherBase):
         self.user_envs = self.backend.user_envs
         self.user_script = self.backend.user_script
         self.gpu_health_check_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "runner",
-            "elastic",
-            "gpu_health_check.py",
+            get_pkg_dir(), "flagscale", "runner", "elastic", "gpu_health_check.py"
         )
 
     def _run_each(
@@ -270,7 +269,7 @@ class SshLauncher(LauncherBase):
                 cmd,
                 background=True,
                 with_test=with_test,
-                root_dir=node_specific_config.get("build_dir", None),
+                pkg_dir=node_specific_config.get("build_dir", None),
                 enable_monitoring=enable_monitoring,
             )
         elif self.task_type == "rl":

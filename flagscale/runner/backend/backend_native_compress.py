@@ -1,12 +1,18 @@
 import os
 from datetime import datetime
 
-import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
-from flagscale.runner.utils import logger, parse_hostfile
+from flagscale.runner.utils import (
+    get_pkg_dir,
+    logger,
+    parse_hostfile,
+    resolve_path,
+    setup_exp_dir,
+    setup_logging_dirs,
+)
 
 
 def _get_args_llmcompressor(config: DictConfig):
@@ -18,7 +24,7 @@ def _get_args_llmcompressor(config: DictConfig):
     output_dir = hydra_config.runtime.output_dir
     output_subdir = hydra_config.output_subdir
     config_path = os.path.join(output_dir, f"{output_subdir}/config.yaml")
-    config_path = hydra.utils.to_absolute_path(config_path)
+    config_path = resolve_path(config_path, "hydra.config_path", raise_missing=True)
 
     args = []
     args.append(f"--config-path={config_path}")
@@ -27,41 +33,24 @@ def _get_args_llmcompressor(config: DictConfig):
 
 
 def _update_config_compress(config: DictConfig):
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
-    config = config.compress.system
+    system = config.compress.system
 
-    wandb_dir = (
-        os.path.abspath(config.logging.wandb_save_dir)
-        if config.logging.get("wandb_save_dir", None)
-        else os.path.join(exp_dir, "wandb")
-    )
-    tensorboard_dir = (
-        os.path.abspath(config.logging.tensorboard_dir)
-        if config.logging.get("tensorboard_dir", None)
+    setup_logging_dirs(system.logging, exp_dir, log_subdir="compress_logs")
+    system.logging.tensorboard_dir = (
+        resolve_path(system.logging.tensorboard_dir, "logging.tensorboard_dir")
+        if system.logging.get("tensorboard_dir", None)
         else os.path.join(exp_dir, "tensorboard")
     )
-    log_dir = (
-        os.path.abspath(config.logging.log_dir)
-        if config.logging.get("log_dir", None)
-        else os.path.join(exp_dir, "logs")
+    system.logging.wandb_save_dir = (
+        resolve_path(system.logging.wandb_save_dir, "logging.wandb_save_dir")
+        if system.logging.get("wandb_save_dir", None)
+        else os.path.join(exp_dir, "wandb")
     )
 
-    log_dir = os.path.join(exp_dir, "compress_logs")
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-
-    config.logging.log_dir = log_dir
-    config.logging.scripts_dir = scripts_dir
-    config.logging.pids_dir = pids_dir
-    config.logging.tensorboard_dir = tensorboard_dir
-    config.logging.wandb_save_dir = wandb_dir
-
-    OmegaConf.set_struct(config, True)
+    OmegaConf.set_struct(system, True)
 
 
 class NativeCompressBackend(BackendBase):
@@ -100,12 +89,10 @@ class NativeCompressBackend(BackendBase):
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-        root_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-        compress_dir = os.path.join(root_dir, "compress")
+        pkg_dir = get_pkg_dir()
+        compress_dir = os.path.join(pkg_dir, "flagscale", "compress")
         ### set megatron dir for dataset
-        megtron_dir = os.path.join(root_dir, "megatron")
+        megatron_dir = os.path.join(pkg_dir, "flagscale", "train")
         cmds_config = config.experiment.get("cmds", None)
         if cmds_config:
             before_start = cmds_config.get("before_start", "")
@@ -120,9 +107,9 @@ class NativeCompressBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
             f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
             f.write("\n")
-            f.write(f"cd {root_dir}\n")
+            f.write(f"cd {pkg_dir}\n")
             f.write("\n")
-            f.write(f"export PYTHONPATH={compress_dir}:{megtron_dir}:{root_dir}\n")
+            f.write(f"export PYTHONPATH={compress_dir}:{megatron_dir}:{pkg_dir}\n")
             f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
@@ -145,7 +132,7 @@ class NativeCompressBackend(BackendBase):
         return host_run_script_file
 
     def generate_stop_script(self, config, host, node_rank):
-        logging_config = config.inference.logging
+        logging_config = config.compress.system.logging
 
         host_stop_script_file = os.path.join(
             logging_config.scripts_dir, f"host_{node_rank}_{host}_stop.sh"

@@ -23,6 +23,108 @@ from flagscale.logger import logger
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 
 
+def resolve_path(path, config_key="", check_exists=False, raise_missing=False):
+    """Resolve a config path to an absolute path and optionally validate it.
+
+    Handles all path forms consistently:
+      - Absolute paths (starting with '/') are returned as-is.
+      - Relative paths ('./…', '../…', or bare like 'data/…') are resolved
+        against the current working directory via ``os.path.abspath``.
+
+    Note: ``run.py`` restores the original cwd before any runner code executes
+    (equivalent to ``hydra.job.chdir=False``), so ``os.path.abspath`` always
+    resolves against the user's project directory, not Hydra's output dir.
+
+    Args:
+        path: The path string to resolve.
+        config_key: Dotted config key for log messages (e.g. 'train.data.tokenizer.vocab_file').
+        check_exists: If True, log a warning when the resolved path does not exist.
+        raise_missing: If True, raise FileNotFoundError when the resolved path does not exist.
+            Takes precedence over *check_exists*.
+    """
+    resolved = os.path.abspath(path)
+    if not os.path.exists(resolved):
+        if raise_missing:
+            raise FileNotFoundError(
+                f"Config '{config_key}': resolved path '{path}' to '{resolved}', "
+                f"but the path does not exist."
+            )
+        if check_exists:
+            logger.warning(
+                f"Config '{config_key}': resolved path '{path}' to '{resolved}', "
+                f"but the path does not exist."
+            )
+    return resolved
+
+
+def setup_exp_dir(config):
+    """Resolve experiment directory and ensure it exists.
+
+    Common setup shared by all task types: resolves ``config.experiment.exp_dir``
+    to an absolute path, creates it if necessary, and returns the resolved path.
+    """
+    exp_dir = resolve_path(config.experiment.exp_dir, "experiment.exp_dir")
+    os.makedirs(exp_dir, exist_ok=True)
+    return exp_dir
+
+
+def get_pkg_dir():
+    """Return the root directory of the FlagScale package/repo.
+
+    Used to locate package-internal files (``flagscale/train/``, scripts, etc.)
+    in generated run scripts for PYTHONPATH, ``cd``, and script paths.
+
+    Resolves to the parent of the ``flagscale/`` package directory, which
+    works both for development (repo root) and pip-installed layouts.
+    """
+    # flagscale/runner/utils.py -> flagscale/runner/ -> flagscale/ -> repo root
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def get_cwd_dir(override=None):
+    """Return the working directory for user-facing path resolution.
+
+    If *override* is given (e.g. from a per-node ``build_dir``),
+    it is resolved to an absolute path and validated.
+    Otherwise the current working directory is returned.
+    """
+    if override is not None:
+        return resolve_path(override, "root_dir", raise_missing=True)
+    return os.getcwd()
+
+
+def setup_logging_dirs(logging_config, exp_dir, log_subdir="logs"):
+    """Set up standard logging directory layout under exp_dir.
+
+    Creates the directory tree and writes paths back into *logging_config*::
+
+        <exp_dir>/<log_subdir>/
+        ├── scripts/
+        └── pids/
+
+    Args:
+        logging_config: The OmegaConf logging section to update in-place.
+        exp_dir: Absolute path to the experiment directory.
+        log_subdir: Name of the logging subdirectory under exp_dir.
+
+    Returns:
+        The absolute log_dir path.
+    """
+    log_dir = (
+        resolve_path(logging_config.log_dir, "logging.log_dir")
+        if logging_config.get("log_dir", None)
+        else os.path.join(exp_dir, log_subdir)
+    )
+    scripts_dir = os.path.join(log_dir, "scripts")
+    pids_dir = os.path.join(log_dir, "pids")
+
+    logging_config.log_dir = log_dir
+    logging_config.scripts_dir = scripts_dir
+    logging_config.pids_dir = pids_dir
+
+    return log_dir
+
+
 class JobStatus(Enum):
     RUNNING = "Running"
     TRANSITIONAL = "Transitional (Stopping or Starting)"

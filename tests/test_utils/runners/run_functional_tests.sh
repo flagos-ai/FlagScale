@@ -64,6 +64,10 @@ run_test() {
 
     [ -d "$conf_dir" ] || { log_error "Config dir not found: $conf_dir"; return 1; }
 
+    # Convert to absolute path — Hydra treats relative --config-path as a
+    # Python package path relative to the decorated function's module.
+    conf_dir="$(cd "$conf_dir" && pwd)"
+
     # Check config file exists
     local config_file=""
     if [ -f "$conf_dir/$config.yaml" ]; then

@@ -127,6 +127,34 @@ should_install_src() {
 }
 
 # =============================================================================
+# Per-Package Annotations
+# =============================================================================
+# Requirements files support per-package option annotations:
+#   # [--no-build-isolation]
+#   megatron-core @ git+https://github.com/...
+# The annotation applies to the NEXT package line only, then resets.
+# Multiple annotations before one package stack (options merge).
+#
+# Parsing is handled by the shared Python module parse_requirements.py
+# (also used by setup.py). The shell functions below are thin wrappers.
+
+_PARSE_REQ_PY="$_PKG_UTILS_DIR/parse_requirements.py"
+
+# Parse # [--option] annotations from a requirements file
+# Outputs: PKG_SPEC<TAB>OPTIONS for each annotated package
+# Usage: parse_pkg_annotations <req_file>
+parse_pkg_annotations() {
+    python3 "$_PARSE_REQ_PY" annotations "$1"
+}
+
+# Create a filtered requirements file excluding annotated packages
+# Normal packages and pip options are kept; annotated packages are commented out.
+# Usage: create_filtered_requirements <req_file> <output_file>
+create_filtered_requirements() {
+    python3 "$_PARSE_REQ_PY" filter "$1" "$2"
+}
+
+# =============================================================================
 # Phase-Scoped Filtering
 # =============================================================================
 

@@ -5,5 +5,8 @@ vllm @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/vllm/0
 
 # support 0.5b_multiple_instance ci test
 ray==2.49.1
-gymnasium
-dm-tree
+gymnasium==1.2.3
+dm-tree==0.1.9
+
+# Source dependencies (installed from git repos)
+# vllm @ git+https://github.com/flagos-ai/vllm-FL.git

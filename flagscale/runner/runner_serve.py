@@ -23,11 +23,15 @@ from flagscale.runner.utils import (
     get_free_port,
     get_ip_addr,
     get_nproc_per_node,
+    get_pkg_dir,
     is_ip_addr,
     is_master_node,
     logger,
     parse_hostfile,
+    resolve_path,
     run_local_command,
+    setup_exp_dir,
+    setup_logging_dirs,
     wait_for_ray_master,
 )
 
@@ -174,10 +178,7 @@ def _update_auto_engine_args(config, backend="vllm", new_engine_args={}):
 def _update_config_serve(config: DictConfig):
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
 
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
 
@@ -205,13 +206,7 @@ def _update_config_serve(config: DictConfig):
         # set auto tp and pp size
         _update_auto_engine_args(config, new_engine_args=cli_engine_args)
 
-    log_dir = os.path.join(exp_dir, "serve_logs")
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-
-    config.logging.log_dir = log_dir
-    config.logging.scripts_dir = scripts_dir
-    config.logging.pids_dir = pids_dir
+    setup_logging_dirs(config.logging, exp_dir, log_subdir="serve_logs")
 
     os.makedirs(config.logging.scripts_dir, exist_ok=True)
     OmegaConf.set_struct(config, True)
@@ -276,7 +271,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
 
     os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    pkg_dir = get_pkg_dir()
     cmds_config = config.experiment.get("cmds", None)
     ssh_port = config.experiment.runner.get("ssh_port", 22)
     docker_name = config.experiment.runner.get("docker", None)
@@ -290,7 +285,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
 
         vllm_path = os.path.dirname(vllm.__path__[0])
     except Exception:
-        vllm_path = f"{root_dir}/vllm"
+        vllm_path = f"{pkg_dir}/vllm"
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
     envs = config.experiment.get("envs", {})
     with open(host_run_script_file, "w") as f:
@@ -301,9 +296,9 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
         f.write("\n")
 
         f.write('if [ -z "$PYTHONPATH" ]; then\n')
-        f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
+        f.write(f"    export PYTHONPATH={vllm_path}:{pkg_dir}\n")
         f.write("else\n")
-        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
+        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{pkg_dir}"\n')
         f.write("fi\n")
         f.write("\n")
         envs_str = " && ".join(
@@ -712,7 +707,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
         f.write("\n")
-        f.write(f"cd {root_dir}\n")
+        f.write(f"cd {pkg_dir}\n")
         f.write("\n")
         f.write(f'cmd="{cmd}"\n')
         f.write("\n")
@@ -752,7 +747,7 @@ def _generate_cloud_run_script_serve(
     if node_id:
         os.makedirs(os.path.join(logging_config.scripts_dir, node_id), exist_ok=True)
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    pkg_dir = get_pkg_dir()
     cmds_config = config.experiment.get("cmds", None)
     if cmds_config:
         before_start_cmd = cmds_config.get("before_start", "")
@@ -764,7 +759,7 @@ def _generate_cloud_run_script_serve(
 
         vllm_path = os.path.dirname(vllm.__path__[0])
     except Exception:
-        vllm_path = f"{root_dir}/vllm"
+        vllm_path = f"{pkg_dir}/vllm"
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
     envs = config.experiment.get("envs", {})
     with open(host_run_script_file, "w") as f:
@@ -775,9 +770,9 @@ def _generate_cloud_run_script_serve(
         f.write("\n")
 
         f.write('if [ -z "$PYTHONPATH" ]; then\n')
-        f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
+        f.write(f"    export PYTHONPATH={vllm_path}:{pkg_dir}\n")
         f.write("else\n")
-        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
+        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{pkg_dir}"\n')
         f.write("fi\n")
         f.write("\n")
         envs_str = " && ".join(f"export {key}={value}" for key, value in envs.items())
@@ -892,7 +887,7 @@ def _generate_cloud_run_script_serve(
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
             f.write("\n")
-            f.write(f"cd {root_dir}\n")
+            f.write(f"cd {pkg_dir}\n")
             f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
@@ -1074,15 +1069,11 @@ class SSHServeRunner(RunnerBase):
                 f"Invalid config entrypoint: {entrypoint}, must be a python file path or null."
             )
         hostfile_path = self.config.experiment.runner.get("hostfile", None)
-        if hostfile_path:
-            if os.path.isabs(hostfile_path):
-                hostfile_path = hostfile_path
-            else:
-                hostfile_path = os.path.join(os.getcwd(), hostfile_path)
-            if not os.path.exists(hostfile_path):
-                raise ValueError(f"The hostfile {hostfile_path} does not exist")
         self.resources = None
         if hostfile_path:
+            hostfile_path = resolve_path(
+                hostfile_path, "experiment.runner.hostfile", raise_missing=True
+            )
             self.resources = parse_hostfile(hostfile_path)
             for key, value in self.resources.items():
                 if not value.get("type", None):
@@ -1317,14 +1308,9 @@ class CloudServeRunner(RunnerBase):
         self.resources = None
         hostfile_path = self.config.experiment.runner.get("hostfile", None)
         if hostfile_path:
-            if os.path.isabs(hostfile_path):
-                hostfile_path = hostfile_path
-            else:
-                hostfile_path = os.path.join(os.getcwd(), hostfile_path)
-            if not os.path.exists(hostfile_path):
-                raise ValueError(f"The hostfile {hostfile_path} does not exist")
-
-        if hostfile_path:
+            hostfile_path = resolve_path(
+                hostfile_path, "experiment.runner.hostfile", raise_missing=True
+            )
             self.resources = parse_cloud_hostfile(hostfile_path)
             for key, value in self.resources.items():
                 if not value.get("type", None):

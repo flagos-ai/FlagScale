@@ -18,6 +18,7 @@ experiment:
     runtime_env: /path/to/verl-FL/verl/trainer/runtime_env.yaml
   envs:
     CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO: 0
 
 action: run
 
