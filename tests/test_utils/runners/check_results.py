@@ -365,7 +365,9 @@ def test_serve_equal(path, task, model, case):
         print(f"[Serve] gold_value_path: {gold_value_path}")
         print(f"[Serve] gold_result: {gold_result}")
     else:
-        print(f"[Serve] No gold values file found at {gold_value_path}, skipping result comparison.")
+        print(
+            f"[Serve] No gold values file found at {gold_value_path}, skipping result comparison."
+        )
 
     # Extract deployment-related configuration items
     deploy_config = whole_config.experiment.runner.deploy
@@ -382,7 +384,7 @@ def test_serve_equal(path, task, model, case):
         # Compare with gold values if available
         if gold_result is not None:
             expected = gold_result["response"]
-            print(f"\n[Serve] Result checking")
+            print("\n[Serve] Result checking")
             print(f"  Expected: {expected}")
             print(f"  Actual:   {greeting}")
             assert greeting == expected, (
@@ -438,7 +440,7 @@ def test_serve_equal(path, task, model, case):
             if gold_result is not None:
                 actual_text = result_json["choices"][0]["text"]
                 expected = gold_result["response"]
-                print(f"\n[Serve] Result checking")
+                print("\n[Serve] Result checking")
                 print(f"  Expected: {expected}")
                 print(f"  Actual:   {actual_text}")
                 assert actual_text == expected, (
