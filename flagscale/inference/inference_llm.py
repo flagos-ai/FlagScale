@@ -16,10 +16,10 @@ def inference(cfg):
     llm_cfg = cfg.get("llm", {})
     llm = LLM(**llm_cfg)
 
-    tokenizer_cfg = llm_cfg.get("tokenizer", None)
-    if tokenizer_cfg:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_cfg, trust_remote_code=True)
-        llm.set_tokenizer(tokenizer)
+    # tokenizer_cfg = llm_cfg.get("tokenizer", None)
+    # if tokenizer_cfg:
+    #     tokenizer = AutoTokenizer.from_pretrained(tokenizer_cfg, trust_remote_code=True)
+    #     llm.set_tokenizer(tokenizer)
 
     # step 3: initialize the sampling parameters
     # TODO(zhaoyinglia): support config logits processor
