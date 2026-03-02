@@ -177,7 +177,7 @@ def resolve_config_path_in_argv():
     """
     for i, arg in enumerate(sys.argv):
         if arg.startswith("--config-path="):
-            path = arg[len("--config-path="):]
+            path = arg[len("--config-path=") :]
             if not os.path.isabs(path):
                 sys.argv[i] = f"--config-path={os.path.abspath(path)}"
         elif arg == "--config-path" and i + 1 < len(sys.argv):
