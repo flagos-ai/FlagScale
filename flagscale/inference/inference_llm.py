@@ -1,5 +1,3 @@
-from transformers import AutoTokenizer
-
 from vllm import LLM
 from vllm.sampling_params import SamplingParams
 
