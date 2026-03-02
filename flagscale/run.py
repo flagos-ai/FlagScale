@@ -1,4 +1,5 @@
 import os
+import sys
 import warnings
 
 import hydra
@@ -167,5 +168,24 @@ def _main(config: DictConfig) -> None:
     execute_action(runner, action, task_type, config)
 
 
+def resolve_config_path_in_argv():
+    """Convert relative --config-path in sys.argv to an absolute path.
+
+    Hydra interprets a relative config_path as relative to the calling
+    module's package directory, not the current working directory.
+    Converting to an absolute path ensures it is treated as a filesystem path.
+    """
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith("--config-path="):
+            path = arg[len("--config-path="):]
+            if not os.path.isabs(path):
+                sys.argv[i] = f"--config-path={os.path.abspath(path)}"
+        elif arg == "--config-path" and i + 1 < len(sys.argv):
+            path = sys.argv[i + 1]
+            if not os.path.isabs(path):
+                sys.argv[i + 1] = os.path.abspath(path)
+
+
 if __name__ == "__main__":
+    resolve_config_path_in_argv()
     main()

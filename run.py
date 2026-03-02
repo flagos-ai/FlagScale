@@ -5,7 +5,8 @@ This file is kept for backward compatibility with existing scripts and documenta
 New code should use: flagscale run ... or python -m flagscale.run
 """
 
-from flagscale.run import main
+from flagscale.run import main, resolve_config_path_in_argv
 
 if __name__ == "__main__":
+    resolve_config_path_in_argv()
     main()
