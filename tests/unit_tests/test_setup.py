@@ -14,7 +14,6 @@ with unittest.mock.patch("setuptools.setup"):
         EXTRAS,
         PIP_OPTIONS,
         PKG_OPTIONS,
-        _ADAPTOR_TO_MAKE_FLAG,
         _build_flagcx,
         build_extras,
         parse_requirements,
