@@ -2,12 +2,11 @@
 
 -r ./base.txt
 
-# FlagTree for Ascend
---index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
---trusted-host resource.flagos.net
+# FlagTree for Ascend (extra index so PyPI remains available for build deps)
+--extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
 flagtree==0.4.0+ascend3.2
 
 # [--no-build-isolation -e]
-FlagGems @ git+https://github.com/flagos-ai/FlagGems.git
+flag-gems @ git+https://github.com/flagos-ai/FlagGems.git
 # [--no-build-isolation -e]
 vllm-plugin-FL @ git+https://github.com/flagos-ai/vllm-plugin-FL.git
