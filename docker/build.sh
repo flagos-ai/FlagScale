@@ -10,6 +10,8 @@
 #   ./docker/build.sh --platform cuda
 #   ./docker/build.sh --platform cuda --task train
 #   ./docker/build.sh --platform cuda --task train --target dev
+#   ./docker/build.sh --platform cuda --task train --target dev --build-arg PKG_MGR=conda
+
 
 set -euo pipefail
 
@@ -44,6 +46,7 @@ TASK=""
 TARGET="dev"
 TAG_PREFIX="flagscale"
 NO_CACHE=false
+BUILD_ARGS=()
 
 # PyPI index URLs (optional, for custom mirrors)
 PIP_INDEX_URL="${PIP_INDEX_URL:-}"
@@ -105,6 +108,7 @@ OPTIONS:
     --tag-prefix PREFIX  Image tag prefix (default: flagscale)
     --index-url URL      PyPI index URL (for custom mirrors)
     --extra-index-url URL  Extra PyPI index URL
+    --build-arg K=V      Pass build-arg to docker (can be repeated)
     --no-cache           Build without cache
     --help               Show this help message
 
@@ -119,6 +123,7 @@ EXAMPLES:
     $0 --platform cuda
     $0 --platform cuda --task train
     $0 --platform cuda --task train --target dev
+    $0 --platform cuda --task train --target dev --build-arg PKG_MGR=conda
     CUDA_VERSION=12.4.0 $0 --platform cuda --task train
 
 EOF
@@ -136,6 +141,7 @@ parse_args() {
             --tag-prefix)       TAG_PREFIX="$2"; shift 2 ;;
             --index-url)        PIP_INDEX_URL="$2"; shift 2 ;;
             --extra-index-url)  PIP_EXTRA_INDEX_URL="$2"; shift 2 ;;
+            --build-arg)        BUILD_ARGS+=("$2"); shift 2 ;;
             --no-cache)         NO_CACHE=true; shift ;;
             --help|-h)          usage; exit 0 ;;
             *)
@@ -164,6 +170,9 @@ get_image_tag() {
 
     # Add python version
     tag="${tag}-py${PYTHON_VERSION}"
+
+    # Add timestamp
+    tag="${tag}-$(date +%Y%m%d%H%M%S)"
 
     echo "$tag"
 }
@@ -222,6 +231,10 @@ build_image() {
     fi
 
     [ "$NO_CACHE" = true ] && build_cmd="$build_cmd --no-cache"
+    for arg in "${BUILD_ARGS[@]}"; do
+        log_info "Build-arg: $arg"
+        build_cmd="$build_cmd --build-arg \"$arg\""
+    done
     build_cmd="$build_cmd $PROJECT_ROOT"
 
     log_info "Running: $build_cmd"

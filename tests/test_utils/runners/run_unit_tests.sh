@@ -77,7 +77,7 @@ run_unit_tests_for_device() {
 
     # Build pytest command with torchrun for distributed test support
     PYTEST_CMD="torchrun --nproc_per_node=8 -m pytest tests/unit_tests/ -v --tb=short"
-
+    wait_for_gpu
     # Apply exclude patterns if any
     if [ -n "$EXCLUDE" ]; then
         PYTEST_CMD="torchrun --nproc_per_node=8 -m pytest $EXCLUDE tests/unit_tests/ -v --tb=short"

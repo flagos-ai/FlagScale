@@ -25,6 +25,10 @@ a100:
         mixtral: ["tp2_pp1_ep2", "tp4_pp1_ep2"]
       hetero_train:
         aquila: ["tp2pp1_tp4pp1_tp2pp1", "tp2dp1pp1_tp2dp2pp1_tp1dp2pp1", "dp2dp4_shared_embedding"]
+      inference:
+        qwen3: ["4b_tp2"]
+      serve:
+        qwen2_5: ["0.5b"]
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

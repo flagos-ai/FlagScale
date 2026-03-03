@@ -1,14 +1,14 @@
 defaults:
   - _self_
-  - inference: 7b-tp2
+  - inference: 7b_tp2
 
 experiment:
-  exp_name: robobrain2
-  exp_dir: tests/functional_tests/inference/robobrain2/results_test/7b-tp2
+  exp_name: deepseek_r1_distill_qwen
+  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen/test_results/7b_tp2
   task:
     type: inference
     backend: vllm
-    entrypoint: flagscale/inference/inference_robobrain2.py
+    entrypoint: flagscale/inference/inference_llm.py
   runner:
     hostfile: null
   cmds:
@@ -16,7 +16,6 @@ experiment:
       source /root/miniconda3/bin/activate flagscale-inference
   envs:
     HYDRA_FULL_ERROR: 1
-    VLLM_WORKER_MULTIPROC_METHOD: "spawn"
     CUBLAS_WORKSPACE_CONFIG: ":4096:8"
     CUDNN_BENCHMARK: "false"
     CUDNN_DETERMINISTIC: "true"
@@ -42,8 +41,6 @@ experiment:
     CUDA_LAUNCH_BLOCKING: 1
     NCCL_DEBUG: INFO
     MAGIC_CACHE: disabled
-    # Serve specific
-    USE_FS_SERVE: false
 
 action: run
 

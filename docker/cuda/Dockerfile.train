@@ -47,7 +47,7 @@ ARG UV_VERSION
 ARG PKG_MGR
 
 # Root installation directory (single source of truth)
-ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_HOME=/root
 
 # Build-time only environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -89,13 +89,43 @@ ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:/usr/local/lib:/usr/local/mpi/lib:/usr/l
 WORKDIR /workspace
 
 # =============================================================================
+# ENV STAGE - Ensure uv/conda/pip environments
+# =============================================================================
+FROM base AS env
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME=/root
+ARG PYTHON_VERSION=3.12
+
+RUN . /etc/profile.d/flagscale-env.sh && \
+    if [ "$PKG_MGR" = "uv" ]; then \
+        if [ ! -f "${FLAGSCALE_HOME}/venv/bin/python3" ]; then \
+            echo "[ENV] Creating uv venv at ${FLAGSCALE_HOME}/venv (python=${PYTHON_VERSION})"; \
+            "$HOME/.local/bin/uv" venv "${FLAGSCALE_HOME}/venv" --python "${PYTHON_VERSION}"; \
+        else \
+            echo "[ENV] Found uv venv at ${FLAGSCALE_HOME}/venv"; \
+        fi; \
+    elif [ "$PKG_MGR" = "conda" ]; then \
+        CONDA_ENV_NAME=flagscale-train; \
+        if [ -d "${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}" ]; then \
+            echo "[ENV] Found conda env ${CONDA_ENV_NAME} at ${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}"; \
+        else \
+            echo "[ENV] Creating conda env ${CONDA_ENV_NAME} (python=${PYTHON_VERSION})"; \
+            env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" create -y -n "${CONDA_ENV_NAME}" "python=${PYTHON_VERSION}"; \
+        fi; \
+    else \
+        echo "[ENV] Using system pip (no dedicated env to create)"; \
+    fi
+
+# =============================================================================
 # DEPS STAGE - Install dependencies using install folder
 # =============================================================================
-FROM base AS deps
+FROM env AS deps
 
 ARG PYTORCH_INDEX
 ARG PKG_MGR
-ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_HOME=/root
+ARG PYTHON_VERSION=3.12
 
 # PyPI index URLs (re-declare to use in this stage)
 ARG PIP_INDEX_URL
@@ -133,7 +163,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task train --pkg-mgr pip --no-system; \
-    fi
+    fi && \
+    rm -rf /root/deps /root/downloads /workspace
 
 # =============================================================================
 # DEV STAGE - Development image
@@ -141,23 +172,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM deps AS dev
 
 ARG PKG_MGR
-ARG FLAGSCALE_HOME=/opt/flagscale
-
-# Dev dependencies are already installed by default (use --no-dev to skip)
-# Copy FlagScale source
-COPY . /workspace/FlagScale
-WORKDIR /workspace/FlagScale
+ARG FLAGSCALE_HOME=/root
 
 CMD ["/bin/bash"]
 
 # =============================================================================
-# RELEASE STAGE - Production image (uses same base for consistency)
+# RELEASE STAGE - Production image (uses same env for consistency)
 # =============================================================================
-FROM base AS release
+FROM env AS release
 
 ARG PYTORCH_INDEX
 ARG PKG_MGR
-ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_HOME=/root
+ARG PYTHON_VERSION=3.12
 
 # PyPI index URLs
 ARG PIP_INDEX_URL
@@ -181,6 +208,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chmod +x /workspace/tools/install/*.sh && \
     chmod +x /workspace/tools/install/utils/*.sh && \
     chmod +x /workspace/tools/install/cuda/*.sh && \
+    ( [ "$PKG_MGR" != "uv" ] || [ -f "${FLAGSCALE_HOME}/venv/bin/python3" ] ) || \
+    ( mkdir -p "${FLAGSCALE_HOME}" && "$HOME/.local/bin/uv" venv "${FLAGSCALE_HOME}/venv" --python "${PYTHON_VERSION}" ) && \
     cd /workspace && \
     if [ "$PKG_MGR" = "uv" ]; then \
         UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
@@ -193,10 +222,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task train --pkg-mgr pip --no-system --no-dev; \
-    fi
-
-# Copy FlagScale source
-COPY . /workspace/FlagScale
-WORKDIR /workspace/FlagScale
+    fi && \
+    rm -rf /root/deps /root/downloads /workspace
 
 CMD ["/bin/bash"]

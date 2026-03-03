@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - inference: 7b-tp2
+  - inference: 7b_tp2
 
 experiment:
-  exp_name: deepseek_r1_distill_qwen
-  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen/results_test/7b-tp2
+  exp_name: deepseek_r1_distill_qwen_flaggems
+  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen_flaggems/test_results/7b_tp2
   task:
     type: inference
     backend: vllm
@@ -19,6 +19,7 @@ experiment:
     CUBLAS_WORKSPACE_CONFIG: ":4096:8"
     CUDNN_BENCHMARK: "false"
     CUDNN_DETERMINISTIC: "true"
+    USE_FLAGGEMS: "true"
     # Quantitative perception training related
     NVTE_APPLY_QK_LAYER_SCALING: 0
     NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0

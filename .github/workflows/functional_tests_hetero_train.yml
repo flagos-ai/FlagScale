@@ -49,7 +49,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /workspace/FlagScale
+      PROJECT_ROOT: /tmp/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     strategy:
       fail-fast: false
@@ -237,4 +237,13 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 15
+        timeout-minutes: 30
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          path: tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
+          retention-days: 7
+          if-no-files-found: warn

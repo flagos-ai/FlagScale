@@ -1,7 +1,7 @@
 # Training-specific dependencies
 
 -r ./base.txt
-
-# Source dependencies (installed from git repos)
-# [--no-build-isolation]
-megatron-core @ git+https://github.com/flagos-ai/Megatron-LM-FL.git
+sentencepiece==0.2.1
+transformers==4.57.6
+tiktoken==0.12.0
+megatron_core @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/megatron-core/0.16.0rc0/megatron_core-0.16.0rc0-cp312-cp312-linux_x86_64.whl

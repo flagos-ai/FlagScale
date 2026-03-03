@@ -258,7 +258,7 @@ def test_inference_equal(path, task, model, case):
     - Perform exact line-by-line content matching (ignoring newline character differences)
     """
     # Construct test result path: concatenate base path, task, model, test result directory and case name
-    test_result_path = os.path.join(path, task, model, "results_test", case)
+    test_result_path = os.path.join(path, task, model, "test_results", case)
     # Locate the inference output log file (host_0_localhost.output)
     result_path = os.path.join(test_result_path, "inference_logs/host_0_localhost.output")
 
@@ -321,10 +321,13 @@ def test_serve_equal(path, task, model, case):
     """
     Verify the output consistency of model serving deployment.
 
-    This test case is mainly used to check the interface availability and basic response capability
-    after the model is deployed as a service. It validates interface calls separately for two deployment modes:
-    1. Composite Deployment Mode (enable_composition=True): Call the basic HTTP interface to verify non-empty responses.
-    2. Standalone VLLM Deployment Mode: Call the OpenAI-compatible /completions interface to verify response status and content.
+    This test case checks both the interface availability and the correctness of the response
+    after the model is deployed as a service. It validates interface calls separately for two
+    deployment modes and compares the response against pre-recorded gold values:
+    1. Composite Deployment Mode (enable_composition=True): Call the basic HTTP interface,
+       verify non-empty responses, and compare with gold values.
+    2. Standalone VLLM Deployment Mode: Call the OpenAI-compatible /completions interface,
+       verify response status, and compare the generated text with gold values.
 
     Parameter Description (injected via pytest fixtures):
     - path: Base directory path
@@ -337,6 +340,7 @@ def test_serve_equal(path, task, model, case):
     - HTTP request returns non-200 status code
     - Response content is empty or does not meet the minimum length requirement
     - Missing required configuration items (e.g., port, model name)
+    - Response content does not match gold values (if gold values file exists)
     """
     # Construct the path to the configuration file corresponding to the test case
     config_path = os.path.join(path, task, model, "conf", f"{case}.yaml")
@@ -352,6 +356,19 @@ def test_serve_equal(path, task, model, case):
 
     print("[Serve] whole_config ", whole_config)
 
+    # Load gold values for result comparison (optional)
+    gold_value_path = os.path.join(path, task, model, "gold_values", case + ".json")
+    gold_result = None
+    if os.path.exists(gold_value_path):
+        with open(gold_value_path, "r") as f:
+            gold_result = json.load(f)
+        print(f"[Serve] gold_value_path: {gold_value_path}")
+        print(f"[Serve] gold_result: {gold_result}")
+    else:
+        print(
+            f"[Serve] No gold values file found at {gold_value_path}, skipping result comparison."
+        )
+
     # Extract deployment-related configuration items
     deploy_config = whole_config.experiment.runner.deploy
 
@@ -363,6 +380,19 @@ def test_serve_equal(path, task, model, case):
         greeting = response.text
         print("[Serve] result ", greeting)
         assert len(greeting) > 5, "Response is empty."
+
+        # Compare with gold values if available
+        if gold_result is not None:
+            expected = gold_result["response"]
+            print("\n[Serve] Result checking")
+            print(f"  Expected: {expected}")
+            print(f"  Actual:   {greeting}")
+            assert greeting == expected, (
+                f"Response mismatch in composition mode.\n"
+                f"Expected: {expected}\n"
+                f"Actual:   {greeting}"
+            )
+            print("[Serve] Gold value check PASSED")
 
     # Scenario 2: Non-composite Deployment Mode (mainly for VLLM engine deployment)
     else:
@@ -403,7 +433,22 @@ def test_serve_equal(path, task, model, case):
             assert response.status_code == 200, "Request failed with status code: {}".format(
                 response.status_code
             )
-            print("[Serve] result ", response.json())
+            result_json = response.json()
+            print("[Serve] result ", result_json)
+
+            # Compare with gold values if available
+            if gold_result is not None:
+                actual_text = result_json["choices"][0]["text"]
+                expected = gold_result["response"]
+                print("\n[Serve] Result checking")
+                print(f"  Expected: {expected}")
+                print(f"  Actual:   {actual_text}")
+                assert actual_text == expected, (
+                    f"Response mismatch in VLLM mode.\n"
+                    f"Expected: {expected}\n"
+                    f"Actual:   {actual_text}"
+                )
+                print("[Serve] Gold value check PASSED")
 
 
 @pytest.mark.usefixtures("path", "task", "model", "case")
@@ -432,7 +477,7 @@ def test_rl_equal(path, task, model, case):
       between actual and golden values
     """
     # 1. Construct file paths and validate file existence
-    test_result_path = os.path.join(path, task, model, "results_test", case)
+    test_result_path = os.path.join(path, task, model, "test_results", case)
     result_path = os.path.join(test_result_path, "logs/host_0_localhost.output")
     print("result_path:", result_path)
 

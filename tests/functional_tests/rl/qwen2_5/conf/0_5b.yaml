@@ -4,7 +4,7 @@ defaults:
 
 experiment:
   exp_name: 0_5b
-  exp_dir: tests/functional_tests/rl/qwen2_5/results_test/0_5b
+  exp_dir: tests/functional_tests/rl/qwen2_5/test_results/0_5b
   task:
     type: rl
     backend: verl

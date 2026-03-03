@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - inference: 7b-tp2
+  - inference: 4b_tp2
 
 experiment:
-  exp_name: deepseek_r1_distill_qwen-flaggems
-  exp_dir: tests/functional_tests/inference/deepseek_r1_distill_qwen-flaggems/results_test/7b-tp2
+  exp_name: qwen3_flaggems
+  exp_dir: tests/functional_tests/inference/qwen3_flaggems/test_results/4b_tp2
   task:
     type: inference
     backend: vllm
@@ -41,7 +41,6 @@ experiment:
     TORCH_CUDNN_DETERMINISM: true
     CUDA_LAUNCH_BLOCKING: 1
     NCCL_DEBUG: INFO
-    MAGIC_CACHE: disabled
 
 action: run
 

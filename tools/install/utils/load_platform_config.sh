@@ -19,6 +19,8 @@ load_platform_config() {
     # Extract CI/CD configuration from .github/configs using yq
     echo "Extracting configuration from $CONFIG_FILE"
     CI_IMAGE=$(/usr/local/bin/yq -r '.ci_image' "$CONFIG_FILE")
+    CI_TRAIN_IMAGE=$(/usr/local/bin/yq -r '.ci_train_image // ""' "$CONFIG_FILE")
+    CI_INFERENCE_IMAGE=$(/usr/local/bin/yq -r '.ci_inference_image // ""' "$CONFIG_FILE")
     RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
     VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
     CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
@@ -28,7 +30,7 @@ load_platform_config() {
     ENV_PATH=$(/usr/local/bin/yq -r '.env_path // "/opt/venv"' "$CONFIG_FILE")
     ENV_NAME_TRAIN=$(/usr/local/bin/yq -r '.env_names.train // "flagscale-train"' "$CONFIG_FILE")
     ENV_NAME_INFERENCE=$(/usr/local/bin/yq -r '.env_names.inference // "flagscale-inference"' "$CONFIG_FILE")
-    ENV_NAME_SERVE=$(/usr/local/bin/yq -r '.env_names.serve // "flagscale-serve"' "$CONFIG_FILE")
+    ENV_NAME_SERVE=$(/usr/local/bin/yq -r '.env_names.serve // "flagscale-inference"' "$CONFIG_FILE")
     ENV_NAME_RL=$(/usr/local/bin/yq -r '.env_names.rl // "flagscale-rl"' "$CONFIG_FILE")
 
     echo "Package manager: $PKG_MGR"
@@ -39,6 +41,12 @@ load_platform_config() {
     if [ -z "$CI_IMAGE" ] || [ "$CI_IMAGE" = "null" ]; then
         echo "❌ Error: ci_image not found in $CONFIG_FILE"
         return 1
+    fi
+    if [ -z "$CI_TRAIN_IMAGE" ] || [ "$CI_TRAIN_IMAGE" = "null" ]; then
+        CI_TRAIN_IMAGE="$CI_IMAGE"
+    fi
+    if [ -z "$CI_INFERENCE_IMAGE" ] || [ "$CI_INFERENCE_IMAGE" = "null" ]; then
+        CI_INFERENCE_IMAGE="$CI_IMAGE"
     fi
     if [ -z "$RUNNER_LABELS" ] || [ "$RUNNER_LABELS" = "null" ]; then
         echo "❌ Error: runner_labels not found in $CONFIG_FILE"
@@ -87,6 +95,8 @@ load_platform_config() {
 
     # Output values to $GITHUB_OUTPUT
     echo "ci_image=$CI_IMAGE" >> $GITHUB_OUTPUT
+    echo "ci_train_image=$CI_TRAIN_IMAGE" >> $GITHUB_OUTPUT
+    echo "ci_inference_image=$CI_INFERENCE_IMAGE" >> $GITHUB_OUTPUT
     echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
 
     { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT

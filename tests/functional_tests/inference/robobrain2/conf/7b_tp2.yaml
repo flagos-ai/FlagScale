@@ -1,14 +1,14 @@
 defaults:
   - _self_
-  - inference: 4b-tp2
+  - inference: 7b_tp2
 
 experiment:
-  exp_name: qwen3-flaggems
-  exp_dir: tests/functional_tests/inference/qwen3-flaggems/results_test/4b-tp2
+  exp_name: robobrain2
+  exp_dir: tests/functional_tests/inference/robobrain2/test_results/7b_tp2
   task:
     type: inference
     backend: vllm
-    entrypoint: flagscale/inference/inference_llm.py
+    entrypoint: flagscale/inference/inference_robobrain2.py
   runner:
     hostfile: null
   cmds:
@@ -16,10 +16,10 @@ experiment:
       source /root/miniconda3/bin/activate flagscale-inference
   envs:
     HYDRA_FULL_ERROR: 1
+    VLLM_WORKER_MULTIPROC_METHOD: "spawn"
     CUBLAS_WORKSPACE_CONFIG: ":4096:8"
     CUDNN_BENCHMARK: "false"
     CUDNN_DETERMINISTIC: "true"
-    USE_FLAGGEMS: "true"
     # Quantitative perception training related
     NVTE_APPLY_QK_LAYER_SCALING: 0
     NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
@@ -41,6 +41,9 @@ experiment:
     TORCH_CUDNN_DETERMINISM: true
     CUDA_LAUNCH_BLOCKING: 1
     NCCL_DEBUG: INFO
+    MAGIC_CACHE: disabled
+    # Serve specific
+    USE_FS_SERVE: false
 
 action: run
 

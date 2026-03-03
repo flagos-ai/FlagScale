@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - inference: 7b-tp2
+  - inference: 7b_tp2
 
 experiment:
-  exp_name: robobrain2-flaggems
-  exp_dir: tests/functional_tests/inference/robobrain2-flaggems/results_test/7b-tp2
+  exp_name: robobrain2_flaggems
+  exp_dir: tests/functional_tests/inference/robobrain2_flaggems/test_results/7b_tp2
   task:
     type: inference
     backend: vllm

@@ -49,7 +49,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /workspace/FlagScale
+      PROJECT_ROOT: /tmp/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     name: unit-${{ inputs.device }}
     container:
@@ -221,7 +221,6 @@ jobs:
             --device "$DEVICE" \
             --type unit
           exit_code=$?
-
           if [ $exit_code -eq 0 ]; then
             echo "✅ Unit tests passed for $PLATFORM/$DEVICE"
           else
