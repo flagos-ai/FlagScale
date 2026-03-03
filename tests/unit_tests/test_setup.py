@@ -14,6 +14,8 @@ with unittest.mock.patch("setuptools.setup"):
         EXTRAS,
         PIP_OPTIONS,
         PKG_OPTIONS,
+        _ADAPTOR_TO_MAKE_FLAG,
+        _build_flagcx,
         build_extras,
         parse_requirements,
     )
@@ -420,3 +422,128 @@ class TestBuildExtras:
         """PIP_OPTIONS keys are a subset of EXTRAS keys"""
         for name in PIP_OPTIONS:
             assert name in EXTRAS, f"PIP_OPTIONS has key '{name}' not found in EXTRAS"
+
+
+# --- TestBuildFlagcx: unit tests for FlagCX build integration ---
+
+
+class TestBuildFlagcx:
+    """Tests for _build_flagcx() function"""
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_skipped_when_env_not_set(self, mock_call, monkeypatch):
+        """_build_flagcx() returns early when FLAGSCALE_BUILD_FLAGCX is not set"""
+        monkeypatch.delenv("FLAGSCALE_BUILD_FLAGCX", raising=False)
+        _build_flagcx()
+        mock_call.assert_not_called()
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_skipped_when_env_is_zero(self, mock_call, monkeypatch):
+        """_build_flagcx() returns early when FLAGSCALE_BUILD_FLAGCX=0"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "0")
+        _build_flagcx()
+        mock_call.assert_not_called()
+
+    def test_invalid_adaptor_raises(self, monkeypatch):
+        """_build_flagcx() raises ValueError for unknown adaptor"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
+        monkeypatch.setenv("FLAGCX_ADAPTOR", "unknown_hw")
+        with pytest.raises(ValueError, match="Unknown FLAGCX_ADAPTOR='unknown_hw'"):
+            _build_flagcx()
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_make_command_nvidia(self, mock_call, monkeypatch):
+        """Verify make is called with USE_NVIDIA=1 for nvidia adaptor"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
+        monkeypatch.setenv("FLAGCX_ADAPTOR", "nvidia")
+        # Pretend the submodule directory exists and is non-empty.
+        monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
+        monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
+
+        _build_flagcx()
+
+        # First call: nested submodule init, second: make, third: pip install
+        assert mock_call.call_count == 3
+        make_cmd = mock_call.call_args_list[1][0][0]
+        assert make_cmd[0] == "make"
+        assert "USE_NVIDIA=1" in make_cmd
+        assert any(arg.startswith("-j") for arg in make_cmd)
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_make_command_ascend(self, mock_call, monkeypatch):
+        """Verify make is called with USE_ASCEND=1 for ascend adaptor"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
+        monkeypatch.setenv("FLAGCX_ADAPTOR", "ascend")
+        monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
+        monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
+
+        _build_flagcx()
+
+        make_cmd = mock_call.call_args_list[1][0][0]
+        assert "USE_ASCEND=1" in make_cmd
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_default_adaptor_is_nvidia(self, mock_call, monkeypatch):
+        """When FLAGCX_ADAPTOR is not set, nvidia is used by default"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
+        monkeypatch.delenv("FLAGCX_ADAPTOR", raising=False)
+        monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
+        monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
+
+        _build_flagcx()
+
+        make_cmd = mock_call.call_args_list[1][0][0]
+        assert "USE_NVIDIA=1" in make_cmd
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_torch_plugin_install(self, mock_call, monkeypatch):
+        """Verify torch plugin pip install is called after make"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
+        monkeypatch.setenv("FLAGCX_ADAPTOR", "nvidia")
+        monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
+        monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
+
+        _build_flagcx()
+
+        # Calls: nested submodule init, make, pip install
+        assert mock_call.call_count == 3
+        pip_cmd = mock_call.call_args_list[2][0][0]
+        assert pip_cmd[0] == sys.executable
+        assert "-m" in pip_cmd
+        assert "pip" in pip_cmd
+        assert "--no-build-isolation" in pip_cmd
+        assert "-e" not in pip_cmd
+        # The plugin path should end with plugin/torch
+        plugin_path = pip_cmd[-1]
+        assert plugin_path.endswith(os.path.join("plugin", "torch"))
+        # FLAGCX_ADAPTOR should be in the env
+        call_env = mock_call.call_args_list[2][1].get("env", {})
+        assert call_env.get("FLAGCX_ADAPTOR") == "nvidia"
+
+    @unittest.mock.patch("setup.subprocess.check_call")
+    def test_submodule_init_when_missing(self, mock_call, monkeypatch):
+        """Verify git submodule init is called when source dir is empty"""
+        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
+        monkeypatch.setenv("FLAGCX_ADAPTOR", "nvidia")
+        # First call to isdir returns False (submodule missing), subsequent calls return True.
+        call_count = {"n": 0}
+        original_isdir = os.path.isdir
+
+        def fake_isdir(p):
+            if "FlagCX" in p and call_count["n"] == 0:
+                call_count["n"] += 1
+                return False
+            return original_isdir(p)
+
+        monkeypatch.setattr("setup.os.path.isdir", fake_isdir)
+        monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
+
+        _build_flagcx()
+
+        # First call should be git submodule update
+        assert mock_call.call_count == 3
+        git_cmd = mock_call.call_args_list[0][0][0]
+        assert git_cmd[0] == "git"
+        assert "submodule" in git_cmd
+        assert "--init" in git_cmd
+        assert "--recursive" in git_cmd

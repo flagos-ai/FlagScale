@@ -276,6 +276,87 @@ def _auto_install_annotated_packages():
 
 
 # ---------------------------------------------------------------------------
+# FlagCX build (native communication library + torch plugin)
+# ---------------------------------------------------------------------------
+
+_ADAPTOR_TO_MAKE_FLAG = {
+    "nvidia": "USE_NVIDIA",
+    "iluvatar_corex": "USE_ILUVATAR_COREX",
+    "cambricon": "USE_CAMBRICON",
+    "metax": "USE_METAX",
+    "du": "USE_DU",
+    "klx": "USE_KUNLUNXIN",
+    "ascend": "USE_ASCEND",
+    "musa": "USE_MUSA",
+    "amd": "USE_AMD",
+    "tsm": "USE_TSM",
+    "enflame": "USE_ENFLAME",
+}
+
+
+def _build_flagcx():
+    """Build FlagCX native library and install its torch plugin.
+
+    Controlled by environment variables:
+      - ``FLAGSCALE_BUILD_FLAGCX=1`` — enable the build (default: skip)
+      - ``FLAGCX_ADAPTOR`` — hardware adaptor name (default: ``nvidia``)
+
+    The function auto-initializes the git submodule if the source tree is
+    missing, runs ``make`` with the appropriate ``USE_*`` flag, and then
+    pip-installs the torch plugin in editable mode.
+    """
+    if os.environ.get("FLAGSCALE_BUILD_FLAGCX") != "1":
+        return
+
+    adaptor = os.environ.get("FLAGCX_ADAPTOR", "nvidia")
+    if adaptor not in _ADAPTOR_TO_MAKE_FLAG:
+        raise ValueError(
+            f"Unknown FLAGCX_ADAPTOR={adaptor!r}. "
+            f"Valid values: {', '.join(sorted(_ADAPTOR_TO_MAKE_FLAG))}"
+        )
+
+    flagcx_dir = os.path.join(SCRIPT_DIR, "third_party", "FlagCX")
+
+    # Auto-initialize the submodule (and its nested submodules like
+    # nlohmann/json, googletest) if the source directory is empty/missing.
+    # Always run with --recursive to ensure nested submodules are present
+    # even when the top-level FlagCX directory was cloned without them.
+    if not os.path.isdir(flagcx_dir) or not os.listdir(flagcx_dir):
+        print("[flagscale] Initializing FlagCX submodule...", file=sys.stderr)
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--recursive", "third_party/FlagCX"],
+            cwd=SCRIPT_DIR,
+        )
+    else:
+        print("[flagscale] Initializing FlagCX nested submodules...", file=sys.stderr)
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--recursive"],
+            cwd=flagcx_dir,
+        )
+
+    make_flag = _ADAPTOR_TO_MAKE_FLAG[adaptor]
+    nproc = os.cpu_count() or 1
+
+    # Build the native library.
+    print(f"[flagscale] Building FlagCX ({adaptor})...", file=sys.stderr)
+    subprocess.check_call(
+        ["make", f"{make_flag}=1", f"-j{nproc}"],
+        cwd=flagcx_dir,
+        env=_get_clean_env(),
+    )
+
+    # Install the torch plugin.
+    print("[flagscale] Installing FlagCX torch plugin...", file=sys.stderr)
+    plugin_dir = os.path.join(flagcx_dir, "plugin", "torch")
+    clean_env = _get_clean_env()
+    clean_env["FLAGCX_ADAPTOR"] = adaptor
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "--no-build-isolation", plugin_dir],
+        env=clean_env,
+    )
+
+
+# ---------------------------------------------------------------------------
 # NOTE: Installation methods:
 # 1. pip install .                    -> CLI only (typer)
 # 2. pip install ".[cuda-train]"      -> CLI + pip deps + auto-install annotated packages
@@ -288,6 +369,12 @@ def _auto_install_annotated_packages():
 #    Packages annotated with "# [--option ...]" need separate install with those options.
 #    The shell installer (tools/install) handles this via parse_pkg_annotations().
 # 5. flagscale install                -> Full installation (apt + pip + ALL source deps)
+#
+# FlagCX (optional native communication library):
+#   Set FLAGSCALE_BUILD_FLAGCX=1 to auto-build the FlagCX submodule (third_party/FlagCX)
+#   and install its torch plugin.  Use FLAGCX_ADAPTOR to select the hardware backend
+#   (default: nvidia).  Example:
+#     FLAGSCALE_BUILD_FLAGCX=1 FLAGCX_ADAPTOR=nvidia pip install .
 # ---------------------------------------------------------------------------
 
 # Only extras_require is dynamic — everything else comes from pyproject.toml.
@@ -295,5 +382,7 @@ setup(extras_require=EXTRAS)
 
 # Only auto-install when setup.py is executed directly (pip install, python setup.py ...),
 # not when imported by tests or other modules.
-if PKG_OPTIONS and __name__ == "__main__":
-    _auto_install_annotated_packages()
+if __name__ == "__main__":
+    _build_flagcx()
+    if PKG_OPTIONS:
+        _auto_install_annotated_packages()

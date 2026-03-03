@@ -13,6 +13,7 @@ outputs
 *.out
 .idea/
 third_party/*
+!third_party/FlagCX
 dist/*
 
 # test results
