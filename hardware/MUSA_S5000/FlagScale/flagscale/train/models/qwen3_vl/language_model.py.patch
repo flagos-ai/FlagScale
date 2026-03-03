@@ -1,0 +1,45 @@
+diff --git a/flagscale/train/models/qwen3_vl/language_model.py b/flagscale/train/models/qwen3_vl/language_model.py
+index edf4a51a..11090524 100644
+--- a/flagscale/train/models/qwen3_vl/language_model.py
++++ b/flagscale/train/models/qwen3_vl/language_model.py
+@@ -22,7 +22,7 @@ from megatron.core.transformer.spec_utils import ModuleSpec
+ from megatron.core.transformer.transformer_config import TransformerConfig
+ from megatron.core.utils import WrappedTensor, deprecate_inference_params
+ from megatron.core.models.gpt.gpt_model import GPTModel
+-from megatron.core.process_groups_config import ProcessGroupCollection
++# from megatron.core.process_groups_config import ProcessGroupCollection
+ 
+ from .language_transformer_block import LanguageTransformerBlock
+ 
+@@ -179,10 +179,10 @@ class Qwen3VLLanguageModule(GPTModel):
+         scatter_embedding_sequence_parallel: bool = True,
+         seq_len_interpolation_factor: Optional[float] = None,
+         mtp_block_spec: Optional[ModuleSpec] = None,
+-        pg_collection: Optional[ProcessGroupCollection] = None,
++        # pg_collection: Optional[ProcessGroupCollection] = None,
+         vp_stage: Optional[int] = None,
+     ) -> None:
+-        super(GPTModel, self).__init__(config=config, pg_collection=pg_collection)
++        super(GPTModel, self).__init__(config=config)#, pg_collection=pg_collection)
+ 
+         if has_config_logger_enabled(config):
+             log_config_to_disk(config, locals(), prefix=type(self).__name__)
+@@ -248,7 +248,7 @@ class Qwen3VLLanguageModule(GPTModel):
+             spec=transformer_layer_spec,
+             pre_process=self.pre_process,
+             post_process=self.post_process,
+-            pg_collection=self.pg_collection,
++            # pg_collection=self.pg_collection,
+             vp_stage=vp_stage,
+         )
+ 
+@@ -287,7 +287,7 @@ class Qwen3VLLanguageModule(GPTModel):
+                 and self.share_embeddings_and_output_weights,
+                 embedding_activation_buffer=self.embedding_activation_buffer,
+                 grad_output_buffer=self.grad_output_buffer,
+-                tp_group=self.pg_collection.tp,
++                # tp_group=self.pg_collection.tp,
+             )
+ 
+         if self.pre_process or self.post_process:
+

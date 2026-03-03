@@ -1,0 +1,326 @@
+diff --git a/flagscale/train/models/qwen3_vl/vision_transformer_block.py b/flagscale/train/models/qwen3_vl/vision_transformer_block.py
+old mode 100755
+new mode 100644
+index 39f3c60f..81473e9a
+--- a/flagscale/train/models/qwen3_vl/vision_transformer_block.py
++++ b/flagscale/train/models/qwen3_vl/vision_transformer_block.py
+@@ -10,9 +10,10 @@ from torch import Tensor, nn
+ 
+ from megatron.core.transformer.transformer_block import TransformerBlock
+ from megatron.core.fusions.fused_layer_norm import FusedLayerNorm
++print("use",FusedLayerNorm.__module__)
+ from megatron.core import parallel_state, tensor_parallel
+ from megatron.core.enums import Fp8Recipe
+-from megatron.core.fp4_utils import get_fp4_context
++# from megatron.core.fp4_utils import get_fp4_context
+ from megatron.core.fp8_utils import get_fp8_context
+ from megatron.core.inference.contexts import BaseInferenceContext
+ from megatron.core.packed_seq_params import PackedSeqParams
+@@ -41,24 +42,39 @@ except ImportError:
+ get_cpu_offload_context = None
+ te_checkpoint = None
+ 
+-if HAVE_TE:
++# if HAVE_TE:
++try:
+     from megatron.core.extensions.transformer_engine import (
+         TENorm,
+         get_cpu_offload_context,
+         te_checkpoint,
+     )
+ 
+-    LayerNormImpl = TENorm
++    # LayerNormImpl = TENorm
++    raise ImportError("not supported")
+ 
+-elif HAVE_APEX:
+-    LayerNormImpl = FusedLayerNorm
++except ImportError:
++    HAVE_TE = False
++    try:
++        from megatron.core.fusions.fused_layer_norm import FusedLayerNorm
+ 
+-else:
+-    from megatron.core.transformer.torch_norm import WrappedTorchNorm
++        # LayerNormImpl = FusedLayerNorm
++        # print("LayerNormImpl",LayerNormImpl.__module__)
++    except ImportError:
++        from megatron.core.transformer.torch_norm import WrappedTorchNorm
+ 
++        LayerNormImpl = WrappedTorchNorm
++    from megatron.core.transformer.torch_norm import WrappedTorchNorm
+     LayerNormImpl = WrappedTorchNorm
+ 
+ 
++from megatron.core.transformer.enums import LayerType
++from megatron.core.transformer.transformer_config import TransformerConfig
++from megatron.core.transformer.transformer_layer import (
++    BaseTransformerLayer,
++    get_transformer_layer_offset,
++)
++
+ class VisionTransformerBlock(TransformerBlock):
+     """
+     The difference between this class and the base TransformerBlock is that:
+@@ -67,19 +83,25 @@ class VisionTransformerBlock(TransformerBlock):
+     """
+     def __init__(self, config, spec,
+                  post_layer_norm = True, pre_process = True, post_process = True,
+-                 pg_collection = None, vp_stage = None,
++                 pg_collection = None, vp_stage = None,model_comm_pgs = None,
+                  projection_config = None,  # Note: DeepStack
+                  projection_layer_spec = None,  # Note: DeepStack
+                  projection_type = 'mlp',  # Note: DeepStack):
+                 ):
+-        super().__init__(config, spec, post_layer_norm, pre_process, post_process, pg_collection, vp_stage)
+-
++        super().__init__(config, spec, post_layer_norm, pre_process, post_process, model_comm_pgs, vp_stage)
++        self.submodules = _get_block_submodules(config, spec, vp_stage)
+         if self.final_layernorm != None:
+             # NOTE(lizhiyu): replace final layernorm with TENorm if using TE
+             self.final_layernorm = None
+             self.final_layernorm = torch.nn.LayerNorm(normalized_shape=self.config.hidden_size, eps=self.config.layernorm_epsilon,)
+-
++            # self.final_layernorm = build_module(
++            #         self.submodules.layer_norm,
++            #         config=self.config,
++            #         hidden_size=self.config.hidden_size,
++            #         eps=self.config.layernorm_epsilon,
++            #     )
+         # NOTE: DeepStack
++        
+         self.deepstack_visual_indexes = self.config.deepstack_visual_indexes
+         self.deepstack_merger_list = nn.ModuleList(
+             [
+@@ -94,15 +116,15 @@ class VisionTransformerBlock(TransformerBlock):
+         )
+         self.deepstack_norm_list = nn.ModuleList(
+             [
+-                # build_module(
+-                #     self.submodules.layer_norm,
+-                #     config=self.config,
+-                #     # NOTE: check here for DeepStack
+-                #     hidden_size=projection_config.ffn_hidden_size,
+-                #     eps=self.config.layernorm_epsilon,
+-                # ),
++                build_module(
++                    self.submodules.layer_norm,
++                    config=self.config,
++                    # NOTE: check here for DeepStack
++                    hidden_size=projection_config.ffn_hidden_size,
++                    eps=self.config.layernorm_epsilon,
++                )
+                 # NOTE(lizhiyu): replace with torch LayerNorm
+-                torch.nn.LayerNorm(normalized_shape = projection_config.ffn_hidden_size, eps = self.config.layernorm_epsilon,)
++                # torch.nn.LayerNorm(normalized_shape = projection_config.ffn_hidden_size, eps = self.config.layernorm_epsilon,)
+                 for _ in range(len(self.config.deepstack_visual_indexes))
+             ]
+         )
+@@ -332,10 +354,10 @@ class VisionTransformerBlock(TransformerBlock):
+             outer_quantization_context = (
+                 get_fp8_context(self.config) if use_outer_quantization_context else nullcontext()
+             )
+-        elif self.config.fp4:
+-            use_outer_quantization_context = False
+-            use_inner_quantization_context = True
+-            outer_quantization_context = nullcontext()
++        # elif self.config.fp4:
++        #     use_outer_quantization_context = False
++        #     use_inner_quantization_context = True
++        #     outer_quantization_context = nullcontext()
+         else:
+             # No quantization
+             use_outer_quantization_context = False
+@@ -425,3 +447,190 @@ class VisionTransformerBlock(TransformerBlock):
+             hidden_states = hidden_states.clone()
+ 
+         return hidden_states, deepstack_feature_lists  # Note: DeepStack
++
++@dataclass
++class TransformerBlockSubmodules:
++    """
++    Dataclass for specifying the submodules of a transformer block.
++
++    This class defines the structure for configuring the layers and normalization
++    within a transformer block, allowing for flexible and customizable architecture designs.
++
++    Args:
++        layer_specs (List[ModuleSpec], optional): A list of module specifications for
++            the layers within the transformer block. Each specification typically
++            defines a complete transformer layer (e.g., self-attention, feed-forward network).
++        layer_norm (Optional[Union[ModuleSpec, torch.nn.Module]], optional): Specification
++            or instance of the layer normalization to be applied.
++    """
++
++    layer_specs: List[ModuleSpec] = None
++    layer_norm: Optional[Union[ModuleSpec, torch.nn.Module]] = None
++
++def _get_block_submodules(
++    config: TransformerConfig,
++    spec: Union[TransformerBlockSubmodules, ModuleSpec],
++    vp_stage: Optional[int] = None,
++) -> TransformerBlockSubmodules:
++    """
++    Retrieve or construct TransformerBlockSubmodules based on the provided specification.
++
++    Args:
++        config (TransformerConfig): Configuration object for the transformer model.
++        spec (Union[TransformerBlockSubmodules, ModuleSpec]): Specification for the
++            transformer block submodules. Can be either a TransformerBlockSubmodules
++            instance or a ModuleSpec.
++        vp_stage (Optional[int]): Virtual pipeline stage number.
++
++    Returns:
++        TransformerBlockSubmodules: The submodules for the transformer block.
++    """
++
++    # Transformer block submodules.
++    if isinstance(spec, TransformerBlockSubmodules):
++        return spec
++
++    # ModuleSpec here is generally assumed to be for a transformer layer that
++    # is implemented in `transformer_layer.py` or if it subclasses
++    # `BaseTransformerLayer` from the `transformer_layer.py` file.
++    elif isinstance(spec, ModuleSpec):
++        if issubclass(spec.module, TransformerBlock):
++            return spec.submodules
++        elif issubclass(spec.module, BaseTransformerLayer):
++            num_layers = get_num_layers_to_build(config, vp_stage)
++            return TransformerBlockSubmodules(
++                layer_specs=[spec] * num_layers, layer_norm=LayerNormImpl
++            )
++        else:
++            raise Exception(f"specialize for {spec.module.__name__}.")
++    else:
++        raise Exception(f"specialize for {type(spec).__name__}.")
++
++def get_num_layers_to_build(config: TransformerConfig, vp_stage: Optional[int] = None) -> int:
++    """
++    Determine the number of transformer layers to build for the current pipeline stage.
++    Args:
++        config (TransformerConfig): Configuration object containing transformer model parameters.
++        vp_stage (Optional[int]): Virtual pipeline stage number.
++
++    Returns:
++        int: The number of layers to be built for the current pipeline stage.
++    """
++    # If we have a custom PP layout, straightforwardly
++    # return the number of decoders in the layout array.
++    if config.pipeline_model_parallel_layout is not None:
++        return config.pipeline_model_parallel_layout.get_num_layers_to_build(
++            layer_type=LayerType.decoder, vp_stage=vp_stage
++        )
++
++    if (
++        config.num_layers_in_first_pipeline_stage is not None
++        or config.num_layers_in_last_pipeline_stage is not None
++    ):
++
++        assert not (
++            config.account_for_embedding_in_pipeline_split
++            or config.account_for_loss_in_pipeline_split
++        ), " \
++        Does not support standalone embedding stage and standalone loss stage with uneven pp"
++        # Number of layers to distribute over rest of pipeline stages
++        layers_to_distribute = config.num_layers
++        # Number of pipeline stages left for distributing transformer layers
++        pipeline_stages_left = parallel_state.get_pipeline_model_parallel_world_size()
++
++        # If the uneven first (last) pipeline stage is enabled, remove the specified number
++        # of layers to calculate the number of layers on each middle pipeline stage.
++        if config.num_layers_in_first_pipeline_stage is not None:
++            layers_to_distribute -= config.num_layers_in_first_pipeline_stage
++            pipeline_stages_left -= 1
++
++        if config.num_layers_in_last_pipeline_stage is not None:
++            layers_to_distribute -= config.num_layers_in_last_pipeline_stage
++            pipeline_stages_left -= 1
++
++        # If pp_size <= 2, we do not have any intermediate pipeline stages, and we do not
++        # need to check if the left over layers are divisible by the left over stages.
++        if pipeline_stages_left > 0:
++            assert (
++                layers_to_distribute % pipeline_stages_left == 0
++            ), "With uneven pipelineing the left over layers must be divisible by left over stages"
++            num_layers_per_pipeline_rank = layers_to_distribute // pipeline_stages_left
++        else:
++            num_layers_per_pipeline_rank = 0
++
++        # If the uneven first (last) pipeline stage is enabled, return the specified number
++        # of layers for all virtual pipeline parallel stages within the first (last) pipeline
++        # parallel stage.
++        if (
++            parallel_state.is_pipeline_first_stage(ignore_virtual=True)
++            and config.num_layers_in_first_pipeline_stage is not None
++        ):
++            num_layers_per_pipeline_rank = config.num_layers_in_first_pipeline_stage
++
++        if (
++            parallel_state.is_pipeline_last_stage(ignore_virtual=True)
++            and config.num_layers_in_last_pipeline_stage is not None
++        ):
++            num_layers_per_pipeline_rank = config.num_layers_in_last_pipeline_stage
++    else:
++        # Include the embedding layer and loss layer into pipeline parallelism partition
++        num_layers = config.num_layers
++        if config.account_for_embedding_in_pipeline_split:
++            num_layers += 1
++
++        if config.account_for_loss_in_pipeline_split:
++            num_layers += 1
++
++        assert (
++            num_layers % config.pipeline_model_parallel_size == 0
++        ), "num_layers should be divisible by pipeline_model_parallel_size"
++        num_layers_per_pipeline_rank = num_layers // config.pipeline_model_parallel_size
++
++    if (
++        parallel_state.get_virtual_pipeline_model_parallel_world_size() is not None
++        and config.pipeline_model_parallel_size > 1
++    ):
++        # Interleaved pipeline parallelism:
++        # Number of layers in each model chunk is the number of layers in the stage,
++        # divided by the number of model chunks in a stage.
++        # With 8 layers, 2 stages, and 4 model chunks, we want an assignment of
++        # layers to stages like (each list is a model chunk):
++        # Stage 0: [0]  [2]  [4]  [6]
++        # Stage 1: [1]  [3]  [5]  [7]
++        # With 8 layers, 2 stages, and 2 virtual stages, we want an assignment of
++        # layers to stages like (each list is a model chunk):
++        # Stage 0: [0, 1]  [4, 5]
++        # Stage 1: [2, 3]  [6, 7]
++        vp_size = parallel_state.get_virtual_pipeline_model_parallel_world_size()
++
++        assert (
++            num_layers_per_pipeline_rank % vp_size == 0
++        ), f"num_layers_per_pipeline_rank {num_layers_per_pipeline_rank} \
++            should be divisible by vp_size {vp_size}"
++        num_layers_per_virtual_stage = num_layers_per_pipeline_rank // vp_size
++
++        num_layers_to_build = num_layers_per_virtual_stage
++
++    else:
++        # Non-interleaved pipeline parallelism:
++        # Each stage gets a contiguous set of layers.
++        num_layers_to_build = num_layers_per_pipeline_rank
++
++    # The embedding (or loss) layer cannot function as a standalone transformer layer
++    # Reduce the number of layers to construct by 1 on the first (or last) stage if the
++    # embedding (or loss) layer is included in the pipeline parallelism partition and placement.
++    if (
++        parallel_state.is_pipeline_first_stage(ignore_virtual=False, vp_stage=vp_stage)
++        and config.account_for_embedding_in_pipeline_split
++    ):
++        num_layers_to_build -= 1
++        assert num_layers_to_build >= 0, "Not enough layers in the first virtual pipeline stage"
++
++    if (
++        parallel_state.is_pipeline_last_stage(ignore_virtual=False, vp_stage=vp_stage)
++        and config.account_for_loss_in_pipeline_split
++    ):
++        num_layers_to_build -= 1
++        assert num_layers_to_build >= 0, "Not enough layers in the last virtual pipeline stage"
++
++    return num_layers_to_build
+\ No newline at end of file
+

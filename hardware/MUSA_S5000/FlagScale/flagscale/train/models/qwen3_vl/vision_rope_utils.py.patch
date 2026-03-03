@@ -1,0 +1,21 @@
+diff --git a/flagscale/train/models/qwen3_vl/vision_rope_utils.py b/flagscale/train/models/qwen3_vl/vision_rope_utils.py
+index 346cbce5..3a1abf65 100644
+--- a/flagscale/train/models/qwen3_vl/vision_rope_utils.py
++++ b/flagscale/train/models/qwen3_vl/vision_rope_utils.py
+@@ -204,6 +204,7 @@ def apply_rotary_pos_emb(
+         cp_group = parallel_state.get_context_parallel_group()
+ 
+     if config.apply_rope_fusion:
++        # return torch.rope(t.unsqueeze(1), freqs.squeeze(1, 2).to(t.device), rotary_interleaved=False, batch_first=False).squeeze(1)
+         if cu_seqlens is None:
+             # NOTE: TE backends do not support mRoPE in bshd format when bs > 1.
+             if config.mrope_section is not None and freqs.shape[1] > 1:
+@@ -212,6 +213,7 @@ def apply_rotary_pos_emb(
+                     "apply_rope_fusion does not support mRoPE in bshd format when bs > 1. "
+                     "Please set apply_rope_fusion to false. This will become an error in v0.16."
+                 )
++                
+                 return _apply_rotary_pos_emb_bshd(
+                     t,
+                     freqs,
+
