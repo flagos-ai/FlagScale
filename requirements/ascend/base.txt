@@ -1,0 +1,3 @@
+# Ascend platform-specific base dependencies
+
+-r ../common.txt

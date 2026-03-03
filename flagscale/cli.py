@@ -266,6 +266,7 @@ def compress(
 
 class Platform(str, Enum):
     cuda = "cuda"
+    ascend = "ascend"
     default = "default"
 
 
