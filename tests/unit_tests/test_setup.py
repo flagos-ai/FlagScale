@@ -385,7 +385,7 @@ class TestBuildExtras:
                 assert isinstance(opts, list)
                 for opt in opts:
                     assert isinstance(opt, str)
-                    assert opt.startswith("--"), (
+                    assert opt[0].startswith("-"), (
                         f"Option '{opt}' for '{pkg}' in PKG_OPTIONS['{name}'] doesn't start with --"
                     )
 
