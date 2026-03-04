@@ -3,10 +3,10 @@ backends_commit:
 backends_version:
   FlagScale: 0.8.0
   Megatron-LM: 0.12.0
-commit: 5552b0be3f62710fb5b1138c069bfebf67505b07
-contact: ppy_1203@163.com
+commit: 05267318f750f694f61e547fa7a7b95876c72b5e
+contact: sugon@liwzh7.com
 device_type: Hygon_BW1000
 models:
-- llama3-70b finetune
+- qwen3
 task:
 - train

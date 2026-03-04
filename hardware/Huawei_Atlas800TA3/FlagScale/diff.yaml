@@ -8,5 +8,6 @@ contact: ''
 device_type: Huawei_Atlas800TA3
 models:
 - Qwen2.5-VL
+- X0
 task:
 - train

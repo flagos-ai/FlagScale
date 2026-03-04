@@ -1,0 +1,49 @@
+diff --git a/examples/qwen2_5_vl/conf/train.yaml b/examples/qwen2_5_vl/conf/train.yaml
+index 7159e1b1..bab349c8 100644
+--- a/examples/qwen2_5_vl/conf/train.yaml
++++ b/examples/qwen2_5_vl/conf/train.yaml
+@@ -11,18 +11,38 @@ experiment:
+     entrypoint: ./flagscale/train/train_qwen2_5_vl.py
+   runner:
+     backend: torchrun
+-    nnodes: 1
++    nnodes: 4
+     nproc_per_node: 8
++    hostfile: /share/project/hostfile
++    master_port: xxxxx
++    ssh_port: xxxx
++    master_addr: xx.x.xx.xxx
+     rdzv_backend: static
+-  cmds:  
+-    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
++  cmds:
++    before_start: |-
++      source /opt/dtk/env.sh
++      export LD_LIBRARY_PATH=/xxx/xx01/lib:$LD_LIBRARY_PATH
++      export LD_LIBRARY_PATH=/xxx/xx02/lib:$LD_LIBRARY_PATH
+   envs:
+-    # NCCL_DEBUG: INFO
+-    # NCCL_DEBUG_SUBSYSTEM: ALL
+     CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+     NVTE_APPLY_QK_LAYER_SCALING: 0
+     NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
++    NCCL_NET_GDR_LEVEL: 7
++    NCCL_NET_GDR_READ: 1
++    NCCL_MAX_NCHANNELS: 32
++    NCCL_MIN_NCHANNELS: 32
++    RCCL_SDMA_COPY_ENABLE: 0
++    NCCL_ALGO: Ring
++    HSA_FORCE_FINE_GRAIN_PCIE: 1
++    OMP_NUM_THREADS: 1
++    NCCL_SOCKET_IFNAME: enp225s0f0np0
++    GLOO_SOCKET_IFNAME: enp225s0f0np0
++    NCCL_IB_HCA: mlx5_0:1,mlx5_6:1
++    ALLREDUCE_STREAM_WITH_COMPUTE: 1
++    SENDRECV_STREAM_WITH_COMPUTE: 1
++    cache_size_limit: 64
++    GPU_MAX_HW_QUEUES: 20
+ 
+ action: run
+ 
+

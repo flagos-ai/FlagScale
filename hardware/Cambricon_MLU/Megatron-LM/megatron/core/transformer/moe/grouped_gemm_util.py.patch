@@ -1,8 +1,8 @@
 diff --git a/megatron/core/transformer/moe/grouped_gemm_util.py b/megatron/core/transformer/moe/grouped_gemm_util.py
-index 5dd344816..06a716b45 100644
+index 5dd344816..0581faf91 100644
 --- a/megatron/core/transformer/moe/grouped_gemm_util.py
 +++ b/megatron/core/transformer/moe/grouped_gemm_util.py
-@@ -1,7 +1,12 @@
+@@ -1,11 +1,15 @@
  # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
  
 +#NOTE(mlu): call grouped_gemm fuse_op from apex
@@ -16,4 +16,8 @@ index 5dd344816..06a716b45 100644
  except ImportError:
      grouped_gemm = None
  
+-
+ def grouped_gemm_is_available():
+     """Check if grouped_gemm is available."""
+     return grouped_gemm is not None
 

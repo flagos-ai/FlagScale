@@ -1,5 +1,5 @@
 diff --git a/flagscale/train/arguments.py b/flagscale/train/arguments.py
-index 3ef28d28..d771f0de 100644
+index 98e31497..b8026cde 100644
 --- a/flagscale/train/arguments.py
 +++ b/flagscale/train/arguments.py
 @@ -63,7 +63,7 @@ class FSTrainArguments:

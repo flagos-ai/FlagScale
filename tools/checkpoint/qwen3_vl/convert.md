@@ -27,7 +27,7 @@ Example: convert the HF checkpoint to MCore-Dense format and verify the output:
 
 ```bash
 cd /workspace/FlagScale/tools/checkpointing/qwen3_vl
-export PYTHONPATH=$PYTHONPATH:../../../:../../../third_party/Megatron-LM
+export PYTHONPATH=../../../:../../../third_party/Megatron-LM:$PYTHONPATH
 bash hf2mcore_qwen3_vl_convertor.sh \
 8B \
 /mnt/qwen3-vl-ckpts/Qwen3-VL-8B-Instruct \

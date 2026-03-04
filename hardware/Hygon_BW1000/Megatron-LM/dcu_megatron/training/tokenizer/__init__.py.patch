@@ -1,0 +1,9 @@
+diff --git a/dcu_megatron/training/tokenizer/__init__.py b/dcu_megatron/training/tokenizer/__init__.py
+new file mode 100644
+index 000000000..ba64c873b
+--- /dev/null
++++ b/dcu_megatron/training/tokenizer/__init__.py
+@@ -0,0 +1 @@
++from .tokenizer import build_tokenizer
+\ No newline at end of file
+

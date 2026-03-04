@@ -1,17 +1,21 @@
 diff --git a/vllm/inputs/preprocess.py b/vllm/inputs/preprocess.py
-index 7518cd8fc..8ff83d805 100644
+index 7518cd8fc..f78b0ff04 100644
 --- a/vllm/inputs/preprocess.py
 +++ b/vllm/inputs/preprocess.py
-@@ -311,6 +311,8 @@ class InputPreprocessor:
+@@ -311,6 +311,12 @@ class InputPreprocessor:
      ) -> Union[TokenInputs, MultiModalInputs]:
          prompt_token_ids = self._truncate_inputs(
              parsed_content["prompt_token_ids"], tokenization_kwargs)
-+        uncond_prompt_token_ids = self._truncate_inputs(
-+            parsed_content["uncond_prompt_token_ids"], tokenization_kwargs)
++        uncond_prompt_token_ids_raw = parsed_content.get("uncond_prompt_token_ids")
++        if uncond_prompt_token_ids_raw is not None:
++            uncond_prompt_token_ids = self._truncate_inputs(
++                parsed_content["uncond_prompt_token_ids"], tokenization_kwargs)
++        else:
++            uncond_prompt_token_ids = None
  
          inputs: Union[TokenInputs, MultiModalInputs]
          if multi_modal_data := parsed_content.get("multi_modal_data"):
-@@ -322,7 +324,10 @@ class InputPreprocessor:
+@@ -322,7 +328,10 @@ class InputPreprocessor:
                  mm_uuids=mm_uuids,
              )
          else:
@@ -23,7 +27,7 @@ index 7518cd8fc..8ff83d805 100644
  
          if cache_salt := parsed_content.get("cache_salt"):
              inputs["cache_salt"] = cache_salt
-@@ -337,6 +342,7 @@ class InputPreprocessor:
+@@ -337,6 +346,7 @@ class InputPreprocessor:
          mm_uuids: Optional[MultiModalUUIDDict] = None,
      ) -> Union[TokenInputs, MultiModalInputs]:
          prompt_text = parsed_content["prompt"]
@@ -31,7 +35,7 @@ index 7518cd8fc..8ff83d805 100644
  
          inputs: Union[TokenInputs, MultiModalInputs]
          if multi_modal_data := parsed_content.get("multi_modal_data"):
-@@ -352,9 +358,17 @@ class InputPreprocessor:
+@@ -352,9 +362,17 @@ class InputPreprocessor:
                  prompt_text,
                  tokenization_kwargs=tokenization_kwargs,
              )

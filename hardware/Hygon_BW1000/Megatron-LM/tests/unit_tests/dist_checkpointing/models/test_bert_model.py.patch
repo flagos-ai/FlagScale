@@ -1,0 +1,15 @@
+diff --git a/tests/unit_tests/dist_checkpointing/models/test_bert_model.py b/tests/unit_tests/dist_checkpointing/models/test_bert_model.py
+index 27f014478..14372cb0d 100644
+--- a/tests/unit_tests/dist_checkpointing/models/test_bert_model.py
++++ b/tests/unit_tests/dist_checkpointing/models/test_bert_model.py
+@@ -74,6 +74,9 @@ class TestBertModel:
+ 
+ 
+ class TestBERTModelReconfiguration:
++    def setup_class(cls):
++        Utils.initialize_distributed()
++
+     def setup_method(self, method):
+         pass
+ 
+
