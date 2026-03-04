@@ -204,6 +204,40 @@ def _get_requested_extras():
     return None
 
 
+def _normalize_extra(name):
+    """PEP 685: lowercase, replace [-_.] runs with single hyphen."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _get_flagcx_adaptor():
+    """Detect FlagCX adaptor from requested pip extras.
+
+    Returns adaptor name (with underscores) or None.
+    Raises ValueError if multiple flagcx extras requested.
+    """
+    requested = _get_requested_extras()
+    if not requested:
+        return None
+
+    extra_to_adaptor = {}
+    for adaptor in _ADAPTOR_TO_MAKE_FLAG:
+        extra_name = _FLAGCX_EXTRA_PREFIX + adaptor.replace("_", "-")
+        extra_to_adaptor[extra_name] = adaptor
+
+    found = []
+    for extra in requested:
+        normalized = _normalize_extra(extra)
+        if normalized in extra_to_adaptor:
+            found.append(extra_to_adaptor[normalized])
+
+    if len(found) > 1:
+        raise ValueError(
+            f"Multiple FlagCX extras requested: {found}. "
+            "Only one hardware backend can be built at a time."
+        )
+    return found[0] if found else None
+
+
 def _auto_install_annotated_packages():
     """Auto-install packages that need special pip flags (e.g. --no-build-isolation).
 
@@ -293,25 +327,36 @@ _ADAPTOR_TO_MAKE_FLAG = {
     "enflame": "USE_ENFLAME",
 }
 
+_FLAGCX_EXTRA_PREFIX = "flagcx-"
 
-def _build_flagcx():
+
+def _build_flagcx_extras():
+    """Generate empty extras_require entries for FlagCX backends.
+
+    Maps each adaptor to "flagcx-<adaptor>" (underscores -> hyphens).
+    These extras have no pip deps — they only trigger the native build.
+    """
+    extras = {}
+    for adaptor in _ADAPTOR_TO_MAKE_FLAG:
+        extra_name = _FLAGCX_EXTRA_PREFIX + adaptor.replace("_", "-")
+        extras[extra_name] = []
+    return extras
+
+
+EXTRAS.update(_build_flagcx_extras())
+
+
+def _build_flagcx(adaptor):
     """Build FlagCX native library and install its torch plugin.
 
-    Controlled by environment variables:
-      - ``FLAGSCALE_BUILD_FLAGCX=1`` — enable the build (default: skip)
-      - ``FLAGCX_ADAPTOR`` — hardware adaptor name (default: ``nvidia``)
-
-    The function auto-initializes the git submodule if the source tree is
-    missing, runs ``make`` with the appropriate ``USE_*`` flag, and then
-    pip-installs the torch plugin in editable mode.
+    ``adaptor`` selects the hardware backend (must be a key in
+    ``_ADAPTOR_TO_MAKE_FLAG``).  The function auto-initializes the git
+    submodule if the source tree is missing, runs ``make`` with the
+    appropriate ``USE_*`` flag, and then pip-installs the torch plugin.
     """
-    if os.environ.get("FLAGSCALE_BUILD_FLAGCX") != "1":
-        return
-
-    adaptor = os.environ.get("FLAGCX_ADAPTOR", "nvidia")
     if adaptor not in _ADAPTOR_TO_MAKE_FLAG:
         raise ValueError(
-            f"Unknown FLAGCX_ADAPTOR={adaptor!r}. "
+            f"Unknown FlagCX adaptor {adaptor!r}. "
             f"Valid values: {', '.join(sorted(_ADAPTOR_TO_MAKE_FLAG))}"
         )
 
@@ -371,18 +416,31 @@ def _build_flagcx():
 # 5. flagscale install                -> Full installation (apt + pip + ALL source deps)
 #
 # FlagCX (optional native communication library):
-#   Set FLAGSCALE_BUILD_FLAGCX=1 to auto-build the FlagCX submodule (third_party/FlagCX)
-#   and install its torch plugin.  Use FLAGCX_ADAPTOR to select the hardware backend
-#   (default: nvidia).  Example:
-#     FLAGSCALE_BUILD_FLAGCX=1 FLAGCX_ADAPTOR=nvidia pip install .
+#   pip install ".[flagcx-nvidia]"              -> Build FlagCX for NVIDIA
+#   pip install ".[cuda-train,flagcx-nvidia]"   -> Combined with platform extras
+#   Valid backends: nvidia, iluvatar-corex, cambricon, metax, du, klx,
+#                   ascend, musa, amd, tsm, enflame
 # ---------------------------------------------------------------------------
 
 # Only extras_require is dynamic — everything else comes from pyproject.toml.
 setup(extras_require=EXTRAS)
 
+# Setuptools commands that only collect metadata — no building needed.
+# pip's PEP 517 build workflow invokes setup.py three times:
+#   1. egg_info  — "Getting requirements to build wheel" (metadata only)
+#   2. dist_info — "Preparing metadata (pyproject.toml)" (metadata only)
+#   3. bdist_wheel — actual wheel build
+# Without this guard, _build_flagcx() and _auto_install_annotated_packages()
+# would run all three times.
+# Skipping during metadata phases ensures a single build during bdist_wheel.
+_METADATA_COMMANDS = frozenset({"egg_info", "dist_info"})
+
 # Only auto-install when setup.py is executed directly (pip install, python setup.py ...),
 # not when imported by tests or other modules.
 if __name__ == "__main__":
-    _build_flagcx()
-    if PKG_OPTIONS:
-        _auto_install_annotated_packages()
+    if not (_METADATA_COMMANDS & set(sys.argv)):
+        adaptor = _get_flagcx_adaptor()
+        if adaptor is not None:
+            _build_flagcx(adaptor)
+        if PKG_OPTIONS:
+            _auto_install_annotated_packages()

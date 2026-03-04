@@ -11,10 +11,13 @@ with unittest.mock.patch("setuptools.setup"):
     if PROJECT_ROOT not in sys.path:
         sys.path.insert(0, PROJECT_ROOT)
     from setup import (
+        _FLAGCX_EXTRA_PREFIX,
+        _METADATA_COMMANDS,
         EXTRAS,
         PIP_OPTIONS,
         PKG_OPTIONS,
         _build_flagcx,
+        _get_flagcx_adaptor,
         build_extras,
         parse_requirements,
     )
@@ -401,6 +404,8 @@ class TestBuildExtras:
     @pytest.mark.parametrize("extra_name", ALL_EXTRAS)
     def test_extra_has_deps_or_pkg_options(self, extra_name):
         """All extras have at least one dependency or per-package option"""
+        if extra_name.startswith(_FLAGCX_EXTRA_PREFIX):
+            return  # flagcx extras are build-only triggers with no deps
         has_deps = len(EXTRAS[extra_name]) > 0
         has_pkg_opts = extra_name in PKG_OPTIONS and len(PKG_OPTIONS[extra_name]) > 0
         assert has_deps or has_pkg_opts, f"Extra '{extra_name}' has no deps and no pkg_options"
@@ -429,37 +434,18 @@ class TestBuildExtras:
 class TestBuildFlagcx:
     """Tests for _build_flagcx() function"""
 
-    @unittest.mock.patch("setup.subprocess.check_call")
-    def test_skipped_when_env_not_set(self, mock_call, monkeypatch):
-        """_build_flagcx() returns early when FLAGSCALE_BUILD_FLAGCX is not set"""
-        monkeypatch.delenv("FLAGSCALE_BUILD_FLAGCX", raising=False)
-        _build_flagcx()
-        mock_call.assert_not_called()
-
-    @unittest.mock.patch("setup.subprocess.check_call")
-    def test_skipped_when_env_is_zero(self, mock_call, monkeypatch):
-        """_build_flagcx() returns early when FLAGSCALE_BUILD_FLAGCX=0"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "0")
-        _build_flagcx()
-        mock_call.assert_not_called()
-
-    def test_invalid_adaptor_raises(self, monkeypatch):
+    def test_invalid_adaptor_raises(self):
         """_build_flagcx() raises ValueError for unknown adaptor"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
-        monkeypatch.setenv("FLAGCX_ADAPTOR", "unknown_hw")
-        with pytest.raises(ValueError, match="Unknown FLAGCX_ADAPTOR='unknown_hw'"):
-            _build_flagcx()
+        with pytest.raises(ValueError, match="Unknown FlagCX adaptor 'unknown_hw'"):
+            _build_flagcx("unknown_hw")
 
     @unittest.mock.patch("setup.subprocess.check_call")
     def test_make_command_nvidia(self, mock_call, monkeypatch):
         """Verify make is called with USE_NVIDIA=1 for nvidia adaptor"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
-        monkeypatch.setenv("FLAGCX_ADAPTOR", "nvidia")
-        # Pretend the submodule directory exists and is non-empty.
         monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
         monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
 
-        _build_flagcx()
+        _build_flagcx("nvidia")
 
         # First call: nested submodule init, second: make, third: pip install
         assert mock_call.call_count == 3
@@ -471,38 +457,21 @@ class TestBuildFlagcx:
     @unittest.mock.patch("setup.subprocess.check_call")
     def test_make_command_ascend(self, mock_call, monkeypatch):
         """Verify make is called with USE_ASCEND=1 for ascend adaptor"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
-        monkeypatch.setenv("FLAGCX_ADAPTOR", "ascend")
         monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
         monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
 
-        _build_flagcx()
+        _build_flagcx("ascend")
 
         make_cmd = mock_call.call_args_list[1][0][0]
         assert "USE_ASCEND=1" in make_cmd
 
     @unittest.mock.patch("setup.subprocess.check_call")
-    def test_default_adaptor_is_nvidia(self, mock_call, monkeypatch):
-        """When FLAGCX_ADAPTOR is not set, nvidia is used by default"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
-        monkeypatch.delenv("FLAGCX_ADAPTOR", raising=False)
-        monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
-        monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
-
-        _build_flagcx()
-
-        make_cmd = mock_call.call_args_list[1][0][0]
-        assert "USE_NVIDIA=1" in make_cmd
-
-    @unittest.mock.patch("setup.subprocess.check_call")
     def test_torch_plugin_install(self, mock_call, monkeypatch):
         """Verify torch plugin pip install is called after make"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
-        monkeypatch.setenv("FLAGCX_ADAPTOR", "nvidia")
         monkeypatch.setattr("setup.os.path.isdir", lambda p: True)
         monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
 
-        _build_flagcx()
+        _build_flagcx("nvidia")
 
         # Calls: nested submodule init, make, pip install
         assert mock_call.call_count == 3
@@ -522,8 +491,6 @@ class TestBuildFlagcx:
     @unittest.mock.patch("setup.subprocess.check_call")
     def test_submodule_init_when_missing(self, mock_call, monkeypatch):
         """Verify git submodule init is called when source dir is empty"""
-        monkeypatch.setenv("FLAGSCALE_BUILD_FLAGCX", "1")
-        monkeypatch.setenv("FLAGCX_ADAPTOR", "nvidia")
         # First call to isdir returns False (submodule missing), subsequent calls return True.
         call_count = {"n": 0}
         original_isdir = os.path.isdir
@@ -537,7 +504,7 @@ class TestBuildFlagcx:
         monkeypatch.setattr("setup.os.path.isdir", fake_isdir)
         monkeypatch.setattr("setup.os.listdir", lambda p: ["Makefile"])
 
-        _build_flagcx()
+        _build_flagcx("nvidia")
 
         # First call should be git submodule update
         assert mock_call.call_count == 3
@@ -546,3 +513,118 @@ class TestBuildFlagcx:
         assert "submodule" in git_cmd
         assert "--init" in git_cmd
         assert "--recursive" in git_cmd
+
+
+# --- TestGetFlagcxAdaptor: unit tests for extras-based adaptor detection ---
+
+
+class TestGetFlagcxAdaptor:
+    """Tests for _get_flagcx_adaptor() function"""
+
+    def test_returns_none_when_no_extras(self, monkeypatch):
+        """Returns None when _get_requested_extras() returns None"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: None)
+        assert _get_flagcx_adaptor() is None
+
+    def test_returns_none_for_non_flagcx_extras(self, monkeypatch):
+        """Returns None when only non-flagcx extras are requested"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["cuda-train"])
+        assert _get_flagcx_adaptor() is None
+
+    def test_returns_adaptor_for_flagcx_extra(self, monkeypatch):
+        """Returns adaptor name for a flagcx extra"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx-nvidia"])
+        assert _get_flagcx_adaptor() == "nvidia"
+
+    def test_handles_underscore_normalization(self, monkeypatch):
+        """Handles underscore variant (PEP 685 normalization)"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx_nvidia"])
+        assert _get_flagcx_adaptor() == "nvidia"
+
+    def test_handles_hyphenated_adaptor(self, monkeypatch):
+        """Handles adaptor names with hyphens (e.g. iluvatar-corex)"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx-iluvatar-corex"])
+        assert _get_flagcx_adaptor() == "iluvatar_corex"
+
+    def test_raises_on_multiple_flagcx_extras(self, monkeypatch):
+        """Raises ValueError when multiple flagcx extras are requested"""
+        monkeypatch.setattr(
+            "setup._get_requested_extras", lambda: ["flagcx-nvidia", "flagcx-ascend"]
+        )
+        with pytest.raises(ValueError, match="Multiple FlagCX extras requested"):
+            _get_flagcx_adaptor()
+
+    def test_ignores_non_flagcx_extras(self, monkeypatch):
+        """Returns correct adaptor when mixed with non-flagcx extras"""
+        monkeypatch.setattr(
+            "setup._get_requested_extras", lambda: ["cuda-train", "flagcx-nvidia", "dev"]
+        )
+        assert _get_flagcx_adaptor() == "nvidia"
+
+
+# --- TestFlagcxExtras: unit tests for flagcx extras generation ---
+
+
+class TestFlagcxExtras:
+    """Tests for _build_flagcx_extras() and EXTRAS integration"""
+
+    def test_all_adaptors_have_extras(self):
+        """Every adaptor in _ADAPTOR_TO_MAKE_FLAG maps to an extra in EXTRAS"""
+        from setup import _ADAPTOR_TO_MAKE_FLAG
+
+        for adaptor in _ADAPTOR_TO_MAKE_FLAG:
+            extra_name = _FLAGCX_EXTRA_PREFIX + adaptor.replace("_", "-")
+            assert extra_name in EXTRAS, f"Missing extra '{extra_name}' for adaptor '{adaptor}'"
+
+    def test_flagcx_extras_have_empty_deps(self):
+        """All flagcx extras have empty dependency lists"""
+        for name, deps in EXTRAS.items():
+            if name.startswith(_FLAGCX_EXTRA_PREFIX):
+                assert deps == [], f"Extra '{name}' should have empty deps, got {deps}"
+
+
+# --- TestMetadataCommandGuard: unit tests for metadata-phase skip logic ---
+
+
+class TestMetadataCommandGuard:
+    """Tests for _METADATA_COMMANDS guard in __main__ block"""
+
+    def test_metadata_commands_is_frozenset(self):
+        """_METADATA_COMMANDS is a frozenset"""
+        assert isinstance(_METADATA_COMMANDS, frozenset)
+
+    def test_egg_info_in_metadata_commands(self):
+        """egg_info is recognised as a metadata command"""
+        assert "egg_info" in _METADATA_COMMANDS
+
+    def test_dist_info_in_metadata_commands(self):
+        """dist_info is recognised as a metadata command"""
+        assert "dist_info" in _METADATA_COMMANDS
+
+    def test_bdist_wheel_not_in_metadata_commands(self):
+        """bdist_wheel is NOT a metadata command (builds should run)"""
+        assert "bdist_wheel" not in _METADATA_COMMANDS
+
+    def test_install_not_in_metadata_commands(self):
+        """install is NOT a metadata command"""
+        assert "install" not in _METADATA_COMMANDS
+
+    def test_guard_skips_for_egg_info(self):
+        """Intersection check correctly detects egg_info in argv"""
+        argv = ["setup.py", "egg_info"]
+        assert _METADATA_COMMANDS & set(argv)
+
+    def test_guard_skips_for_dist_info(self):
+        """Intersection check correctly detects dist_info in argv"""
+        argv = ["setup.py", "dist_info"]
+        assert _METADATA_COMMANDS & set(argv)
+
+    def test_guard_allows_bdist_wheel(self):
+        """Intersection check returns empty for bdist_wheel"""
+        argv = ["setup.py", "bdist_wheel"]
+        assert not (_METADATA_COMMANDS & set(argv))
+
+    def test_guard_allows_install(self):
+        """Intersection check returns empty for install"""
+        argv = ["setup.py", "install"]
+        assert not (_METADATA_COMMANDS & set(argv))
