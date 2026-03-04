@@ -53,7 +53,7 @@ def parse_requirements(req_file):
                 m = re.match(r"^#\s*\[([^\]]+)\]\s*$", line)
                 if m:
                     opts = m.group(1).split()
-                    if opts and opts[0].startswith("-"):
+                    if opts and all(o.startswith("--") for o in opts):
                         pending_options.extend(opts)
                 continue
             if line.startswith("-r "):
