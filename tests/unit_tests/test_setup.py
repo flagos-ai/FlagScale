@@ -12,7 +12,6 @@ with unittest.mock.patch("setuptools.setup"):
         sys.path.insert(0, PROJECT_ROOT)
     from setup import (
         _FLAGCX_EXTRA_PREFIX,
-        _METADATA_COMMANDS,
         EXTRAS,
         PIP_OPTIONS,
         PKG_OPTIONS,
@@ -581,50 +580,3 @@ class TestFlagcxExtras:
         for name, deps in EXTRAS.items():
             if name.startswith(_FLAGCX_EXTRA_PREFIX):
                 assert deps == [], f"Extra '{name}' should have empty deps, got {deps}"
-
-
-# --- TestMetadataCommandGuard: unit tests for metadata-phase skip logic ---
-
-
-class TestMetadataCommandGuard:
-    """Tests for _METADATA_COMMANDS guard in __main__ block"""
-
-    def test_metadata_commands_is_frozenset(self):
-        """_METADATA_COMMANDS is a frozenset"""
-        assert isinstance(_METADATA_COMMANDS, frozenset)
-
-    def test_egg_info_in_metadata_commands(self):
-        """egg_info is recognised as a metadata command"""
-        assert "egg_info" in _METADATA_COMMANDS
-
-    def test_dist_info_in_metadata_commands(self):
-        """dist_info is recognised as a metadata command"""
-        assert "dist_info" in _METADATA_COMMANDS
-
-    def test_bdist_wheel_not_in_metadata_commands(self):
-        """bdist_wheel is NOT a metadata command (builds should run)"""
-        assert "bdist_wheel" not in _METADATA_COMMANDS
-
-    def test_install_not_in_metadata_commands(self):
-        """install is NOT a metadata command"""
-        assert "install" not in _METADATA_COMMANDS
-
-    def test_guard_skips_for_egg_info(self):
-        """Intersection check correctly detects egg_info in argv"""
-        argv = ["setup.py", "egg_info"]
-        assert _METADATA_COMMANDS & set(argv)
-
-    def test_guard_skips_for_dist_info(self):
-        """Intersection check correctly detects dist_info in argv"""
-        argv = ["setup.py", "dist_info"]
-        assert _METADATA_COMMANDS & set(argv)
-
-    def test_guard_allows_bdist_wheel(self):
-        """Intersection check returns empty for bdist_wheel"""
-        argv = ["setup.py", "bdist_wheel"]
-        assert not (_METADATA_COMMANDS & set(argv))
-
-    def test_guard_allows_install(self):
-        """Intersection check returns empty for install"""
-        argv = ["setup.py", "install"]
-        assert not (_METADATA_COMMANDS & set(argv))
