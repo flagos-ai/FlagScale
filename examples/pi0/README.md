@@ -181,7 +181,9 @@ Configure the following fields:
 ### Start Training
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0/conf --config-name train action=run
+flagscale train pi0 --config ./examples/pi0/conf/train.yaml
+# or
+flagscale train pi0 -c ./examples/pi0/conf/train.yaml
 ```
 
 Training logs are saved to `outputs/pi0_train/logs/host_0_localhost.output` by default.
@@ -191,7 +193,7 @@ Checkpoints are saved to `${experiment.exp_dir}/checkpoints` (default: `outputs/
 ### Stop Training
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0/conf --config-name train action=stop
+flagscale train pi0 --stop
 ```
 
 ## Inference
@@ -270,10 +272,9 @@ Configure the following fields:
 
 ```sh
 cd FlagScale/
-python run.py \
-    --config-path ./examples/pi0/conf \
-    --config-name inference \
-    action=run
+flagscale inference pi0 --config ./examples/pi0/conf/inference.yaml
+# or
+flagscale inference pi0 -c ./examples/pi0/conf/inference.yaml
 ```
 
 Inference logs are saved to `outputs/pi0_inference/inference_logs/host_0_localhost.output` by default.
@@ -312,7 +313,9 @@ Configure the following fields:
 
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0/conf --config-name serve action=run
+flagscale serve pi0 --config ./examples/pi0/conf/serve.yaml
+# or
+flagscale serve pi0 -c ./examples/pi0/conf/serve.yaml
 ```
 
 Serving logs are saved to `outputs/pi0_serve/logs/host_0_localhost.output` by default.
@@ -321,7 +324,7 @@ Serving logs are saved to `outputs/pi0_serve/logs/host_0_localhost.output` by de
 
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0/conf --config-name serve action=stop
+flagscale serve pi0 --stop
 ```
 
 ### Test Server with Client
