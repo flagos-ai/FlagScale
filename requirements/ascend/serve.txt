@@ -4,6 +4,7 @@
 
 # FlagTree for Ascend (extra index so PyPI remains available for build deps)
 --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+# [--extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple]
 flagtree==0.4.0+ascend3.2
 
 # [--no-build-isolation -e]
