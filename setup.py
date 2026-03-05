@@ -16,33 +16,21 @@ from parse_requirements import parse_requirements
 def build_extras():
     """Build extras_require by scanning requirements/ directory.
 
-    Auto-discovers platforms (cuda, rocm, ...) and tasks (train, serve, ...).
-    Maps: requirements/<platform>/<task>.txt -> extra "<platform>-<task>"
-    Special: base.txt -> extra "<platform>", dev.txt -> extra "dev"
+    Produces flat extras: platform names (cuda, rocm, ...) and task names
+    (train, serve, ...) are separate extras with empty deps.  The actual
+    dependencies are installed via subprocess at install time because the
+    correct requirements file depends on the combination of platform + task,
+    which pip's static extras_require can't express.
 
-    Returns (extras, pip_options, pkg_options) where:
+    Returns (extras, platforms, tasks) where:
       - extras: dict mapping extra name -> list of PEP 508 specifiers
-        (excludes packages with per-package options — those are
-        auto-installed after setup() via _auto_install_annotated_packages())
-      - pip_options: dict mapping extra name -> list of pip option strings
-      - pkg_options: dict mapping extra name -> dict of package -> list of options
-        (these packages are excluded from extras and auto-installed after setup())
+        (empty for platform/task markers; populated for ``dev``)
+      - platforms: set of discovered platform names
+      - tasks: set of discovered task names (excluding ``base``)
     """
     extras = {}
-    extra_pip_options = {}
-    extra_pkg_options = {}
-
-    def _register(name, req_file):
-        deps, opts, pkg_opts = parse_requirements(req_file)
-        # Exclude annotated packages from extras_require — they need
-        # special pip flags and are auto-installed after setup().
-        normal_deps = [d for d in deps if d not in pkg_opts]
-        if normal_deps or pkg_opts:
-            extras[name] = normal_deps
-        if opts:
-            extra_pip_options[name] = list(dict.fromkeys(opts))
-        if pkg_opts:
-            extra_pkg_options[name] = pkg_opts
+    platforms = set()
+    tasks = set()
 
     req_dir = os.path.join(SCRIPT_DIR, "requirements")
     # Platform directories (cuda, rocm, ...)
@@ -50,21 +38,33 @@ def build_extras():
         entry_path = os.path.join(req_dir, entry)
         if not os.path.isdir(entry_path):
             continue
+        platforms.add(entry)
+        extras[entry] = []  # platform marker — empty deps
         for filename in sorted(os.listdir(entry_path)):
             if not filename.endswith(".txt"):
                 continue
             task = filename[:-4]  # strip .txt
-            extra_name = entry if task == "base" else f"{entry}-{task}"
-            _register(extra_name, os.path.join(entry_path, filename))
-    # Dev extras (platform-independent)
+            if task not in ("base", "all"):
+                tasks.add(task)
+
+    # Task markers — empty deps (deps installed via subprocess)
+    for task in sorted(tasks):
+        extras[task] = []
+
+    # Special markers
+    extras["all"] = []  # installs all tasks for the platform
+    extras["flagcx"] = []  # triggers native FlagCX build
+
+    # Dev extras (platform-independent) — has actual deps
     dev_path = os.path.join(req_dir, "dev.txt")
     if os.path.isfile(dev_path):
-        _register("dev", dev_path)
+        deps, _, _ = parse_requirements(dev_path)
+        extras["dev"] = deps
 
-    return extras, extra_pip_options, extra_pkg_options
+    return extras, platforms, tasks
 
 
-EXTRAS, PIP_OPTIONS, PKG_OPTIONS = build_extras()
+EXTRAS, PLATFORMS, TASKS = build_extras()
 
 
 # ---------------------------------------------------------------------------
@@ -209,82 +209,163 @@ def _normalize_extra(name):
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _get_flagcx_adaptor():
-    """Detect FlagCX adaptor from requested pip extras.
+_PLATFORM_TO_ADAPTOR = {
+    "cuda": "nvidia",
+    # Future: "rocm": "amd", "ascend": "ascend", etc.
+}
 
-    Returns adaptor name (with underscores) or None.
-    Raises ValueError if multiple flagcx extras requested.
+
+def _get_flagcx_adaptor(requested_extras, req_platforms):
+    """Determine FlagCX adaptor from requested extras and platform.
+
+    Returns adaptor name (e.g. ``"nvidia"``) or ``None`` if ``flagcx``
+    was not requested.  Raises ``ValueError`` if ``flagcx`` is requested
+    without a platform that maps to an adaptor.
     """
-    requested = _get_requested_extras()
-    if not requested:
+    normalized = {_normalize_extra(e) for e in requested_extras}
+    if "flagcx" not in normalized:
         return None
 
-    extra_to_adaptor = {}
-    for adaptor in _ADAPTOR_TO_MAKE_FLAG:
-        extra_name = _FLAGCX_EXTRA_PREFIX + adaptor.replace("_", "-")
-        extra_to_adaptor[extra_name] = adaptor
-
-    found = []
-    for extra in requested:
-        normalized = _normalize_extra(extra)
-        if normalized in extra_to_adaptor:
-            found.append(extra_to_adaptor[normalized])
-
-    if len(found) > 1:
+    if not req_platforms:
         raise ValueError(
-            f"Multiple FlagCX extras requested: {found}. "
-            "Only one hardware backend can be built at a time."
+            "The 'flagcx' extra requires a platform extra (e.g. 'cuda') "
+            "to determine the hardware backend."
         )
-    return found[0] if found else None
+
+    plat = next(iter(req_platforms))
+    adaptor = _PLATFORM_TO_ADAPTOR.get(plat)
+    if adaptor is None:
+        raise ValueError(
+            f"No FlagCX adaptor mapping for platform '{plat}'. "
+            f"Known mappings: {_PLATFORM_TO_ADAPTOR}"
+        )
+    return adaptor
 
 
-def _auto_install_annotated_packages():
-    """Auto-install packages that need special pip flags (e.g. --no-build-isolation).
+def _install_platform_task_deps():
+    """Install platform+task dependencies via subprocess.
 
-    Detects which extras were requested from the parent pip process (e.g.
-    ``pip install ".[cuda-train]"``), then installs only annotated packages
-    belonging to those extras.
-
-    These packages are excluded from extras_require because pip can't pass
-    per-package flags.  Assumes build dependencies (e.g. torch) are already
-    installed in the environment.
+    Detects requested extras from the parent pip process, validates the
+    combination, installs dependencies from the matching requirements
+    files, and triggers FlagCX build if requested.
     """
     requested = _get_requested_extras()
     if not requested:
         return
 
-    # Filter to extras that actually have annotated packages.
-    requested = [e for e in requested if e in PKG_OPTIONS]
-    if not requested:
+    normalized = {_normalize_extra(e) for e in requested}
+
+    # Separate into categories.
+    req_platforms = normalized & PLATFORMS
+    req_tasks = normalized & TASKS
+    has_all = "all" in normalized
+    has_flagcx = "flagcx" in normalized
+
+    # Validation: tasks require exactly one platform.
+    if (req_tasks or has_all) and len(req_platforms) == 0:
+        raise ValueError(
+            f"Task extras {sorted(req_tasks or {'all'})} require a platform extra "
+            f"(one of: {sorted(PLATFORMS)}). "
+            f'Example: pip install ".[cuda,train]"'
+        )
+    if len(req_platforms) > 1:
+        raise ValueError(
+            f"Multiple platform extras requested: {sorted(req_platforms)}. "
+            "Only one platform can be specified at a time."
+        )
+
+    if not req_platforms:
+        # Only non-platform extras (dev, flagcx without tasks) — nothing to install.
+        if has_flagcx:
+            raise ValueError(
+                "The 'flagcx' extra requires a platform extra (e.g. 'cuda') "
+                "to determine the hardware backend."
+            )
         return
+
+    plat = next(iter(req_platforms))
+    req_dir = os.path.join(SCRIPT_DIR, "requirements")
+
+    # Determine which task files to install.
+    if has_all:
+        # Use all.txt which contains -r includes for the intended tasks.
+        # parse_requirements() resolves -r includes recursively, so the
+        # exact set of tasks is governed by all.txt, not by directory listing.
+        all_file = os.path.join(req_dir, plat, "all.txt")
+        task_files = [all_file] if os.path.isfile(all_file) else []
+    elif req_tasks:
+        task_files = []
+        # Always include base.txt for the platform.
+        base_file = os.path.join(req_dir, plat, "base.txt")
+        if os.path.isfile(base_file):
+            task_files.append(base_file)
+        for task in sorted(req_tasks):
+            task_file = os.path.join(req_dir, plat, f"{task}.txt")
+            if os.path.isfile(task_file):
+                task_files.append(task_file)
+            else:
+                print(
+                    f"[flagscale] Warning: no requirements file for {plat}/{task}.txt",
+                    file=sys.stderr,
+                )
+    else:
+        # Platform only, no tasks — install base.txt.
+        base_file = os.path.join(req_dir, plat, "base.txt")
+        task_files = [base_file] if os.path.isfile(base_file) else []
 
     verbose = _get_pip_verbosity()
     clean_env = _get_clean_env()
 
     if verbose:
-        print("[flagscale] Auto-installing annotated packages...", file=sys.stderr)
-        print(f"[flagscale]   requested extras: {', '.join(requested)}", file=sys.stderr)
-        print(f"[flagscale]   verbosity level: {verbose}", file=sys.stderr)
+        print("[flagscale] Installing platform+task dependencies...", file=sys.stderr)
+        print(f"[flagscale]   platform: {plat}", file=sys.stderr)
         print(
-            f"[flagscale]   cleaned env vars: {', '.join(_BUILD_ISOLATION_VARS)}",
+            f"[flagscale]   tasks: {sorted(req_tasks) if req_tasks else 'all' if has_all else 'base'}",
             file=sys.stderr,
         )
+        print(f"[flagscale]   verbosity level: {verbose}", file=sys.stderr)
 
-    seen = set()
-    for extra_name in sorted(requested):
-        pkg_opts = PKG_OPTIONS.get(extra_name, {})
-        pip_opt_list = PIP_OPTIONS.get(extra_name, [])
+    seen_deps = set()
+    for req_file in task_files:
+        deps, pip_opts, pkg_opts = parse_requirements(req_file)
+
+        # Install normal deps (non-annotated).
+        normal_deps = [d for d in deps if d not in pkg_opts and d not in seen_deps]
+        if normal_deps:
+            cmd = [sys.executable, "-m", "pip", "install"]
+            if verbose:
+                cmd.append("-" + "v" * verbose)
+            for pip_opt in pip_opts:
+                cmd.extend(pip_opt.split())
+            cmd.extend(normal_deps)
+
+            if verbose:
+                print(f"[flagscale]   command: {' '.join(cmd)}", file=sys.stderr)
+            else:
+                basename = os.path.basename(req_file)
+                print(f"[flagscale] Installing deps from {plat}/{basename}...", file=sys.stderr)
+
+            rc = subprocess.call(cmd, env=clean_env)
+            if rc != 0:
+                print(
+                    f"[flagscale] Warning: install from {req_file} failed (exit {rc}).",
+                    file=sys.stderr,
+                )
+
+        seen_deps.update(d for d in deps if d not in pkg_opts)
+
+        # Install annotated packages (need special pip flags).
         for pkg, opts in pkg_opts.items():
-            if pkg in seen:
+            if pkg in seen_deps:
                 continue
-            seen.add(pkg)
+            seen_deps.add(pkg)
             pkg_name = pkg.split("@")[0].strip()
             opt_str = " ".join(opts)
             cmd = [sys.executable, "-m", "pip", "install"]
             cmd.extend(opts)
             if verbose:
                 cmd.append("-" + "v" * verbose)
-            for pip_opt in pip_opt_list:
+            for pip_opt in pip_opts:
                 cmd.extend(pip_opt.split())
             cmd.append(pkg)
 
@@ -298,7 +379,7 @@ def _auto_install_annotated_packages():
 
             rc = subprocess.call(cmd, env=clean_env)
             if rc != 0:
-                full_opts = f"{opt_str} {' '.join(pip_opt_list)}".strip()
+                full_opts = f"{opt_str} {' '.join(pip_opts)}".strip()
                 print(
                     f"[flagscale] Warning: auto-install of {pkg_name} failed (exit {rc}).",
                     file=sys.stderr,
@@ -307,6 +388,11 @@ def _auto_install_annotated_packages():
                     f'[flagscale] Install manually: pip install {full_opts} "{pkg}"',
                     file=sys.stderr,
                 )
+
+    # FlagCX build.
+    adaptor = _get_flagcx_adaptor(requested, req_platforms)
+    if adaptor is not None:
+        _build_flagcx(adaptor)
 
 
 # ---------------------------------------------------------------------------
@@ -326,24 +412,6 @@ _ADAPTOR_TO_MAKE_FLAG = {
     "tsm": "USE_TSM",
     "enflame": "USE_ENFLAME",
 }
-
-_FLAGCX_EXTRA_PREFIX = "flagcx-"
-
-
-def _build_flagcx_extras():
-    """Generate empty extras_require entries for FlagCX backends.
-
-    Maps each adaptor to "flagcx-<adaptor>" (underscores -> hyphens).
-    These extras have no pip deps — they only trigger the native build.
-    """
-    extras = {}
-    for adaptor in _ADAPTOR_TO_MAKE_FLAG:
-        extra_name = _FLAGCX_EXTRA_PREFIX + adaptor.replace("_", "-")
-        extras[extra_name] = []
-    return extras
-
-
-EXTRAS.update(_build_flagcx_extras())
 
 
 def _build_flagcx(adaptor):
@@ -403,23 +471,21 @@ def _build_flagcx(adaptor):
 
 # ---------------------------------------------------------------------------
 # NOTE: Installation methods:
-# 1. pip install .                    -> CLI only (typer)
-# 2. pip install ".[cuda-train]"      -> CLI + pip deps + auto-install annotated packages
-#    Annotated packages (e.g. megatron-core with --no-build-isolation) are excluded from
-#    extras_require and auto-installed by detecting ".[cuda-train]" from the parent pip
-#    process tree (cross-platform: /proc on Linux, ps on macOS, wmic on Windows).
+# 1. pip install .                       -> CLI only (typer)
+# 2. pip install ".[cuda,train]"         -> CLI + platform/task deps (subprocess)
+#    Platform + task extras are flat and comma-separated.  The correct
+#    requirements file is determined by the combination (e.g. cuda + train ->
+#    requirements/cuda/train.txt).  Annotated packages (e.g. megatron-core
+#    with --no-build-isolation) are auto-installed via subprocess.
 #    Requires torch to be pre-installed. Use -v/-vvv for detail.
-# 3. pip install ".[cuda-all,dev]"    -> CLI + all CUDA pip deps + dev tools
-# 4. pip install -r requirements/cuda/train.txt  -> pip deps with index URLs (handled natively)
-#    Packages annotated with "# [--option ...]" need separate install with those options.
-#    The shell installer (tools/install) handles this via parse_pkg_annotations().
-# 5. flagscale install                -> Full installation (apt + pip + ALL source deps)
+# 3. pip install ".[cuda,all,dev]"       -> CLI + all CUDA deps + dev tools
+# 4. pip install -r requirements/cuda/train.txt  -> pip deps with index URLs
+# 5. flagscale install                   -> Full installation (apt + pip + ALL)
 #
 # FlagCX (optional native communication library):
-#   pip install ".[flagcx-nvidia]"              -> Build FlagCX for NVIDIA
-#   pip install ".[cuda-train,flagcx-nvidia]"   -> Combined with platform extras
-#   Valid backends: nvidia, iluvatar-corex, cambricon, metax, du, klx,
-#                   ascend, musa, amd, tsm, enflame
+#   pip install ".[cuda,flagcx]"         -> Build FlagCX for NVIDIA (adaptor
+#                                           inferred from platform)
+#   pip install ".[cuda,train,flagcx]"   -> Combined with task extras
 # ---------------------------------------------------------------------------
 
 # Only extras_require is dynamic — everything else comes from pyproject.toml.
@@ -430,8 +496,7 @@ setup(extras_require=EXTRAS)
 #   1. egg_info  — "Getting requirements to build wheel" (metadata only)
 #   2. dist_info — "Preparing metadata (pyproject.toml)" (metadata only)
 #   3. bdist_wheel — actual wheel build
-# Without this guard, _build_flagcx() and _auto_install_annotated_packages()
-# would run all three times.
+# Without this guard, _install_platform_task_deps() would run all three times.
 # Skipping during metadata phases ensures a single build during bdist_wheel.
 _METADATA_COMMANDS = frozenset({"egg_info", "dist_info"})
 
@@ -439,8 +504,4 @@ _METADATA_COMMANDS = frozenset({"egg_info", "dist_info"})
 # not when imported by tests or other modules.
 if __name__ == "__main__":
     if not (_METADATA_COMMANDS & set(sys.argv)):
-        adaptor = _get_flagcx_adaptor()
-        if adaptor is not None:
-            _build_flagcx(adaptor)
-        if PKG_OPTIONS:
-            _auto_install_annotated_packages()
+        _install_platform_task_deps()

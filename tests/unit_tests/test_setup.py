@@ -11,12 +11,10 @@ with unittest.mock.patch("setuptools.setup"):
     if PROJECT_ROOT not in sys.path:
         sys.path.insert(0, PROJECT_ROOT)
     from setup import (
-        _FLAGCX_EXTRA_PREFIX,
         EXTRAS,
-        PIP_OPTIONS,
-        PKG_OPTIONS,
         _build_flagcx,
         _get_flagcx_adaptor,
+        _install_platform_task_deps,
         build_extras,
         parse_requirements,
     )
@@ -31,13 +29,7 @@ def _discover_platforms():
     return sorted(e for e in os.listdir(req_dir) if os.path.isdir(os.path.join(req_dir, e)))
 
 
-def _discover_extras():
-    """Discover all extra names from the pre-computed EXTRAS dict."""
-    return sorted(EXTRAS.keys())
-
-
-PLATFORMS = _discover_platforms()
-ALL_EXTRAS = _discover_extras()
+DISCOVERED_PLATFORMS = _discover_platforms()
 
 
 # --- Fixture ---
@@ -322,7 +314,7 @@ class TestParseRequirements:
         assert opts == []
         assert pkg_opts == {}
 
-    @pytest.mark.parametrize("platform", PLATFORMS)
+    @pytest.mark.parametrize("platform", DISCOVERED_PLATFORMS)
     def test_real_platform_base(self, platform):
         """Parse real requirements/<platform>/base.txt successfully"""
         deps, opts, pkg_opts = parse_requirements(
@@ -346,85 +338,60 @@ class TestParseRequirements:
 class TestBuildExtras:
     """Tests for build_extras() function"""
 
-    def test_returns_dicts(self):
-        """build_extras() returns (extras_dict, pip_options_dict, pkg_options_dict)"""
-        extras, pip_options, pkg_options = build_extras()
+    def test_returns_correct_types(self):
+        """build_extras() returns (extras_dict, platforms_set, tasks_set)"""
+        extras, platforms, tasks = build_extras()
         assert isinstance(extras, dict)
-        assert isinstance(pip_options, dict)
-        assert isinstance(pkg_options, dict)
+        assert isinstance(platforms, set)
+        assert isinstance(tasks, set)
 
     def test_has_dev_extra(self):
-        """Has 'dev' extra from requirements/dev.txt"""
+        """Has 'dev' extra from requirements/dev.txt with actual deps"""
         extras, _, _ = build_extras()
         assert "dev" in extras
         assert any("pytest" in dep for dep in extras["dev"])
 
-    @pytest.mark.parametrize("platform", PLATFORMS)
-    def test_has_platform_base_extra(self, platform):
-        """Each platform directory produces a base extra"""
+    @pytest.mark.parametrize("platform", DISCOVERED_PLATFORMS)
+    def test_has_platform_extra_with_empty_deps(self, platform):
+        """Each platform directory produces a platform extra with empty deps"""
+        extras, platforms, _ = build_extras()
+        assert platform in extras, f"Missing '{platform}' extra"
+        assert extras[platform] == [], f"Platform extra '{platform}' should have empty deps"
+        assert platform in platforms
+
+    def test_has_task_extras_with_empty_deps(self):
+        """Task names from requirements files are extras with empty deps"""
+        extras, _, tasks = build_extras()
+        for task in tasks:
+            assert task in extras, f"Missing task extra '{task}'"
+            assert extras[task] == [], f"Task extra '{task}' should have empty deps"
+
+    def test_has_all_extra(self):
+        """Has 'all' extra with empty deps"""
         extras, _, _ = build_extras()
-        assert platform in extras, f"Missing '{platform}' extra from {platform}/base.txt"
-        assert len(extras[platform]) > 0
+        assert "all" in extras
+        assert extras["all"] == []
 
-    def test_pkg_options_keys_subset_of_extras(self):
-        """PKG_OPTIONS keys are a subset of EXTRAS keys"""
-        for name in PKG_OPTIONS:
-            assert name in EXTRAS, f"PKG_OPTIONS has key '{name}' not found in EXTRAS"
+    def test_has_flagcx_extra(self):
+        """Has 'flagcx' extra with empty deps"""
+        extras, _, _ = build_extras()
+        assert "flagcx" in extras
+        assert extras["flagcx"] == []
 
-    def test_annotated_packages_excluded_from_extras(self):
-        """Packages with per-package options are NOT in extras_require"""
-        for name, pkg_opts in PKG_OPTIONS.items():
-            for pkg in pkg_opts:
-                assert pkg not in EXTRAS.get(name, []), (
-                    f"Annotated pkg '{pkg}' should not be in EXTRAS['{name}']"
-                )
+    def test_discovers_known_tasks(self):
+        """Discovers expected task names from cuda directory"""
+        _, _, tasks = build_extras()
+        expected_tasks = {"train", "serve", "inference", "rl", "hetero_train"}
+        assert expected_tasks.issubset(tasks), f"Missing tasks: {expected_tasks - tasks}"
+        assert "all" not in tasks, "'all' should not be in tasks (it's a special marker)"
 
-    def test_pkg_options_values_are_dicts(self):
-        """PKG_OPTIONS values are dicts mapping pkg -> list of options"""
-        for name, pkg_opts in PKG_OPTIONS.items():
-            assert isinstance(pkg_opts, dict), f"PKG_OPTIONS['{name}'] is not a dict"
-            for pkg, opts in pkg_opts.items():
-                assert isinstance(pkg, str)
-                assert isinstance(opts, list)
-                for opt in opts:
-                    assert isinstance(opt, str)
-                    assert opt.startswith("--"), (
-                        f"Option '{opt}' for '{pkg}' in PKG_OPTIONS['{name}'] doesn't start with --"
-                    )
-
-    @pytest.mark.parametrize("extra_name", ALL_EXTRAS)
+    @pytest.mark.parametrize("extra_name", sorted(EXTRAS.keys()))
     def test_extra_is_list_of_strings(self, extra_name):
         """All extras values are lists of strings"""
         deps = EXTRAS[extra_name]
         assert isinstance(deps, list), f"Extra '{extra_name}' is not a list"
         for dep in deps:
             assert isinstance(dep, str), f"Dep '{dep}' in extra '{extra_name}' is not a string"
-
-    @pytest.mark.parametrize("extra_name", ALL_EXTRAS)
-    def test_extra_has_deps_or_pkg_options(self, extra_name):
-        """All extras have at least one dependency or per-package option"""
-        if extra_name.startswith(_FLAGCX_EXTRA_PREFIX):
-            return  # flagcx extras are build-only triggers with no deps
-        has_deps = len(EXTRAS[extra_name]) > 0
-        has_pkg_opts = extra_name in PKG_OPTIONS and len(PKG_OPTIONS[extra_name]) > 0
-        assert has_deps or has_pkg_opts, f"Extra '{extra_name}' has no deps and no pkg_options"
-
-    def test_pip_options_values_are_string_lists(self):
-        """PIP_OPTIONS values are lists of option strings"""
-        for name, opts in PIP_OPTIONS.items():
-            assert isinstance(opts, list), f"PIP_OPTIONS['{name}'] is not a list"
-            for opt in opts:
-                assert isinstance(opt, str), (
-                    f"Option '{opt}' in PIP_OPTIONS['{name}'] is not a string"
-                )
-                assert opt.startswith("-"), (
-                    f"Option '{opt}' in PIP_OPTIONS['{name}'] doesn't start with -"
-                )
-
-    def test_pip_options_keys_subset_of_extras(self):
-        """PIP_OPTIONS keys are a subset of EXTRAS keys"""
-        for name in PIP_OPTIONS:
-            assert name in EXTRAS, f"PIP_OPTIONS has key '{name}' not found in EXTRAS"
 
 
 # --- TestBuildFlagcx: unit tests for FlagCX build integration ---
@@ -520,63 +487,119 @@ class TestBuildFlagcx:
 class TestGetFlagcxAdaptor:
     """Tests for _get_flagcx_adaptor() function"""
 
-    def test_returns_none_when_no_extras(self, monkeypatch):
-        """Returns None when _get_requested_extras() returns None"""
-        monkeypatch.setattr("setup._get_requested_extras", lambda: None)
-        assert _get_flagcx_adaptor() is None
+    def test_returns_none_when_no_flagcx(self):
+        """Returns None when flagcx is not in requested extras"""
+        assert _get_flagcx_adaptor(["cuda", "train"], {"cuda"}) is None
 
-    def test_returns_none_for_non_flagcx_extras(self, monkeypatch):
-        """Returns None when only non-flagcx extras are requested"""
-        monkeypatch.setattr("setup._get_requested_extras", lambda: ["cuda-train"])
-        assert _get_flagcx_adaptor() is None
+    def test_returns_adaptor_for_cuda_platform(self):
+        """Returns 'nvidia' adaptor when flagcx + cuda are requested"""
+        assert _get_flagcx_adaptor(["cuda", "flagcx"], {"cuda"}) == "nvidia"
 
-    def test_returns_adaptor_for_flagcx_extra(self, monkeypatch):
-        """Returns adaptor name for a flagcx extra"""
-        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx-nvidia"])
-        assert _get_flagcx_adaptor() == "nvidia"
+    def test_raises_without_platform(self):
+        """Raises ValueError when flagcx is requested without a platform"""
+        with pytest.raises(ValueError, match="requires a platform extra"):
+            _get_flagcx_adaptor(["flagcx"], set())
 
-    def test_handles_underscore_normalization(self, monkeypatch):
-        """Handles underscore variant (PEP 685 normalization)"""
-        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx_nvidia"])
-        assert _get_flagcx_adaptor() == "nvidia"
+    def test_raises_for_unknown_platform(self):
+        """Raises ValueError when platform has no adaptor mapping"""
+        with pytest.raises(ValueError, match="No FlagCX adaptor mapping"):
+            _get_flagcx_adaptor(["flagcx", "unknown_plat"], {"unknown_plat"})
 
-    def test_handles_hyphenated_adaptor(self, monkeypatch):
-        """Handles adaptor names with hyphens (e.g. iluvatar-corex)"""
-        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx-iluvatar-corex"])
-        assert _get_flagcx_adaptor() == "iluvatar_corex"
-
-    def test_raises_on_multiple_flagcx_extras(self, monkeypatch):
-        """Raises ValueError when multiple flagcx extras are requested"""
-        monkeypatch.setattr(
-            "setup._get_requested_extras", lambda: ["flagcx-nvidia", "flagcx-ascend"]
-        )
-        with pytest.raises(ValueError, match="Multiple FlagCX extras requested"):
-            _get_flagcx_adaptor()
-
-    def test_ignores_non_flagcx_extras(self, monkeypatch):
-        """Returns correct adaptor when mixed with non-flagcx extras"""
-        monkeypatch.setattr(
-            "setup._get_requested_extras", lambda: ["cuda-train", "flagcx-nvidia", "dev"]
-        )
-        assert _get_flagcx_adaptor() == "nvidia"
+    def test_handles_pep685_normalization(self):
+        """Handles PEP 685 normalized extra names"""
+        assert _get_flagcx_adaptor(["flag_cx"], {"cuda"}) is None  # not "flagcx"
+        assert _get_flagcx_adaptor(["flagcx"], {"cuda"}) == "nvidia"
 
 
-# --- TestFlagcxExtras: unit tests for flagcx extras generation ---
+# --- TestFlagcxExtras: unit tests for flagcx extra in EXTRAS ---
 
 
 class TestFlagcxExtras:
-    """Tests for _build_flagcx_extras() and EXTRAS integration"""
+    """Tests for flagcx extra in EXTRAS"""
 
-    def test_all_adaptors_have_extras(self):
-        """Every adaptor in _ADAPTOR_TO_MAKE_FLAG maps to an extra in EXTRAS"""
-        from setup import _ADAPTOR_TO_MAKE_FLAG
+    def test_single_flagcx_extra_exists(self):
+        """A single 'flagcx' extra exists in EXTRAS"""
+        assert "flagcx" in EXTRAS
 
-        for adaptor in _ADAPTOR_TO_MAKE_FLAG:
-            extra_name = _FLAGCX_EXTRA_PREFIX + adaptor.replace("_", "-")
-            assert extra_name in EXTRAS, f"Missing extra '{extra_name}' for adaptor '{adaptor}'"
+    def test_flagcx_extra_has_empty_deps(self):
+        """The 'flagcx' extra has empty dependency list"""
+        assert EXTRAS["flagcx"] == []
 
-    def test_flagcx_extras_have_empty_deps(self):
-        """All flagcx extras have empty dependency lists"""
-        for name, deps in EXTRAS.items():
-            if name.startswith(_FLAGCX_EXTRA_PREFIX):
-                assert deps == [], f"Extra '{name}' should have empty deps, got {deps}"
+    def test_no_per_adaptor_flagcx_extras(self):
+        """No per-adaptor flagcx extras (e.g. flagcx-nvidia) exist"""
+        for name in EXTRAS:
+            assert not name.startswith("flagcx-"), (
+                f"Found per-adaptor extra '{name}' — should be just 'flagcx'"
+            )
+
+
+# --- TestValidation: tests for extras validation logic ---
+
+
+class TestValidation:
+    """Tests for extras validation in _install_platform_task_deps()"""
+
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_task_without_platform_raises(self, mock_call, monkeypatch):
+        """Task extras without a platform raise ValueError"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["train"])
+        with pytest.raises(ValueError, match="require a platform extra"):
+            _install_platform_task_deps()
+
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_all_without_platform_raises(self, mock_call, monkeypatch):
+        """'all' extra without a platform raises ValueError"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["all"])
+        with pytest.raises(ValueError, match="require a platform extra"):
+            _install_platform_task_deps()
+
+    def test_dev_without_platform_ok(self, monkeypatch):
+        """'dev' extra without a platform does not raise"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["dev"])
+        # Should not raise — dev is platform-independent
+        _install_platform_task_deps()
+
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_cuda_train_installs_deps(self, mock_call, monkeypatch):
+        """'cuda,train' combo installs deps via subprocess"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["cuda", "train"])
+        _install_platform_task_deps()
+        # Should have called subprocess.call at least once for deps
+        assert mock_call.call_count >= 1
+
+    @unittest.mock.patch("setup._build_flagcx")
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_cuda_train_flagcx_triggers_build(self, mock_call, mock_build, monkeypatch):
+        """'cuda,train,flagcx' combo triggers FlagCX build"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["cuda", "train", "flagcx"])
+        _install_platform_task_deps()
+        mock_build.assert_called_once_with("nvidia")
+
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_flagcx_without_platform_raises(self, mock_call, monkeypatch):
+        """'flagcx' without platform raises ValueError"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["flagcx"])
+        with pytest.raises(ValueError, match="requires a platform extra"):
+            _install_platform_task_deps()
+
+    def test_no_extras_is_noop(self, monkeypatch):
+        """No extras requested does nothing"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: None)
+        # Should not raise
+        _install_platform_task_deps()
+
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_cuda_all_installs_all_task_files(self, mock_call, monkeypatch):
+        """'cuda,all' installs all task files for the platform"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["cuda", "all"])
+        _install_platform_task_deps()
+        # Should have called subprocess for deps
+        assert mock_call.call_count >= 1
+
+    @unittest.mock.patch("setup.subprocess.call", return_value=0)
+    def test_platform_only_installs_base(self, mock_call, monkeypatch):
+        """'cuda' alone installs only base.txt"""
+        monkeypatch.setattr("setup._get_requested_extras", lambda: ["cuda"])
+        _install_platform_task_deps()
+        # Should install base deps
+        assert mock_call.call_count >= 1
