@@ -2,6 +2,24 @@
 
 [[中文版](./README_cn.md)|English]
 
+<div align="right">
+  <a href="https://www.linkedin.com/company/flagos-community" target="_blank">
+    <img src="./docs/assets/Linkedin.png" alt="LinkIn" width="32" height="32" />
+  </a>
+
+  <a href="https://www.youtube.com/@FlagOS_Official" target="_blank">
+    <img src="./docs/assets/youtube.png" alt="YouTube" width="32" height="32" />
+  </a>
+
+  <a href="https://x.com/FlagOS_Official" target="_blank">
+    <img src="./docs/assets/x.png" alt="X" width="32" height="32" />
+  </a>
+
+  <a href="https://www.facebook.com/FlagOSCommunity" target="_blank">
+    <img src="./docs/assets/Facebook.png" alt="X" width="32" height="32" />
+  </a>
+</div>
+
 <!--Begin Announcements.-->
 
 > [!IMPORTANT]
@@ -17,6 +35,7 @@
 > [`main-legacy`](https://github.com/flagos-ai/FlagScale/tree/main-legacy) branch.
 > It will continue to receive critical bug fixes and minor updates for a period of time.
 <!--End Announcements.-->
+
 
 ## Overview
 
