@@ -84,16 +84,23 @@ run_test() {
 
     # Clean old results
     # Extract exp_dir from config file and clean it
-    local exp_dir=$(grep -E '^\s*exp_dir:' "$config_file" | head -1 | sed 's/.*exp_dir:\s*//' | tr -d '"' | tr -d "'")
+    local exp_dir=$(grep -oP '^\s*exp_dir:\s*\K\S+' "$config_file" | head -1 | tr -d "\"'")
     if [ -n "$exp_dir" ]; then
         log_info "Cleaning old results in: $exp_dir"
         rm -rf "$exp_dir"/* 2>/dev/null || true
     fi
 
-    # Run test
-    log_info "Start operation for executing the task: "
-    log_info "  python run.py --config-path ${conf_dir} --config-name ${config} action=test"
-    python run.py --config-path ${conf_dir} --config-name ${config} action=test || return 1
+    # Map task name to flagscale CLI subcommand
+    # e.g. hetero_train -> train, train -> train, others unchanged
+    local cli_task="$task"
+    case "$task" in
+        *train*) cli_task="train" ;;
+    esac
+
+    # Run test via flagscale CLI
+    # --config expects the full YAML path
+    log_info "Running: flagscale $cli_task $model --config $config_file --test"
+    flagscale "$cli_task" "$model" --config "$config_file" --test || return 1
 
     # Match the corresponding comparison function according to task type
     # Matching rules:
@@ -120,27 +127,33 @@ run_test() {
             ;;
     esac
 
-    # Validate results if validator exists
-    if [ -f "$PROJECT_ROOT/tests/test_utils/runners/check_results.py" ]; then
-        local validator_cmd="python -m pytest \"$PROJECT_ROOT/tests/test_utils/runners/check_results.py::$compare_function\" \
-            --path=tests/functional_tests --task=\"$task\" --model=\"$model\" \
-            --case=\"$config\" --platform=\"$PLATFORM\""
-        [ -n "$CURRENT_DEVICE" ] && validator_cmd="$validator_cmd --device=\"$CURRENT_DEVICE\""
+    # Validate results using pytest-based checker (check_results.py)
+    # Build command as an array to avoid eval and ensure safe quoting.
+    local check_results="$PROJECT_ROOT/tests/test_utils/runners/check_results.py"
+    if [ -f "$check_results" ]; then
+        local validator_cmd=(
+            python -m pytest "${check_results}::${compare_function}"
+            --path=tests/functional_tests
+            "--task=$task" "--model=$model"
+            "--case=$config" "--platform=$PLATFORM"
+        )
+        [ -n "$CURRENT_DEVICE" ] && validator_cmd+=("--device=$CURRENT_DEVICE")
 
+        # For serve tasks, wait for the service to be fully ready before validation
         if [ "$task" = "serve" ]; then
             log_info "Waiting 1 minute for service to be ready..."
             sleep 1m
         fi
 
-        if ! eval "$validator_cmd"; then
+        if ! "${validator_cmd[@]}"; then
             log_error "Validation failed for $task/$model/$config"
             return 1
         fi
 
+        # Stop the serve process after validation completes
         if [ "$task" = "serve" ]; then
-            log_info "Stop operation for executing the serve task: "
-            log_info "  python run.py --config-path ${conf_dir} --config-name ${config} action=stop"
-            python run.py --config-path ${conf_dir} --config-name ${config} action=stop
+            log_info "Stopping serve: flagscale serve $model --config $config_file --stop"
+            flagscale serve "$model" --config "$config_file" --stop
         fi
     fi
 
@@ -148,16 +161,22 @@ run_test() {
 }
 
 # Get tests from platform configuration
+# Returns JSON describing which test cases to run for the given device/task/model.
+# Uses an array instead of eval to safely handle paths with special characters.
 get_test_configs() {
     local device="$1"
     local task="$2"
     local model="$3"
     local list="$4"
 
-    local cmd="python \"$SCRIPT_DIR/parse_config.py\" --platform \"$PLATFORM\" --device \"$device\" --type functional --task \"$task\""
-    [ -n "$model" ] && cmd="$cmd --model \"$model\""
-    [ -n "$list" ] && cmd="$cmd --list \"$list\""
-    eval "$cmd" 2>/dev/null || echo ""
+    local cmd=(
+        python "$SCRIPT_DIR/parse_config.py"
+        --platform "$PLATFORM" --device "$device"
+        --type functional --task "$task"
+    )
+    [ -n "$model" ] && cmd+=(--model "$model")
+    [ -n "$list" ] && cmd+=(--list "$list")
+    "${cmd[@]}" 2>/dev/null || echo ""
 }
 
 # Parse and run tests using helper module
