@@ -78,7 +78,7 @@ experiment:
     per_node_task: false
     no_shared_fs: false
     ssh_port: xxx  Replace with Docker SSH port
-    nnodes: 1 
+    nnodes: 2
     nproc_per_node: 8
     rdzv_backend: static
     hostfile: ./muxi_hostfile  
@@ -113,7 +113,7 @@ experiment:
 
 device_type_specific:
   C550:
-    build_dir: FlagScale/build/Metax_C550/FlagScale
+    build_dir: /path/to/FlagScale/build/Metax_C550/FlagScale
 action: run
 
 hydra:
@@ -180,77 +180,5 @@ python run.py --config-path ./examples/qwen3conf  --config-name train_hetero_10b
 ```bash
 python run.py --config-path ./examples/qwen3conf  --config-name train_hetero_10b action=stop
 ```
-
-## 3. Convert Checkpoint to Hugging Face Format
-
-### 3.1 Navigate to the Checkpoint Tool Directory
-
-```bash
-cd ./tools/checkpoint/
-```
-
-### 3.2 Modify the Code Files
-
-1. Edit `loader_mcore.py`  (Line 220)
-
-   ```
-   fake_etp_group = _ConverterFakeProcessGroup(size=margs.expert_tensor_parallel_size)
-   if margs.expert_tensor_parallel_size is None:
-       margs.expert_tensor_parallel_size = 1
-   ```
-
-2. Edit `qwen3/model.py`   (Line 33)
-
-   ```
-   def get_mg_model(dtype, pre_process, post_process):
-       from flagscale.train.train_gpt import model_provider, gpt_builder
-   
-       s_time = time.time()
-       model = model_provider(gpt_builder, pre_process, post_process).to(dtype)
-   ```
-
-3. Edit `FlagScale/third_party/Megatron-LM/megatron/training/checkpointing.py` (Line 1149)  
-
-   ````
-   state_dict = torch.load(checkpoint_name, map_location='cpu', weights_only=False)
-   ````
-
-###  3.3 Edit the Conversion Script
-
-Create/Edit the `run_qwen3.sh` script:
-
-```bash
-vi run_qwen3.sh
-```
-
-Paste the following content into the script:
-
-```bash
-python convert.py \
-    --model-type qwen3 \
-    --loader mcore \
-    --saver transformers \
-    --target-tensor-parallel-size 1 \
-    --target-pipeline-parallel-size 1 \
-    --target-expert-parallel-size 1 \
-    --max-queue-size 50 \
-    --target-params-dtype bf16 \
-    --true-vocab-size 151851 \
-    --megatron-path ../../third_party/Megatron-LM \
-    --load-dir xxx/ckpt \
-    --save-dir xxx/ckpt_hf \
-```
-
-###  3.4 Execute the Conversion Script
-
-```bash
-bash run_qwen3.sh
-```
-
-#### ps:
-
-#### --load-dir: Path to the trained checkpoint in Torch format.  
-
-#### --save-dir: Path to save the converted checkpoint in Hugging Face format.  
 
 
