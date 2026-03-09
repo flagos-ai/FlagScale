@@ -15,6 +15,7 @@ from transformers import (
     Qwen3VLForConditionalGeneration,
 )
 
+from flagscale.models.vla.registry import register_vlm
 from flagscale.train.train_config import TrainConfig
 
 
@@ -135,6 +136,7 @@ class QwenVLBackbone(nn.Module):
         return list(self.model.model.visual.blocks) + list(self.model.model.language_model.layers)
 
 
+@register_vlm("qwen2.5-vl")
 class Qwen25VLBackbone(QwenVLBackbone):
     """Qwen2.5-VL backend."""
 
@@ -177,6 +179,7 @@ class Qwen25VLBackbone(QwenVLBackbone):
         return batch_input.to(f"cuda:{torch.cuda.current_device()}")
 
 
+@register_vlm("qwen3-vl")
 class Qwen3VLBackbone(QwenVLBackbone):
     """Qwen3-VL backend."""
 

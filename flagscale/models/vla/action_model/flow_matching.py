@@ -5,10 +5,12 @@ from flagscale.models.utils.constants import ACTION
 from flagscale.models.vla.action_model.gr00t_action_header import (
     FlowmatchingActionHead as _FlowmatchingActionHead,
 )
+from flagscale.models.vla.registry import register_action_model
 from flagscale.models.vla.utils import get_vlm_config
 from flagscale.train.train_config import TrainConfig
 
 
+@register_action_model("flow_matching")
 class FlowMatchingHead(nn.Module):
     """
     Flow matching action head wrapper for VLA framework.
