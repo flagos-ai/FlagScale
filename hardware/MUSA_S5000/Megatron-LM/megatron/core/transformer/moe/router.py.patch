@@ -1,0 +1,55 @@
+diff --git a/megatron/core/transformer/moe/router.py b/megatron/core/transformer/moe/router.py
+index 3856cfad1..b8a950e25 100644
+--- a/megatron/core/transformer/moe/router.py
++++ b/megatron/core/transformer/moe/router.py
+@@ -556,3 +556,49 @@ class TopKRouter(Router):
+         """Save the state dict of the router."""
+         self._maintain_float32_expert_bias()  # switch to float32 before saving
+         return super()._save_to_state_dict(*args, **kwargs)
++
++
++    def seq_aux_loss_load_balancing(self, logits: torch.Tensor, bsz: int, seq_length: int):
++        """Apply sequence-auxiliary loss-based load balancing to the logits tensor.
++
++        Args:
++            logits (torch.Tensor): The logits tensor after gating, shape: [num_tokens, num_experts].
++            bsz (int): The batch size.
++            seq_length (int): The sequence length.
++
++        Returns:
++            probs (torch.Tensor): The probabilities of token to experts assignment.
++            routing_map (torch.Tensor): The mask of token to experts assignment.
++        """
++
++        probs, routing_map, tokens_per_expert = topk_softmax_with_capacity(
++            logits,
++            self.topk,
++            capacity_factor=self.config.moe_expert_capacity_factor,
++            pad_to_capacity=self.config.moe_pad_expert_input_to_capacity,
++            drop_policy=self.config.moe_token_drop_policy,
++            use_pre_softmax=self.config.moe_router_pre_softmax,
++            num_groups=self.config.moe_router_num_groups,
++            group_topk=self.config.moe_router_group_topk,
++            scaling_factor=self.config.moe_router_topk_scaling_factor,
++            deterministic_mode=self.config.deterministic_mode,
++            score_function=self.score_function,
++            expert_bias=self.expert_bias,
++        )
++
++        if self.training and torch.is_grad_enabled():
++            # Apply sequence-auxiliary load balancing loss
++            scores, loss_routing_map = self.compute_routing_scores_for_aux_loss(logits)
++            aux_loss_func = partial(
++                sequence_load_balancing_loss_func,
++                probs=scores,
++                routing_map=loss_routing_map,
++                batch_size=bsz,
++                seq_length=seq_length,
++                topk=self.topk,
++            )
++            probs = self.apply_load_balancing_loss(
++                activation=probs, load_balancing_loss_func=aux_loss_func
++            )
++
++        return probs, routing_map
+

@@ -1,0 +1,65 @@
+diff --git a/flagscale/train/models/qwen3_vl/vision_attention.py b/flagscale/train/models/qwen3_vl/vision_attention.py
+index 75c880a6..842d7c5b 100644
+--- a/flagscale/train/models/qwen3_vl/vision_attention.py
++++ b/flagscale/train/models/qwen3_vl/vision_attention.py
+@@ -19,7 +19,7 @@ from megatron.core.parallel_state import (
+     get_tensor_model_parallel_rank,
+     get_tensor_model_parallel_world_size,
+ )
+-from megatron.core.process_groups_config import ProcessGroupCollection
++# from megatron.core.process_groups_config import ProcessGroupCollection
+ from megatron.core.transformer.module import MegatronModule
+ from megatron.core.transformer.spec_utils import ModuleSpec, build_module
+ from megatron.core.utils import (
+@@ -98,7 +98,8 @@ class VisionSelfAttention(Attention):
+         layer_number: int,
+         attn_mask_type=AttnMaskType.padding,
+         cp_comm_type: str = None,
+-        pg_collection: ProcessGroupCollection = None,
++        model_comm_pgs = None,
++        # pg_collection: ProcessGroupCollection = None,
+     ):
+         super().__init__(
+             config=config,
+@@ -107,7 +108,8 @@ class VisionSelfAttention(Attention):
+             attn_mask_type=attn_mask_type,
+             attention_type="self",
+             cp_comm_type=cp_comm_type,
+-            pg_collection=pg_collection,
++            model_comm_pgs=None,
++            # pg_collection=pg_collection,
+         )
+ 
+         self.linear_qkv = build_module(
+@@ -121,10 +123,11 @@ class VisionSelfAttention(Attention):
+             skip_bias_add=False,
+             is_expert=False,
+             tp_comm_buffer_name='qkv',
+-            tp_group=self.pg_collection.tp,
++            # tp_group=self.pg_collection.tp,
+         )
+ 
+         if submodules.q_layernorm is not None:
++            self.config.qk_layernorm_hidden_dim = getattr(self.config, 'qk_layernorm_hidden_dim', False)
+             if not self.config.qk_layernorm_hidden_dim:
+                 self.q_layernorm = build_module(
+                     submodules.q_layernorm,
+@@ -464,7 +467,7 @@ class VisionSelfAttention(Attention):
+                         q_pos_emb,
+                         config=self.config,
+                         cu_seqlens=cu_seqlens_q,
+-                        cp_group=self.pg_collection.cp,
++                        # cp_group=self.pg_collection.cp,
+                     )
+                 else:
+                     query = inference_context.apply_rotary_emb_query(
+@@ -476,7 +479,7 @@ class VisionSelfAttention(Attention):
+                     k_pos_emb,
+                     config=self.config,
+                     cu_seqlens=cu_seqlens_kv,
+-                    cp_group=self.pg_collection.cp,
++                    # cp_group=self.pg_collection.cp,
+                 )
+ 
+             # TODO, can apply positional embedding to value_layer so it has
+

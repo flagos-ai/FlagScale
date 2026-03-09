@@ -1,0 +1,314 @@
+diff --git a/flagscale/train/train.py b/flagscale/train/train.py
+old mode 100644
+new mode 100755
+index 8c13b277..0804a1fd
+--- a/flagscale/train/train.py
++++ b/flagscale/train/train.py
+@@ -1,6 +1,7 @@
+ # Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
+ 
+ """Pretrain utilities."""
++import torch
+ 
+ import dataclasses
+ from datetime import datetime
+@@ -14,7 +15,16 @@ import sys
+ from typing import List, Optional
+ 
+ import torch.distributed
+-
++# Get the directory of the current file
++current_dir = os.path.dirname(os.path.abspath(__file__))
++# Go up two levels to reach FlagScale root directory
++flagscale_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
++# Append the relative paths
++sys.path.append('/home/megatron-lm-musa-patch')
++sys.path.append(os.path.join(flagscale_root, 'third_party', 'Megatron-LM'))
++
++import musa_patch
++import sys
+ from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
+ from megatron.training.log_handler import CustomHandler
+ 
+@@ -25,7 +35,7 @@ import time
+ 
+ # The earliest we can measure the start time.
+ _TRAIN_START_TIME = time.time()
+-import torch
++
+ 
+ try:
+     from megatron.rl import rl_utils
+@@ -58,12 +68,12 @@ from megatron.core.fp8_utils import correct_amax_history_if_needed
+ from megatron.training.checkpointing import load_checkpoint
+ from megatron.training.checkpointing import save_checkpoint
+ from megatron.training.checkpointing import checkpoint_exists
+-from megatron.core.full_cuda_graph import FullCudaGraphWrapper
+-from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
++# from megatron.core.full_cuda_graph import FullCudaGraphWrapper
++# from megatron.core.transformer.cuda_graphs import TECudaGraphHelper
+ from megatron.core.transformer.module import Float16Module
+ from megatron.core.distributed import DistributedDataParallelConfig, TorchFullyShardedDataParallelConfig
+ from megatron.core.distributed import DistributedDataParallel as DDP
+-from megatron.core.distributed.fsdp.mcore_fsdp_adapter import FullyShardedDataParallel as megatron_FSDP
++# from megatron.core.distributed.fsdp.mcore_fsdp_adapter import FullyShardedDataParallel as megatron_FSDP
+ from megatron.core.optimizer.optimizer import param_group_identifier_keys
+ 
+ try:
+@@ -114,7 +124,7 @@ from megatron.training.utils import (
+     report_memory,
+     unwrap_model,
+     update_use_dist_ckpt,
+-    to_empty_if_meta_device,
++    # to_empty_if_meta_device,
+ )
+ from megatron.training.global_vars import (
+     destroy_global_vars,
+@@ -1125,6 +1135,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
+ 
+     # Build model.
+     def build_model():
++        args.use_dualpipev = False
+         if (
+             mpu.get_pipeline_model_parallel_world_size() > 1
+             and args.virtual_pipeline_model_parallel_size is not None
+@@ -1180,6 +1191,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
+     ######## FLAGSCALE BEGIN ########
+     # 1) init
+     config = get_model_config(model[0])
++    config.peft_type = None
+     if config.peft_type is not None:
+         peft = PEFT.from_config(config)
+         unwrapped_model = unwrap_model(model)
+@@ -1250,6 +1262,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
+     correct_amax_history_if_needed(model)
+ 
+     if wrap_with_ddp:
++        args.use_megatron_fsdp = False if not hasattr(args, "use_megatron_fsdp") else args.use_megatron_fsdp
+         if args.use_torch_fsdp2:
+             assert HAVE_FSDP2, "Torch FSDP2 requires torch>=2.4.0"
+             DP = torch_FSDP
+@@ -1383,7 +1396,7 @@ def get_optimizer_param_scheduler(optimizer):
+         override_opt_param_scheduler=args.override_opt_param_scheduler,
+         wsd_decay_steps=wsd_decay_steps,
+         lr_wsd_decay_style=args.lr_wsd_decay_style,
+-        stablelm2_scheduler_config=stablelm2_scheduler_config,
++        # stablelm2_scheduler_config=stablelm2_scheduler_config,
+     )
+ 
+     return opt_param_scheduler
+@@ -1601,15 +1614,15 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
+         return {}, True, should_checkpoint, should_exit, exit_code, None, None
+ 
+     ########## FlagScale Begin ##########
+-    if args.auto_skip_spiky_loss and (args.consumed_train_samples > args.lr_warmup_samples and args.curr_iteration > args.lr_warmup_iters):
+-        spiky_loss_detector = get_spiky_loss_detector()
+-        loss_ = spiky_loss_detector.reduce_losses(losses_reduced)
+-        is_spiky_loss = spiky_loss_detector.is_spkiy_loss(loss_)
+-        is_spiky_loss_tensor = torch.tensor(is_spiky_loss, dtype=torch.int, device="cuda")
+-        torch.distributed.all_reduce(is_spiky_loss_tensor, op=torch.distributed.ReduceOp.MAX)
+-        is_spiky_loss = is_spiky_loss_tensor.item()
+-        if is_spiky_loss > 0:
+-            return {}, True, should_checkpoint, should_exit, exit_code, None, None
++    # if args.auto_skip_spiky_loss and (args.consumed_train_samples > args.lr_warmup_samples and args.curr_iteration > args.lr_warmup_iters):
++    #     spiky_loss_detector = get_spiky_loss_detector()
++    #     loss_ = spiky_loss_detector.reduce_losses(losses_reduced)
++    #     is_spiky_loss = spiky_loss_detector.is_spkiy_loss(loss_)
++    #     is_spiky_loss_tensor = torch.tensor(is_spiky_loss, dtype=torch.int, device="cuda")
++    #     torch.distributed.all_reduce(is_spiky_loss_tensor, op=torch.distributed.ReduceOp.MAX)
++    #     is_spiky_loss = is_spiky_loss_tensor.item()
++    #     if is_spiky_loss > 0:
++    #         return {}, True, should_checkpoint, should_exit, exit_code, None, None
+     ########## FlagScale End ##########
+ 
+     # Empty unused memory.
+@@ -1865,6 +1878,8 @@ def training_log(
+                 writer.add_scalar('grpo_collection_iteration', grpo_collection_iteration, iteration)
+             if wandb_writer:
+                 wandb_writer.log({'grpo_collection_iteration': grpo_collection_iteration}, iteration)
++        
++        args.log_memory_to_tensorboard = False 
+         if args.log_memory_to_tensorboard:
+             mem_stats = torch.cuda.memory_stats()
+             if writer:
+@@ -1996,10 +2011,20 @@ def training_log(
+             total_loss_dict[skipped_iters_key]
+         )
+         log_string += ' number of nan iterations: {:3d} |'.format(total_loss_dict[nan_iters_key])
++
++        # Write to text file
++        if torch.distributed.get_rank() == 0:
++            log_file_path = os.path.join('xxx', 'training_log.txt')
++
++            # log_file_path = os.path.join('/data/jiaming.wang/flag_scale/01023_backup/FlagScale/xxx/training_log.txt')
++            with open(log_file_path, 'a') as f:
++                f.write(log_string + '\n')
++        
+         total_loss_dict[advanced_iters_key] = 0
+         total_loss_dict[skipped_iters_key] = 0
+         total_loss_dict[nan_iters_key] = 0
+         print_rank_last(log_string)
++        args.auto_tune = False
+         if not args.auto_tune: ########## FlagScale Add ##########
+             if report_memory_flag:
+                 # Report memory after optimizer state has been initialized.
+@@ -2416,7 +2441,7 @@ def train(
+     # Setup some training config params.
+     config.grad_scale_func = optimizer.scale_loss
+     config.timers = timers
+-    if isinstance(model[0], (megatron_FSDP, DDP)) and args.overlap_grad_reduce:
++    if isinstance(model[0], (DDP)) and args.overlap_grad_reduce:
+         assert config.no_sync_func is None, (
+             'When overlap_grad_reduce is True, config.no_sync_func must be None; '
+             'a custom no_sync_func is not supported when overlapping grad-reduce'
+@@ -2483,8 +2508,8 @@ def train(
+     extra_eval_iterations = 0
+     # Wrap forward_backward_func for Full iteration CUDA graph
+     forward_backward_func = get_forward_backward_func()
+-    if args.enable_cuda_graph and args.cuda_graph_scope=="full_iteration":
+-        forward_backward_func = FullCudaGraphWrapper(forward_backward_func, cuda_graph_warmup_steps=args.cuda_graph_warmup_steps)
++    # if args.enable_cuda_graph and args.cuda_graph_scope=="full_iteration":
++    #     forward_backward_func = FullCudaGraphWrapper(forward_backward_func, cuda_graph_warmup_steps=args.cuda_graph_warmup_steps)
+ 
+     def get_e2e_base_metrics():
+         """Get base metrics values for one-logger to calculate E2E tracking metrics."""
+@@ -2549,18 +2574,19 @@ def train(
+         print_rank_0(f">>> Weight hashes match after {iteration} iterations...")
+ 
+     # Capture CUDA Graphs.
+-    if args.external_cuda_graph:
+-        cuda_graph_helper = TECudaGraphHelper(
+-            model=model,
+-            config=config,
+-            seq_length=args.seq_length,
+-            micro_batch_size=args.micro_batch_size,
+-            optimizers=[optimizer],
+-        )
+-        cuda_graph_helper.create_cudagraphs()
++    # if args.external_cuda_graph:
++    #     cuda_graph_helper = TECudaGraphHelper(
++    #         model=model,
++    #         config=config,
++    #         seq_length=args.seq_length,
++    #         micro_batch_size=args.micro_batch_size,
++    #         optimizers=[optimizer],
++    #     )
++    #     cuda_graph_helper.create_cudagraphs()
+ 
+     # enable flag_gems for transformer_engine_fl
+-    if args.use_flag_gems:
++    args.use_flag_gems_replace_torch = getattr(args, 'use_flag_gems_replace_torch', False)
++    if args.use_flag_gems_replace_torch:
+         if not HAVE_GEMS:
+             raise ValueError(f"Can not import flag gems")
+         else:
+@@ -2574,7 +2600,7 @@ def train(
+                 prof.step()
+             elif iteration == args.profile_step_start:
+                 torch.cuda.cudart().cudaProfilerStart()
+-                torch.autograd.profiler.emit_nvtx(record_shapes=True).__enter__()
++                torch.autograd.profiler.emit_nvtx(record_shapes=False).__enter__()
+ 
+         ft_integration.on_checkpointing_start()
+         maybe_finalize_async_save(blocking=False)
+@@ -2619,6 +2645,8 @@ def train(
+         args.curr_iteration = iteration
+ 
+         ########## FlagScale Begin ##########
++        args.skip_samples_range = False
++        args.skip_iters_range = False
+         if args.skip_samples_range or args.skip_iters_range:
+             current_global_batch_size = get_current_global_batch_size()
+             start_skip_iteration = 0
+@@ -2705,8 +2733,8 @@ def train(
+                     config.param_sync_func = param_sync_func
+                     pre_hook_enabled = True
+                     # Set the manual hooks when CUDA Graphs are used.
+-                    if args.external_cuda_graph:
+-                        cuda_graph_helper.cuda_graph_set_manual_hooks()
++                    # if args.external_cuda_graph:
++                    #     cuda_graph_helper.cuda_graph_set_manual_hooks()
+ 
+         iteration += 1
+         batch_size = (
+@@ -2756,7 +2784,7 @@ def train(
+             params_norm,
+             num_zeros_in_grad,
+         )
+-
++        args.do_valid = False
+         # Evaluation.
+         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid:
+             if args.log_energy:
+@@ -2797,7 +2825,8 @@ def train(
+ 
+         ######## FlagScale Begin ########
+         # Extra Evaluation =====================================================================
+-        if args.extra_eval_interval and iteration % args.extra_eval_interval == 0:
++        args.extra_eval_interval = False
++        if args.extra_eval_interval: #and iteration % args.extra_eval_interval == 0:
+             # NOTE(zhaoyinglia): Must rebuild the dataloaders for extra validation here,
+             # to guarantee extra validation start from extra_iter=0 every time,
+             # but we don't need to rebuild the datasets.
+@@ -2955,8 +2984,8 @@ def evaluate(
+     eval_batch_size = args.global_batch_size
+     eval_num_microbatches = eval_batch_size // (args.micro_batch_size * args.data_parallel_size)
+     forward_backward_func = get_forward_backward_func()
+-    if args.enable_cuda_graph and args.cuda_graph_scope=="full_iteration":
+-        forward_backward_func = FullCudaGraphWrapper(forward_backward_func, cuda_graph_warmup_steps=args.cuda_graph_warmup_steps)
++    # if args.enable_cuda_graph and args.cuda_graph_scope=="full_iteration":
++    #     forward_backward_func = FullCudaGraphWrapper(forward_backward_func, cuda_graph_warmup_steps=args.cuda_graph_warmup_steps)
+ 
+     ######## FlagScale Begin ########
+     if extra_valid_index is not None:
+@@ -3189,6 +3218,7 @@ def get_train_valid_test_num_samples():
+         train_samples = args.train_samples
+     else:
+         train_samples = args.train_iters * args.global_batch_size
++    args.full_validation = True
+     if args.full_validation:
+         eval_samples = None
+     else:
+@@ -3256,8 +3286,8 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
+                     # correct and needs to be calculated/set per validation set
+                     raise NotImplementedError("--multiple-validation-sets currently requires --full-validation")
+                 valid_dataloaders.append(build_pretraining_data_loader(valid_d, args.consumed_valid_samples))
+-        if not args.multiple_validation_sets:
+-            assert len(valid_dataloaders) == 1
++        # if not args.multiple_validation_sets:
++        #     assert len(valid_dataloaders) == 1
+         test_dataloader = build_pretraining_data_loader(test_ds, 0)
+ 
+         # Flags to know if we need to do training/validation/testing.
+@@ -3265,10 +3295,10 @@ def build_train_valid_test_data_loaders(build_train_valid_test_datasets_provider
+         do_valid = valid_dataloaders is not None and (args.full_validation or args.eval_iters > 0)
+         do_test = test_dataloader is not None and (args.full_validation or args.eval_iters > 0)
+         flags = torch.tensor(
+-            [int(do_train), int(do_valid), int(do_test)], dtype=torch.long, device='cuda'
++            [int(do_train), int(do_valid), int(do_test)], dtype=torch.long, device='musa'
+         )
+     else:
+-        flags = torch.tensor([0, 0, 0], dtype=torch.long, device='cuda')
++        flags = torch.tensor([0, 0, 0], dtype=torch.long, device='musa')
+ 
+     torch.distributed.broadcast(flags, 0)
+ 
+@@ -3314,7 +3344,7 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
+         train_data_iterator = _get_iterator(dl_type, train_dataloader)
+     else:
+         train_data_iterator = None
+-
++    valid_dataloaders = None
+     if valid_dataloaders is not None:
+         # when using full validation, we need to override eval iters with the correct
+         # number of iterations on tp rank 0 so that it can be distributed to the other
+@@ -3346,7 +3376,7 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
+             valid_data_iterators = None
+     else:
+         valid_data_iterators = None
+-
++    test_dataloader = None
+     if test_dataloader is not None:
+         test_data_iterator = _get_iterator(dl_type, test_dataloader)
+     else:
+
