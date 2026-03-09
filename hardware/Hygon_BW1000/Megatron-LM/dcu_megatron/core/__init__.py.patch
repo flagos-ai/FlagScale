@@ -1,0 +1,8 @@
+diff --git a/dcu_megatron/core/__init__.py b/dcu_megatron/core/__init__.py
+new file mode 100644
+index 000000000..11a3aad50
+--- /dev/null
++++ b/dcu_megatron/core/__init__.py
+@@ -0,0 +1 @@
++from .transformer.transformer_block import transformer_block_init_wrapper
+

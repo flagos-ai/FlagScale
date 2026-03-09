@@ -1,0 +1,39 @@
+diff --git a/dcu_megatron/core/utils.py b/dcu_megatron/core/utils.py
+new file mode 100644
+index 000000000..589b61ca2
+--- /dev/null
++++ b/dcu_megatron/core/utils.py
+@@ -0,0 +1,32 @@
++import torch
++
++from typing import List, Optional, Union
++from importlib.metadata import version
++from packaging.version import Version as PkgVersion
++
++
++_flux_version = None
++
++
++def get_flux_version():
++    """Get flux version from __version__; if not available use pip's. Use caching."""
++
++    def get_flux_version_str():
++        import flux
++
++        if hasattr(flux, '__version__'):
++            return str(flux.__version__)
++        else:
++            return version("flux")
++
++    global _flux_version
++    if _flux_version is None:
++        _flux_version = PkgVersion(get_flux_version_str())
++    return _flux_version
++
++
++def is_flux_min_version(version, check_equality=True):
++    """Check if minimum version of `flux` is installed."""
++    if check_equality:
++        return get_flux_version() >= PkgVersion(version)
++    return get_flux_version() > PkgVersion(version)
+

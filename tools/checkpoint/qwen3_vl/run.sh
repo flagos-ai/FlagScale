@@ -1,4 +1,4 @@
-export PYTHONPATH=$PYTHONPATH:$(dirname $(dirname "$0")):$(dirname $(dirname $(dirname "$0")))/third_party/Megatron-LM
+export PYTHONPATH=$(dirname $(dirname "$0")):$(dirname $(dirname $(dirname "$0")))/third_party/Megatron-LM:$PYTHONPATH
 # export MP_PP0_LAYERS=30
 # bash hf2mcore_qwen3_vl_convertor.sh \
 #     32B \

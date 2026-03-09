@@ -1,0 +1,11 @@
+diff --git a/megatron/core/transformer/module.py b/megatron/core/transformer/module.py
+index c89acec40..db3a75d5b 100644
+--- a/megatron/core/transformer/module.py
++++ b/megatron/core/transformer/module.py
+@@ -192,4 +192,4 @@ class Float16Module(MegatronModule):
+         return self.module.sharded_state_dict(prefix, *args, **kwargs)
+ 
+     def load_state_dict(self, state_dict, strict=True):
+-        self.module.load_state_dict(state_dict, strict=strict)
++        self.module.load_state_dict(state_dict, strict=False)
+

@@ -1,0 +1,13 @@
+diff --git a/megatron/core/pipeline_parallel/schedules.py b/megatron/core/pipeline_parallel/schedules.py
+index 0e15e399c..ed33de78d 100644
+--- a/megatron/core/pipeline_parallel/schedules.py
++++ b/megatron/core/pipeline_parallel/schedules.py
+@@ -1851,6 +1851,7 @@ def forward_backward_pipelining_without_interleaving(
+         output_tensors = []
+     forward_data_store = []
+ 
++    p2p_communication.warm_up_comm_group(config=config)
+     # Run warmup forward passes.
+     for i in range(num_warmup_microbatches):
+         # Decide to checkpoint all layers' activations of the current micro-batch
+

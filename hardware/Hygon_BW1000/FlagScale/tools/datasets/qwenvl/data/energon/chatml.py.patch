@@ -1,0 +1,87 @@
+diff --git a/tools/datasets/qwenvl/data/energon/chatml.py b/tools/datasets/qwenvl/data/energon/chatml.py
+index 7c71e91e..643968e4 100644
+--- a/tools/datasets/qwenvl/data/energon/chatml.py
++++ b/tools/datasets/qwenvl/data/energon/chatml.py
+@@ -9,7 +9,7 @@ from typing import List, Union
+ 
+ import torch
+ 
+-from webdataset.autodecode import Decoder
++from webdataset.autodecode import Decoder, imagehandler
+ 
+ from megatron.energon.epathlib.epath import EPath
+ from megatron.energon.flavors.base_dataset import Sample
+@@ -20,12 +20,12 @@ from megatron.energon.flavors.webdataset import DefaultDecoderWebdatasetFactory
+ class ChatMLSample(Sample):
+     """multi-turn complex samples with images and videos"""
+ 
+-    imgs: List[str]
+-    videos: List[List[str]]
++    imgs: List[torch.Tensor]
++    videos: List[List[torch.Tensor]]
+     conversation: str  # JSON string of GPT-format conversations
+ 
+ 
+-class NestedImagesPathHandler:
++class NestedImagesHandler:
+     def __init__(self, imagespec):
+         """Create an image handler.
+ 
+@@ -33,6 +33,7 @@ class NestedImagesPathHandler:
+         """
+         self.extensions = ["jpgs", "videos"]
+         self.extensions_mapping = {"jpgs": "jpg", "videos": "jpg"}
++        self.image_handler = imagehandler(imagespec)
+ 
+     def __call__(self, key, data):
+         """Perform nested image decoding.
+@@ -44,34 +45,24 @@ class NestedImagesPathHandler:
+         if extension.lower() not in self.extensions:
+             return None
+         data = pickle.loads(data)
++        key = self.extensions_mapping[extension]
++        if extension.lower() == "jpgs":
++            data = [self.image_handler(key, d) for d in data]
++        else:
++            data = [[self.image_handler(key, d) for d in video] for video in data]
+         return data
+ 
+ 
+-# During training, data is automatically decoded to from default webdataset to 'ChatMLSample' when loaded using energon-dataloader,
+-# and this is not done during preparation!!!
+-# After decoding, the data is passed into the TaskEncoder for further processing.
+ class ChatMLWebdataset(DefaultDecoderWebdatasetFactory[ChatMLSample]):
+     __sample_type__ = ChatMLSample
+ 
+-    def __init__(
+-        self,
+-        path: EPath,
+-        *,
+-        auto_decode: bool = True,
+-        image_decode="torchrgb",
+-        ignore_decoder_errors: bool = False,
+-        av_decode="AVDecoder",
+-        video_decode_audio: bool = False,
+-        **kwargs,
+-    ):
+-        super().__init__(
+-            path,
+-            auto_decode=auto_decode,
+-            image_decode=image_decode,
+-            ignore_decoder_errors=ignore_decoder_errors,
+-            av_decode=av_decode,
+-            video_decode_audio=video_decode_audio,
+-            **kwargs,
+-        )
++    def __init__(self, path: EPath, *, auto_decode: bool = True, **kwargs):
++        super().__init__(path, auto_decode=auto_decode, **kwargs)
+         if auto_decode:
+-            self._decoder = Decoder([NestedImagesPathHandler(self.image_decode)])
++            self._decoder = Decoder(
++                [
++                    imagehandler(self.image_decode),
++                    NestedImagesHandler(self.image_decode),
++                    self._video_decoder,
++                ]
++            )
+

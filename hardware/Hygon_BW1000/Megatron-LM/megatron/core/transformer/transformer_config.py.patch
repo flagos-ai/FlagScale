@@ -1,0 +1,34 @@
+diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
+index c4bfe416d..94da18d3a 100644
+--- a/megatron/core/transformer/transformer_config.py
++++ b/megatron/core/transformer/transformer_config.py
+@@ -232,6 +232,15 @@ class TransformerConfig(ModelParallelConfig):
+     the number of transformer layers to recompute within each pipeline stage.  Must be None for
+     'selective' activation checkpointing."""
+ 
++    recompute_granularity_per_stage_micro_batch: list = None
++    """Same as recompute_granularity but for each stage and each micro-batch."""
++
++    recompute_method_per_stage_micro_batch: list = None
++    """Same as recompute_method but for each stage and each micro-batch."""
++
++    recompute_num_layers_per_stage_micro_batch: list = None
++    """Same as recompute_num_layers but for each stage and each micro-batch."""
++
+     distribute_saved_activations: Optional[bool] = None
+     """If True, distribute recomputed activations across the model parallel group."""
+ 
+@@ -509,6 +518,12 @@ class TransformerConfig(ModelParallelConfig):
+     config_logger_dir: str = ""
+     """When non-empty, dumps entry-point configs to config_logger_dir"""
+ 
++    qk_layernorm_hidden_dim: bool = False
++    """Whether to apply LayerNorm to the query and key embeddings on the hidden dimension rather than head dimension."""
++
++    use_partial_reduce_for_shared_embedding: bool = False
++    """Whether to use partional reduce for shared embedding."""
++
+     flash_decode: bool = False
+     """ Use the optimized flash decoding kernel during inference. """
+ 
+

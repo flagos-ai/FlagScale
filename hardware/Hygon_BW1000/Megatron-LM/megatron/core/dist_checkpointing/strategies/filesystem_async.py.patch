@@ -1,0 +1,154 @@
+diff --git a/megatron/core/dist_checkpointing/strategies/filesystem_async.py b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
+index 2af90a65b..30a522122 100644
+--- a/megatron/core/dist_checkpointing/strategies/filesystem_async.py
++++ b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
+@@ -5,21 +5,23 @@ import dataclasses
+ import logging
+ import os
+ import queue
++import pickle
+ from functools import partial
+ from heapq import heappop, heappush
+ from itertools import chain
+ from operator import itemgetter
+ from pathlib import Path
+ from time import time
+-from typing import Callable, Dict, List, Optional, Tuple, Union
++from typing import Callable, Dict, List, Optional, Tuple, Union, cast
+ 
+ import psutil
+ import torch
+ from torch import multiprocessing as mp
+ from torch.distributed.checkpoint import FileSystemWriter
+-from torch.distributed.checkpoint.filesystem import DEFAULT_SUFFIX, _StoragePrefix, _write_item
++from torch.distributed.checkpoint.filesystem import DEFAULT_SUFFIX, _StoragePrefix, _write_item, _metadata_fn
+ from torch.distributed.checkpoint.planner import SavePlan, SavePlanner, WriteItem, WriteItemType
+ from torch.distributed.checkpoint.storage import WriteResult
++from torch.distributed.checkpoint.metadata import Metadata
+ from torch.futures import Future
+ 
+ from .async_utils import _disable_gc
+@@ -30,6 +32,40 @@ WriteBucket = Tuple[Path, str, Tuple[list, list]]  # represents writes to a sing
+ 
+ _results_queue = None
+ 
++_GLOBAL_PREVIOUS_METADATA = None
++
++_GLOBAL_PREVIOUS_COUNT = 0
++
++
++def get_previous_metadata():
++    """
++    Get the metadata from the previous save.
++    """
++    return _GLOBAL_PREVIOUS_METADATA
++
++
++def set_previous_metadata(metadata):
++    """
++    Set the metadata from the previous save.
++    """
++    global _GLOBAL_PREVIOUS_METADATA
++    _GLOBAL_PREVIOUS_METADATA = metadata
++
++
++def get_previous_count():
++    """
++    Get the count from the previous save.
++    """
++    return _GLOBAL_PREVIOUS_COUNT
++
++
++def set_previous_count(count):
++    """
++    Set the count from the previous save.
++    """
++    global _GLOBAL_PREVIOUS_COUNT
++    _GLOBAL_PREVIOUS_COUNT = count
++
+ 
+ def _get_write_results_queue():
+     global _results_queue
+@@ -75,6 +111,13 @@ class FileSystemWriterAsync(FileSystemWriter):
+         self.results_queue: Optional[mp.Queue] = None
+         self.separation_hint = separation_hint
+ 
++        # Get the value from the environment variable if it exists, otherwise default to False
++        self.single_file_per_tensor_ckpt = os.getenv('FS_SFPT_CKPT_SAVE', 'False').lower() in (
++            'true',
++            '1',
++            't',
++        )
++
+     def prepare_write_data(self, plan: SavePlan, planner: SavePlanner) -> None:
+         """
+         First stage of async saving. Copy data to CPU and plan the local saving.
+@@ -99,12 +142,17 @@ class FileSystemWriterAsync(FileSystemWriter):
+         start = time()
+         # move tensors from GPU to CPU before starting async writing
+         # We do D2H synchronously for now
+-        file_count = 0
++        if not self.single_file_per_tensor_ckpt:
++            file_count = 0
++        else:
++            file_count = get_previous_count()
+ 
+         def gen_file(prefix=""):
+             nonlocal file_count
+             file_name = f"{prefix}{storage_plan.prefix}{file_count}{DEFAULT_SUFFIX}"
+             file_count += 1
++            if self.single_file_per_tensor_ckpt:
++                set_previous_count(file_count)
+             return file_name
+ 
+         def _clone_if_needed(ten: torch.Tensor):
+@@ -392,6 +440,48 @@ class FileSystemWriterAsync(FileSystemWriter):
+             local_plan, storage_data=_StoragePrefix(f"__{torch.distributed.get_rank()}_")
+         )
+ 
++    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
++        # Modify based on the original implementation from torch.distributed.checkpoint.filesystem.FileSystemWriter
++        # https://github.com/pytorch/pytorch/blob/625c24a7f98a645b6f8758a01d7163a842582ce0/torch/distributed/checkpoint/filesystem.py#L574
++
++        if not self.single_file_per_tensor_ckpt:
++            storage_md = {}
++        else:
++            if get_previous_count() == 1:
++                storage_md = {}
++            else:
++                # Get the metadata from the previous save
++                prev_metadata = get_previous_metadata()
++                prev_metadata.state_dict_metadata.update(metadata.state_dict_metadata)
++                metadata = prev_metadata
++                storage_md = metadata.storage_data
++
++        for wr_list in results:
++            storage_md.update({wr.index: wr.storage_data for wr in wr_list})
++        metadata.storage_data = storage_md
++
++        if not self.single_file_per_tensor_ckpt or get_previous_count() == 1:
++            metadata.storage_meta = self.storage_meta()
++
++        tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
++        with self.fs.create_stream(tmp_path, "wb") as metadata_file:
++            pickle.dump(metadata, metadata_file)
++            if self.sync_files:
++                try:
++                    os.fsync(metadata_file.fileno())
++                except AttributeError:
++                    os.sync()
++
++        # delete in-case other checkpoints were present.
++        if self.fs.exists(self.metadata_path):
++            self.fs.rm_file(self.metadata_path)
++
++        self.fs.rename(tmp_path, self.metadata_path)
++
++        # Store the metadata for the next save
++        if self.single_file_per_tensor_ckpt:
++            set_previous_metadata(metadata)
++
+ 
+ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
+     """
+

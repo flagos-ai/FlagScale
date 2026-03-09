@@ -1,0 +1,23 @@
+diff --git a/dcu_megatron/core/transformer/transformer_block.py b/dcu_megatron/core/transformer/transformer_block.py
+new file mode 100644
+index 000000000..e6ec1e15c
+--- /dev/null
++++ b/dcu_megatron/core/transformer/transformer_block.py
+@@ -0,0 +1,16 @@
++from functools import wraps
++
++
++def transformer_block_init_wrapper(fn):
++    @wraps(fn)
++    def wrapper(self, *args, **kwargs):
++        fn(self, *args, **kwargs)
++
++        # mtp require seperate layernorms for main model and mtp modules, thus move finalnorm out of block
++        config = args[0] if len(args) > 1 else kwargs['config']
++        mtp_layers = getattr(config, "mtp_num_layers", None)
++        if isinstance(mtp_layers, int) and mtp_layers > 0:
++            self.main_final_layernorm = self.final_layernorm
++            self.final_layernorm = None
++
++    return wrapper
+

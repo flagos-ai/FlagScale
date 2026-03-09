@@ -1,0 +1,4 @@
+diff --git a/megatron/core/models/gpt/gpt_layer_specs.py b/megatron/core/models/gpt/gpt_layer_specs.py
+old mode 100755
+new mode 100644
+
