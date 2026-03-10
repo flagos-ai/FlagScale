@@ -1,13 +1,21 @@
 diff --git a/megatron/training/checkpointing.py b/megatron/training/checkpointing.py
-index 104fa6882..722859bf6 100644
+index 104fa6882..40cda37d0 100644
 --- a/megatron/training/checkpointing.py
 +++ b/megatron/training/checkpointing.py
-@@ -286,12 +286,15 @@ def read_metadata(tracker_filename):
+@@ -40,6 +40,7 @@ from . import wandb_utils
+ from . import ft_integration
+ 
+ from megatron.core.msc_utils import MultiStorageClientFeature, open_file
++from megatron.training.global_vars import get_wandb_writer
+ 
+ try:
+     from megatron.core.distributed.fsdp.src.megatron_fsdp.uneven_dtensor import preprocess_state_dict_for_uneven_dtensor
+@@ -286,12 +287,15 @@ def read_metadata(tracker_filename):
                  print_rank_0('ERROR: Invalid metadata file {}. Exiting'.format(
                      tracker_filename))
                  sys.exit()
 -    assert iteration > 0 or release, 'error parsing metadata file {}'.format(
-+    # TODO: we use iteration 0 to load checkpoint from other framework.  
++    # TODO: we use iteration 0 to load checkpoint from other framework.
 +    # We should remove this after we have a better way to load checkpoint from other framework.
 +    assert iteration >= 0 or release, 'error parsing metadata file {}'.format(
          tracker_filename)
@@ -20,9 +28,56 @@ index 104fa6882..722859bf6 100644
          torch.distributed.all_reduce(iters_cuda, op=torch.distributed.ReduceOp.MAX)
          max_iter = iters_cuda[0].item()
  
-@@ -692,6 +695,28 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+@@ -369,6 +373,13 @@ def _build_sharded_state_dict_metadata(args: Namespace) -> dict:
+     impossible to enforce a linearly increasing versioning for this whole space.
+     """
+     metadata = {}
++    if args.ckpt_format == "nemo_zarr":
++        if args.use_distributed_optimizer:
++            if args.ckpt_fully_parallel_save:
++                metadata['distrib_optim_sharding_type'] = 'fully_sharded_model_space'
++            else:
++                metadata['distrib_optim_sharding_type'] = 'dp_zero_gather_scatter'
++        return metadata
+ 
+     if args.use_distributed_optimizer and args.ckpt_format == "fsdp_dtensor":
+         metadata['distrib_optim_sharding_type'] = 'fsdp_dtensor'
+@@ -469,7 +480,11 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+     return_base_dir = (ckpt_type != CheckpointType.LEGACY)
+     checkpoint_name = get_checkpoint_name(save_dir, iteration, release=False, pipeline_parallel=pipeline_parallel,
+         tensor_rank=tensor_rank, pipeline_rank=pipeline_rank, expert_parallel=expert_parallel, expert_rank=expert_rank, return_base_dir=return_base_dir)
++    if ckpt_format == "nemo_zarr" and os.path.exists(checkpoint_name) \
++        and (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0):
++        shutil.rmtree(checkpoint_name)
+ 
++    torch.distributed.barrier()
+     # Save dataloader state if the dataloader supports it (currently only Megatron Energon).
+     maybe_save_dataloader_state(train_data_iterator, iteration, getattr(args, "dataloader_save", None))
+ 
+@@ -519,7 +534,7 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+         )
+ 
+         state_dict['num_floating_point_operations_so_far'] = num_floating_point_operations_so_far
+-        if ckpt_type == CheckpointType.GLOBAL and ckpt_format == "torch_dist":
++        if ckpt_type == CheckpointType.GLOBAL and (ckpt_format == "torch_dist" or ckpt_format == "nemo_zarr"):
+             if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+                 # TODO Handle non-empty directories (e.g., after a crash during saving).
+                 ensure_directory_exists(checkpoint_name, check_parent=False)
+@@ -529,7 +544,7 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+                 validate_sharding_integrity = not args.ckpt_assume_constant_structure
+             else:
+                 validate_sharding_integrity = True
+-                save_strategy = get_default_save_sharded_strategy(args.ckpt_format)
++                save_strategy = get_default_save_sharded_strategy(args.ckpt_format if ckpt_format != "nemo_zarr" else "zarr")
+                 if args.ckpt_assume_constant_structure and args.ckpt_format == 'torch_dist':
+                     save_strategy.use_cached_ckpt_structure = args.ckpt_assume_constant_structure
+                     if checkpointing_context is not None and 'load_strategy' in checkpointing_context:
+@@ -690,8 +705,35 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
+ 
+     # Additional callback for wandb (last rank)
      if not torch.distributed.is_initialized() \
-        or is_last_rank():
+-       or is_last_rank():
++       or is_last_rank() and get_wandb_writer():
          def wandb_finalize_fn():
 +            ######### FlagScale Begin #########
 +            #NOTE(lizhiyu): The tracker file is created by rank 0 but wandb_finalize_fn is called on the last rank.
@@ -33,23 +88,28 @@ index 104fa6882..722859bf6 100644
 +            timeout_seconds = 600  # 10 minutes
 +            wait_interval_seconds = 5
 +            max_retries = timeout_seconds // wait_interval_seconds
++            i = 0
++            for i in range(max_retries):
++                try:
++                    if isfile(tracker_file):
++                        with open(tracker_file, 'r') as f:
++                            content = f.read().strip()
++                            if content == str(iteration):
++                                break  # Success
++                except FileNotFoundError:
++                    continue
++                finally:
++                    print(f'WandB finalization waiting for the tracker file {tracker_file} to update...')
++                    pytime.sleep(wait_interval_seconds)
 +
-+            for _ in range(max_retries):
-+                if isfile(tracker_file):
-+                    with open(tracker_file, 'r') as f:
-+                        content = f.read().strip()
-+                        if content == str(iteration):
-+                            break  # Success
-+                print(f'WandB finalization waiting for the tracker file {tracker_file} to update...')
-+                pytime.sleep(wait_interval_seconds)
-+            else:
++            if i == max_retries:
 +                # This block executes if the loop completes without a `break`.
 +                raise RuntimeError(f"Timed out waiting for tracker file {tracker_file} to be updated for iteration {iteration} after {timeout_seconds} seconds.")
 +            ######### FlagScale End #########
              wandb_utils.on_save_checkpoint_success(checkpoint_name, get_checkpoint_tracker_filename(save_dir), save_dir, iteration)
          if args.async_save:
              assert async_save_request is not None
-@@ -774,9 +799,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
+@@ -774,9 +816,7 @@ def maybe_save_dataloader_state(train_iterator, iteration, dataloader_save_path)
  
      torch.distributed.barrier(group=mpu.get_data_parallel_group())
  
@@ -60,7 +120,25 @@ index 104fa6882..722859bf6 100644
      torch.distributed.barrier(group=mpu.get_data_parallel_group())
  
      dataloader_save_dict = {}
-@@ -1239,6 +1262,10 @@ def load_args_from_checkpoint(
+@@ -801,7 +841,7 @@ def generate_state_dict(args, model, optimizer, opt_param_scheduler,
+         if len(model) > 1:
+             key = f"model{i}"
+ 
+-        if args.ckpt_format == "torch_dist":
++        if args.ckpt_format == "torch_dist" or args.ckpt_format == "nemo_zarr":
+             model_sd = model[i].sharded_state_dict(**(model_sd_kwargs or {}))
+         else:   # torch, torch_dcp, fsdp_dtensor
+             model_sd = model[i].state_dict_for_save_checkpoint()
+@@ -813,7 +853,7 @@ def generate_state_dict(args, model, optimizer, opt_param_scheduler,
+         if optimizer is not None and not optimizer.is_stub_optimizer:
+             optimizer_sd = None
+ 
+-            if args.ckpt_format == "torch_dist":
++            if args.ckpt_format == "torch_dist" or args.ckpt_format == "nemo_zarr":
+                 optimizer_sd = optimizer.sharded_state_dict(state_dict, **(optim_sd_kwargs or {}))
+             elif args.ckpt_format == "fsdp_dtensor":
+                 if optim_sd_kwargs is None:
+@@ -1239,6 +1279,10 @@ def load_args_from_checkpoint(
              checkpoint_args, 'add_bias_linear', not getattr(checkpoint_args, 'disable_bias_linear')
          )
  
@@ -71,7 +149,7 @@ index 104fa6882..722859bf6 100644
      def _set_arg(arg_name, old_arg_name=None, force=False):
          if not force and getattr(args, arg_name, None) is not None:
              return
-@@ -1274,6 +1301,8 @@ def load_args_from_checkpoint(
+@@ -1274,6 +1318,8 @@ def load_args_from_checkpoint(
      _set_arg('add_qkv_bias', force=True)
      _set_arg('squared_relu', force=True)
      _set_arg('swiglu', force=True)
@@ -80,11 +158,58 @@ index 104fa6882..722859bf6 100644
      _set_arg('untie_embeddings_and_output_weights', force=True)
      _set_arg('apply_layernorm_1p', force=True)
      _set_arg('normalization', force=True)
-@@ -1432,6 +1461,14 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
-         mismatch_msg = "(TP, PP) mismatch after resume ({} vs {} from checkpoint)".format(
+@@ -1360,7 +1406,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+             strict=strict,
+             load_arg=load_arg
+         )
+-        
++
+         # Since load_modelopt_checkpoint doesn't return iteration count, we need to get it
+         if torch.distributed.is_initialized():
+             tracker_filename = get_checkpoint_tracker_filename(load_dir)
+@@ -1372,7 +1418,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+                 iteration = 0
+         else:
+             iteration = 0
+-        
++
+         # We don't have a reliable way to get num_floating_point_operations_so_far from ModelOpt format
+         return iteration, 0
+ 
+@@ -1390,6 +1436,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+     model = unwrap_model(ddp_model)
+ 
+     ckpt_format = args.ckpt_format
++    convert_nemo_zarr = False
+     if args.auto_detect_ckpt_format or ckpt_format == "torch_dist":
+         state_dict, checkpoint_name, release, ckpt_type = _load_base_checkpoint(
+             load_dir,
+@@ -1411,11 +1458,20 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+             pass    # Not loaded.
+         else:
+             raise NotImplementedError(f"checkpoint format {ckpt_format} not supported")
++    elif args.ckpt_format == "nemo_zarr":
++        tracker_filename = get_checkpoint_tracker_filename(load_dir)
++        if isfile(tracker_filename):
++            state_dict, checkpoint_name, release, ckpt_type = _load_base_checkpoint(load_dir, args, rank0=True, checkpointing_context=checkpointing_context)
++        else:
++            checkpoint_name = os.path.join(load_dir, "weights")
++            state_dict = dist_checkpointing.load_common_state_dict(checkpoint_name)
++            convert_nemo_zarr = True
++            release = False
+ 
+     load_kwargs = {}
+     ignore_rng_state = False
+     ignore_rerun_state = True
+-    if ckpt_format == "torch_dist":
++    if ckpt_format == "torch_dist" or (ckpt_format == "nemo_zarr" and (not convert_nemo_zarr)):
+         ckpt_tp_pp = (
+             state_dict['args'].tensor_model_parallel_size,
+             state_dict['args'].pipeline_model_parallel_size,
+@@ -1433,6 +1489,14 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
              run_tp_pp, ckpt_tp_pp
          )
-+        
+ 
 +        ########## FlagScale Begin ##########
 +        #Add support for changing parallel strategy from tp/pp to ep for ChainedOptimizer when using dist checkpointing
 +        convert_to_ep = (
@@ -92,10 +217,11 @@ index 104fa6882..722859bf6 100644
 +            getattr(state_dict['args'], 'expert_model_parallel_size', 1) == 1
 +        )
 +        ########## FlagScale End ##########
- 
++
          # Determine if RNG state will be loaded
          if (ckpt_tp_pp == run_tp_pp and not release and not args.finetune and not args.no_load_rng
-@@ -1468,6 +1505,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+                 and not getattr(state_dict['args'], 'no_save_rng', False)):
+@@ -1468,6 +1532,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
                      ckpt_tp_pp != run_tp_pp
                      and sharded_sd_metadata['distrib_optim_sharding_type']
                      not in DistributedOptimizer.checkpoint_fully_reshardable_formats
@@ -103,7 +229,7 @@ index 104fa6882..722859bf6 100644
                  ):
                      raise RuntimeError(f"{mismatch_msg}: not supported for DistributedOptimizer with sharding type"
                                         f" {sharded_sd_metadata['distrib_optim_sharding_type']}."
-@@ -1481,7 +1519,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+@@ -1481,7 +1546,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
              gen_sd_optim = None
              gen_sd_opt_param_scheduler = None
  
@@ -112,7 +238,65 @@ index 104fa6882..722859bf6 100644
          model_sd_kwargs = dict(metadata=sharded_sd_metadata)
  
          # Determine if rerun state will be loaded
-@@ -1829,3 +1867,4 @@ def load_biencoder_checkpoint(model, only_query_model=False,
+@@ -1543,6 +1608,42 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+             "num_floating_point_operations_so_far": 0,
+         }
+         load_kwargs["sharded_state_dict"] = sharded_state_dict
++    elif args.ckpt_format == "nemo_zarr":
++        convert_to_ep = (
++            getattr(args, 'expert_model_parallel_size', 1) != 1 and
++            getattr(state_dict['args'], 'expert_model_parallel_size', 1) == 1
++        )
++        sharded_sd_metadata = dist_checkpointing.load_content_metadata(preloaded_state_dict=state_dict)
++        optim_sd_kwargs = dict(metadata=sharded_sd_metadata, is_loading=True, convert_to_ep=convert_to_ep) ##add tp/pp to ep
++        model_sd_kwargs = dict(metadata=sharded_sd_metadata)
++        gen_sd_rerun_state = None
++        if has_nvidia_modelopt:
++            # if ckpt_type == CheckpointType.LOCAL:
++            #     print_rank_0('WARNING: Local checkpointing does not support nvidia_modelopt.')
++            # elif ckpt_type == CheckpointType.GLOBAL:
++            #     restore_modelopt_state(model, state_dict)
++            # else:
++            #     restore_sharded_modelopt_state(model, checkpoint_name)
++            restore_modelopt_state(model, state_dict)
++
++        gen_sd_optim = None
++        gen_sd_opt_param_scheduler = None
++        if not args.no_load_optim and "optimizer" in state_dict.keys():
++            gen_sd_optim = optimizer
++            gen_sd_opt_param_scheduler = opt_param_scheduler
++        load_kwargs["sharded_state_dict"] = generate_state_dict(
++            args, model, gen_sd_optim, gen_sd_opt_param_scheduler, rng_state=get_rng_state(args.ckpt_format),
++            optim_sd_kwargs=optim_sd_kwargs, model_sd_kwargs=model_sd_kwargs,
++            rerun_state=gen_sd_rerun_state
++        )
++        if not isfile(tracker_filename):
++            load_kwargs["sharded_state_dict"]["state_dict"] = {"module." + k : v for k, v in load_kwargs["sharded_state_dict"]["model"].items()}
++            load_kwargs["sharded_state_dict"].pop("model")
++            for v in load_kwargs["sharded_state_dict"]["state_dict"].values():
++                v.key = "module." + v.key
++            if not args.load_adapter:
++                load_kwargs["sharded_state_dict"]["state_dict"] = {k:v for k, v in load_kwargs["sharded_state_dict"]["state_dict"].items() if not (".adapter." in k or k.endswith(".adapters"))}
++
+     elif args.ckpt_format == "fsdp_dtensor":
+         reader = FileSystemReader(get_load_checkpoint_path_by_args(args))
+         try:
+@@ -1578,7 +1679,13 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load',
+             iteration=1,
+         )
+ 
+-    state_dict, checkpoint_name, release, ckpt_type = _load_base_checkpoint(
++    if args.ckpt_format == "nemo_zarr" and convert_nemo_zarr:
++        ckpt_type = CheckpointType.GLOBAL
++        state_dict = dist_checkpointing.load(load_kwargs["sharded_state_dict"], checkpoint_name, None, strict=args.dist_ckpt_strictness)
++        state_dict["model"] = state_dict.pop("state_dict")
++        state_dict['model'] = {k.replace("module.", "", 1) : v for k, v in state_dict['model'].items()}
++    else:
++        state_dict, checkpoint_name, release, ckpt_type = _load_base_checkpoint(
+         load_dir, args, rank0=False, checkpointing_context=checkpointing_context,
+         **load_kwargs
+     )
+@@ -1829,3 +1936,4 @@ def load_biencoder_checkpoint(model, only_query_model=False,
          print(' successfully loaded {}'.format(checkpoint_name))
  
      return model

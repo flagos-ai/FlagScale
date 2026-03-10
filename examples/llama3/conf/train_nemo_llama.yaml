@@ -1,0 +1,29 @@
+defaults:
+  - train: 1b_lora
+  - _self_
+
+experiment:
+  exp_name: llama3
+  exp_dir: ./outputs_llama3_1b_lora
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/train_nemo_llama.py
+  runner:
+    backend: torchrun
+    nnodes: 1
+    nproc_per_node: 2
+    hostfile: null
+  envs:
+    CUDA_VISIBLE_DEVICES: 0,1
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    MKL_SERVICE_FORCE_INTEL: 1
+    CUBLAS_WORKSPACE_CONFIG: :4096:8
+    NCCL_ALGO: Ring
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
