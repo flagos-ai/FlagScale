@@ -147,7 +147,7 @@ class NativeServeBackend(BackendBase):
         logger.info("\n************** Ray Configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 
-    def generate_run_script(self, config, host, node_rank, cmd, background=True, with_test=False):
+    def generate_run_script(self, config, host, node_rank, cmd, background=False):
         nodes = config.get("nodes", None)
         logging_config = config.logging
 
@@ -350,7 +350,8 @@ class NativeServeBackend(BackendBase):
                     f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
-                f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
 
             f.write("\n")
             f.flush()

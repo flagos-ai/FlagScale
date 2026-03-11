@@ -256,33 +256,10 @@ def test_generate_run_script_with_monitoring(
             assert "--enable-log-collection" in content
 
 
-def test_generate_run_script_with_test(mock_config, mock_get_args_native, mock_update_config_train):
-    """Test generate_run_script with with_test=True."""
-    backend = NativeTrainBackend(mock_config)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        mock_config.train.system.logging.scripts_dir = os.path.join(tmpdir, "scripts")
-        mock_config.train.system.logging.log_dir = os.path.join(tmpdir, "logs")
-        mock_config.train.system.logging.pids_dir = os.path.join(tmpdir, "pids")
-
-        with (
-            patch("os.path.exists", return_value=True),
-            patch("os.path.abspath", return_value=tmpdir),
-        ):
-            script_path = backend.generate_run_script(
-                mock_config, "localhost", 0, "test_cmd", background=True, with_test=True
-            )
-
-        with open(script_path, "r") as f:
-            content = f.read()
-            assert 'bash -c "$cmd; sync"' in content
-            assert "nohup" not in content  # No background when with_test
-
-
 def test_generate_run_script_foreground(
     mock_config, mock_get_args_native, mock_update_config_train
 ):
-    """Test generate_run_script with background=False."""
+    """Test generate_run_script with background=False uses tee for stdout + file."""
     backend = NativeTrainBackend(mock_config)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -301,7 +278,9 @@ def test_generate_run_script_foreground(
         with open(script_path, "r") as f:
             content = f.read()
             assert "nohup" not in content
+            assert "set -o pipefail" in content
             assert 'bash -c "$cmd; sync"' in content
+            assert "tee -a" in content
 
 
 def test_generate_stop_script(mock_config, mock_get_args_native, mock_update_config_train):

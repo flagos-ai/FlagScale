@@ -383,11 +383,9 @@ class TestBuildExtras:
             for pkg, opts in pkg_opts.items():
                 assert isinstance(pkg, str)
                 assert isinstance(opts, list)
-                for opt in opts:
-                    assert isinstance(opt, str)
-                    assert opt.startswith("--"), (
-                        f"Option '{opt}' for '{pkg}' in PKG_OPTIONS['{name}'] doesn't start with --"
-                    )
+                assert opts[0].startswith("-"), (
+                    f"Option '{opts}' for '{pkg}' in PKG_OPTIONS['{name}'] doesn't start with -"
+                )
 
     @pytest.mark.parametrize("extra_name", ALL_EXTRAS)
     def test_extra_is_list_of_strings(self, extra_name):

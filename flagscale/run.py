@@ -116,7 +116,13 @@ def execute_action(runner, action: str, task_type: str, config: DictConfig) -> N
     elif action == "dryrun":
         runner.run(dryrun=True)
     elif action == "test":
-        runner.run(with_test=True)
+        # Serve tasks are long-running daemons validated externally, so they
+        # must start in the background even during tests.  Other tasks
+        # (train, inference) run in the foreground so output streams directly.
+        if task_type == "serve":
+            runner.run()
+        else:
+            runner.run(background=False)
     elif action == "stop":
         runner.stop()
     elif action == "query":

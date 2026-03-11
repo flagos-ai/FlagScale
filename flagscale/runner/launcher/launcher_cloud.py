@@ -29,23 +29,23 @@ class CloudLauncher(LauncherBase):
         nnodes,
         node_rank,
         nproc_per_node,
-        with_test=False,
+        background=True,
         dryrun=False,
     ):
         export_cmd = []
         for k, v in self.user_envs.items():
             export_cmd += [f"{k}={v}"]
 
-        cmd = shlex.join(export_cmd + ["python"] + [self.user_script] + self.user_args)
+        cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         host_run_script_file = self.backend.generate_run_script(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=background
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)
 
     def run(
-        self, with_test=False, dryrun=False, monitor=False, interval=10, enable_monitoring=None
+        self, background=True, dryrun=False, monitor=False, interval=10, enable_monitoring=None
     ):
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
@@ -67,7 +67,7 @@ class CloudLauncher(LauncherBase):
             1,
             0,
             nproc_per_node,
-            with_test=with_test,
+            background=background,
             dryrun=dryrun,
         )
         self.host = available_addr
@@ -118,7 +118,6 @@ class CloudLauncher(LauncherBase):
     def _query_each(self, host, node_rank):
         "Query each node status."
         host_query_script_file = self._generate_query_script(host, node_rank)
-        logging_config = self.config.logging
         result = ""
         try:
             result = run_local_command(f"bash {host_query_script_file}", query=True)

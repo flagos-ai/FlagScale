@@ -22,6 +22,7 @@ from flagscale.runner.utils import (
     get_addr,
     get_free_port,
     get_ip_addr,
+    get_node0_log_file,
     get_nproc_per_node,
     get_pkg_dir,
     is_ip_addr,
@@ -32,6 +33,7 @@ from flagscale.runner.utils import (
     run_local_command,
     setup_exp_dir,
     setup_logging_dirs,
+    start_tail_log,
     wait_for_ray_master,
 )
 
@@ -255,7 +257,7 @@ def parse_cloud_hostfile(hostfile_path):
     return resources
 
 
-def _generate_run_script_serve(config, host, node_rank, cmd, background=True, with_test=False):
+def _generate_run_script_serve(config, host, node_rank, cmd, background=False):
     nodes = config.get("nodes", None)
     logging_config = config.logging
 
@@ -719,7 +721,8 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                 f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
             )
         else:
-            f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+            f.write("set -o pipefail\n")
+            f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
@@ -728,9 +731,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
     return host_run_script_file
 
 
-def _generate_cloud_run_script_serve(
-    config, host, node_rank, cmd, background=True, with_test=False
-):
+def _generate_cloud_run_script_serve(config, host, node_rank, cmd, background=False):
     logging_config = config.logging
     node_id = get_addr()
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
@@ -899,7 +900,8 @@ def _generate_cloud_run_script_serve(
                     f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
-                f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
@@ -1097,7 +1099,7 @@ class SSHServeRunner(RunnerBase):
         nnodes,
         node_rank,
         nproc_per_node,
-        with_test=False,
+        background=True,
         dryrun=False,
     ):
         export_cmd = []
@@ -1108,12 +1110,12 @@ class SSHServeRunner(RunnerBase):
         cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         host_run_script_file = _generate_run_script_serve(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=background
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)
 
-    def run(self, with_test=False, dryrun=False):
+    def run(self, background=True, dryrun=False):
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
         if visible_devices is not None and isinstance(visible_devices, str):
@@ -1122,22 +1124,35 @@ class SSHServeRunner(RunnerBase):
 
         runner_config = self.config.experiment.runner
 
-        # If hostfile is not provided, run the job on localhost
-        nproc_from_args = runner_config.get("nproc_per_node", None)
-        nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
-        available_addr = runner_config.get("master_addr", "localhost")
-        available_port = runner_config.get("master_port", get_free_port())
-        self._run_each(
-            "localhost",
-            available_addr,
-            available_port,
-            1,
-            0,
-            nproc_per_node,
-            with_test=with_test,
-            dryrun=dryrun,
-        )
-        self.host = available_addr
+        # In background mode, tail node 0's log file on the login node console.
+        # In foreground mode, tee already streams stdout directly.
+        _tail_stop = None
+        if not dryrun and background:
+            logging_config = self.config.logging
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            log_file = get_node0_log_file(logging_config, no_shared_fs)
+            _, _tail_stop = start_tail_log(log_file)
+
+        try:
+            # If hostfile is not provided, run the job on localhost
+            nproc_from_args = runner_config.get("nproc_per_node", None)
+            nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
+            available_addr = runner_config.get("master_addr", "localhost")
+            available_port = runner_config.get("master_port", get_free_port())
+            self._run_each(
+                "localhost",
+                available_addr,
+                available_port,
+                1,
+                0,
+                nproc_per_node,
+                background=background,
+                dryrun=dryrun,
+            )
+            self.host = available_addr
+        finally:
+            if _tail_stop:
+                _tail_stop.set()
 
     def _stop_each(self, host, node_rank):
         logging_config = self.config.logging
@@ -1357,7 +1372,7 @@ class CloudServeRunner(RunnerBase):
         nnodes,
         node_rank,
         nproc_per_node,
-        with_test=False,
+        background=True,
         dryrun=False,
     ):
         export_cmd = []
@@ -1367,12 +1382,12 @@ class CloudServeRunner(RunnerBase):
         cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         host_run_script_file = _generate_cloud_run_script_serve(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=background
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)
 
-    def run(self, with_test=False, dryrun=False):
+    def run(self, background=True, dryrun=False):
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
         if visible_devices is not None and isinstance(visible_devices, str):
@@ -1381,19 +1396,32 @@ class CloudServeRunner(RunnerBase):
 
         runner_config = self.config.experiment.runner
 
-        # If hostfile is not provided, run the job on localhost
-        nproc_from_args = runner_config.get("nproc_per_node", None)
-        nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
-        available_addr = runner_config.get("master_addr", "localhost")
-        available_port = runner_config.get("master_port", get_free_port())
-        self._run_each(
-            "localhost",
-            available_addr,
-            available_port,
-            1,
-            0,
-            nproc_per_node,
-            with_test=with_test,
-            dryrun=dryrun,
-        )
-        self.host = available_addr
+        # In background mode, tail node 0's log file on the login node console.
+        # In foreground mode, tee already streams stdout directly.
+        _tail_stop = None
+        if not dryrun and background:
+            logging_config = self.config.logging
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            log_file = get_node0_log_file(logging_config, no_shared_fs)
+            _, _tail_stop = start_tail_log(log_file)
+
+        try:
+            # If hostfile is not provided, run the job on localhost
+            nproc_from_args = runner_config.get("nproc_per_node", None)
+            nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
+            available_addr = runner_config.get("master_addr", "localhost")
+            available_port = runner_config.get("master_port", get_free_port())
+            self._run_each(
+                "localhost",
+                available_addr,
+                available_port,
+                1,
+                0,
+                nproc_per_node,
+                background=background,
+                dryrun=dryrun,
+            )
+            self.host = available_addr
+        finally:
+            if _tail_stop:
+                _tail_stop.set()

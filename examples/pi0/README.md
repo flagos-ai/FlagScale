@@ -24,8 +24,8 @@ Install FlagScale and robotics dependencies:
 
 ```sh
 cd FlagScale/
-pip install . --verbose
-pip install -r requirements/train/robotics/requirements.txt
+pip install ".[cuda]"
+pip install git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
 ```
 
 Install additional dependencies for downloading models/datasets:

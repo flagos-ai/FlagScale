@@ -19,20 +19,20 @@ conda create -n flagscale-inference python=3.12
 conda activate flagscale-inference
 ```
 
-Install FlagScale:
+### Install FlagScale
 
 ```sh
 cd FlagScale/
-pip install . --verbose
+pip install ".[cuda-train]"
 ```
 
-### Install vLLM and Transformers
+### Install vllm-plugin-FL
+
+Follow Setup in the vllm-plugin-FL [setup guide](https://github.com/flagos-ai/vllm-plugin-FL?tab=readme-ov-file#setup).
+
+### Install Transformers
 
 ```sh
-git clone https://github.com/flagos-ai/vllm-FL.git
-cd vllm-FL
-pip install packaging==24.2
-pip install --no-build-isolation .
 pip install transformers==4.57.0
 ```
 

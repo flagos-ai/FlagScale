@@ -778,8 +778,7 @@ if __name__ == "__main__":
     config = OmegaConf.load(config_file_path)
 
     # Extract train config and convert to Pydantic TrainConfig
-    train_config_dict = OmegaConf.to_container(config.train, resolve=True)
-    train_config = TrainConfig(**train_config_dict)
+    train_config = TrainConfig.from_hydra_config(config)
 
     # Extract experiment config (seed, exp_dir, etc.)
     experiment_config = OmegaConf.to_container(config.experiment, resolve=True)

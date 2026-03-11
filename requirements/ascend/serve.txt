@@ -1,0 +1,12 @@
+# Ascend serve-specific dependencies
+
+-r ./base.txt
+
+# FlagTree for Ascend (extra index so PyPI remains available for build deps)
+# [--extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple]
+flagtree==0.4.0+ascend3.2
+
+# [--no-build-isolation]
+flag-gems @ git+https://github.com/flagos-ai/FlagGems.git
+# [--no-build-isolation]
+vllm-plugin-FL @ git+https://github.com/flagos-ai/vllm-plugin-FL.git

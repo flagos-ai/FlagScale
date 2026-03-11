@@ -33,8 +33,7 @@ class NativeTrainBackend(BackendBase):
         host,
         node_rank,
         cmd,
-        background=True,
-        with_test=False,
+        background=False,
         pkg_dir=None,
         enable_monitoring=False,
     ):
@@ -105,17 +104,13 @@ class NativeTrainBackend(BackendBase):
                 )
             f.write("\n")
 
-            if with_test:
-                f.write('bash -c "$cmd; sync" \n')
+            if background:
+                f.write(
+                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                )
             else:
-                # TODO: need a option to control whether to append or overwrite the output file
-                # Now, it always appends to the output file
-                if background:
-                    f.write(
-                        f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
-                    )
-                else:
-                    f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())

@@ -7,6 +7,7 @@ from flagscale.runner.runner_base_legacy import RunnerBase
 from flagscale.runner.utils import (
     get_free_port,
     get_nnodes,
+    get_node0_log_file,
     get_nproc_per_node,
     get_pkg_dir,
     logger,
@@ -16,6 +17,7 @@ from flagscale.runner.utils import (
     run_ssh_command,
     setup_exp_dir,
     setup_logging_dirs,
+    start_tail_log,
 )
 
 
@@ -61,7 +63,7 @@ def _update_config_inference(config: DictConfig):
     OmegaConf.set_struct(config, True)
 
 
-def _generate_run_script_inference(config, host, node_rank, cmd, background=True, with_test=False):
+def _generate_run_script_inference(config, host, node_rank, cmd, background=False):
     logging_config = config.inference.logging
 
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
@@ -95,17 +97,13 @@ def _generate_run_script_inference(config, host, node_rank, cmd, background=True
         f.write("\n")
         f.write(f'cmd="{cmd}"\n')
         f.write("\n")
-        if with_test:
-            f.write(f'bash -c "$cmd; sync"  >> {host_output_file} \n')
+        if background:
+            f.write(
+                f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+            )
         else:
-            # TODO: need a option to control whether to append or overwrite the output file
-            # Now, it always appends to the output file
-            if background:
-                f.write(
-                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
-                )
-            else:
-                f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+            f.write("set -o pipefail\n")
+            f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
@@ -171,7 +169,7 @@ class SSHInferenceRunner(RunnerBase):
         nnodes,
         node_rank,
         nproc_per_node,
-        with_test=False,
+        background=True,
         dryrun=False,
     ):
         export_cmd = []
@@ -182,7 +180,7 @@ class SSHInferenceRunner(RunnerBase):
 
         logging_config = self.config.inference.logging
         host_run_script_file = _generate_run_script_inference(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=background
         )
 
         if host != "localhost":
@@ -198,11 +196,23 @@ class SSHInferenceRunner(RunnerBase):
                 )
 
             # Step 3: run the host_run_script_file on the remote host
-            run_ssh_command(host, f"bash {host_run_script_file}", ssh_port, dryrun)
+            # For foreground + node 0, stream stdout through SSH to the login
+            # node console so logs are visible without depending on shared FS.
+            run_ssh_command(
+                host,
+                f"bash {host_run_script_file}",
+                ssh_port,
+                dryrun,
+                stream_output=(not background and node_rank == 0),
+            )
         else:
-            run_local_command(f"bash {host_run_script_file}", dryrun)
+            run_local_command(
+                f"bash {host_run_script_file}",
+                dryrun,
+                stream_output=(not background and node_rank == 0),
+            )
 
-    def run(self, with_test=False, dryrun=False):
+    def run(self, background=True, dryrun=False):
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
         if visible_devices is not None and isinstance(visible_devices, str):
@@ -211,49 +221,62 @@ class SSHInferenceRunner(RunnerBase):
 
         runner_config = self.config.experiment.runner
 
-        # If hostfile is provided, use the resources from the hostfile
-        if self.resources is not None:
-            nnodes_from_hostfile = len(self.resources.keys())
-            nnodes_from_args = runner_config.get("nnodes", None)
-            nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
-            available_ip = next(iter(self.resources.keys()))
-            available_port = get_free_port()
-            for node_rank, (host, resource_info) in enumerate(self.resources.items()):
-                if node_rank >= nnodes:
-                    break
-                nproc_from_hostfile = resource_info["slots"]
+        # In background mode, tail node 0's log file on the login node console.
+        # In foreground mode, tee already streams stdout directly.
+        _tail_stop = None
+        if not dryrun and background:
+            logging_config = self.config.inference.logging
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            log_file = get_node0_log_file(logging_config, no_shared_fs, self.resources)
+            _, _tail_stop = start_tail_log(log_file)
+
+        try:
+            # If hostfile is provided, use the resources from the hostfile
+            if self.resources is not None:
+                nnodes_from_hostfile = len(self.resources.keys())
+                nnodes_from_args = runner_config.get("nnodes", None)
+                nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
+                available_ip = next(iter(self.resources.keys()))
+                available_port = get_free_port()
+                for node_rank, (host, resource_info) in enumerate(self.resources.items()):
+                    if node_rank >= nnodes:
+                        break
+                    nproc_from_hostfile = resource_info["slots"]
+                    nproc_from_args = runner_config.get("nproc_per_node", None)
+                    nproc_per_node = get_nproc_per_node(
+                        nproc_from_hostfile, nproc_from_args, num_visible_devices
+                    )
+                    master_addr = runner_config.get("master_addr", available_ip)
+                    master_port = runner_config.get("master_port", available_port)
+                    self._run_each(
+                        host,
+                        master_addr,
+                        master_port,
+                        nnodes,
+                        node_rank,
+                        nproc_per_node,
+                        background=background,
+                        dryrun=dryrun,
+                    )
+            else:
+                # If hostfile is not provided, run the job on localhost
                 nproc_from_args = runner_config.get("nproc_per_node", None)
-                nproc_per_node = get_nproc_per_node(
-                    nproc_from_hostfile, nproc_from_args, num_visible_devices
-                )
-                master_addr = runner_config.get("master_addr", available_ip)
-                master_port = runner_config.get("master_port", available_port)
+                nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
+                available_addr = runner_config.get("master_addr", "localhost")
+                available_port = runner_config.get("master_port", get_free_port())
                 self._run_each(
-                    host,
-                    master_addr,
-                    master_port,
-                    nnodes,
-                    node_rank,
+                    "localhost",
+                    available_addr,
+                    available_port,
+                    1,
+                    0,
                     nproc_per_node,
-                    with_test=with_test,
+                    background=background,
                     dryrun=dryrun,
                 )
-        else:
-            # If hostfile is not provided, run the job on localhost
-            nproc_from_args = runner_config.get("nproc_per_node", None)
-            nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
-            available_addr = runner_config.get("master_addr", "localhost")
-            available_port = runner_config.get("master_port", get_free_port())
-            self._run_each(
-                "localhost",
-                available_addr,
-                available_port,
-                1,
-                0,
-                nproc_per_node,
-                with_test=with_test,
-                dryrun=dryrun,
-            )
+        finally:
+            if _tail_stop:
+                _tail_stop.set()
 
     def _stop_each(self, host, node_rank):
         host_stop_script_file = _generate_stop_script(self.config, host, node_rank)

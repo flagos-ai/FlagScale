@@ -136,7 +136,7 @@ class LlamaCppBackend(BackendBase):
         logger.info("\n************** LlamaCpp Configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 
-    def generate_run_script(self, config, host, node_rank, cmd, background=True, with_test=False):
+    def generate_run_script(self, config, host, node_rank, cmd, background=False):
         logging_config = config.logging
 
         no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
@@ -193,15 +193,13 @@ class LlamaCppBackend(BackendBase):
             f.write("\n")
             f.write("echo '=========== launch task (LlamaCpp) ==========='\n")
 
-            if with_test:
-                f.write(f'bash -c "$cmd; sync" >> {host_output_file} \n')
+            if background:
+                f.write(
+                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                )
             else:
-                if background:
-                    f.write(
-                        f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
-                    )
-                else:
-                    f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
 
             f.write("\n")
             f.flush()

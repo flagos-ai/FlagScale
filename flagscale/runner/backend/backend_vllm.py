@@ -367,7 +367,7 @@ class VllmBackend(BackendBase):
         logger.info("\n************** configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 
-    def generate_run_script(self, config, host, node_rank, cmd, background=True, with_test=False):
+    def generate_run_script(self, config, host, node_rank, cmd, background=False):
         if self.task_type == "inference":
             logging_config = config.inference.logging
 
@@ -404,17 +404,13 @@ class VllmBackend(BackendBase):
                 f.write("\n")
                 f.write(f'cmd="{cmd}"\n')
                 f.write("\n")
-                if with_test:
-                    f.write(f'bash -c "$cmd; sync"  >> {host_output_file} \n')
+                if background:
+                    f.write(
+                        f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                    )
                 else:
-                    # TODO: need a option to control whether to append or overwrite the output file
-                    # Now, it always appends to the output file
-                    if background:
-                        f.write(
-                            f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
-                        )
-                    else:
-                        f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                    f.write("set -o pipefail\n")
+                    f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
                 f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
@@ -595,7 +591,8 @@ class VllmBackend(BackendBase):
                             f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                         )
                     else:
-                        f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                        f.write("set -o pipefail\n")
+                        f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
                 f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())
@@ -977,7 +974,8 @@ class VllmBackend(BackendBase):
                         f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                     )
                 else:
-                    f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                    f.write("set -o pipefail\n")
+                    f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
                 f.write("\n")
                 f.flush()
                 os.fsync(f.fileno())

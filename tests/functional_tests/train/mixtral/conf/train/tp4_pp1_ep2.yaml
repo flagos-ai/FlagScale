@@ -52,6 +52,7 @@ model:
 
   seed: 42
   train_iters: 10
+  eval_iters: 0
   micro_batch_size: 1
   global_batch_size: 128
   clip_grad: 1.0

@@ -53,7 +53,7 @@ def parse_requirements(req_file):
                 m = re.match(r"^#\s*\[([^\]]+)\]\s*$", line)
                 if m:
                     opts = m.group(1).split()
-                    if opts and all(o.startswith("--") for o in opts):
+                    if opts and opts[0].startswith("-"):
                         pending_options.extend(opts)
                 continue
             if line.startswith("-r "):
@@ -107,7 +107,7 @@ def _cmd_filter(req_file, output_file):
                 m = re.match(r"^#\s*\[([^\]]+)\]\s*$", stripped)
                 if m:
                     opts = m.group(1).split()
-                    if opts and all(o.startswith("--") for o in opts):
+                    if opts and opts[0].startswith("-"):
                         pending = True
                         continue  # skip annotation comment
                 dst.write(line)
