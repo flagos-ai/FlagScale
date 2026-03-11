@@ -1285,6 +1285,10 @@ def core_transformer_config_from_args(args, config_class=None):
         assert not args.multi_latent_attention, "Multi latent attention with heterogeneous layers is not supported."
         config_class = HeterogeneousTransformerConfig
 
+    if args.use_engram:
+        from flagscale.models.megatron.engram.engram_config import EngramConfig
+        config_class = EngramConfig
+
     # Translate args to core transformer configuration
     kw_args = {}
     for f in dataclasses.fields(config_class):

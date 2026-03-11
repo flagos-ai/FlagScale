@@ -1,0 +1,112 @@
+system:
+  no_shared_fs: ${experiment.runner.no_shared_fs}
+  num_workers: 2
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  expert_model_parallel_size: 1
+  context_parallel_size: 1
+  sequence_parallel: true
+  use_distributed_optimizer: true
+  overlap_grad_reduce: true
+  overlap_param_gather: true
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+    log_timers_to_tensorboard: true
+    log_validation_ppl_to_tensorboard: true
+    log_throughput: true
+    log_params_norm: true
+    log_num_zeros_in_grad: true
+    log_memory_to_tensorboard: true
+  checkpoint:
+    save_interval: ${experiment.save_steps}
+    load: ${experiment.load}
+    ckpt_format: ${experiment.ckpt_format}
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 36
+  hidden_size: 2560
+  ffn_hidden_size: 9728
+  num_attention_heads: 32
+  kv_channels: 128
+  group_query_attention: true
+  num_query_groups: 8
+  seq_length: 4096
+  max_position_embeddings: 32768
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  rotary_base: 10000
+  swiglu: true
+  normalization: RMSNorm
+  qk_layernorm: true
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  untie_embeddings_and_output_weights: true
+  position_embedding_type: rope
+  no_rope_fusion: true
+
+  # hf: attention_bias: true
+  disable_bias_linear: true
+  add_qkv_bias: false
+
+  # engram args =================
+  use_engram: true
+  engram_tokenizer_name_or_path: xxx
+  engram_vocab_size: [759680, 759680]
+  max_ngram_size: 3
+  n_embed_per_ngram: 512
+  n_head_per_ngram: 8
+  engram_layer_ids: [2]
+  engram_pad_id: 2
+  engram_seed: 0
+  engram_kernel_size: 4
+  engram_hc_mult: 1
+  # hf: engram_lr_multiplier: 5.0 miss
+
+
+  # training
+  seed: ${experiment.seed}
+  finetune: false
+  # to be update
+  micro_batch_size: 1
+  # hf: gbs: 1024
+  global_batch_size: 128
+  # hf: max_steps: 24000
+  train_iters: 102400
+  eval_iters: 0
+
+
+  optimizer:
+    clip_grad: 1.0
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-4
+      min_lr: 3.0e-4
+      # lr_warmup_fraction: 0.01
+      lr_warmup_iters: 240
+      lr_decay_style: WSD
+      lr_wsd_decay_style: cosine
+      lr_wsd_decay_iters: 10
+
+data:
+  reset_position_ids: True
+  reset_attention_mask: True
+  data_path: xxx
+  split: 1
+  no_mmap_bin_files: true
+  tokenizer:
+    legacy_tokenizer: true
+    tokenizer_type: Qwen2TokenizerFS
+    tokenizer_path: xxx
+    vocab_size: 151936
+    make_vocab_size_divisible_by: 64

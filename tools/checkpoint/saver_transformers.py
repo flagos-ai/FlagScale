@@ -283,6 +283,8 @@ def save_checkpoint(queue, args):
         msg = queue_get(f"transformer layer {layer_id}")
 
         margs.total_layer_num = layer_id
+        if margs.use_engram and layer_id in margs.engram_layer_ids:
+            ckpt_plugin.set_hf_engram_ckpt(msg, hf_model, layer_id, md, margs)
         ckpt_plugin.set_hf_attn_ckpt(msg, hf_model, layer_id, md, margs)
         ckpt_plugin.set_hf_mlp_ckpt(msg, hf_model, layer_id, md, margs)
 
