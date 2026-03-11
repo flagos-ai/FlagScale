@@ -20,12 +20,11 @@ conda create -n flagos-robo python=3.12
 conda activate flagos-robo
 ```
 
-Install FlagScale and robotics dependencies:
+Install FlagScale and training dependencies:
 
 ```sh
 cd FlagScale/
-pip install . --verbose
-pip install -r requirements/train/robotics/requirements.txt
+pip install ".[cuda-train]" --verbose
 ```
 
 Install additional dependencies for downloading models/datasets:
