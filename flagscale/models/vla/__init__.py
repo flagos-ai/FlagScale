@@ -1,3 +1,4 @@
+from .action_model import FlowMatchingHead
 from .protocols import ActionModel, VLMBackbone
 from .qwen_gr00t import QwenGr00t
 from .registry import (
@@ -7,6 +8,7 @@ from .registry import (
     register_vlm,
 )
 from .utils import get_vlm_config
+from .vlm import Qwen3VLBackbone, Qwen25VLBackbone, QwenVLBackbone
 
 __all__ = [
     "VLMBackbone",
@@ -17,4 +19,8 @@ __all__ = [
     "build_action_model",
     "get_vlm_config",
     "QwenGr00t",
+    "QwenVLBackbone",
+    "Qwen25VLBackbone",
+    "Qwen3VLBackbone",
+    "FlowMatchingHead",
 ]

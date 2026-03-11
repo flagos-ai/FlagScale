@@ -10,3 +10,8 @@ dm-tree==0.1.9
 
 # Source dependencies (installed from git repos)
 # vllm @ git+https://github.com/flagos-ai/vllm-FL.git
+
+# Support vla model serving
+websocket-client==1.8.0
+websocket==0.2.1
+websockets==15.0.1
