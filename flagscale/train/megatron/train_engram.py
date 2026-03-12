@@ -15,7 +15,7 @@ from megatron.core.models.gpt import GPTModel
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import get_attr_wrapped_model, StragglerDetector
 from megatron.core.tokenizers.text.utils.build_tokenizer import build_tokenizer
-from megatron.core import mpu
+from megatron.core import parallel_state
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
@@ -188,7 +188,17 @@ def get_batch(data_iterator, vp_stage=None):
 
     # get batches based on the TP rank you are on
     batch = get_batch_on_this_tp_rank(data_iterator)
-
+    ## NOTE: This should be handled in the get_batch_on_this_tp_rank.
+    # In order to minimize the impact of the engram on the framework's internal structure, it has been extracted
+    # from the function. Better solutions will be found in the future.
+    # Broadcast tokens within TP group for each pipeline_stage except the first stage.
+    if not (parallel_state.get_pipeline_model_parallel_world_size == 1 or parallel_state.is_pipeline_first_stage()):
+        if parallel_state.get_tensor_model_parallel_rank() == 0:
+            torch.distributed.broadcast(batch["tokens"], src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
+        else:
+            tokens = torch.empty_like(batch["labels"])
+            torch.distributed.broadcast(tokens, src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
+            batch["tokens"] = tokens
     # slice batch along sequence dimension for context parallelism
     batch = get_batch_on_this_cp_rank(batch)
 

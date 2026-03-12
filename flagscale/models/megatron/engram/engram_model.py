@@ -1,5 +1,7 @@
 # ruff: noqa: RUF013
 ## built-in
+from typing import Optional
+
 import torch
 from torch import Tensor
 
@@ -169,6 +171,34 @@ class EngramModel(GPTModel):
             runtime_gather_output=runtime_gather_output,
             extra_block_kwargs=extra_block_kwargs,
             inference_context=inference_context,
+        )
+
+    def build_schedule_plan(
+        self,
+        input_ids: Tensor,
+        position_ids: Tensor,
+        attention_mask: Tensor,
+        decoder_input: Tensor = None,
+        labels: Tensor = None,
+        inference_context: BaseInferenceContext = None,
+        packed_seq_params: PackedSeqParams = None,
+        extra_block_kwargs: dict = None,
+        runtime_gather_output: Optional[bool] = None,
+        inference_params: Optional[BaseInferenceContext] = None,
+        loss_mask: Optional[Tensor] = None,
+    ):
+        self.engram_hash_input_ids = LazyHashInputIds(
+            hash_mapping=self.engram_hash,
+            input_ids=input_ids,
+            hash_stream=self._hash_stream,
+        )
+        return super().build_schedule_plan(
+            input_ids,
+            position_ids,
+            attention_mask,
+            decoder_input,
+            labels=labels,
+            loss_mask=loss_mask
         )
 
     def sharded_state_dict(

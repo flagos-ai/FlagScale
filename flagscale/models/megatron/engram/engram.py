@@ -34,13 +34,17 @@ class Engram(nn.Module):
             pad_id=engram_cfg.engram_pad_id,
             seed=engram_cfg.engram_seed,
         )
-        self.multi_head_embedding = MultiHeadEmbedding(
+        self.conditional_memory = MultiHeadEmbedding(
             engram_cfg,
             list_of_N=[
                 x for y in global_hash_mapping.vocab_size_across_layers[self.layer_id] for x in y
             ],
             D=engram_cfg.n_embed_per_ngram // engram_cfg.n_head_per_ngram,
         )
+        self.embedding_cache = None  # Cache for pre-computed embeddings
+        self.embedding_stream = None  # Stream for pre-computing embeddings
+        if torch.cuda.is_available():
+            self.embedding_stream = torch.cuda.Stream()
         self.short_conv = ShortConv(
             hidden_size=self.backbone_config.hidden_size,
             kernel_size=engram_cfg.engram_kernel_size,
@@ -81,8 +85,14 @@ class Engram(nn.Module):
         # [B, L, N_GRAM * N_HEADS_PER_GRAM]
         # fake hyper-connection
         hidden_states = hidden_states.unsqueeze(2)
-
-        embeddings = self.multi_head_embedding(hash_input_ids).flatten(start_dim=-2)
+        if self.embedding_cache is not None:
+            embeddings, embedding_event = self.embedding_cache
+            if embedding_event is not None:
+                torch.cuda.current_stream().wait_event(embedding_event)  # Ensure pre-computed embeddings are ready
+            self.embedding_cache = None  # Clear cache after use
+            del embedding_event  # Free the event
+        else:
+            embeddings = self.conditional_memory(hash_input_ids).flatten(start_dim=-2)
         # [L/tp_size, B, N_GRAM * N_HEADS_PER_GRAM, N_EMBED_PER_GRAM // N_HEADS_PER_GRAM]
         # [L/tp_size, B, N_GRAM * N_EMBED_PER_NGRAM]
 
@@ -120,3 +130,17 @@ class Engram(nn.Module):
         output = output.squeeze(2)
 
         return output
+
+    def pre_compute_embedding(self, input_ids: torch.Tensor):
+        """
+        Pre-compute the multi-head embedding for the given input IDs.
+        This can be called before the forward pass to warm up the embedding cache.
+        """
+        assert input_ids is not None, "Input ids can not be None for EngramModel"
+        self.embedding_stream.synchronize()  # Ensure previous computations on the stream are finished
+        with torch.cuda.stream(self.embedding_stream):
+            embedding_result = self.conditional_memory(input_ids).flatten(start_dim=-2)
+        embedding_event = torch.cuda.Event()
+        embedding_event.record(self.embedding_stream)
+        self.embedding_cache = (embedding_result, embedding_event)
+        

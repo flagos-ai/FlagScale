@@ -81,6 +81,9 @@ class EngramTransformerLayer(TransformerLayer):
             sequence_len_offset=sequence_len_offset,
             inference_params=inference_params,
         )
+    
+    def pre_compute_embedding(self, hash_input_ids: Tensor):
+        self.engram.pre_compute_embedding(hash_input_ids)
 
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
@@ -282,6 +285,14 @@ class EngramTransformerBlock(TransformerBlock):
                     with self.offload_context, inner_quantization_context:
                         # Build kwargs based on layer type
                         layer_kwargs = {}
+
+                        # Pre-compute embeddings for the next EngramTransformerLayer if exists to overlap with current layer's computation
+                        if l_no < len(self.layers) - 1:
+                            next_layer = self.layers[l_no + 1]
+                            if isinstance(next_layer, EngramTransformerLayer):
+                                engram_hash_layer_id = next_layer.layer_number - 1
+                                hash_input_ids = engram_hash_input_ids[engram_hash_layer_id]
+                                next_layer.pre_compute_embedding(hash_input_ids)
 
                         # Only pass input_ids to EngramTransformerLayer
                         if isinstance(layer, EngramTransformerLayer):
