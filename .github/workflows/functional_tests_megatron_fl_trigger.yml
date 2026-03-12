@@ -1,0 +1,476 @@
+name: Functional Tests - Training (Megatron-LM-FL)
+
+# Triggered by Megatron-LM-FL Repo cicd workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      megatron_lm_fl_repo:
+        required: true
+        type: string
+        description: "Megatron-LM-FL repository (e.g., owner/Megatron-LM-FL)"
+      megatron_lm_fl_branch:
+        required: true
+        type: string
+        description: "Megatron-LM-FL branch to pull and install"
+      platform:
+        required: false
+        type: string
+        description: "Platform name (e.g., cuda)"
+        default: "cuda"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.megatron_lm_fl_branch }}
+  cancel-in-progress: true
+
+jobs:
+  checkout_and_config:
+    defaults:
+      run:
+        shell: bash
+    runs-on: ubuntu-latest
+    outputs:
+      ci_train_image: ${{ steps.config.outputs.ci_train_image }}
+      runs_on: ${{ steps.config.outputs.runs_on }}
+      container_volumes: ${{ steps.config.outputs.container_volumes }}
+      container_options: ${{ steps.config.outputs.container_options }}
+      train_test_matrix: ${{ steps.config.outputs.train_test_matrix }}
+      hetero_train_test_matrix: ${{ steps.config.outputs.hetero_train_test_matrix }}
+      pkg_mgr: ${{ steps.config.outputs.pkg_mgr }}
+      env_path: ${{ steps.config.outputs.env_path }}
+      env_name_train: ${{ steps.config.outputs.env_name_train }}
+    steps:
+      - name: Checkout FlagScale code
+        uses: actions/checkout@v4
+
+      - name: Load platform configuration
+        id: config
+        run: |
+          set -euo pipefail
+
+          PLATFORM="${{ inputs.platform }}"
+          CONFIG_FILE=".github/configs/${PLATFORM}.yml"
+
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "Error: Platform configuration file not found: $CONFIG_FILE"
+            echo "Available configs:"
+            ls -la .github/configs/
+            exit 1
+          fi
+
+          # Install mikefarah/yq (v4) for YAML parsing
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          /usr/local/bin/yq --version
+
+          # Source the platform config loading script
+          source ./tools/install/utils/load_platform_config.sh
+
+          # Load configuration and group tests by task
+          load_platform_config "$PLATFORM"
+
+  functional_test_train:
+    needs: checkout_and_config
+    if: fromJson(needs.checkout_and_config.outputs.train_test_matrix)[0] != null
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: ${{ github.workspace }}
+    runs-on: ${{ fromJson(needs.checkout_and_config.outputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test_config: ${{ fromJson(needs.checkout_and_config.outputs.train_test_matrix) }}
+    container:
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(needs.checkout_and_config.outputs.container_volumes) }}
+      options: ${{ needs.checkout_and_config.outputs.container_options }}
+
+    steps:
+      - name: Checkout FlagScale code
+        uses: actions/checkout@v4
+
+      - name: Set safe directory
+        run: |
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Pull and install latest Megatron-LM-FL
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ needs.checkout_and_config.outputs.pkg_mgr }}'
+          ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
+          ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          MEGATRON_LM_FL_REPO='${{ inputs.megatron_lm_fl_repo }}'
+          MEGATRON_LM_FL_BRANCH='${{ inputs.megatron_lm_fl_branch }}'
+
+          echo "Cloning Megatron-LM-FL from ${MEGATRON_LM_FL_REPO}, branch: ${MEGATRON_LM_FL_BRANCH}"
+          git clone --depth 1 --branch "${MEGATRON_LM_FL_BRANCH}" \
+            "https://github.com/${MEGATRON_LM_FL_REPO}.git" /tmp/Megatron-LM-FL
+
+          echo "Installing Megatron-LM-FL via pip..."
+          pip install /tmp/Megatron-LM-FL --no-build-isolation --root-user-action=ignore \
+            || { echo "Megatron-LM-FL install failed"; exit 1; }
+
+          echo "Megatron-LM-FL installed successfully from branch: ${MEGATRON_LM_FL_BRANCH}"
+          pip show megatron-core 2>/dev/null || pip show megatron 2>/dev/null || echo "Package info not available"
+        timeout-minutes: 30
+
+      - name: Install dependencies for training
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ needs.checkout_and_config.outputs.pkg_mgr }}'
+          ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
+          ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
+
+          echo "Installing dependencies for training"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install FlagScale CLI
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "FlagScale CLI not found in PATH"; exit 1; }
+          echo "FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+
+          # For train task: all dependencies are pre-installed in the env
+          # No additional installation needed
+          echo "Environment ready for train tests"
+        timeout-minutes: 30
+
+      - name: Run functional tests
+        id: functional_test
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ matrix.test_config.device }}'
+          TASK='${{ matrix.test_config.task }}'
+          MODEL='${{ matrix.test_config.model }}'
+          CASE='${{ matrix.test_config.case }}'
+          PKG_MGR='${{ needs.checkout_and_config.outputs.pkg_mgr }}'
+          ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
+          ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
+
+          echo "Running functional tests for training"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
+          echo "Case: ${CASE:-all}"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+          echo "Project root: $PROJECT_ROOT"
+          echo "Megatron-LM-FL branch: ${{ inputs.megatron_lm_fl_branch }}"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "Running tests with pip/system Python"
+              ;;
+          esac
+
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Run functional tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type functional \
+            --task "$TASK" \
+            --model "$MODEL" \
+            --list "$CASE"
+          exit_code=$?
+
+          if [ $exit_code -eq 0 ]; then
+            echo "Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
+          else
+            echo "Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+          fi
+
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit $exit_code
+        timeout-minutes: 30
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-megatron-lm-fl-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
+          retention-days: 7
+          if-no-files-found: warn
+
+  functional_test_hetero_train:
+    needs: checkout_and_config
+    if: fromJson(needs.checkout_and_config.outputs.hetero_train_test_matrix)[0] != null
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: ${{ github.workspace }}
+    runs-on: ${{ fromJson(needs.checkout_and_config.outputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test_config: ${{ fromJson(needs.checkout_and_config.outputs.hetero_train_test_matrix) }}
+    container:
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(needs.checkout_and_config.outputs.container_volumes) }}
+      options: ${{ needs.checkout_and_config.outputs.container_options }}
+
+    steps:
+      - name: Checkout FlagScale code
+        uses: actions/checkout@v4
+
+      - name: Set safe directory
+        run: |
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Pull and install latest Megatron-LM-FL
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ needs.checkout_and_config.outputs.pkg_mgr }}'
+          ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
+          ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          MEGATRON_LM_FL_REPO='${{ inputs.megatron_lm_fl_repo }}'
+          MEGATRON_LM_FL_BRANCH='${{ inputs.megatron_lm_fl_branch }}'
+
+          echo "Cloning Megatron-LM-FL from ${MEGATRON_LM_FL_REPO}, branch: ${MEGATRON_LM_FL_BRANCH}"
+          git clone --depth 1 --branch "${MEGATRON_LM_FL_BRANCH}" \
+            "https://github.com/${MEGATRON_LM_FL_REPO}.git" /tmp/Megatron-LM-FL
+
+          echo "Installing Megatron-LM-FL via pip..."
+          pip install /tmp/Megatron-LM-FL --no-build-isolation --root-user-action=ignore \
+            || { echo "Megatron-LM-FL install failed"; exit 1; }
+
+          echo "Megatron-LM-FL installed successfully from branch: ${MEGATRON_LM_FL_BRANCH}"
+          pip show megatron-core 2>/dev/null || pip show megatron 2>/dev/null || echo "Package info not available"
+        timeout-minutes: 30
+
+      - name: Install dependencies for heterogeneous training
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ needs.checkout_and_config.outputs.pkg_mgr }}'
+          ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
+          ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
+
+          echo "Installing dependencies for heterogeneous training"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install FlagScale CLI
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "FlagScale CLI not found in PATH"; exit 1; }
+          echo "FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+
+          echo "Environment ready for heterogeneous train tests"
+        timeout-minutes: 30
+
+      - name: Run functional tests
+        id: functional_test
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ matrix.test_config.device }}'
+          TASK='${{ matrix.test_config.task }}'
+          MODEL='${{ matrix.test_config.model }}'
+          CASE='${{ matrix.test_config.case }}'
+          PKG_MGR='${{ needs.checkout_and_config.outputs.pkg_mgr }}'
+          ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
+          ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
+
+          echo "Running functional tests for heterogeneous training"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
+          echo "Case: ${CASE:-all}"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+          echo "Project root: $PROJECT_ROOT"
+          echo "Megatron-LM-FL branch: ${{ inputs.megatron_lm_fl_branch }}"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "Running tests with pip/system Python"
+              ;;
+          esac
+
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Run functional tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type functional \
+            --task "$TASK" \
+            --model "$MODEL" \
+            --list "$CASE"
+          exit_code=$?
+
+          if [ $exit_code -eq 0 ]; then
+            echo "Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
+          else
+            echo "Functional tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+          fi
+
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit $exit_code
+        timeout-minutes: 30
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-hetero-megatron-lm-fl-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
+          retention-days: 7
+          if-no-files-found: warn
