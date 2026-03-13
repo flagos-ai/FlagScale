@@ -1,5 +1,4 @@
 import argparse
-import importlib
 
 import numpy as np
 import torch
@@ -8,7 +7,8 @@ from PIL import Image
 
 from flagscale.logger import logger
 from flagscale.models.utils.constants import OBS_STATE
-from flagscale.train.utils.train_utils import load_checkpoint
+from flagscale.models.vla import TrainablePolicy
+from flagscale.train.processor import PolicyProcessorPipeline
 
 
 def load_image(image_path: str, size: tuple[int, int] | None = None) -> torch.Tensor:
@@ -33,10 +33,16 @@ def run_inference(config_path: str):
     engine_cfg = cfg.engine
     generate_cfg = cfg.generate
 
-    model_variant = engine_cfg.model_variant
-    policy = getattr(importlib.import_module("flagscale.models.vla"), model_variant)
-    model, preprocessor, postprocessor = load_checkpoint(
-        engine_cfg.model, policy, engine_cfg.device
+    pretrained_dir = engine_cfg.model
+    model = TrainablePolicy.from_pretrained(pretrained_dir, device=engine_cfg.device)
+
+    preprocessor = PolicyProcessorPipeline.from_pretrained(
+        pretrained_dir,
+        config_filename="policy_preprocessor.json",
+    )
+    postprocessor = PolicyProcessorPipeline.from_pretrained(
+        pretrained_dir,
+        config_filename="policy_postprocessor.json",
     )
 
     # TODO: (yupu): model.to(dtype)?

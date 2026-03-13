@@ -52,6 +52,7 @@ from safetensors.torch import load_file, save_file
 
 from .converters import batch_to_transition, create_transition, transition_to_batch
 from .core import EnvAction, EnvTransition, PolicyAction, RobotAction, TransitionKey
+from flagscale.models.utils.constants import resolve_pretrained_dir
 
 if TYPE_CHECKING:
     from flagscale.models.configs.types import PipelineFeatureType, PolicyFeature
@@ -646,6 +647,7 @@ class DataProcessorPipeline(HubMixin, Generic[TInput, TOutput]):
 
         if model_path.is_dir():
             # Directory: load specified config from directory
+            model_path = resolve_pretrained_dir(model_path, config_filename)
             config_path = model_path / config_filename
             if not config_path.exists():
                 # Check for migration before giving clear error

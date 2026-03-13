@@ -1,4 +1,4 @@
-from .action_model import FlowMatchingHead
+from .base_policy import TrainablePolicy
 from .protocols import ActionModel, VLMBackbone
 from .qwen_gr00t import QwenGr00t
 from .registry import (
@@ -11,6 +11,7 @@ from .utils import get_vlm_config
 from .vlm import Qwen3VLBackbone, Qwen25VLBackbone, QwenVLBackbone
 
 __all__ = [
+    "TrainablePolicy",
     "VLMBackbone",
     "ActionModel",
     "register_vlm",
@@ -22,5 +23,4 @@ __all__ = [
     "QwenVLBackbone",
     "Qwen25VLBackbone",
     "Qwen3VLBackbone",
-    "FlowMatchingHead",
 ]

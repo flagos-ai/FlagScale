@@ -2,10 +2,16 @@
 Training configuration models using Pydantic.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field, field_validator
+
+from flagscale.models.utils.constants import resolve_pretrained_dir
+
+TRAIN_CONFIG_NAME = "train_config.json"
 
 
 class FreezeConfig(BaseModel):
@@ -159,6 +165,12 @@ class SystemConfig(BaseModel):
         raw = self.__dict__.get("raw")
         if raw is not None and hasattr(raw, name):
             return getattr(raw, name)
+        try:
+            extra = object.__getattribute__(self, "__pydantic_extra__")
+        except AttributeError:
+            extra = None
+        if extra is not None and name in extra:
+            return extra[name]
         raise AttributeError(name)
 
 
@@ -181,6 +193,12 @@ class DataConfig(BaseModel):
         raw = self.__dict__.get("raw")
         if raw is not None and hasattr(raw, name):
             return getattr(raw, name)
+        try:
+            extra = object.__getattribute__(self, "__pydantic_extra__")
+        except AttributeError:
+            extra = None
+        if extra is not None and name in extra:
+            return extra[name]
         raise AttributeError(name)
 
 
@@ -203,7 +221,8 @@ class ModelConfig(BaseModel):
 
     # Required fields to identify which model and checkpoint to use
     model_name: str = Field(..., description="Model name: 'pi0' or 'pi0.5'")
-    checkpoint_dir: str = Field(..., description="Path to pretrained model checkpoint")
+    # None when the policy loads pretrained sub-components (e.g. VLM) internally
+    checkpoint_dir: str | None = Field(default=None, description="Path to pretrained model checkpoint")
     freeze: FreezeConfig | None = None
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     raw: DictConfig | None = Field(default=None, exclude=True)
@@ -214,6 +233,12 @@ class ModelConfig(BaseModel):
         raw = self.__dict__.get("raw")
         if raw is not None and hasattr(raw, name):
             return getattr(raw, name)
+        try:
+            extra = object.__getattribute__(self, "__pydantic_extra__")
+        except AttributeError:
+            extra = None
+        if extra is not None and name in extra:
+            return extra[name]
         raise AttributeError(name)
 
     @field_validator("model_name")
@@ -246,7 +271,32 @@ class TrainConfig(BaseModel):
         train_dict["system"] = SystemConfig(**train_dict["system"], raw=train.system)
         train_dict["data"] = DataConfig(**train_dict["data"], raw=train.data)
         train_dict["model"] = ModelConfig(**train_dict["model"], raw=train.model)
-        return cls(**train_dict)
+        config = cls(**train_dict)
+        return config
+
+    def _save_pretrained(self, save_directory: str | Path) -> None:
+        save_directory = Path(save_directory)
+        save_directory.mkdir(parents=True, exist_ok=True)
+        data = self.model_dump()
+        with open(save_directory / TRAIN_CONFIG_NAME, "w") as f:
+            json.dump(data, f, indent=4)
+
+    @classmethod
+    def from_pretrained(cls, pretrained_path: str | Path) -> "TrainConfig":
+        path = resolve_pretrained_dir(Path(pretrained_path), TRAIN_CONFIG_NAME)
+        config_file = path / TRAIN_CONFIG_NAME
+        if not config_file.exists():
+            raise FileNotFoundError(f"{TRAIN_CONFIG_NAME} not found in {path}")
+        with open(config_file) as f:
+            data = json.load(f)
+        raw_system = OmegaConf.create(data["system"])
+        raw_data = OmegaConf.create(data["data"])
+        raw_model = OmegaConf.create(data["model"])
+        data["system"] = SystemConfig(**data["system"], raw=raw_system)
+        data["data"] = DataConfig(**data["data"], raw=raw_data)
+        data["model"] = ModelConfig(**data["model"], raw=raw_model)
+        config = cls(**data)
+        return config
 
     def to_omegaconf(self) -> DictConfig:
         """Reconstruct the full OmegaConf config from stored raw DictConfigs."""

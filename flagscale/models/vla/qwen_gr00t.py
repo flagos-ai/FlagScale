@@ -13,15 +13,22 @@ A lightweight implementation that Qwen-VL + Flow-matching head to directly predi
 Flow-matching header is copyright from GR00T N1.5,
 """
 
+import dataclasses
 from pathlib import Path
 
 import torch
+from safetensors.torch import save_file
 
-from flagscale.models.configs.types import FeatureType, PolicyFeature
-from flagscale.models.utils.constants import ACTION, OBS_STATE, VLM_CONFIG_DIR
-from flagscale.models.vla.base_policy import TrainablePolicy
+from flagscale.models.utils.constants import (
+    ACTION,
+    OBS_STATE,
+    VLM_CONFIG_DIR,
+    resolve_pretrained_dir,
+)
+from flagscale.models.vla.base_policy import SAFETENSORS_FILE, TrainablePolicy
+from flagscale.models.vla.configuration_qwen_gr00t import QwenGr00tConfig
 from flagscale.models.vla.registry import build_action_model, build_vlm
-from flagscale.train.train_config import TrainConfig
+from flagscale.models.vla.utils import get_vlm_config
 
 
 class QwenGr00t(TrainablePolicy):
@@ -35,48 +42,32 @@ class QwenGr00t(TrainablePolicy):
     Focus: Predict future continuous actions conditioned on images + instruction.
     """
 
-    def __init__(self, config: TrainConfig, **kwargs):
-        super().__init__()
-        self._config = config
+    def __init__(self, config: QwenGr00tConfig):
+        super().__init__(config)
 
-        vlm_type = config.model.vlm.get("type", "qwen3-vl")
-        self.vlm = build_vlm(vlm_type, config=config)
-
-        action_model_type = config.model.action_model.get("type", "flow_matching")
-        self.action_model = build_action_model(
-            action_model_type,
-            vlm_config=self.vlm.model_config,
-            action_config={},
-            full_config=config,
+        self.vlm = build_vlm(
+            config.vlm.type,
+            vlm_config=config.vlm,
+            prompt_template=config.prompt_template,
         )
 
-        self.future_action_window_size = config.model.action_model.future_action_window_size
-        self.use_state = config.model.action_model.get("use_state", False)
+        vlm_hidden_size = get_vlm_config(self.vlm.model_config)["hidden_size"]
+        config.action_model.diffusion_model_cfg["cross_attention_dim"] = vlm_hidden_size
 
-        # Deserialize input/output features from config (checkpoint load path).
-        # At training time, make_policy sets these on the policy after construction.
-        load_pretrained = config.model.qwenvl.get("load_pretrained", True)
-        raw_input = config.model.get("input_features", {})
-        raw_output = config.model.get("output_features", {})
+        self.action_model = build_action_model(
+            config.action_model.type,
+            config=config.action_model,
+        )
 
-        if not load_pretrained and (not raw_input or not raw_output):
-            raise ValueError(
-                "Checkpoint config missing input_features/output_features. "
-                "Re-save the checkpoint with the latest training code."
-            )
+        self.future_action_window_size = config.action_model.future_action_window_size
+        self.use_state = config.action_model.use_state
 
-        if raw_input:
-            self.input_features = {
-                k: PolicyFeature(type=FeatureType(v["type"]), shape=tuple(v["shape"]))
-                for k, v in raw_input.items()
-            }
-        if raw_output:
-            self.output_features = {
-                k: PolicyFeature(type=FeatureType(v["type"]), shape=tuple(v["shape"]))
-                for k, v in raw_output.items()
-            }
+        if config.input_features:
+            self.input_features = config.input_features
+        if config.output_features:
+            self.output_features = config.output_features
 
-    def forward(self, batch: list[dict] | dict, **kwargs) -> dict[str, torch.Tensor]:
+    def forward(self, batch: list[dict] | dict) -> dict[str, torch.Tensor]:
         """ """
         if isinstance(batch, list):  # wds: list of per-sample dicts
             images = [ex["image"] for ex in batch]
@@ -101,8 +92,8 @@ class QwenGr00t(TrainablePolicy):
             # last_hidden_state: [B, seq_len, H]
             last_hidden = vlm_output["hidden_states"][-1]  # [B, L, H]
 
-        target_horizon = self._config.model.action_model.action_horizon
-        target_dim = self._config.model.action_model.action_dim
+        target_horizon = self.config.action_model.action_horizon
+        target_dim = self.config.action_model.action_dim
 
         padded_actions = []
         action_masks = []
@@ -136,9 +127,7 @@ class QwenGr00t(TrainablePolicy):
 
             # TODO: (yupu) I believe there is a bug in starVLA, the
             # `repeated_diffusion_steps` is not properly set in the config.
-            repeated_diffusion_steps = self._config.model.action_model.get(
-                "repeated_diffusion_steps", 4
-            )
+            repeated_diffusion_steps = self.config.action_model.repeated_diffusion_steps
 
             actions_repeated = actions.repeat(repeated_diffusion_steps, 1, 1)
             last_hidden_repeated = last_hidden.repeat(repeated_diffusion_steps, 1, 1)
@@ -163,7 +152,7 @@ class QwenGr00t(TrainablePolicy):
         return {"loss": output["loss"]}
 
     @torch.inference_mode()
-    def predict_action(self, batch: list[dict] | dict, **kwargs) -> dict:
+    def predict_action(self, batch: list[dict] | dict) -> dict:
         """
         Steps:
           1. Resize images to training resolution (if specified)
@@ -205,26 +194,63 @@ class QwenGr00t(TrainablePolicy):
         # Assume the output of the action model is dict mapping `ACTION` to the normalized actions
         return output
 
-    def checkpoint_config_overrides(self) -> dict:
-        return {
-            "model": {
-                "qwenvl": {
-                    "load_pretrained": False,
-                    "base_vlm": "${_pretrained_dir}/" + VLM_CONFIG_DIR,
-                },
-                "input_features": {
-                    k: {"type": ft.type.value, "shape": list(ft.shape)}
-                    for k, ft in self.input_features.items()
-                },
-                "output_features": {
-                    k: {"type": ft.type.value, "shape": list(ft.shape)}
-                    for k, ft in self.output_features.items()
-                },
-            }
-        }
+    def fsdp_units(self):
+        return self.vlm.fsdp_units() + self.action_model.fsdp_units()
 
-    def save_pretrained_artifacts(self, save_dir: Path) -> None:
-        vlm_config_dir = save_dir / VLM_CONFIG_DIR
+    def _save_pretrained(self, save_directory: Path, state_dict=None) -> None:
+        """Save QwenGr00t checkpoint: VLM processor + config.json + weights.
+
+        In addition to the base class artifacts, writes the VLM HF config
+        and processor to a ``vlm_config/`` subdirectory so the checkpoint
+        is fully self-contained (no dependency on the original VLM hub
+        repo at inference time).  ``config.json`` records a *relative*
+        ``base_vlm`` path pointing at this subdirectory.
+        """
+        save_directory = Path(save_directory)
+
+        # 1. Save VLM config + processor
+        vlm_config_dir = save_directory / VLM_CONFIG_DIR
         vlm_config_dir.mkdir(parents=True, exist_ok=True)
         self.vlm.model.config.save_pretrained(vlm_config_dir)
         self.vlm.processor.save_pretrained(vlm_config_dir)
+
+        # 2. Save config.json with relative VLM path
+        save_config = dataclasses.replace(
+            self.config,
+            vlm=dataclasses.replace(
+                self.config.vlm,
+                base_vlm=VLM_CONFIG_DIR,
+                load_pretrained=False,
+            ),
+        )
+        save_config._save_pretrained(save_directory)
+
+        # 3. Save weights
+        # Under FSDP2, model.state_dict() returns sharded DTensors that can't
+        # be serialized directly. The caller must gather the full state dict
+        # via get_model_state_dict() and pass it in.
+        if state_dict is not None:
+            state_dict = {k: v.clone().contiguous() for k, v in state_dict.items()}
+        else:
+            state_dict = {k: v.clone().contiguous() for k, v in self.state_dict().items()}
+        save_file(state_dict, str(save_directory / SAFETENSORS_FILE))
+
+    @classmethod
+    def from_pretrained(cls, pretrained_path, device="cpu", **kwargs):
+        """Load a QwenGr00t checkpoint.
+
+        Resolves the relative ``base_vlm`` path stored in ``config.json``
+        against the checkpoint directory, then delegates weight loading
+        to ``TrainablePolicy.from_pretrained``.
+        """
+        path = resolve_pretrained_dir(Path(pretrained_path), SAFETENSORS_FILE)
+        config = QwenGr00tConfig.from_pretrained(path)
+
+        # Resolve relative VLM path against checkpoint directory
+        if not Path(config.vlm.base_vlm).is_absolute():
+            config.vlm = dataclasses.replace(
+                config.vlm,
+                base_vlm=str(path / config.vlm.base_vlm),
+            )
+
+        return super().from_pretrained(pretrained_path, device=device, config=config)

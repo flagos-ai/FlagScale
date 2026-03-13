@@ -1,6 +1,9 @@
 # Mainly adopted from:
 # https://github.com/starVLA/starVLA/blob/3f7feefbc5fc25890ad3a7d262b8a0aea1339aa7/starVLA/model/modules/vlm/QWen3.py
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +19,14 @@ from transformers import (
 )
 
 from flagscale.models.vla.registry import register_vlm
-from flagscale.train.train_config import TrainConfig
+
+
+@dataclass
+class QwenVLConfig:
+    type: str = "qwen3-vl"
+    base_vlm: str = ""
+    load_pretrained: bool = True
+    attn_implementation: str | None = None
 
 
 def _to_pil(img):
@@ -38,22 +48,20 @@ class QwenVLBackbone(nn.Module):
     Base class for Qwen VL backends.
 
     Args:
-        config: TrainConfig object with config.model.qwenvl namespace.
+        vlm_config: QwenVLConfig with base_vlm, load_pretrained, attn_implementation.
+        prompt_template: Optional prompt template with {instruction} placeholder.
     """
 
-    def __init__(self, config: TrainConfig, **kwargs):
+    def __init__(self, vlm_config: QwenVLConfig, prompt_template: str | None = None, **kwargs):
         super().__init__()
-        qwenvl_config = config.model.qwenvl
-        self.model_id = qwenvl_config.base_vlm
-        # When loading from checkpoint, base_vlm is resolved via OmegaConf
-        # interpolation: "${_pretrained_dir}/vlm_config" → absolute path.
-        self._load_pretrained = qwenvl_config.get("load_pretrained", True)
-        self._attn_implementation = qwenvl_config.get("attn_implementation", None)
+        self.model_id = vlm_config.base_vlm
+        self._load_pretrained = vlm_config.load_pretrained
+        self._attn_implementation = vlm_config.attn_implementation
 
         if not self._load_pretrained and not Path(self.model_id).exists():
             raise FileNotFoundError(
                 f"VLM config directory not found: {self.model_id}. "
-                "Ensure the checkpoint was saved with save_pretrained_artifacts."
+                "Ensure the checkpoint was saved with save_pretrained."
             )
 
         # TODO: (yupu) The model loaded by `from_pretrained` is eval mode by default, is this expected? I removed `policy.train()` in train_qwen_gr00t.py to match starVLA, but not sure if this is the right way to do this.
@@ -61,7 +69,7 @@ class QwenVLBackbone(nn.Module):
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         # FIXME: Hard-coded padding side
         self.processor.tokenizer.padding_side = "left"
-        self._config: TrainConfig = config
+        self._prompt_template = prompt_template
 
     def _load_model(self, model_id: str):
         raise NotImplementedError
@@ -111,9 +119,8 @@ class QwenVLBackbone(nn.Module):
         for imgs, instruction in zip(images, instructions):
             content = [{"type": "image", "image": img} for img in imgs]
 
-            if "CoT_prompt" in self._config.data.vla_data:
-                cot_prompt = self._config.data.vla_data.get("CoT_prompt", "")
-                prompt = cot_prompt.replace("{instruction}", instruction)
+            if self._prompt_template is not None:
+                prompt = self._prompt_template.replace("{instruction}", instruction)
             else:
                 prompt = instruction
 

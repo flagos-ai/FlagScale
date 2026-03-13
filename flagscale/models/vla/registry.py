@@ -24,9 +24,9 @@ def build_vlm(name: str, **kwargs):
     return VLM_REGISTRY[name](**kwargs)
 
 
-def build_action_model(name: str, vlm_config, action_config: dict, **kwargs):
+def build_action_model(name: str, **kwargs):
     if name not in ACTION_MODEL_REGISTRY:
         raise ValueError(
             f"Unknown ActionModel: {name}. Available: {list(ACTION_MODEL_REGISTRY.keys())}"
         )
-    return ACTION_MODEL_REGISTRY[name](vlm_config=vlm_config, action_config=action_config, **kwargs)
+    return ACTION_MODEL_REGISTRY[name](**kwargs)

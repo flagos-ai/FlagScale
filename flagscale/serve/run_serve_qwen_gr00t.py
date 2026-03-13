@@ -2,7 +2,6 @@
 # https://github.com/starVLA/starVLA/blob/3f7feefbc5fc25890ad3a7d262b8a0aea1339aa7/deployment/model_server/server_policy.py
 
 import argparse
-import importlib
 import time
 
 import torch
@@ -10,8 +9,9 @@ from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from flagscale.logger import logger
 from flagscale.models.utils.constants import ACTION
+from flagscale.models.vla import TrainablePolicy
 from flagscale.serve.websocket_policy_server import WebsocketPolicyServer
-from flagscale.train.utils.train_utils import load_checkpoint
+from flagscale.train.processor import PolicyProcessorPipeline
 
 
 class Policy:
@@ -28,10 +28,17 @@ class Policy:
 
     def load_model(self):
         t_s = time.perf_counter()
-        model_variant = self.config_engine.model_variant
-        policy = getattr(importlib.import_module("flagscale.models.vla"), model_variant)
-        self.model, self.preprocessor, self.postprocessor = load_checkpoint(
-            self.config_engine.model, policy, self.config_engine.device
+        pretrained_dir = self.config_engine.model
+        self.model = TrainablePolicy.from_pretrained(
+            pretrained_dir, device=self.config_engine.device
+        )
+        self.preprocessor = PolicyProcessorPipeline.from_pretrained(
+            pretrained_dir,
+            config_filename="policy_preprocessor.json",
+        )
+        self.postprocessor = PolicyProcessorPipeline.from_pretrained(
+            pretrained_dir,
+            config_filename="policy_postprocessor.json",
         )
         # TODO: (yupu): model.to(dtype)?
         logger.info(f"Policy model loading latency: {time.perf_counter() - t_s:.2f}s")
