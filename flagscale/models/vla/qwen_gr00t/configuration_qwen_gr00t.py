@@ -8,7 +8,7 @@ from flagscale.models.configs.types import NormalizationMode
 from flagscale.models.utils.constants import ACTION
 from flagscale.models.vla.action_model.gr00t_action_header import GR00TActionHeadConfig
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
-from flagscale.models.vla.vlm.qwen_vl import QwenVLConfig
+from flagscale.models.vla.vlm.qwenvl_backbone import QwenVLConfig
 
 if TYPE_CHECKING:
     from flagscale.train.train_config import TrainConfig
