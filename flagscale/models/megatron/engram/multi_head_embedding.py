@@ -1,5 +1,5 @@
 ## built-in
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
 ## third-party
 import math
 
@@ -15,6 +15,7 @@ from megatron.core.tensor_parallel.utils import VocabUtility
 from megatron.core.tensor_parallel.layers import _initialize_affine_weight_cpu, _initialize_affine_weight_gpu
 from megatron.core import parallel_state
 from megatron.core.model_parallel_config import ModelParallelConfig
+from megatron.core.dist_checkpointing.mapping import ShardedTensor
 
 # engram
 from .engram_config import EngramConfig
@@ -30,7 +31,7 @@ def _vocab_size_with_padding(orig_vocab_size, tp_size):
     return after
 
 
-class ConditionalMemory(nn.Module):
+class EngramMemory(nn.Module):
     """Embedding parallelized in the vocabulay dimension.
 
     This is mainly adapted from torch.nn.Embedding and all the default values are kept.
@@ -69,8 +70,10 @@ class ConditionalMemory(nn.Module):
         self.embedding_parallel_group = embedding_parallel_group
         if self.embedding_parallel_group is None:
             self.embedding_parallel_size = 1
+            self.embedding_parallel_rank = 0
         else:
             self.embedding_parallel_size = get_pg_size(self.embedding_parallel_group)
+            self.embedding_parallel_rank = get_pg_rank(self.embedding_parallel_group)
 
         (self.vocab_start_index, self.vocab_end_index) = (
             VocabUtility.vocab_range_from_global_vocab_size(
@@ -206,6 +209,35 @@ class ConditionalMemory(nn.Module):
         torch.cuda.nvtx.range_pop()
         return output
 
+    def sharded_state_dict(
+        self,
+        prefix: str = '',
+        sharded_offsets: Tuple[Tuple[int, int, int]] = (),
+        metadata: Optional[dict] = None,** kwargs,
+    ):
+        state_dict = self.state_dict(prefix="", keep_vars=True)
+        weight_prefix = f"{prefix}weight"
+        prepend_axis_num = len(sharded_offsets)
+        new_offsets = []
+        tp_rank = self.embedding_parallel_rank
+        tp_size = self.embedding_parallel_size
+        dp_replica_id = get_pg_rank(parallel_state.get_engram_data_parallel_group())
+        new_offsets.append((prepend_axis_num, tp_rank, tp_size))
+
+        replica_id = (0, 0, dp_replica_id)
+        sharded_tensor = ShardedTensor.from_rank_offsets(
+            weight_prefix,
+            state_dict["weight"],
+            *sharded_offsets,
+            *new_offsets,
+            replica_id=replica_id,
+            allow_shape_mismatch=True,
+            **kwargs
+        )
+        return {
+            weight_prefix: sharded_tensor
+        }
+
 
 class MultiHeadEmbedding(nn.Module):
     def __init__(self, engram_cfg: EngramConfig, list_of_N: list[int], D: int):
@@ -230,7 +262,7 @@ class MultiHeadEmbedding(nn.Module):
             padded_total_N = _vocab_size_with_padding(total_N, get_pg_size(self.tp_group))
             print(f"Engram multi-head embedding: pad total_n from {total_N} to {padded_total_N}")
 
-            self.embedding = tensor_parallel.VocabParallelEmbedding(
+            self.memory = tensor_parallel.VocabParallelEmbedding(
                 num_embeddings=padded_total_N,
                 embedding_dim=D,
                 init_method=self.engram_cfg.embedding_init_method,
@@ -243,7 +275,7 @@ class MultiHeadEmbedding(nn.Module):
             self.reduce_scatter_embeddings = self.engram_cfg.sequence_parallel
             padded_total_N = _vocab_size_with_padding(total_N, get_pg_size(self.embedding_parallel_group))
             print(f"Engram multi-head embedding: pad total_n from {total_N} to {padded_total_N}")
-            self.embedding = ConditionalMemory(
+            self.memory = EngramMemory(
                 num_embeddings=padded_total_N,
                 embedding_dim=D,
                 init_method=self.engram_cfg.embedding_init_method,
@@ -252,16 +284,23 @@ class MultiHeadEmbedding(nn.Module):
                 embedding_parallel_group=self.embedding_parallel_group,
             )
             if self.engram_cfg.engram_embedding_parallel_method == "alltoall":
-                self.embedding.enable_parallel()
+                self.memory.enable_parallel()
             elif self.engram_cfg.engram_embedding_parallel_method == "offload":
-                self.embedding.enable_offloading()
+                self.memory.enable_offloading()
             else:
                 raise ValueError(f"Unsupported engram_embedding_parallel_method: {self.engram_cfg.engram_embedding_parallel_method}")
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         shifted_input_ids = input_ids + self.offsets
-        output = self.embedding(shifted_input_ids)
+        output = self.memory(shifted_input_ids)
 
         if not self.reduce_scatter_embeddings:
             output = output.transpose(0, 1).contiguous()
         return output
+    
+    def sharded_state_dict(self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None):
+        sharded_dict = {}
+        memory_prefix = f"{prefix}memory."
+        memory_sharded_dict = self.memory.sharded_state_dict(memory_prefix, sharded_offsets, metadata)
+        sharded_dict.update(memory_sharded_dict)
+        return sharded_dict

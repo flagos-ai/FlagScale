@@ -375,9 +375,15 @@ class FSTrainArguments:
         if self.args.use_engram:
             print(f"[rank{torch.distributed.get_rank()}]: just for debug.")
             if self.args.engram_embedding_parallel_method == "allreduce":
-                assert self.args.engram_embedding_parallel_size is None, "embedding parallel size should be None when using allreduce"
                 if self.args.rank == 0:
-                    warnings.warn(f"[rank0]: We do not recoomend using allreduce for engram embedding, this is deprecated and will be removed in later version.", DeprecationWarning)
+                    warnings.warn(f"[rank0]: We do not recomend using allreduce for engram embedding, this is deprecated and will be removed in later version.", DeprecationWarning)
+                if self.args.engram_embedding_parallel_size is not None:
+                    warnings.warn(
+                        "[rank0]: If set the embedding_parallel_method to allreduce, " \
+                        "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel." \
+                        "So the embedding_parallel_size is useless and set to None."
+                    )
+                    self.args.engram_embedding_parallel_size = None   
             elif self.args.engram_embedding_parallel_method == "alltoall":
                 assert self.args.engram_embedding_parallel_size is not None, "embedding parallel size should be specified when using alltoall"
             elif self.args.engram_embedding_parallel_method == "offload":
@@ -809,7 +815,7 @@ def _add_engram_args(parser):
     group.add_argument(
         '--engram-embedding-parallel-size',
         type=int,
-        default=None,
+        default=1,
         help='Parallel size for Engram embedding',
     )
     group.add_argument(

@@ -14,6 +14,9 @@ from .ngram_hash import get_or_create_hash_mapping
 from .short_conv import ShortConv
 
 
+## Megatron
+from megatron.core.transformer.utils import sharded_state_dict_default
+
 class Engram(nn.Module):
     def __init__(self, engram_cfg: EngramConfig, layer_id):
         super().__init__()
@@ -34,7 +37,7 @@ class Engram(nn.Module):
             pad_id=engram_cfg.engram_pad_id,
             seed=engram_cfg.engram_seed,
         )
-        self.conditional_memory = MultiHeadEmbedding(
+        self.memory = MultiHeadEmbedding(
             engram_cfg,
             list_of_N=[
                 x for y in global_hash_mapping.vocab_size_across_layers[self.layer_id] for x in y
@@ -92,7 +95,7 @@ class Engram(nn.Module):
             self.embedding_cache = None  # Clear cache after use
             del embedding_event  # Free the event
         else:
-            embeddings = self.conditional_memory(hash_input_ids).flatten(start_dim=-2)
+            embeddings = self.memory(hash_input_ids).flatten(start_dim=-2)
         # [L/tp_size, B, N_GRAM * N_HEADS_PER_GRAM, N_EMBED_PER_GRAM // N_HEADS_PER_GRAM]
         # [L/tp_size, B, N_GRAM * N_EMBED_PER_NGRAM]
 
@@ -139,8 +142,25 @@ class Engram(nn.Module):
         assert input_ids is not None, "Input ids can not be None for EngramModel"
         self.embedding_stream.synchronize()  # Ensure previous computations on the stream are finished
         with torch.cuda.stream(self.embedding_stream):
-            embedding_result = self.conditional_memory(input_ids).flatten(start_dim=-2)
+            embedding_result = self.memory(input_ids).flatten(start_dim=-2)
         embedding_event = torch.cuda.Event()
         embedding_event.record(self.embedding_stream)
         self.embedding_cache = (embedding_result, embedding_event)
         
+    def sharded_state_dict(
+        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
+    ):
+        sharded_dict = {}
+        memory_prefix = f"{prefix}memory."
+        sharded_dict.update(self.memory.sharded_state_dict(memory_prefix, sharded_offsets, metadata))
+        conv_prefix = f"{prefix}short_conv."
+        sharded_dict.update(sharded_state_dict_default(self.short_conv, conv_prefix, sharded_offsets, metadata))
+        value_proj_prefix = f"{prefix}value_proj."
+        sharded_dict.update(sharded_state_dict_default(self.value_proj, value_proj_prefix, sharded_offsets, metadata))
+        key_projs_prefix = f"{prefix}key_projs."
+        sharded_dict.update(sharded_state_dict_default(self.key_projs, key_projs_prefix, sharded_offsets, metadata))
+        norm1_prefix = f"{prefix}norm1."
+        sharded_dict.update(sharded_state_dict_default(self.norm1, norm1_prefix, sharded_offsets, metadata))
+        norm2_prefix = f"{prefix}norm2."
+        sharded_dict.update(sharded_state_dict_default(self.norm2, norm2_prefix, sharded_offsets, metadata))
+        return sharded_dict

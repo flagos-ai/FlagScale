@@ -27,7 +27,7 @@ experiment:
     backend: torchrun
     nnodes: 3
     nproc_per_node: 8
-    hostfile: hostfile # Slect an available hostfile. Like ip_1 slosts=8\nip_2 slost=8...
+    hostfile: hostfile # Select an available hostfile. Like ip_1 slosts=8\nip_2 slost=8...
     master_port: 10720 # Select an available port.
     ssh_port: 10710 # Select an available port.
     master_addr: <master_ip>

@@ -88,7 +88,11 @@ class EngramTransformerLayer(TransformerLayer):
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
-        raise NotImplementedError("Sharded state dict is not supported for EngramTransformerLayer")
+        sharded_dict =  super().sharded_state_dict(prefix, sharded_offsets, metadata)
+        engram_prefix = f"{prefix}engram."
+        engram_sharded = self.engram.sharded_state_dict(engram_prefix, sharded_offsets, metadata)
+        sharded_dict.update(engram_sharded)
+        return sharded_dict
 
 
 class EngramTransformerBlock(TransformerBlock):
@@ -344,8 +348,3 @@ class EngramTransformerBlock(TransformerBlock):
             hidden_states = hidden_states.clone()
 
         return hidden_states
-
-    def sharded_state_dict(
-        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict = None
-    ):
-        raise NotImplementedError("Sharded state dict is not supported for EngramTransformerBlock")

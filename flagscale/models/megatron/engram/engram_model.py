@@ -201,7 +201,3 @@ class EngramModel(GPTModel):
             loss_mask=loss_mask
         )
 
-    def sharded_state_dict(
-        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
-    ):
-        raise NotImplementedError("Sharded state dict is not supported for EngramModel")
