@@ -373,7 +373,6 @@ class FSTrainArguments:
 
         # Engram related.
         if self.args.use_engram:
-            print(f"[rank{torch.distributed.get_rank()}]: just for debug.")
             if self.args.engram_embedding_parallel_method == "allreduce":
                 if self.args.rank == 0:
                     warnings.warn(f"[rank0]: We do not recomend using allreduce for engram embedding, this is deprecated and will be removed in later version.", DeprecationWarning)
