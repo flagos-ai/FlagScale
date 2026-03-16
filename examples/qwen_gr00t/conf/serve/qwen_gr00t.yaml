@@ -1,0 +1,7 @@
+- serve_id: vllm_model # Not in use
+  engine_args:
+    host: 0.0.0.0
+    port: 5000
+    model_variant: QwenGr00t
+    model: /workspace/models/qwen_gr00t_train/checkpoints/last
+    device: "cuda"

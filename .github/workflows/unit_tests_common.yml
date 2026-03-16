@@ -165,6 +165,9 @@ jobs:
             --pip-deps typer \
             --retry-count 3
 
+          # TODO: temp solution to install newly added deps, remove once the new image is built
+          pip install qwen_vl_utils==0.0.14 diffusers==0.36.0 websocket-client==1.8.0 websocket==0.2.1 websockets==15.0.1 msgpack==1.1.0
+
           # Copy test data (keep existing logic)
           mkdir -p /opt/data
           cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true

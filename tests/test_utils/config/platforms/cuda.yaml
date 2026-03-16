@@ -21,7 +21,7 @@ a100:
       # Add or remove test cases per model
       train:
         aquila: ["tp2_pp2", "tp4_pp2"]
-        deepseek: ["tp2_pp2_ep2"]
+        deepseek: ["tp2_pp2_ep2", "tp2_pp2_ep2_engram"]
         mixtral: ["tp2_pp1_ep2", "tp4_pp1_ep2"]
       hetero_train:
         aquila: ["tp2pp1_tp4pp1_tp2pp1", "tp2dp1pp1_tp2dp2pp1_tp1dp2pp1", "dp2dp4_shared_embedding"]

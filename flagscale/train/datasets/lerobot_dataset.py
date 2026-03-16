@@ -509,7 +509,7 @@ class LeRobotDatasetMetadata:
         feature_keys = list(self.features)
         return (
             f"{self.__class__.__name__}({{\n"
-            f"    Repository ID: '{self.repo_id}',\n"
+            f"    Root: '{self.root}',\n"
             f"    Total episodes: '{self.total_episodes}',\n"
             f"    Total frames: '{self.total_frames}',\n"
             f"    Features: '{feature_keys}',\n"
@@ -1086,6 +1086,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         # Add task as a string
         task_idx = item["task_index"].item()
         item["task"] = self.meta.tasks.iloc[task_idx].name
+
         return item
 
     def __repr__(self):

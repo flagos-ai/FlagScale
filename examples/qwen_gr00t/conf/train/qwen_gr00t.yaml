@@ -1,0 +1,168 @@
+system:
+  batch_size: 16
+  train_steps: 30000
+  log_freq: 1
+  grad_clip_norm: 1.0
+  use_amp: true
+  shuffle: true
+  num_workers: 4
+
+  checkpoint:
+    output_directory: ${experiment.exp_dir}
+    # Whether to save checkpoint
+    save_checkpoint: true
+    # Number of steps between checkpoints
+    save_freq: 1000
+  # TODO(yupu): Support resuming from checkpoint
+
+model:
+  # TODO: (yupu) the config layout is still a mess
+  model_name: qwen_gr00t
+  # Path to the checkpoint of the pretrained base VLM model, e.g. Qwen3-VL-4B-Instruct
+  checkpoint_dir: /workspace/models/Qwen/Qwen3-VL-4B-Instruct/
+  vlm:
+    type: qwen3-vl
+  qwenvl:
+    base_vlm: /workspace/models/Qwen/Qwen3-VL-4B-Instruct/
+    attn_implementation: flash_attention_2
+    vl_hidden_dim: 2048
+  dino:
+    dino_backbone: dinov2_vits14
+  action_model:
+    # Whether to condition the action model on proprioceptive state (observation.state)
+    use_state: false
+    type: flow_matching
+    action_model_type: DiT-B
+    action_hidden_dim: 1024
+    hidden_size: 1024
+    add_pos_embed: True
+    max_seq_len: 1024
+    action_dim: 7
+    state_dim: 7
+    future_action_window_size: 7
+    action_horizon: 8
+    past_action_window_size: 0
+    repeated_diffusion_steps: 4
+    noise_beta_alpha: 1.5
+    noise_beta_beta: 1.0
+    noise_s: 0.999
+    num_timestep_buckets: 1000
+    num_inference_timesteps: 4
+    num_target_vision_tokens: 32
+    diffusion_model_cfg:
+      cross_attention_dim: 2048
+      dropout: 0.2
+      final_dropout: True
+      interleave_self_attention: True
+      norm_type: ada_norm
+      num_layers: 16
+      output_dim: 1024
+      positional_embeddings: None
+  reduce_in_full_precision: True
+
+  optimizer:
+    name: AdamW
+    lr: 2.5e-5
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08
+    param_groups:
+      vlm:
+        lr: 1.0e-05
+      action_model:
+        lr: 1.0e-04
+    scheduler:
+      name: cosine_with_min_lr
+      warmup_steps: 5000
+      scheduler_kwargs:
+        min_lr: 1.0e-06
+      # Legacy fields kept for BC
+      decay_steps: 30000
+      decay_lr: 2.5e-6
+
+  # ============================================================
+  # Module Freezing Configuration
+  # ============================================================
+  # Freezing logic: freeze_patterns are applied first, then keep_patterns override.
+  # Patterns are regex matched against full parameter names.
+  #
+  # Common patterns for QwenGR00T:
+  #   - "qwen_vl_interface\\..*"                              # Entire VLM
+  #   - "qwen_vl_interface\\.model\\.visual\\..*"             # Vision encoder
+  #   - "qwen_vl_interface\\.model\\.model\\..*"              # Language model
+  #   - "qwen_vl_interface\\.model\\.model\\.layers\\.[0-9]\\."  # LLM layers 0-9
+  #   - "action_model\\..*"                                   # Action head
+  #   - "action_model\\.model\\.transformer_blocks\\.[0-7]\\."   # DiT blocks 0-7
+  #
+  # freeze:
+  #   # SCENARIO A: Freeze VLM, train only action head
+    # freeze_patterns:
+    #   - "qwen_vl_interface\\..*"
+  #
+  #   # SCENARIO B: Freeze VLM but keep projector trainable
+  #   # freeze_patterns:
+  #   #   - "qwen_vl_interface\\..*"
+  #   # keep_patterns:
+  #   #   - "qwen_vl_interface\\.model\\.visual\\.merger\\..*"
+  #
+  #   # SCENARIO C: Freeze everything except action decoder
+  #   # freeze_patterns:
+  #   #   - ".*"
+  #   # keep_patterns:
+  #   #   - "action_model\\.action_decoder\\..*"
+
+data:
+  dataset_type: lerobot
+  wds:
+    vision_root: ""
+    action_key: eepose
+    state_key: eepose
+  # TODO: (yupu) Remove this once we have a proper dataset config
+  vla_data:
+    dataset_py: lerobot_datasets
+    data_root_dir: playground/Datasets/
+    data_mix: libero_goal_old
+    action_type: delta_qpos
+    CoT_prompt: Your task is {instruction}. To identify the key objects for your task. Locate their bounding boxes in [x1,y1,x2,y2] format.
+    CoT_answer: bbox
+    default_image_resolution: [3, 224, 224]
+    load_all_data_for_training: True
+    obs: ["image_0"]
+    video_backend: torchvision_av
+  # Path to the training data
+  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  tolerance_s: 0.0001
+  # TODO: (yupu) I think these indices should belong to the policy config, maybe put it in the model config?
+  observation_delta_indices: [0]
+  action_delta_indices: [0,1,2,3,4,5,6,7]
+  preprocessor:
+    name: policy_preprocessor
+    steps:
+      - registry_name: rename_observations_processor
+        config:
+          rename_map: {}
+      - registry_name: to_batch_processor
+        config: {}
+      - registry_name: device_processor
+        config:
+          device: cuda
+          float_dtype: null
+      - registry_name: normalizer_processor
+        config:
+          eps: 1e-8
+          features: {}
+          norm_map:
+            VISUAL: IDENTITY
+            STATE: MIN_MAX
+            ACTION: MIN_MAX
+  postprocessor:
+    name: policy_postprocessor
+    steps:
+      - registry_name: unnormalizer_processor
+        config:
+          eps: 1e-8
+          features: {}
+          norm_map:
+            VISUAL: IDENTITY
+            STATE: MIN_MAX
+            ACTION: MIN_MAX

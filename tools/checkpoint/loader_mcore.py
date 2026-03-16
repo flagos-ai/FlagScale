@@ -124,6 +124,22 @@ def _load_checkpoint(queue, args):
     _set_arg("hetero_process_meshes")
     _set_arg("hetero_pipeline_layer_split")
 
+    # for engram
+    _set_arg("use_engram")
+    _set_arg("engram_layer_ids")
+    _set_arg("engram_hc_mult")
+    _set_arg("engram_kernel_size")
+    _set_arg("engram_pad_id")
+    _set_arg("engram_seed")
+    _set_arg("engram_vocab_size")
+    _set_arg("engram_tokenizer_name_or_path")
+    _set_arg("max_ngram_size")
+    _set_arg("n_embed_per_ngram")
+    _set_arg("n_head_per_ngram")
+    setattr(margs, "vocab_size", args.true_vocab_size)
+    engram_tokenizer_path_ckpt = getattr(checkpoint_args, "engram_tokenizer_name_or_path", None)
+    setattr(margs, "engram_tokenizer_name_or_path", os.path.join(root_path, engram_tokenizer_path_ckpt))
+
     # for hetero
     if margs.hetero_process_meshes is not None:
         margs.pipeline_model_parallel_size = sum(row[-1] for row in margs.hetero_process_meshes)
@@ -369,6 +385,11 @@ def _load_checkpoint(queue, args):
             for layer_id in range(len(models[0].decoder.layers)):
                 message = dict()
                 margs.total_layer_num = total_layer_num
+
+                engram_layer_id  = total_layer_num # get_global_layer_id
+                if margs.use_engram and engram_layer_id in margs.engram_layer_ids:
+                    ckpt_plugin.get_engram_ckpt(message, models, engram_layer_id, margs)
+
                 ckpt_plugin.get_attn_ckpt(message, models, layer_id, margs)
                 ckpt_plugin.get_mlp_ckpt(message, models, layer_id, margs)
 

@@ -5,6 +5,7 @@ exclude: |
         flagscale/models/megatron/.*|
         tools/checkpoint/loader.*\.py|
         tools/checkpoint/saver.*\.py|
+        tools/checkpoint/qwen3_engram/modeling_hf/.*|
         examples/aquila/tokenizer*|
     )$
 repos:

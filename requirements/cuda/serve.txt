@@ -1,7 +1,7 @@
 # serve-specific dependencies
 
 -r ./base.txt
-vllm @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/vllm/0.11.0%2Bfl.0.1.cu124/vllm-0.11.0%2Bfl.0.1.cu124-cp312-cp312-linux_x86_64.whl
+vllm @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/vllm/0.13.0%2Bfl.0.1.cu128.g72506c983/vllm-0.13.0%2Bfl.0.1.cu128.g72506c983-cp312-cp312-linux_x86_64.whl
 
 # support 0.5b_multiple_instance ci test
 ray==2.49.1
@@ -10,3 +10,9 @@ dm-tree==0.1.9
 
 # Source dependencies (installed from git repos)
 # vllm @ git+https://github.com/flagos-ai/vllm-FL.git
+
+# Support vla model serving
+websocket-client==1.8.0
+websocket==0.2.1
+websockets==15.0.1
+msgpack==1.1.0

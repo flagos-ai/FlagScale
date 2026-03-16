@@ -1,0 +1,11 @@
+engine:
+  model_variant: "QwenGr00t"
+  model: /workspace/models/qwen_gr00t_train/checkpoints/last
+  device: "cuda"
+
+generate:
+  images:
+    observation.images.wrist_image: qwen_gr00t_inference_inputs/frame_100_observation_images_wrist_image.jpg
+    observation.images.image: qwen_gr00t_inference_inputs/frame_100_observation_images_image.jpg
+  state_path: qwen_gr00t_inference_inputs/frame_100_state.pt
+  task_path: qwen_gr00t_inference_inputs/frame_100_task.txt

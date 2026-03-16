@@ -27,7 +27,6 @@ from threading import Lock
 from typing import Any, ClassVar
 
 import av
-import fsspec
 import pyarrow as pa
 import torch
 import torchvision
@@ -188,9 +187,9 @@ class VideoDecoderCache:
 
         with self._lock:
             if video_path not in self._cache:
-                file_handle = fsspec.open(video_path).__enter__()
-                decoder = VideoDecoder(file_handle, seek_mode="approximate")
-                self._cache[video_path] = (decoder, file_handle)
+                # Pass path directly instead of fsspec file handle — only local files are supported.
+                decoder = VideoDecoder(video_path, seek_mode="approximate")
+                self._cache[video_path] = (decoder, None)
 
             return self._cache[video_path][0]
 
@@ -198,7 +197,8 @@ class VideoDecoderCache:
         """Clear the cache and close file handles."""
         with self._lock:
             for _, file_handle in self._cache.values():
-                file_handle.close()
+                if file_handle is not None:
+                    file_handle.close()
             self._cache.clear()
 
     def size(self) -> int:

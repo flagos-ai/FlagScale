@@ -167,6 +167,7 @@ class DataConfig(BaseModel):
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
+    dataset_type: str = "lerobot"
     data_path: str = Field(..., description="Path to training dataset")
     tolerance_s: float = 0.0001
     use_imagenet_stats: bool = True
@@ -197,7 +198,7 @@ class ModelConfig(BaseModel):
 
     model_config = {
         "extra": "allow",
-        "arbitrary_types_allowed": True
+        "arbitrary_types_allowed": True,
     }
 
     # Required fields to identify which model and checkpoint to use
@@ -218,7 +219,7 @@ class ModelConfig(BaseModel):
     @field_validator("model_name")
     @classmethod
     def validate_model_name(cls, v):
-        valid_names = {"pi0", "pi0.5"}
+        valid_names = {"pi0", "pi0.5", "qwen_gr00t"}
         if v not in valid_names:
             raise ValueError(f"Invalid model_name: {v}. Must be one of {valid_names}")
         return v
@@ -246,6 +247,14 @@ class TrainConfig(BaseModel):
         train_dict["data"] = DataConfig(**train_dict["data"], raw=train.data)
         train_dict["model"] = ModelConfig(**train_dict["model"], raw=train.model)
         return cls(**train_dict)
+
+    def to_omegaconf(self) -> DictConfig:
+        """Reconstruct the full OmegaConf config from stored raw DictConfigs."""
+        return OmegaConf.create({
+            "system": self.system.raw,
+            "model": self.model.raw,
+            "data": self.data.raw,
+        })
 
     class Config:
         # Allow arbitrary types for complex objects

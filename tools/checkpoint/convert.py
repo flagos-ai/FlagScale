@@ -38,7 +38,7 @@ def main():
         default=[],
         nargs="+",
         required=True,
-        choices=["aquila", "mistral", "mixtral", "llama", "deepseek_v3", "qwen3"],
+        choices=["aquila", "mistral", "mixtral", "llama", "deepseek_v3", "qwen3", "qwen3_engram"],
         help="Type of the model.",
     )
     parser.add_argument(
