@@ -16,9 +16,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from pathlib import Path
-from typing import Any
 
+import torch.nn as nn
 from safetensors.torch import load_file, save_file
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
 from torch.optim import Optimizer
 
 from flagscale.models.utils.constants import (
@@ -27,6 +32,7 @@ from flagscale.models.utils.constants import (
     OPTIMIZER_PARAM_GROUPS,
     OPTIMIZER_STATE,
     PRETRAINED_MODEL_DIR,
+    SAFETENSORS_FILE,
     SCHEDULER_STATE,
     TRAINING_STATE_DIR,
     TRAINING_STEP,
@@ -135,25 +141,53 @@ def save_training_state(
         save_scheduler_state(scheduler, save_dir)
 
 
-def load_training_state(
-    checkpoint_dir: Path,
-    optimizer: Optimizer,
-    scheduler=None,
-) -> tuple[int, Optimizer, Any]:
-    """Load training state for resume.
+def load_model_state_fsdp2(model: nn.Module, pretrained_dir: Path) -> None:
+    """Load a full (non-sharded) safetensors checkpoint into an FSDP2-wrapped model."""
+    full_sd = load_file(str(pretrained_dir / SAFETENSORS_FILE))
+    set_model_state_dict(model, full_sd, options=StateDictOptions(full_state_dict=True))
 
-    Returns:
-        (step, optimizer, scheduler) with their state loaded.
+
+def load_optimizer_state_fsdp2(model: nn.Module, optimizer: Optimizer, save_dir: Path) -> None:
+    """Load optimizer state into an FSDP2-wrapped model's optimizer.
+
+    FSDP2 optimizer state uses FQN string keys (not integer indices).
+    Params that never received gradients won't have state entries;
+    pad them with empty dicts so set_optimizer_state_dict doesn't KeyError.
     """
+    flat_optim = load_file(str(save_dir / OPTIMIZER_STATE))
+    optim_state = unflatten_dict(flat_optim)
+    param_groups = load_json(save_dir / OPTIMIZER_PARAM_GROUPS)
+    all_pg_params = {p for g in param_groups for p in g["params"]}
+    for p in all_pg_params - set(optim_state.get("state", {}).keys()):
+        optim_state.setdefault("state", {})[p] = {}
+    optim_state["param_groups"] = param_groups
+    set_optimizer_state_dict(
+        model, optimizer, optim_state, options=StateDictOptions(full_state_dict=True)
+    )
+
+
+def load_training_state_fsdp2(
+    checkpoint_dir: Path,
+    model: nn.Module,
+    optimizer: Optimizer,
+    scheduler,
+) -> int:
+    """Load full training state into an FSDP2-wrapped model and optimizer.
+
+    Returns the training step to resume from.
+    """
+    pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
     training_state_dir = checkpoint_dir / TRAINING_STATE_DIR
-    if not training_state_dir.is_dir():
-        raise NotADirectoryError(training_state_dir)
-    load_rng_state(training_state_dir)
+
+    load_model_state_fsdp2(model, pretrained_dir)
     step = load_training_step(training_state_dir)
-    optimizer = load_optimizer_state(optimizer, training_state_dir)
+    load_rng_state(training_state_dir)
+    load_optimizer_state_fsdp2(model, optimizer, training_state_dir)
+
     if scheduler is not None:
-        scheduler = load_scheduler_state(scheduler, training_state_dir)
-    return step, optimizer, scheduler
+        load_scheduler_state(scheduler, training_state_dir)
+
+    return step
 
 
 def save_optimizer_state(state_dict: dict, save_dir: Path) -> None:
@@ -162,26 +196,6 @@ def save_optimizer_state(state_dict: dict, save_dir: Path) -> None:
     flat_state = flatten_dict(state_dict)
     save_file(flat_state, save_dir / OPTIMIZER_STATE)
     write_json(param_groups, save_dir / OPTIMIZER_PARAM_GROUPS)
-
-
-def load_optimizer_state(optimizer: Optimizer, save_dir: Path) -> Optimizer:
-    current_state_dict = optimizer.state_dict()
-    flat_state = load_file(save_dir / OPTIMIZER_STATE)
-    state = unflatten_dict(flat_state)
-
-    if "state" in state:
-        loaded_state_dict = {"state": {int(k): v for k, v in state["state"].items()}}
-    else:
-        loaded_state_dict = {"state": {}}
-
-    if "param_groups" in current_state_dict:
-        param_groups = deserialize_json_into_object(
-            save_dir / OPTIMIZER_PARAM_GROUPS, current_state_dict["param_groups"]
-        )
-        loaded_state_dict["param_groups"] = param_groups
-
-    optimizer.load_state_dict(loaded_state_dict)
-    return optimizer
 
 
 def save_scheduler_state(scheduler, save_dir: Path) -> None:

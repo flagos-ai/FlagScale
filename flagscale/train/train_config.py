@@ -136,11 +136,12 @@ class OptimizerConfig(BaseModel):
 
 
 class CheckpointConfig(BaseModel):
-    """Checkpoint saving configuration"""
+    """Checkpoint saving and resume configuration"""
 
     save_checkpoint: bool = True
     save_freq: int = 1000
     output_directory: str
+    resume_from: str | None = None
 
 
 class SystemConfig(BaseModel):

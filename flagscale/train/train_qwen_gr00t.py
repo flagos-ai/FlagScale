@@ -26,7 +26,7 @@ from flagscale.train.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
-from flagscale.train.datasets.utils import dataset_to_policy_features
+from flagscale.train.datasets.utils import dataset_to_policy_features, write_json
 from flagscale.models.configs.types import FeatureType
 from flagscale.train.processor import PolicyProcessorPipeline
 from flagscale.models.utils.constants import (
@@ -42,9 +42,11 @@ from flagscale.train.utils.logging_utils import (
 )
 from flagscale.train.utils.train_utils import (
     get_step_checkpoint_dir,
+    load_training_state_fsdp2,
     save_checkpoint,
     update_last_checkpoint,
 )
+from flagscale.train.utils.random_utils import serialize_rng_state, deserialize_rng_state
 from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
 from flagscale.models.vla import TrainablePolicy
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
@@ -525,6 +527,18 @@ def main(config: TrainConfig, seed: int):
 
     dist.barrier()
 
+    step = 0
+    resume_from = config.system.checkpoint.resume_from
+    if resume_from:
+        step = load_training_state_fsdp2(
+            Path(resume_from), policy, optimizer, lr_scheduler,
+        )
+        saved_rng = serialize_rng_state()
+        for _ in range(step):
+            next(dl_iter)
+        deserialize_rng_state(saved_rng)
+        logger.info(f"Resumed from checkpoint at step {step}")
+
     train_metrics = {
         "loss": AverageMeter("loss", ":.3f"),
         "grad_norm": AverageMeter("grdn", ":.3f"),
@@ -535,8 +549,6 @@ def main(config: TrainConfig, seed: int):
 
     effective_batch_size = config.system.batch_size * world_size
 
-    step = 0
-
     train_tracker = MetricsTracker(
         effective_batch_size,
         num_frames,
@@ -545,13 +557,16 @@ def main(config: TrainConfig, seed: int):
         initial_step=step,
     )
 
-    # Ensures proper data shuffling across epochs in distributed training
     epoch = 0
     if sampler is not None:
         samples_per_epoch = num_frames // effective_batch_size
+        if resume_from and samples_per_epoch > 0:
+            epoch = step // samples_per_epoch
         sampler.set_epoch(epoch)
     else:
         samples_per_epoch = 0
+
+    step_metrics = []
 
     for _ in range(step, config.system.train_steps):
         start_time = time.perf_counter()
@@ -578,6 +593,14 @@ def main(config: TrainConfig, seed: int):
 
         step += 1
         train_tracker.step()
+
+        if is_main_process:
+            step_metrics.append({
+                "step": step,
+                "loss": train_tracker.metrics["loss"].val,
+                "grad_norm": train_tracker.metrics["grad_norm"].val,
+                "lr": train_tracker.metrics["lr"].val,
+            })
 
         # Update epoch counter for sampler.set_epoch() when we've processed one epoch worth of samples
         # This ensures proper data shuffling across epochs in distributed training
@@ -623,6 +646,10 @@ def main(config: TrainConfig, seed: int):
 
     if is_main_process:
         logger.info("Training completed")
+        metrics_path = Path(config.system.checkpoint.output_directory) / "step_metrics.json"
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(step_metrics, metrics_path)
+        logger.info(f"Wrote per-step metrics to {metrics_path}")
 
     dist.barrier()
     dist.destroy_process_group()

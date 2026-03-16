@@ -23,10 +23,11 @@ from .configuration_qwen_gr00t import QwenGr00tConfig
 from flagscale.models.utils.constants import (
     ACTION,
     OBS_STATE,
+    SAFETENSORS_FILE,
     VLM_CONFIG_DIR,
     resolve_pretrained_dir,
 )
-from flagscale.models.vla.base_policy import SAFETENSORS_FILE, TrainablePolicy
+from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.models.vla.registry import build_action_model, build_vlm
 from flagscale.models.vla.utils import get_vlm_config
 

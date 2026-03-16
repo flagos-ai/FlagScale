@@ -10,15 +10,13 @@ from safetensors.torch import load_model, save_file
 from torch import Tensor, nn
 
 from flagscale.models.configs.types import FeatureType, PolicyFeature
-from flagscale.models.utils.constants import resolve_pretrained_dir
+from flagscale.models.utils.constants import SAFETENSORS_FILE, resolve_pretrained_dir
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 
 if TYPE_CHECKING:
     import builtins
 
 logger = getLogger(__name__)
-
-SAFETENSORS_FILE = "model.safetensors"
 
 
 class TrainablePolicy(nn.Module, ABC):
