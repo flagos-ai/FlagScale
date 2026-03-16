@@ -77,7 +77,7 @@ class EngramMemory(nn.Module):
 
         (self.vocab_start_index, self.vocab_end_index) = (
             VocabUtility.vocab_range_from_global_vocab_size(
-                self.num_embeddings, get_pg_rank(self.embedding_parallel_group), get_pg_size(self.embedding_parallel_group)
+                self.num_embeddings, self.embedding_parallel_rank, self.embedding_parallel_size
             )
         )
         self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
@@ -99,8 +99,8 @@ class EngramMemory(nn.Module):
                     0,
                     init_method,
                     params_dtype=config.params_dtype,
-                    rank=get_pg_rank(self.tp_group),
-                    world_size=get_pg_size(self.tp_group),
+                    rank=self.embedding_parallel_rank,
+                    world_size=self.embedding_parallel_size,
                 )
         else:
             self.weight = Parameter(

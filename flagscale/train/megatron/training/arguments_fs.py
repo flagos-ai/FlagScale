@@ -375,7 +375,7 @@ class FSTrainArguments:
         if self.args.use_engram:
             if self.args.engram_embedding_parallel_method == "allreduce":
                 if self.args.rank == 0:
-                    warnings.warn(f"[rank0]: We do not recomend using allreduce for engram embedding, this is deprecated and will be removed in later version.", DeprecationWarning)
+                    warnings.warn(f"[rank0]: We do not recommend using allreduce for engram embedding, this is deprecated and will be removed in a later version.", DeprecationWarning)
                 if self.args.engram_embedding_parallel_size is not None:
                     warnings.warn(
                         "[rank0]: If set the embedding_parallel_method to allreduce, " \
@@ -390,8 +390,9 @@ class FSTrainArguments:
                     self.args.engram_embedding_parallel_size = 1
             else:
                 raise ValueError(f"Invalid embedding parallel method: {self.args.engram_embedding_parallel_method}")
-            assert not self.args.use_megatron_fsdp, "Megatron FSDP does not be supported yet, looking forward to later version."
-            assert not self.args.init_model_with_meta_device, "Init_model_with_meta_device does not be supported yet, looking forward to later version."
+            assert not self.args.use_megatron_fsdp, "Megatron FSDP is not supported yet; support is planned for a later version."
+            assert not self.args.init_model_with_meta_device, "Init_model_with_meta_device is not supported yet; support is planned for a later version."
+        assert not (args.pipeline_model_parallel_size == 1 and args.overlap_moe_expert_parallel_comm), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
 
 
 def _add_hetero_args(parser):

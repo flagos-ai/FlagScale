@@ -15,7 +15,6 @@ from megatron.core.models.gpt import GPTModel
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import get_attr_wrapped_model, StragglerDetector
 from megatron.core.tokenizers.text.utils.build_tokenizer import build_tokenizer
-from megatron.core import parallel_state
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
@@ -56,11 +55,22 @@ def get_batch(data_iterator, vp_stage=None):
     # In order to minimize the impact of the engram on the framework's internal structure, it has been extracted
     # from the function. Better solutions will be found in the future.
     # Broadcast tokens within TP group for each pipeline_stage except the first stage.
-    if not (parallel_state.get_pipeline_model_parallel_world_size == 1 or parallel_state.is_pipeline_first_stage()):
+    # Already broadcast tokens in above function:
+    # 1. pp_size = 1
+    # 2. is_pp_first_stage
+    # 3. is_pp_last_stage and enbale_mtp
+    args = get_args()
+    already_broadcast_tokens = (parallel_state.get_pipeline_model_parallel_world_size() == 1) or parallel_state.is_pipeline_first_stage() or (parallel_state.is_pipeline_last_stage() and args.mtp_num_layers is not None)
+    if not already_broadcast_tokens:
         if parallel_state.get_tensor_model_parallel_rank() == 0:
             torch.distributed.broadcast(batch["tokens"], src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
         else:
-            tokens = torch.empty_like(batch["labels"])
+            # Allocate a placeholder tensor to receive the broadcasted tokens.
+            tokens = torch.empty(
+                (args.micro_batch_size, args.seq_length),
+                dtype=torch.long,
+                device=torch.cuda.current_device(),
+            )
             torch.distributed.broadcast(tokens, src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
             batch["tokens"] = tokens
     # slice batch along sequence dimension for context parallelism
