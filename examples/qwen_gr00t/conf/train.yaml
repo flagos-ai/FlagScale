@@ -3,7 +3,7 @@ defaults:
   - train: qwen_gr00t
 
 experiment:
-  exp_name: 0313_qwen_gr00t_train_refactor
+  exp_name: qwen_gr00t_train
   seed: 42
   save_steps: 10000
   load: null
