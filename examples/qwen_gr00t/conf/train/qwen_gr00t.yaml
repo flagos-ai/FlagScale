@@ -13,7 +13,8 @@ system:
     save_checkpoint: true
     # Number of steps between checkpoints
     save_freq: 1000
-  # TODO(yupu): Support resuming from checkpoint
+    # Path to a checkpoint directory to resume training from (e.g. /path/to/checkpoints/005000)
+    # resume_from:
 
 model:
   model_name: qwen_gr00t

@@ -226,8 +226,6 @@ def make_pre_post_processors(
     Returns:
         (preprocessor, postprocessor) — either may be None if not configured.
     """
-    from flagscale.train.processor.pipeline import ProcessorStepRegistry
-
     features = {**policy.input_features, **policy.output_features}
     norm_map = policy.config.normalization_mapping
 
@@ -533,7 +531,14 @@ def main(config: TrainConfig, seed: int):
         step = load_training_state_fsdp2(
             Path(resume_from), policy, optimizer, lr_scheduler,
         )
+        # Advance the dataloader iterator to the correct position. The data
+        # ordering is deterministic from the DistributedSampler's own seed
+        # (not the global RNG), so calling next() `step` times moves the
+        # cursor to the right batch. We save/restore the global RNG around
+        # this so the fast-forward's incidental RNG consumption is discarded
+        # and training resumes with the exact RNG state from the checkpoint.
         saved_rng = serialize_rng_state()
+        # TODO: (yupu) Maybe save/restore the dataloader state?
         for _ in range(step):
             next(dl_iter)
         deserialize_rng_state(saved_rng)
