@@ -101,6 +101,12 @@ def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
 
     def _resize_to_uint8_hwc(frame: torch.Tensor) -> torch.Tensor:
         """float32 CHW [0,1] from torchcodec → uint8 HWC 224x224 via PIL resize."""
+        if frame.dim() == 4:
+            # delta_timestamps adds a leading T dim; squeeze single-frame case
+            if frame.shape[0] == 1:
+                frame = frame.squeeze(0)
+            else:
+                return torch.stack([_resize_to_uint8_hwc(f) for f in frame])
 
         frame_uint8 = (frame.permute(1, 2, 0) * 255).round().clamp(0, 255).to(torch.uint8)
         # PIL default is BICUBIC, matching starVLA's Image.fromarray(image).resize((224, 224))

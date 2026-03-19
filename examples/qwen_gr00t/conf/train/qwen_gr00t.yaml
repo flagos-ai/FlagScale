@@ -1,5 +1,5 @@
 system:
-  batch_size: 16
+  batch_size: 8
   train_steps: 30000
   log_freq: 1
   grad_clip_norm: 1.0
@@ -12,7 +12,7 @@ system:
     # Whether to save checkpoint
     save_checkpoint: true
     # Number of steps between checkpoints
-    save_freq: 1000
+    save_freq: 10000
     # Path to a checkpoint directory to resume training from (e.g. /path/to/checkpoints/005000)
     # resume_from:
 
@@ -116,7 +116,7 @@ data:
     action_key: eepose
     state_key: eepose
   # Path to the training data
-  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  data_path: /workspace/datasets/HuggingFaceVLA/libero/
   tolerance_s: 0.0001
   preprocessor:
     name: policy_preprocessor

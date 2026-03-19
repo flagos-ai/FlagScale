@@ -15,14 +15,14 @@ from flagscale.models.vla import TrainablePolicy
 from flagscale.serve.websocket_policy_server import WebsocketPolicyServer
 from flagscale.train.processor import PolicyProcessorPipeline, ProcessorStepRegistry
 
+# TODO: (yupu) to constant.py?
 TASK_KEY = "task"
 
 
-def validate_batch(batch: dict, rename_map: dict[str, str] | None = None) -> list[str]:
-    """Validate an incoming client batch against the internal data contract.
+def validate_batch(batch: dict) -> list[str]:
+    """Validate a batch against the internal data contract.
 
-    If ``rename_map`` is provided, keys are remapped before checking so that
-    validation always operates on the canonical internal names::
+    Expected canonical keys (after rename_map has been applied)::
 
         - ``observation.images.*``: ``np.ndarray``, HWC uint8, ndim == 3
         - ``observation.state``: ``np.ndarray`` or ``list``
@@ -30,9 +30,6 @@ def validate_batch(batch: dict, rename_map: dict[str, str] | None = None) -> lis
 
     Returns a list of warning/error messages. Empty list means the batch is valid.
     """
-    if rename_map:
-        batch = {rename_map.get(k, k): v for k, v in batch.items()}
-
     errors: list[str] = []
 
     if TASK_KEY not in batch:
@@ -100,24 +97,12 @@ class Policy:
         logger.info(f"Policy model loading latency: {time.perf_counter() - t_s:.2f}s")
 
     def _load_processors(self, pretrained_dir: str) -> None:
-        """Load pre/post-processors from the checkpoint and build the serve preprocessor.
-
-        If ``rename_map`` is set in the config, it is injected as an override into the
-        saved preprocessor's ``rename_observations_processor`` step, remapping client-sent
-        observation keys to the keys the model was trained with.
-        """
+        """Load pre/post-processors from the checkpoint and build the serve preprocessor."""
         self.rename_map = self.config_engine.get("rename_map")
-
-        preprocessor_overrides: dict = {}
-        if self.rename_map:
-            preprocessor_overrides["rename_observations_processor"] = {
-                "rename_map": self.rename_map
-            }
 
         self.preprocessor = PolicyProcessorPipeline.from_pretrained(
             pretrained_dir,
             config_filename="policy_preprocessor.json",
-            overrides=preprocessor_overrides if preprocessor_overrides else None,
         )
         self.postprocessor = PolicyProcessorPipeline.from_pretrained(
             pretrained_dir,
@@ -144,7 +129,6 @@ class Policy:
     def inference(self, batch: dict) -> dict:
         """Run inference on a single batch.
 
-        Processing order: serve_preprocessor → preprocessor → model → postprocessor.
 
         Args:
             batch: Raw observation dict from the client. Image values are typically
@@ -155,23 +139,50 @@ class Policy:
             ``[B, T, action_dim]``.
         """
         logger.info("Start to inference")
-        errors = validate_batch(batch, rename_map=self.rename_map)
+        logger.info(f"Raw batch keys: {list(batch.keys())}")
+
+        if self.rename_map:
+            batch = {self.rename_map.get(k, k): v for k, v in batch.items()}
+            logger.info(f"After rename keys: {list(batch.keys())}")
+
+        errors = validate_batch(batch)
         if errors:
             for err in errors:
                 # TODO: (yupu) Response with error status?
                 logger.warning(f"Batch validation: {err}")
 
+        for k, v in batch.items():
+            if hasattr(v, "shape"):
+                logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+            else:
+                logger.info(f"  {k}: type={type(v).__name__} value={repr(v)[:120]}")
+
         if self.serve_preprocessor:
             batch = self.serve_preprocessor(batch)
+            logger.info("After serve_preprocessor:")
+            for k, v in batch.items():
+                if hasattr(v, "shape"):
+                    logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+
         batch = self.preprocessor(batch)
+        logger.info("After preprocessor:")
+        for k, v in batch.items():
+            if hasattr(v, "shape"):
+                logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
 
         with torch.no_grad():
             action = self.model.predict_action(batch)
 
+        logger.info(f"Raw action keys: {list(action.keys())}")
+        for k, v in action.items():
+            if hasattr(v, "shape"):
+                logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+
         action = self.postprocessor(action)
 
-        # Convert to numpy for msgpack serialization
-        action[ACTION] = action[ACTION].detach().cpu().numpy()
+        # Convert to numpy for msgpack serialization; squeeze batch dim [1,T,D] → [T,D]
+        action[ACTION] = action[ACTION].squeeze(0).detach().cpu().numpy()
+        logger.info(f"Final action shape: {action[ACTION].shape}")
 
         return action
 

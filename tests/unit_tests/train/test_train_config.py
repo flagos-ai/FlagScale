@@ -348,8 +348,8 @@ class TestTrainConfig(unittest.TestCase):
                 "checkpoint": {"output_directory": "/tmp"},
             },
             "model": {
-                "model_name": "pi0"
-                # Missing required checkpoint_dir
+                # Missing required model_name
+                "checkpoint_dir": "/model",
             },
             "data": {"data_path": "/data"},
         }

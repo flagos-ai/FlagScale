@@ -23,7 +23,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from flagscale.runner.utils import logger
+from flagscale.logger import logger
 from flagscale.train.train_config import TrainConfig, DataConfig
 from flagscale.train.datasets.transforms import ImageTransforms
 from flagscale.train.datasets.lerobot_dataset import (
@@ -70,9 +70,9 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
     torch.backends.cudnn.enabled = True
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = False
+    torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def init_ddp():
@@ -109,7 +109,7 @@ def make_dataset(cfg: DataConfig, policy_config):
     # TODO: (yupu) Support image transforms
     enable_image_transform = False
     # TODO: (yupu) Remove hard-coded video backend
-    video_backend = "pyav"
+    video_backend = "torchcodec"
 
     image_transforms = (
         ImageTransforms(cfg.image_transforms) if enable_image_transform else None
@@ -612,7 +612,7 @@ def main(config: TrainConfig, seed: int):
         logger.info(f"processor_kwargs: {processor_kwargs}")
         logger.info(f"postprocessor_kwargs: {postprocessor_kwargs}")
 
-    preprocessor, _ = make_pre_post_processors(
+    preprocessor, postprocessor = make_pre_post_processors(
         pretrained_path=policy_config.pretrained_path,
         **processor_kwargs,
         **postprocessor_kwargs,
@@ -748,7 +748,12 @@ def main(config: TrainConfig, seed: int):
                 policy_to_save = policy.module
                 save_checkpoint(
                     checkpoint_dir=checkpoint_dir,
+                    step=step,
+                    config=config,
                     policy=policy_to_save,
+                    lr_scheduler=lr_scheduler,
+                    preprocessor=preprocessor,
+                    postprocessor=postprocessor,
                 )
                 update_last_checkpoint(checkpoint_dir)
 
