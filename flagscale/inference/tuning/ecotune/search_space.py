@@ -13,6 +13,17 @@ class SearchDimension:
     high: float
     kind: str = "float"
 
+    def __post_init__(self) -> None:
+        if self.high <= self.low:
+            raise ValueError(
+                f"Invalid SearchDimension '{self.name}': high ({self.high}) must be greater than low ({self.low})."
+            )
+        if self.kind == "int":
+            if not float(self.low).is_integer() or not float(self.high).is_integer():
+                raise ValueError(
+                    f"Invalid integer SearchDimension '{self.name}': low ({self.low}) and high ({self.high}) must be integral."
+                )
+
     def sample(self, rng: np.random.Generator) -> Any:
         value = rng.uniform(self.low, self.high)
         if self.kind == "int":
@@ -26,7 +37,7 @@ class SearchDimension:
         return float(raw)
 
     def normalize(self, value: Any) -> float:
-        return (float(value) - self.low) / (self.high - self.low + 1e-12)
+        return (float(value) - self.low) / (self.high - self.low)
 
 
 class SearchSpace:
@@ -57,6 +68,14 @@ class SearchSpace:
 
     def from_vector(self, vector: np.ndarray) -> Dict[str, Any]:
         vec = np.asarray(vector, dtype=np.float64)
+        if vec.ndim != 1:
+            raise ValueError(
+                f"SearchSpace.from_vector expected a 1D vector, got shape {vec.shape!r}."
+            )
+        if len(vec) != self.n_dims:
+            raise ValueError(
+                f"SearchSpace.from_vector expected vector of length {self.n_dims}, got {len(vec)}."
+            )
         return {
             dim.name: dim.denormalize(np.clip(vec[idx], 0.0, 1.0))
             for idx, dim in enumerate(self._dimensions)

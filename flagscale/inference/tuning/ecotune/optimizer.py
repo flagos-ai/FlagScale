@@ -60,7 +60,26 @@ class EcoTuneOptimizer:
         self.candidates_per_step = int(candidates_per_step)
         self.r_min = float(r_min)
         self.r_max = float(r_max)
-        self.fidelity_levels = fidelity_levels or list(np.linspace(self.r_min, self.r_max, 10))
+        if fidelity_levels is None:
+            self.fidelity_levels = list(np.linspace(self.r_min, self.r_max, 10))
+        else:
+            normalized_levels: List[float] = []
+            for fidelity in fidelity_levels:
+                try:
+                    value = float(fidelity)
+                except (TypeError, ValueError):
+                    continue
+                if self.r_min <= value <= self.r_max:
+                    normalized_levels.append(value)
+
+            if not normalized_levels:
+                self.fidelity_levels = list(np.linspace(self.r_min, self.r_max, 10))
+            else:
+                unique_sorted = sorted(set(normalized_levels))
+                if not np.any(np.isclose(unique_sorted, self.r_max)):
+                    unique_sorted.append(self.r_max)
+                    unique_sorted = sorted(set(unique_sorted))
+                self.fidelity_levels = unique_sorted
         self.rng = np.random.default_rng(random_seed)
         self.surrogate = MultiFidelityGPSurrogate(n_dims=search_space.n_dims)
         self.acquisition = TokenAwareExpectedImprovement(
@@ -107,7 +126,7 @@ class EcoTuneOptimizer:
             ]
             score_at_rmax = -np.inf
             promoted = False
-            if self.r_max in affordable:
+            if np.any(np.isclose(affordable, self.r_max)):
                 score_at_rmax = self.acquisition.score(config, config_vec, self.r_max)
                 promoted = score_at_rmax > self.promotion_threshold
 

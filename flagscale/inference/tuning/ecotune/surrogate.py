@@ -24,7 +24,16 @@ class MultiFidelityGPSurrogate:
         self._is_fit = False
 
     def add_observation(self, config_vec: np.ndarray, fidelity: float, score: float) -> None:
-        self._config_x.append(np.asarray(config_vec, dtype=np.float64))
+        x = np.asarray(config_vec, dtype=np.float64)
+        if x.ndim != 1:
+            raise ValueError(
+                f"config_vec must be a 1-D array of length {self.n_dims}, got shape {x.shape!r}"
+            )
+        if x.shape[0] != self.n_dims:
+            raise ValueError(
+                f"config_vec length {x.shape[0]} does not match expected n_dims={self.n_dims}"
+            )
+        self._config_x.append(x)
         self._fidelity_x.append(float(fidelity))
         self._y.append(float(score))
         self._is_fit = False
@@ -49,7 +58,7 @@ class MultiFidelityGPSurrogate:
                     self._fidelity_x[j],
                 )
         self._K += (self.cfg.noise_variance + 1e-8) * np.eye(n)
-        self._K_inv = np.linalg.inv(self._K)
+        self._L = np.linalg.cholesky(self._K)
         self._y_arr = np.asarray(self._y, dtype=np.float64)
         self._is_fit = True
 
@@ -59,14 +68,25 @@ class MultiFidelityGPSurrogate:
             return 0.0, self.cfg.signal_variance
 
         x = np.asarray(config_vec, dtype=np.float64)
+        if x.ndim != 1:
+            raise ValueError(
+                f"config_vec must be a 1-D array of length {self.n_dims}, got shape {x.shape!r}"
+            )
+        if x.shape[0] != self.n_dims:
+            raise ValueError(
+                f"config_vec length {x.shape[0]} does not match expected n_dims={self.n_dims}"
+            )
         n = len(self._y)
         k_star = np.zeros(n, dtype=np.float64)
         for i in range(n):
             k_star[i] = self._kernel(x, fidelity, self._config_x[i], self._fidelity_x[i])
 
-        alpha = self._K_inv @ self._y_arr
+        tmp = np.linalg.solve(self._L, self._y_arr)
+        alpha = np.linalg.solve(self._L.T, tmp)
         mu = float(k_star @ alpha)
-        var = float(self.cfg.signal_variance - k_star @ (self._K_inv @ k_star))
+        tmp2 = np.linalg.solve(self._L, k_star)
+        v = np.linalg.solve(self._L.T, tmp2)
+        var = float(self.cfg.signal_variance - k_star @ v)
         return mu, max(var, 1e-12)
 
     def best_score(self, min_fidelity: Optional[float] = None) -> float:
@@ -79,7 +99,7 @@ class MultiFidelityGPSurrogate:
             score for score, fidelity in zip(self._y, self._fidelity_x) if fidelity >= min_fidelity
         ]
         if not filtered:
-            return 0.0
+            return float(np.max(np.asarray(self._y, dtype=np.float64)))
         return float(np.max(np.asarray(filtered, dtype=np.float64)))
 
     @property
