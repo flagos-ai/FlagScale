@@ -446,7 +446,7 @@ def main(config: TrainConfig, seed: int):
     if config.data.dataset_type == "wds":
         from megatron.energon import get_train_dataset, get_loader, WorkerConfig
         from flagscale.models.vla.qwen_gr00t import QwenGr00tConfig
-        from flagscale.models.vla.qwen_gr00t_task_encoder import TaskEncoder
+        from flagscale.models.vla.qwen_gr00t.task_encoder_qwen_gr00t import TaskEncoder
 
         if not isinstance(policy_config, QwenGr00tConfig):
             raise ValueError(
