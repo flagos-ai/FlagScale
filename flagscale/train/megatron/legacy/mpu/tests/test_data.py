@@ -10,6 +10,8 @@ import operator
 import sys
 sys.path.append("../..")
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def test_broadcast_data(tensor_model_parallel_size):
 
@@ -52,7 +54,7 @@ def test_broadcast_data(tensor_model_parallel_size):
 
     data_b = data_utils.broadcast_data(keys, data, torch.int64)
     for key in keys:
-        tensor = data_t[key].cuda()
+        tensor = data_t[key].to(cur_platform.device())
         assert data_b[key].sub(tensor).abs().max() == 0
 
     # Reset groups

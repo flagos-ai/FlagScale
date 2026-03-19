@@ -28,6 +28,7 @@ system:
     log_interval: 1
     no_log_loss_scale_to_tensorboard: true
   checkpoint:
+    ckpt_format: torch
     no_save_optim: true
     no_save_rng: true
     save_interval: 100000

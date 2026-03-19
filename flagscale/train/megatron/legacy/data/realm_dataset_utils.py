@@ -10,6 +10,9 @@ from megatron.core import mpu, tensor_parallel
 from megatron.legacy.data.dataset_utils import create_masked_lm_predictions, pad_and_convert_to_numpy
 from megatron.training import get_args, get_tokenizer, print_rank_0
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 
 def get_one_epoch_dataloader(dataset, micro_batch_size=None):
     """Specifically one epoch to be used in an indexing job."""
@@ -179,7 +182,7 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
     # This should be a barrier but nccl barrier assumes
     # device_index=rank which is not the case for model
     # parallel case
-    counts = torch.tensor([1], dtype=torch.long, device='cuda')
+    counts = torch.tensor([1], dtype=torch.long, device=cur_platform.device_name())
     torch.distributed.all_reduce(counts, group=mpu.get_data_parallel_group())
     assert counts[0].item() == mpu.get_data_parallel_group().size()
 
