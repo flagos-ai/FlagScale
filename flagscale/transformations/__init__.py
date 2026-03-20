@@ -16,6 +16,11 @@ __all__ = ["create_transformations_from_config"]
 
 def _get_transformation_registry() -> dict[str, type[Transformation]]:
     """Get the transformation registry with lazy imports to avoid circular dependencies."""
+    if "AdaSpaTransformation" not in _TRANSFORMATION_REGISTRY:
+        from flagscale.inference.core.diffusion.adaspa_transformation import AdaSpaTransformation
+
+        _TRANSFORMATION_REGISTRY["AdaSpaTransformation"] = AdaSpaTransformation
+
     if "TimestepTrackerTransformation" not in _TRANSFORMATION_REGISTRY:
         from flagscale.inference.core.diffusion.timestep_tracker_transformation import (
             TimestepTrackerTransformation,
