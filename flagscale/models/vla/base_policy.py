@@ -53,7 +53,8 @@ class TrainablePolicy(nn.Module, ABC):
         super().__init_subclass__(**kwargs)
         if inspect.isabstract(cls):
             return
-        type_name = cls.__name__
+        # Pi0 and Pi0.5 has "Policy" suffix
+        type_name = cls.__name__.removesuffix("Policy")
         if type_name in TrainablePolicy._registry:
             existing = TrainablePolicy._registry[type_name]
             if existing is not cls:

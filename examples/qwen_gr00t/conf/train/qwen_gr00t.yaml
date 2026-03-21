@@ -116,7 +116,7 @@ data:
     action_key: eepose
     state_key: eepose
   # Path to the training data
-  data_path: /workspace/datasets/HuggingFaceVLA/libero/
+  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
   tolerance_s: 0.0001
   preprocessor:
     name: policy_preprocessor

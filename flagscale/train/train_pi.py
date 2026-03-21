@@ -5,7 +5,6 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any, Iterator, TypedDict
-import wandb
 import os
 import pathlib
 import random
@@ -109,7 +108,7 @@ def make_dataset(cfg: DataConfig, policy_config):
     # TODO: (yupu) Support image transforms
     enable_image_transform = False
     # TODO: (yupu) Remove hard-coded video backend
-    video_backend = "torchcodec"
+    video_backend = "pyav"
 
     image_transforms = (
         ImageTransforms(cfg.image_transforms) if enable_image_transform else None
@@ -548,7 +547,7 @@ def main(config: TrainConfig, seed: int):
     device = torch.device("cuda", local_rank)
     rank = dist.get_rank()
     is_main_process = rank == 0 and local_rank == 0
-    policy_config.device = device
+    policy_config.device = str(device)
 
     if is_main_process:
         logger.info(f"Policy config ({model_name}): {policy_config}")

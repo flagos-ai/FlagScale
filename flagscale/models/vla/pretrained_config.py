@@ -227,6 +227,18 @@ class PreTrainedConfig(ABC):
                 )
             config_cls = PreTrainedConfig._registry.get(type_name)
             if config_cls is None:
+                # Fall back to case-insensitive match for lerobot's checkpoints that stored
+                # the type in lowercase (e.g. "pi05" instead of "PI05").
+                type_name_lower = type_name.lower()
+                config_cls = next(
+                    (
+                        v
+                        for k, v in PreTrainedConfig._registry.items()
+                        if k.lower() == type_name_lower
+                    ),
+                    None,
+                )
+            if config_cls is None:
                 raise ValueError(
                     f"Unknown config type '{type_name}'. "
                     f"Known types: {list(PreTrainedConfig._registry.keys())}"
@@ -237,6 +249,10 @@ class PreTrainedConfig(ABC):
 
         data["input_features"] = _decode_features(data.get("input_features"))
         data["output_features"] = _decode_features(data.get("output_features"))
+
+        # Strip HubMixin fields that lerobot's checkpoints may have persisted.
+        for key in ("repo_id", "push_to_hub", "private", "tags", "license"):
+            data.pop(key, None)
 
         return config_cls._from_dict(data)
 

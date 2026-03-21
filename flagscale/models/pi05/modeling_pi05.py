@@ -25,10 +25,6 @@ from typing import Literal, TypedDict, TypeVar
 
 import torch
 import torch.nn.functional as F
-from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-from safetensors.torch import (
-    save_model as save_model_as_safetensor,
-)
 from torch import Tensor, nn
 from transformers.models.auto import CONFIG_MAPPING
 from transformers.models.gemma import modeling_gemma
@@ -38,16 +34,13 @@ from typing_extensions import Unpack
 
 # from lerobot.configs.policies import PreTrainedConfig
 from flagscale.models.pi05.configuration_pi05 import DEFAULT_IMAGE_SIZE, PI05Config
-
-# from lerobot.policies.pretrained import PreTrainedPolicy, T
-# from lerobot.policies.rtc.modeling_rtc import RTCProcessor
 from flagscale.models.utils.constants import (
     ACTION,
     OBS_LANGUAGE_ATTENTION_MASK,
     OBS_LANGUAGE_TOKENS,
     OPENPI_ATTENTION_MASK_VALUE,
 )
-from flagscale.train.utils.hub import HubMixin
+from flagscale.models.vla.base_policy import TrainablePolicy
 
 T = TypeVar("T", bound="PI05Policy")
 
@@ -864,20 +857,12 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         return self.action_out_proj(suffix_out)
 
 
-class PI05Policy(nn.Module, HubMixin):
+class PI05Policy(TrainablePolicy):
     """PI05 Policy for LeRobot."""
 
-    config_class = PI05Config
-    name = "pi05"
-
     def __init__(self, config: PI05Config):
-        """
-        Args:
-            config: Policy configuration class instance.
-        """
-        super().__init__()
         config.validate_features()
-        self.config = config
+        super().__init__(config)
 
         # Initialize the core PI05 model
         # self.init_rtc_processor()
@@ -1202,6 +1187,10 @@ class PI05Policy(nn.Module, HubMixin):
 
         return actions
 
+    def predict_action(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+        actions = self.predict_action_chunk(batch)
+        return {ACTION: actions}
+
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training."""
 
@@ -1226,8 +1215,3 @@ class PI05Policy(nn.Module, HubMixin):
         }
 
         return loss, loss_dict
-
-    def _save_pretrained(self, save_directory: Path) -> None:
-        # self.config._save_pretrained(save_directory)
-        model_to_save = self.module if hasattr(self, "module") else self
-        save_model_as_safetensor(model_to_save, str(save_directory / SAFETENSORS_SINGLE_FILE))

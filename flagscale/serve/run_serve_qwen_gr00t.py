@@ -61,6 +61,14 @@ def validate_batch(batch: dict) -> list[str]:
     return errors
 
 
+def debug_print(batch):
+    for k, v in batch.items():
+        if hasattr(v, "shape"):
+            logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+        else:
+            logger.info(f"  {k}: type={type(v).__name__} value={repr(v)[:120]}")
+
+
 class Policy:
     """VLA policy server wrapping a TrainablePolicy with pre/post-processing.
 
@@ -151,38 +159,42 @@ class Policy:
                 # TODO: (yupu) Response with error status?
                 logger.warning(f"Batch validation: {err}")
 
-        for k, v in batch.items():
-            if hasattr(v, "shape"):
-                logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
-            else:
-                logger.info(f"  {k}: type={type(v).__name__} value={repr(v)[:120]}")
+        debug_print(batch)
+        # for k, v in batch.items():
+        #     if hasattr(v, "shape"):
+        #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+        #     else:
+        #         logger.info(f"  {k}: type={type(v).__name__} value={repr(v)[:120]}")
 
         if self.serve_preprocessor:
             batch = self.serve_preprocessor(batch)
             logger.info("After serve_preprocessor:")
-            for k, v in batch.items():
-                if hasattr(v, "shape"):
-                    logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+            debug_print(batch)
+            # for k, v in batch.items():
+            #     if hasattr(v, "shape"):
+            #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
 
         batch = self.preprocessor(batch)
         logger.info("After preprocessor:")
-        for k, v in batch.items():
-            if hasattr(v, "shape"):
-                logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+        debug_print(batch)
+        # for k, v in batch.items():
+        #     if hasattr(v, "shape"):
+        #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
 
         with torch.no_grad():
             action = self.model.predict_action(batch)
 
         logger.info(f"Raw action keys: {list(action.keys())}")
-        for k, v in action.items():
-            if hasattr(v, "shape"):
-                logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
+        debug_print(action)
+        # for k, v in action.items():
+        #     if hasattr(v, "shape"):
+        #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype} first_step={v[0,0,:7]}")
 
         action = self.postprocessor(action)
 
         # Convert to numpy for msgpack serialization; squeeze batch dim [1,T,D] → [T,D]
         action[ACTION] = action[ACTION].squeeze(0).detach().cpu().numpy()
-        logger.info(f"Final action shape: {action[ACTION].shape}")
+        logger.info(f"Final action shape: {action[ACTION].shape}, first_step={action[ACTION][0]}")
 
         return action
 

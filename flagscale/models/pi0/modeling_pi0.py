@@ -27,10 +27,6 @@ from typing import Literal, TypedDict, TypeVar
 
 import torch
 import torch.nn.functional as F
-from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-from safetensors.torch import (
-    save_model as save_model_as_safetensor,
-)
 from torch import Tensor, nn
 from transformers.models.auto import CONFIG_MAPPING
 from transformers.models.gemma import modeling_gemma
@@ -40,7 +36,7 @@ from typing_extensions import Unpack
 
 # from lerobot.configs.policies import PreTrainedConfig
 from flagscale.models.pi0.configuration_pi0 import DEFAULT_IMAGE_SIZE, PI0Config
-from flagscale.train.utils.hub import HubMixin
+from flagscale.models.vla.base_policy import TrainablePolicy
 
 T = TypeVar("T", bound="PI0Policy")
 
@@ -893,21 +889,12 @@ class PI0Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         return self.action_out_proj(suffix_out)
 
 
-# class PI0Policy(PreTrainedPolicy):
-class PI0Policy(nn.Module, HubMixin):
+class PI0Policy(TrainablePolicy):
     """PI0 OpenPI Policy for LeRobot."""
 
-    config_class = PI0Config
-    name = "pi0"
-
     def __init__(self, config: PI0Config):
-        """
-        Args:
-            config: Policy configuration class instance.
-        """
-        super().__init__()
         config.validate_features()
-        self.config = config
+        super().__init__(config)
 
         # Initialize the core PI0 model
         # self.init_rtc_processor()
@@ -1221,6 +1208,10 @@ class PI0Policy(nn.Module, HubMixin):
 
         return actions
 
+    def predict_action(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+        actions = self.predict_action_chunk(batch)
+        return {ACTION: actions}
+
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training."""
 
@@ -1248,8 +1239,3 @@ class PI0Policy(nn.Module, HubMixin):
         }
 
         return loss, loss_dict
-
-    def _save_pretrained(self, save_directory: Path) -> None:
-        # self.config._save_pretrained(save_directory)
-        model_to_save = self.module if hasattr(self, "module") else self
-        save_model_as_safetensor(model_to_save, str(save_directory / SAFETENSORS_SINGLE_FILE))

@@ -3,7 +3,7 @@ defaults:
   - train: qwen_gr00t
 
 experiment:
-  exp_name: 260319_qwen_gr00t_train_libero
+  exp_name: 260320_qwen_gr00t_train_libero_goal_old_dataset
   seed: 42
   save_steps: 10000
   load: null

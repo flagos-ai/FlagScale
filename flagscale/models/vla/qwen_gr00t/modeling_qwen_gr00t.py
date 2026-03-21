@@ -20,6 +20,7 @@ import torch
 from safetensors.torch import save_file
 
 from .configuration_qwen_gr00t import QwenGr00tConfig
+from flagscale.logger import logger
 from flagscale.models.utils.constants import (
     ACTION,
     OBS_STATE,
@@ -171,6 +172,12 @@ class QwenGr00t(TrainablePolicy):
             else:
                 state = None
         else:  # lerobot: single dict with batched tensors
+            logger.info(f"[predict_action] batch keys={list(batch.keys())}")
+            logger.info(f"[predict_action] image_features keys={list(self.image_features.keys())}")
+            for k in self.image_features:
+                if k in batch:
+                    v = batch[k]
+                    logger.info(f"[predict_action] image key={k} shape={v.shape} dtype={v.dtype}")
             images, instructions = self.vlm.prepare_input(
                 batch, image_feature_keys=list(self.image_features.keys())
             )
@@ -183,6 +190,10 @@ class QwenGr00t(TrainablePolicy):
             # last_hidden_state: [B, seq_len, H]
             last_hidden = vlm_output["hidden_states"][-1]  # [B, L, H]
 
+        logger.info(
+            f"[predict_action] last_hidden shape={last_hidden.shape} dtype={last_hidden.dtype}"
+        )
+
         if state is not None:
             state = state.to(device=last_hidden.device, dtype=last_hidden.dtype)
 
@@ -191,6 +202,11 @@ class QwenGr00t(TrainablePolicy):
             vlm_output_for_action = {"hidden_states": last_hidden}
             action_input = {"state": state}
             output = self.action_model.predict_action(vlm_output_for_action, action_input)
+
+        logger.info(f"[predict_action] output keys={list(output.keys())}")
+        for k, v in output.items():
+            if isinstance(v, torch.Tensor):
+                logger.info(f"[predict_action] output {k} shape={v.shape} dtype={v.dtype}")
 
         # Assume the output of the action model is dict mapping `ACTION` to the normalized actions
         return output
