@@ -133,12 +133,20 @@ class EngramMemory(nn.Module):
         input_ids = input_ids.view(-1)
         routing_map = input_ids // self.num_embeddings_per_partition
         # [num_partitions], number of tokens assigned to each partition from the current rank's input.
-        num_tokens_per_partition = torch.histc(routing_map, bins=self.embedding_parallel_size, min=0, max=self.embedding_parallel_size)
+        num_tokens_per_partition = torch.bincount(
+            routing_map,
+            minlength=self.embedding_parallel_size,
+         ).to(dtype=torch.int64)
         # Reorder the token indices to match the order of partitions.
         # Shape = (batch * seqlen, ).
         token_indices_partitions_sorted = torch.argsort(routing_map, stable=True)
         # Shape = (batch * seqlen, ).
         routed_input = input_ids[token_indices_partitions_sorted]
+        # Use to unsort.
+        self._token_unsort_indices = torch.empty_like(token_indices_partitions_sorted)
+        self._token_unsort_indices[token_indices_partitions_sorted] = torch.arange(
+            token_indices_partitions_sorted.size(0), device=token_indices_partitions_sorted.device
+        )
         # generate the input splits and output splits for all-to-all
         with torch.no_grad():
             output_splits_cuda = tensor_parallel.all_to_all(
@@ -173,6 +181,7 @@ class EngramMemory(nn.Module):
     def _combine(self, hidden_states: torch.Tensor):
         torch.cuda.nvtx.range_push("engram_embedding_combine")
         routed_hidden_states = tensor_parallel.all_to_all(self.embedding_parallel_group, hidden_states, self.input_splits, self.output_splits)
+        routed_hidden_states = routed_hidden_states[self._token_unsort_indices]
         hidden_states = routed_hidden_states.view(*self.hidden_shape, -1)
         torch.cuda.nvtx.range_pop()
         return hidden_states

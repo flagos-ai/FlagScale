@@ -74,6 +74,8 @@ def get_batch(data_iterator, vp_stage=None):
             torch.distributed.broadcast(tokens, src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
             batch["tokens"] = tokens
     # slice batch along sequence dimension for context parallelism
+    # I am not sure why broadcast here needs a synchronize but does not need in the get_batch_on_this_tp_rank. Anyway, make it happy.
+    torch.cuda.synchronize()
     batch = get_batch_on_this_cp_rank(batch)
 
     return batch.values()

@@ -29,26 +29,41 @@ class LazyHashInputIds:
         self.input_ids = input_ids
         self.hash_stream = hash_stream
         self._result = None
-        self._computation_started = False
-
-        # torch.cuda.nvtx.range_push("LazyHashInputIds hash")
-        # Start async computation immediately if stream is available
+        self._is_async_pending = False        
+        # Async
         if self.hash_stream is not None:
+            # self.hash_stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(self.hash_stream):
                 self._result = self.hash_mapping.hash(self.input_ids)
-            self._computation_started = True
-        # torch.cuda.nvtx.range_pop()
+            self._is_async_pending = True
+            # record result to use across stream
+            self._record_current_stream()
+
+    def _record_current_stream(self):
+        """Helper to record current stream on all result tensors"""
+        if self._result is None:
+            return
+        current_stream = torch.cuda.current_stream()
+        if isinstance(self._result, dict):
+            for t in self._result.values():
+                if isinstance(t, torch.Tensor):
+                    t.record_stream(current_stream)
+        elif isinstance(self._result, torch.Tensor):
+            self._result.record_stream(current_stream)
 
     def __getitem__(self, key):
-        """Access hash result, synchronizing if necessary."""
-        if self._result is None:
-            if self.hash_stream is not None and self._computation_started:
-                # Wait for async computation to complete
-                torch.cuda.current_stream().wait_stream(self.hash_stream)
-                self._computation_started = False  # Mark as synchronized
-            else:
-                # Compute synchronously if no stream or computation not started
-                self._result = self.hash_mapping.hash(self.input_ids)
+        # Case 1: Async compute -> wait
+        if self._is_async_pending:
+            torch.cuda.current_stream().wait_stream(self.hash_stream)
+            self._is_async_pending = False  # Async finish
+            self._record_current_stream()
+            
+        # Case 2: Sync but no compute -> start compute
+        elif self._result is None:
+            self._result = self.hash_mapping.hash(self.input_ids)
+            
+        # Case 3: Async or sync compute is finished.
+        # print(f"[rank{torch.distributed.get_rank()}]: LazyHashInputIds result = {self._result}")
         return self._result[key]
 
     def get(self, key, default=None):
