@@ -151,10 +151,6 @@ class TrainablePolicy(nn.Module, ABC):
 
         model = cls(config=config)
 
-        has_meta = any(p.is_meta for p in model.parameters())
-        if has_meta:
-            model.to_empty(device=device)
-
         weights_path = path / SAFETENSORS_FILE
         if not weights_path.exists():
             raise FileNotFoundError(f"Weights file not found: {weights_path}")

@@ -228,4 +228,7 @@ def main(config: DictConfig | ListConfig) -> None:
 
 if __name__ == "__main__":
     parsed_cfg = parse_config()
-    main(parsed_cfg["serve"][0])
+    if isinstance(parsed_cfg, ListConfig):
+        main(parsed_cfg[0])
+    else:
+        main(parsed_cfg["serve"][0])
