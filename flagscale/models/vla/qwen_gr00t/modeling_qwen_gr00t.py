@@ -69,7 +69,7 @@ class QwenGr00t(TrainablePolicy):
         if config.output_features:
             self.output_features = config.output_features
 
-    def forward(self, batch: list[dict] | dict) -> dict[str, torch.Tensor]:
+    def forward(self, batch: list[dict] | dict, vlm_batch: dict[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
         """ """
         if isinstance(batch, list):  # wds: list of per-sample dicts
             images = [ex["image"] for ex in batch]
@@ -151,7 +151,14 @@ class QwenGr00t(TrainablePolicy):
 
             output = self.action_model.forward(vlm_output_repeated, action_input)
 
-        return {"loss": output["loss"]}
+        result = {"loss": output["loss"]}
+
+        if vlm_batch is not None:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                vlm_loss = self.vlm.model(**vlm_batch, return_dict=True).loss
+            result["vlm_loss"] = vlm_loss
+
+        return result
 
     @torch.inference_mode()
     def predict_action(self, batch: list[dict] | dict) -> dict:

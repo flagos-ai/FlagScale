@@ -26,7 +26,7 @@ from flagscale.train.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
-from flagscale.train.datasets.utils import dataset_to_policy_features, write_json
+from flagscale.train.datasets.utils import dataset_to_policy_features
 from flagscale.models.configs.types import FeatureType
 from flagscale.train.processor import PolicyProcessorPipeline
 from flagscale.models.utils.constants import (
@@ -379,6 +379,8 @@ def update_policy(
     grad_clip_norm: float,
     lr_scheduler=None,
     lock=None,
+    vlm_batch: Any = None,
+    vlm_loss_scale: float = 0.0,
 ) -> MetricsTracker:
     """
     Performs a single training step to update the policy's weights.
@@ -389,12 +391,18 @@ def update_policy(
     Args:
         train_metrics: A MetricsTracker instance to record training statistics.
         policy: The policy model to be trained (FSDP2-sharded).
-        batch: A batch of training data.
+        batch: A batch of VLA training data (robot observations + actions).
         optimizer: The optimizer used to update the policy's parameters.
         use_amp: Whether to use automatic mixed precision.
         grad_clip_norm: The maximum norm for gradient clipping.
         lr_scheduler: An optional learning rate scheduler.
         lock: An optional lock for thread-safe optimizer updates.
+        vlm_batch: Optional batch of VLM co-training data. When provided, the policy
+            computes an additional language modelling loss on this batch (via the VLM
+            backbone's causal LM head) and adds it to the action loss. Expected keys
+            match the HF Qwen model inputs: input_ids, attention_mask, labels, and
+            optionally pixel_values / image_grid_thw for multimodal samples.
+        vlm_loss_scale: Weight applied to the VLM loss before adding to action loss.
 
     Returns:
         The updated MetricsTracker with new statistics for this step.
@@ -407,8 +415,10 @@ def update_policy(
         torch.amp.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
     )
     with autocast_context:
-        output = policy(batch)
+        output = policy(batch, vlm_batch=vlm_batch)
         loss = output["loss"]
+        if "vlm_loss" in output:
+            loss = loss + vlm_loss_scale * output["vlm_loss"]
 
     loss.backward()
 
@@ -432,6 +442,8 @@ def update_policy(
     train_metrics.grad_norm = grad_norm.full_tensor().item() if hasattr(grad_norm, 'full_tensor') else grad_norm.item()
     train_metrics.lr = optimizer.param_groups[0]["lr"]
     train_metrics.update_s = time.perf_counter() - start_time
+    if "vlm_loss" in output and "vlm_loss" in train_metrics.metrics:
+        train_metrics.vlm_loss = output["vlm_loss"].item()
 
     return train_metrics
 
@@ -476,6 +488,22 @@ def main(config: TrainConfig, seed: int):
         )
         dataloader = get_loader(ds)
         dl_iter = iter(dataloader)
+
+        vlm_dl_iter = None
+        if getattr(config.data, "vlm_data_path", None):
+            vlm_ds = get_train_dataset(
+                config.data.vlm_data_path,
+                batch_size=config.system.batch_size,
+                task_encoder=TaskEncoder(config.data.wds),
+                shuffle_buffer_size=1000,
+                max_samples_per_sequence=100,
+                worker_config=WorkerConfig.default_worker_config(
+                    num_workers=config.system.num_workers,
+                    data_parallel_group=None,
+                ),
+                repeat=True,
+            )
+            vlm_dl_iter = iter(get_loader(vlm_ds))
         preprocessor = None
         postprocessor = None
         sampler = None
@@ -521,6 +549,7 @@ def main(config: TrainConfig, seed: int):
         dl_iter = cycle(dataloader)
         num_frames = dataset.num_frames
         num_episodes = dataset.num_episodes
+        vlm_dl_iter = None
 
     # --- Apply FSDP2 ---
     device_mesh = init_device_mesh("cuda", (world_size,))
@@ -557,6 +586,8 @@ def main(config: TrainConfig, seed: int):
         "update_s": AverageMeter("updt_s", ":.3f"),
         "dataloading_s": AverageMeter("data_s", ":.3f"),
     }
+    if vlm_dl_iter is not None:
+        train_metrics["vlm_loss"] = AverageMeter("vlm_loss", ":.3f")
 
     effective_batch_size = config.system.batch_size * world_size
 
@@ -577,8 +608,6 @@ def main(config: TrainConfig, seed: int):
     else:
         samples_per_epoch = 0
 
-    step_metrics = []
-
     for _ in range(step, config.system.train_steps):
         start_time = time.perf_counter()
         batch = next(dl_iter)
@@ -587,6 +616,8 @@ def main(config: TrainConfig, seed: int):
                 k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                 for k, v in batch.items()
             }
+
+        vlm_batch = next(vlm_dl_iter) if vlm_dl_iter is not None else None
 
         if preprocessor is not None:
             batch = preprocessor(batch)
@@ -600,18 +631,12 @@ def main(config: TrainConfig, seed: int):
             use_amp=config.system.use_amp,
             grad_clip_norm=config.system.grad_clip_norm,
             lr_scheduler=lr_scheduler,
+            vlm_batch=vlm_batch,
+            vlm_loss_scale=getattr(config.system, "vlm_loss_scale", 0.1),
         )
 
         step += 1
         train_tracker.step()
-
-        if is_main_process:
-            step_metrics.append({
-                "step": step,
-                "loss": train_tracker.metrics["loss"].val,
-                "grad_norm": train_tracker.metrics["grad_norm"].val,
-                "lr": train_tracker.metrics["lr"].val,
-            })
 
         # Update epoch counter for sampler.set_epoch() when we've processed one epoch worth of samples
         # This ensures proper data shuffling across epochs in distributed training
@@ -657,10 +682,6 @@ def main(config: TrainConfig, seed: int):
 
     if is_main_process:
         logger.info("Training completed")
-        metrics_path = Path(config.system.checkpoint.output_directory) / "step_metrics.json"
-        metrics_path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(step_metrics, metrics_path)
-        logger.info(f"Wrote per-step metrics to {metrics_path}")
 
     dist.barrier()
     dist.destroy_process_group()

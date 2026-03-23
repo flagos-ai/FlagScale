@@ -6,6 +6,9 @@ system:
   use_amp: true
   shuffle: true
   num_workers: 4
+  # Weight applied to VLM language modelling loss when co-training with vlm_data_path.
+  # Set to 0 or omit vlm_data_path to disable co-training.
+  vlm_loss_scale: 0.1
 
   checkpoint:
     output_directory: ${experiment.exp_dir}
@@ -117,6 +120,8 @@ data:
     state_key: eepose
   # Path to the training data
   data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  # Path to VLM co-training data (WDS/Energon format). Leave unset to disable co-training.
+  # vlm_data_path: /workspace/datasets/vlm_cotrain/
   tolerance_s: 0.0001
   preprocessor:
     name: policy_preprocessor

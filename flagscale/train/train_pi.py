@@ -20,7 +20,12 @@ import torch
 import torch.distributed as dist
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy, MixedPrecision
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+    MixedPrecision,
+)
+from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateDictOptions
 
 from flagscale.logger import logger
 from flagscale.train.train_config import TrainConfig, DataConfig
@@ -124,7 +129,7 @@ def make_dataset(cfg: DataConfig, policy_config):
     # TODO: (yupu) Support image transforms
     enable_image_transform = False
     # TODO: (yupu) Remove hard-coded video backend
-    video_backend = "pyav"
+    video_backend = "torchcodec"
 
     image_transforms = (
         ImageTransforms(cfg.image_transforms) if enable_image_transform else None
@@ -742,6 +747,10 @@ def main(config: TrainConfig, seed: int):
 
         if config.system.checkpoint.save_checkpoint and step % config.system.checkpoint.save_freq == 0:
             dist.barrier()
+            state_dict = get_model_state_dict(
+                policy,
+                options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+            )
             if is_main_process:
                 logger.info(f"Saving checkpoint at step {step}")
                 output_dir = Path(config.system.checkpoint.output_directory)
@@ -756,6 +765,7 @@ def main(config: TrainConfig, seed: int):
                     lr_scheduler=lr_scheduler,
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
+                    state_dict=state_dict,
                 )
                 update_last_checkpoint(checkpoint_dir)
             dist.barrier()

@@ -1,19 +1,7 @@
 - serve_id: vllm_model
   engine_args:
     host: 0.0.0.0
-    port: 5000
-    # Model variant: "pi0" or "pi0.5"
+    port: 5001
     model_variant: "pi0.5"
-    model: /workspace/models/lerobot/pi05_base
-    tokenizer: /workspace/models/google/paligemma-3b-pt-224
-    stat_path: /workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json
+    model: /share/project/fengyupu/github/FlagScale_2/outputs/260322_pi0_5_train_new_lerobot/checkpoints/001000/pretrained_model
     device: "cuda"
-    # By default, Pi0.5 uses quantiles for state and action normalization, if false, it uses mean and std instead
-    use_quantiles: false
-    images_keys:
-      - observation.images.base_0_rgb
-      - observation.images.left_wrist_0_rgb
-      - observation.images.right_wrist_0_rgb
-    # Only used for warmup
-    images_shape: [3, 480, 640]
-    state_key: observation.state

@@ -16,6 +16,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from flagscale.models.pi0.modeling_pi0 import PI0Policy
+    from flagscale.models.pi05.modeling_pi05 import PI05Policy
+except ImportError:
+    pass
+
 __all__ = [
     "TrainablePolicy",
     "VLMBackbone",
