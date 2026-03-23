@@ -1,0 +1,175 @@
+name: Common Functional Tests - CLI
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+        description: Platform name (e.g., cuda, default)
+      image:
+        required: true
+        type: string
+      runs_on:
+        required: true
+        type: string
+      container_volumes:
+        required: true
+        type: string
+      container_options:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
+
+jobs:
+  functional_test_cli:
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: /tmp/FlagScale
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Download source code artifact (attempt 1)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_1
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 2)
+        if: steps.download_attempt_1.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_2
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 3)
+        if: steps.download_attempt_2.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        id: download_attempt_3
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Verify artifact download
+        run: |
+          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 1"
+          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
+          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
+            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
+          else
+            echo "❌ Error: All 3 download attempts failed"
+            echo "Artifact name: ${{ inputs.source_artifact }}"
+            exit 1
+          fi
+
+      - name: Extract source code
+        run: |
+          mkdir -p $PROJECT_ROOT
+          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+
+      - name: Set safe directory
+        run: |
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Install FlagScale CLI
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          echo "Installing FlagScale CLI (outside virtual environment)"
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install FlagScale CLI using system pip
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
+          echo "✅ FlagScale CLI installed successfully"
+        timeout-minutes: 10
+
+      - name: Validate CLI functionality
+        id: cli_validation
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          echo "Validating CLI (outside virtual environment)"
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          failed=false
+
+          # 1. Validate flagscale --version
+          echo "=========================================="
+          echo "Test: flagscale --version"
+          echo "=========================================="
+          if flagscale --version; then
+            echo "✅ flagscale --version passed"
+          else
+            echo "❌ flagscale --version failed"
+            failed=true
+          fi
+
+          # 2. Validate flagscale --help
+          echo "=========================================="
+          echo "Test: flagscale --help"
+          echo "=========================================="
+          if flagscale --help; then
+            echo "✅ flagscale --help passed"
+          else
+            echo "❌ flagscale --help failed"
+            failed=true
+          fi
+
+          # 3. Validate each subcommand --help
+          SUBCOMMANDS="train serve inference rl compress install test pull run"
+          for cmd in $SUBCOMMANDS; do
+            echo "=========================================="
+            echo "Test: flagscale $cmd --help"
+            echo "=========================================="
+            if flagscale $cmd --help; then
+              echo "✅ flagscale $cmd --help passed"
+            else
+              echo "❌ flagscale $cmd --help failed"
+              failed=true
+            fi
+          done
+
+          # 4. Run CLI unit tests
+          echo "=========================================="
+          echo "Test: CLI unit tests (pytest)"
+          echo "=========================================="
+          pip install pytest pytest-mock --root-user-action=ignore || { echo "❌ pytest install failed"; exit 1; }
+          if pytest tests/unit_tests/test_cli.py -v; then
+            echo "✅ CLI unit tests passed"
+          else
+            echo "❌ CLI unit tests failed"
+            failed=true
+          fi
+
+          # Final result
+          echo "=========================================="
+          if [ "$failed" = "true" ]; then
+            echo "❌ CLI validation failed"
+            exit 1
+          fi
+          echo "✅ All CLI validations passed!"
+        timeout-minutes: 10

@@ -109,6 +109,11 @@ def _get_runner_cmd_train(
         del runner_args["enable_monitoring"]
     if "enable_gpu_health_check" in runner_args:
         del runner_args["enable_gpu_health_check"]
+    # Profiling options are consumed by launcher; torchrun doesn't accept them.
+    if "nsys_bin_path" in runner_args:
+        del runner_args["nsys_bin_path"]
+    if "nsys_rep_file_path" in runner_args:
+        del runner_args["nsys_rep_file_path"]
     if "deploy" in runner_args:
         del runner_args["deploy"]
     runner_args["rdzv_id"] = rdzv_id
@@ -213,6 +218,41 @@ class SshLauncher(LauncherBase):
             runner_cmd = _get_runner_cmd_train(
                 host, master_addr, master_port, nnodes, node_rank, nproc_per_node, self.config
             )
+
+            # Optional Nsight Systems profiling (nsys)
+            runner_cfg = self.config.experiment.runner
+            nsys_bin_path = runner_cfg.get("nsys_bin_path", None)
+            nsys_rep_file_path = runner_cfg.get("nsys_rep_file_path", None)
+            if nsys_bin_path and nsys_rep_file_path:
+                # Allow passing either a full path to `nsys` or a directory containing it.
+                nsys_exe = (
+                    nsys_bin_path
+                    if os.path.basename(str(nsys_bin_path)) == "nsys"
+                    else os.path.join(str(nsys_bin_path), "nsys")
+                )
+                # If a directory is provided, write a per-host report file under it.
+                # Keep `$HOSTNAME` unexpanded so the remote shell expands it.
+                rep_path = str(nsys_rep_file_path)
+                if rep_path.endswith("/") or (
+                    ".nsys-rep" not in rep_path and "$HOSTNAME" not in rep_path
+                ):
+                    rep_path = rep_path.rstrip("/") + "/$HOSTNAME.nsys-rep"
+                nsys_cmd = [
+                    nsys_exe,
+                    "profile",
+                    "-s",
+                    "none",
+                    "-t",
+                    "nvtx,cuda,osrt",
+                    "-o",
+                    rep_path,
+                    "--force-overwrite",
+                    "true",
+                    "--capture-range=cudaProfilerApi",
+                    "--capture-range-end=stop",
+                ]
+                runner_cmd = nsys_cmd + runner_cmd
+
             # update hetero-current-device-type according to the device_type in hostfile
             if device_type is not None:
                 if "--hetero-current-device-type" in self.user_args:

@@ -84,12 +84,14 @@ load_platform_config() {
     INFERENCE_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "inference")]')
     SERVE_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "serve")]')
     RL_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "rl")]')
+    BENCHMARK_TESTS=$(echo "$FUNCTIONAL_TEST_MATRIX" | jq -c '[.[] | select(.task == "benchmark")]')
 
     echo "Train tests: $(echo "$TRAIN_TESTS" | jq 'length') test(s)"
     echo "Hetero train tests: $(echo "$HETERO_TRAIN_TESTS" | jq 'length') test(s)"
     echo "Inference tests: $(echo "$INFERENCE_TESTS" | jq 'length') test(s)"
     echo "Serve tests: $(echo "$SERVE_TESTS" | jq 'length') test(s)"
     echo "RL tests: $(echo "$RL_TESTS" | jq 'length') test(s)"
+    echo "Benchmark tests: $(echo "$BENCHMARK_TESTS" | jq 'length') test(s)"
 
     echo "✅ Loaded config for platform: $PLATFORM"
 
@@ -107,6 +109,7 @@ load_platform_config() {
     { echo 'inference_test_matrix<<EOFINFERENCE'; echo "$INFERENCE_TESTS"; echo 'EOFINFERENCE'; } >> $GITHUB_OUTPUT
     { echo 'serve_test_matrix<<EOFINFERENCE'; echo "$SERVE_TESTS"; echo 'EOFINFERENCE'; } >> $GITHUB_OUTPUT
     { echo 'rl_test_matrix<<EOFRL'; echo "$RL_TESTS"; echo 'EOFRL'; } >> $GITHUB_OUTPUT
+    { echo 'benchmark_test_matrix<<EOFBENCHMARK'; echo "$BENCHMARK_TESTS"; echo 'EOFBENCHMARK'; } >> $GITHUB_OUTPUT
 
     # Output package manager configuration
     echo "pkg_mgr=$PKG_MGR" >> $GITHUB_OUTPUT

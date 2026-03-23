@@ -1,0 +1,303 @@
+name: Common Functional Tests - Benchmark
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+        description: Platform name (e.g., cuda, default)
+      test_matrix:
+        required: true
+        type: string
+        description: JSON array of test configurations
+      image:
+        required: true
+        type: string
+      runs_on:
+        required: true
+        type: string
+      container_volumes:
+        required: true
+        type: string
+      container_options:
+        required: true
+        type: string
+      source_artifact:
+        required: true
+        type: string
+        description: Name of the artifact containing source code
+      pkg_mgr:
+        required: false
+        type: string
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
+        default: ""
+      env_path:
+        required: false
+        type: string
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
+
+jobs:
+  functional_test_benchmark:
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT_ROOT: /tmp/FlagScale
+    runs-on: ${{ fromJson(inputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test_config: ${{ fromJson(inputs.test_matrix) }}
+    container:
+      image: ${{ inputs.image }}
+      ports:
+        - 80
+      volumes: ${{ fromJson(inputs.container_volumes) }}
+      options: ${{ inputs.container_options }}
+
+    steps:
+      - name: Download source code artifact (attempt 1)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_1
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 2)
+        if: steps.download_attempt_1.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_attempt_2
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Download source code artifact (attempt 3)
+        if: steps.download_attempt_2.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        id: download_attempt_3
+        with:
+          name: ${{ inputs.source_artifact }}
+          path: /tmp
+
+      - name: Verify artifact download
+        run: |
+          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
+            echo "Artifact downloaded successfully on attempt 1"
+          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
+            echo "Artifact downloaded successfully on attempt 2 (retried once)"
+          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
+            echo "Artifact downloaded successfully on attempt 3 (retried twice)"
+          else
+            echo "Error: All 3 download attempts failed"
+            echo "Artifact name: ${{ inputs.source_artifact }}"
+            exit 1
+          fi
+
+      - name: Extract source code
+        run: |
+          mkdir -p $PROJECT_ROOT
+          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+
+      - name: Set safe directory
+        run: |
+          git config --global --add safe.directory $PROJECT_ROOT
+
+      - name: Install dependencies for benchmark
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Installing dependencies for benchmark"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install FlagScale CLI
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "FlagScale CLI not found in PATH"; exit 1; }
+          echo "FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+
+          # Install Megatron-LM-FL from source (force-build to replace pre-installed megatron-core)
+          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          INSTALL_DIR=""
+          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            INSTALL_DIR=$(dirname "$ENV_PATH")
+          fi
+
+          ./tools/install/install.sh \
+            --platform ${{ inputs.platform }} \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
+            --force-build \
+            --retry-count 3
+
+          echo "Environment ready for benchmark tests"
+        timeout-minutes: 30
+
+      - name: Run benchmark tests
+        id: benchmark_test
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          PLATFORM='${{ inputs.platform }}'
+          DEVICE='${{ matrix.test_config.device }}'
+          TASK='${{ matrix.test_config.task }}'
+          MODEL='${{ matrix.test_config.model }}'
+          CASE='${{ matrix.test_config.case }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Running benchmark tests"
+          echo "Platform: $PLATFORM"
+          echo "Device: $DEVICE"
+          echo "Task: $TASK"
+          echo "Model: $MODEL"
+          echo "Case: ${CASE:-all}"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+          echo "Project root: $PROJECT_ROOT"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "Running tests with pip/system Python"
+              ;;
+          esac
+
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Collect GPU info before benchmark
+          echo "=========================================="
+          echo "GPU Information"
+          echo "=========================================="
+          nvidia-smi || echo "nvidia-smi not available"
+          echo "=========================================="
+
+          # Run benchmark tests using run_tests.sh
+          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
+            --platform "$PLATFORM" \
+            --device "$DEVICE" \
+            --type functional \
+            --task "$TASK" \
+            --model "$MODEL" \
+            --list "$CASE"
+          exit_code=$?
+
+          if [ $exit_code -eq 0 ]; then
+            echo "Benchmark tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
+          else
+            echo "Benchmark tests failed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE (exit code: $exit_code)"
+          fi
+
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit $exit_code
+        timeout-minutes: 60
+
+      - name: Parse benchmark output to JSON
+        if: always() && steps.benchmark_test.outcome == 'success'
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          TASK='${{ matrix.test_config.task }}'
+          MODEL='${{ matrix.test_config.model }}'
+          CASE='${{ matrix.test_config.case }}'
+
+          LOG_FILE="tests/functional_tests/${TASK}/${MODEL}/test_results/${CASE}/logs/host_0_localhost.output"
+          GOLD_FILE="tests/functional_tests/${TASK}/${MODEL}/gold_values/${CASE}.json"
+          OUTPUT_FILE="tests/functional_tests/${TASK}/${MODEL}/test_results/${CASE}/logs/benchmark_metrics.json"
+
+          echo "Parsing benchmark output to JSON"
+          echo "Log file: $LOG_FILE"
+          echo "Gold values: $GOLD_FILE"
+          echo "Output: $OUTPUT_FILE"
+
+          python tests/test_utils/runners/parse_benchmark_output.py \
+            "$LOG_FILE" "$GOLD_FILE" "$OUTPUT_FILE"
+
+      - name: Install jq
+        if: always() && steps.benchmark_test.outcome == 'success'
+        run: apt-get update && apt-get install -y jq
+
+      - name: Upload benchmark data to backend
+        if: always() && steps.benchmark_test.outcome == 'success'
+        uses: flagos-ai/FlagOps/actions/post-benchmark-report@main
+        with:
+          backend_url: 'http://10.1.4.167:30180'
+          report_path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results/${{ matrix.test_config.case }}/logs/benchmark_metrics.json
+          list_code: 'ft_${{ matrix.test_config.task }}_${{ matrix.test_config.model }}_${{ matrix.test_config.case }}'
+          list_name: 'Benchmark ${{ matrix.test_config.task }} ${{ matrix.test_config.model }} ${{ matrix.test_config.case }}'
+          header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Values","required":true,"sortable":false,"type":"array"}]'
+          repository_name: '${{ github.repository }}'
+          commit_id: '${{ github.event.pull_request.head.sha || github.sha }}'
+          workflow_id: '${{ github.run_id }}'
+          fail_on_error: 'false'
+
+      - name: Upload Benchmark Test Logs
+        if: always() && steps.benchmark_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
+          retention-days: 7
+          if-no-files-found: warn
