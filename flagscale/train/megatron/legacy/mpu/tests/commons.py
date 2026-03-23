@@ -8,6 +8,8 @@ import torch
 
 import mpu
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 class IdentityLayer(torch.nn.Module):
     def __init__(self, size, scale=1.0):
@@ -43,10 +45,10 @@ def initialize_distributed(backend='nccl'):
           'rank: {}, world size: {}'.format(local_rank, rank, world_size))
 
     # Set the device id.
-    device = rank % torch.cuda.device_count()
+    device = rank % cur_platform.device_count()
     if local_rank is not None:
         device = local_rank
-    torch.cuda.set_device(device)
+    cur_platform.set_device(device)
 
     # Call the init process.
     init_method = 'tcp://'

@@ -10,6 +10,9 @@ SIGNAL_MAP = {
     'SIGUSR2': signal.SIGUSR2
 }
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 def get_world_size():
     if torch.distributed.is_available() and torch.distributed.is_initialized():
         world_size = torch.distributed.get_world_size()
@@ -22,9 +25,9 @@ def get_device(local_rank=None):
     backend = torch.distributed.get_backend()
     if backend == 'nccl':
         if local_rank is None:
-            device = torch.device('cuda')
+            device = torch.device(cur_platform.device_name())
         else:
-            device = torch.device(f'cuda:{local_rank}')
+            device = torch.device(f'{cur_platform.device_name()}:{local_rank}')
     elif backend == 'gloo':
         device = torch.device('cpu')
     else:

@@ -23,7 +23,12 @@ from megatron.core.rerun_state_machine import (
     initialize_rerun_state_machine,
 )
 from megatron.core.utils import get_te_version, is_te_min_version, is_torch_min_version
-from megatron.legacy import fused_kernels
+
+try:
+    from megatron.legacy import fused_kernels
+except ImportError:
+    fused_kernels = None
+
 from megatron.training import get_adlr_autoresume, get_args, get_tensorboard_writer
 from megatron.training import inprocess_restart
 from megatron.training.arguments import parse_args, validate_args
@@ -38,6 +43,8 @@ from megatron.plugin.hetero.parallel_context import set_parallel_context
 
 logger = logging.getLogger(__name__)
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def initialize_megatron(
     extra_args_provider=None,
@@ -60,7 +67,7 @@ def initialize_megatron(
     """
     if not allow_no_cuda:
         # Make sure cuda is available.
-        assert torch.cuda.is_available(), "Megatron requires CUDA."
+        assert cur_platform.is_available(), "Megatron requires CUDA."
 
     # Parse arguments
     if parsed_args is None:
@@ -153,7 +160,7 @@ def initialize_megatron(
         if args.num_experts is not None:
             from megatron.core.transformer.moe.router import MoEAuxLossAutoScaler
 
-            MoEAuxLossAutoScaler.set_loss_scale(torch.ones(1, device=torch.cuda.current_device()))
+            MoEAuxLossAutoScaler.set_loss_scale(torch.ones(1, device=cur_platform.current_device()))
 
         # Set tensorboard writer and wandb writer.
         set_global_writers(args)
@@ -239,11 +246,19 @@ def _compile_dependencies():
     if torch.distributed.get_rank() == 0:
         start_time = time.time()
         print("> compiling and loading fused kernels ...", flush=True)
-        fused_kernels.load(args)
+        try:
+            if fused_kernels is not None:
+                fused_kernels.load(args)
+        except Exception as e:
+            print("> fused kernels are not available for platform: {cur_platform.device_name()}")
         torch.distributed.barrier()
     else:
         torch.distributed.barrier()
-        fused_kernels.load(args)
+        try:
+            if fused_kernels is not None:
+                fused_kernels.load(args)
+        except Exception as e:
+            print("> fused kernels are not available for platform: {cur_platform.device_name()}")
     # Simple barrier to make sure all ranks have passed the
     # compilation phase successfully before moving on to the
     # rest of the program. We think this might ensure that
@@ -334,7 +349,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
     """Initialize torch.distributed and core model parallel."""
     args = get_args()
 
-    device_count = torch.cuda.device_count()
+    device_count = cur_platform.device_count()
     if torch.distributed.is_initialized():
 
         if args.rank == 0:
@@ -351,14 +366,14 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
             print("> initializing torch distributed ...", flush=True)
         # Manually set the device ids.
         if device_count > 0:
-            torch.cuda.set_device(args.local_rank)
-            device_id = torch.device(f'cuda:{args.local_rank}')
+            cur_platform.set_device(args.local_rank)
+            device_id = torch.device(cur_platform.device_name(args.local_rank))
         else:
             device_id = None
 
         # Set to non-default stream for cudagraph capturing.
         if args.cuda_graph_impl == "transformer_engine":
-            torch.cuda.set_stream(torch.cuda.Stream())
+            cur_platform.set_stream(cur_platform.Stream())
 
         # Call the init process
         init_process_group_kwargs = {
@@ -456,7 +471,7 @@ def _set_random_seed(
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
-        if torch.cuda.device_count() > 0:
+        if cur_platform.device_count() > 0:
             tensor_parallel.model_parallel_cuda_manual_seed(
                 seed, te_rng_tracker, inference_rng_tracker, use_cudagraphable_rng
             )
@@ -509,7 +524,7 @@ def _warmup_jit_function():
 
     # Warmup fused bias+gelu
     bias = torch.rand(
-        args.ffn_hidden_size // args.tensor_model_parallel_size, dtype=dtype, device="cuda"
+        args.ffn_hidden_size // args.tensor_model_parallel_size, dtype=dtype, device=cur_platform.device_name()
     )
     input = torch.rand(
         (
@@ -518,7 +533,7 @@ def _warmup_jit_function():
             args.ffn_hidden_size // args.tensor_model_parallel_size,
         ),
         dtype=dtype,
-        device="cuda",
+        device=cur_platform.device_name(),
     )
     # Warmup JIT fusions with the input grad_enable state of both forward
     # prop and recomputation
@@ -539,14 +554,14 @@ def _warmup_jit_function():
     input = torch.rand(
         (seq_length // args.context_parallel_size, args.micro_batch_size, args.hidden_size),
         dtype=dtype,
-        device="cuda",
+        device=cur_platform.device_name(),
     )
     residual = torch.rand(
         (seq_length // args.context_parallel_size, args.micro_batch_size, args.hidden_size),
         dtype=dtype,
-        device="cuda",
+        device=cur_platform.device_name(),
     )
-    bias = torch.rand((args.hidden_size), dtype=dtype, device="cuda").expand_as(residual)
+    bias = torch.rand((args.hidden_size), dtype=dtype, device=cur_platform.device_name()).expand_as(residual)
     dropout_rate = 0.1
     # Warmup JIT fusions with the input grad_enable state of both forward
     # prop and recomputation
@@ -557,7 +572,7 @@ def _warmup_jit_function():
         for _ in range(5):
             output = bias_dropout_add_fused_train([input, bias], residual, dropout_rate)
     del bias, input, residual, output
-    torch.cuda.empty_cache()
+    cur_platform.empty_cache()
 
 
 def setup_logging() -> None:

@@ -154,6 +154,7 @@ jobs:
           fi
 
           # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
+          # Use --force-build to ensure Megatron-LM-FL replaces any pre-installed megatron-core
           ./tools/install/install.sh \
             --platform ${{ inputs.platform }} \
             --task train \
@@ -163,6 +164,7 @@ jobs:
             --no-system --no-dev --no-base --no-task \
             --src-deps megatron-lm \
             --pip-deps typer \
+            --force-build \
             --retry-count 3
 
           # TODO: temp solution to install newly added deps, remove once the new image is built

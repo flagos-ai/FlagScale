@@ -345,7 +345,10 @@ class SshLauncher(LauncherBase):
         if enable_monitoring is None:
             enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
         num_visible_devices = None
-        visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+        # visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+        visible_devices = next(
+            (v for k, v in self.user_envs.items() if k.endswith("_VISIBLE_DEVICES")), None
+        )
         if visible_devices is not None and isinstance(visible_devices, str):
             visible_devices = visible_devices.split(",")
             num_visible_devices = len(visible_devices)
@@ -983,7 +986,10 @@ class SshLauncher(LauncherBase):
 
                 # Get CUDA_VISIBLE_DEVICES if set
                 cur_envs = add_decive_extra_config(self.user_envs, resource_info["type"])
-                visible_devices = cur_envs.get("CUDA_VISIBLE_DEVICES", None)
+                # visible_devices = cur_envs.get("CUDA_VISIBLE_DEVICES", None)
+                visible_devices = next(
+                    (v for k, v in cur_envs.items() if k.endswith("_VISIBLE_DEVICES")), None
+                )
                 num_visible_devices = None
                 if visible_devices is not None and isinstance(visible_devices, str):
                     visible_devices = visible_devices.split(",")
@@ -1050,7 +1056,10 @@ class SshLauncher(LauncherBase):
             node_rank = 0
             host = "localhost"
 
-            visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+            # visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+            visible_devices = next(
+                (v for k, v in self.user_envs.items() if k.endswith("_VISIBLE_DEVICES")), None
+            )
             num_visible_devices = None
             if visible_devices is not None and isinstance(visible_devices, str):
                 visible_devices = visible_devices.split(",")

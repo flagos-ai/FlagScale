@@ -13,6 +13,9 @@ from megatron.legacy.data.dataset_utils import (
 from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.datasets.data_samplers import MegatronPretrainingSampler
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 
 def make_attention_mask(source_block, target_block):
     """
@@ -192,7 +195,7 @@ def get_block_samples_mapping(block_dataset, title_dataset, data_prefix, num_epo
     # This should be a barrier but nccl barrier assumes
     # device_index=rank which is not the case for model
     # parallel case
-    counts = torch.tensor([1], dtype=torch.long, device='cuda')
+    counts = torch.tensor([1], dtype=torch.long, device=cur_platform.device_name())
     torch.distributed.all_reduce(counts, group=mpu.get_data_parallel_group())
     assert counts[0].item() == mpu.get_data_parallel_group().size()
 

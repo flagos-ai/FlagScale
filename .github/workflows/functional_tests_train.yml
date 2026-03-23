@@ -155,8 +155,24 @@ jobs:
           command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
           echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
 
-          # For train task: all dependencies are pre-installed in the env
-          # No additional installation needed
+          # Install Megatron-LM-FL from source (force-build to replace pre-installed megatron-core)
+          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          INSTALL_DIR=""
+          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            INSTALL_DIR=$(dirname "$ENV_PATH")
+          fi
+
+          ./tools/install/install.sh \
+            --platform ${{ inputs.platform }} \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
+            --force-build \
+            --retry-count 3
+
           echo "Environment ready for train tests"
         timeout-minutes: 30
 

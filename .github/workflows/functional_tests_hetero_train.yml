@@ -166,6 +166,7 @@ jobs:
             ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
             --no-system --no-dev --no-base --no-task \
             --src-deps megatron-lm \
+            --force-build \
             --retry-count 3
 
           # Install FlagScale CLI

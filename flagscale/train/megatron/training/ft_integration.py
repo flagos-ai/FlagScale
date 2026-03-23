@@ -62,6 +62,8 @@ _curr_eval_iter_idx = 0
 _NUM_WARMUP_ITERS = 1
 _MIN_ITERS_FOR_STEP_TIMEOUT_UPDATE = 16
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def get_rank_monitor_client() -> Optional[Any]:
     """Returns the underlying fault tolerance client instance
@@ -326,7 +328,7 @@ def maybe_setup_simulated_fault() -> None:
     rank = torch.distributed.get_rank()
     rand_rank = rng.randint(0, torch.distributed.get_world_size() - 1)
     rank_to_fail = rank_to_fail if rank_to_fail is not None else rand_rank
-    rank_to_fail = torch.tensor([rank_to_fail], device=torch.cuda.current_device())
+    rank_to_fail = torch.tensor([rank_to_fail], device=cur_platform.current_device())
     torch.distributed.broadcast(rank_to_fail, 0)
     rank_to_fail = int(rank_to_fail.item())
 
