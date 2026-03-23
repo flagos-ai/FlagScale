@@ -3,7 +3,7 @@ defaults:
   - train: pi0_5
 
 experiment:
-  exp_name: pi0_5_train
+  exp_name: 260322_pi0_5_train_new_lerobot
   seed: 42
   save_steps: 10000
   load: null
@@ -22,7 +22,8 @@ experiment:
     before_start: echo "Starting PI0.5 Training"
   envs:
     LOGLEVEL: "INFO"
-    CUDA_VISIBLE_DEVICES: "2,3,4,5,6,7"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    # CUDA_VISIBLE_DEVICES: "1,2,3,4,5,6,7"
     CUDA_DEVICE_MAX_CONNECTIONS: 1
     WANDB_MODE: offline
     OTEL_SDK_DISABLED: true
