@@ -71,21 +71,25 @@ def stop_server(proc) -> None:
         proc.kill()
 
 
-def make_headers(url: str, body: str, secret: str) -> dict:
+def make_headers(url: str, body: str, secret: str, include_content_type: bool = False) -> dict:
     timestamp = str(int(time.time()))
     to_sign = f"{timestamp}{url}{body}"
     sign = hmac.new(secret.encode(), to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-    return {
-        "Content-Type": "application/json",
+    headers = {
         "X-Flageval-Sign": sign,
         "X-Flageval-Timestamp": timestamp,
     }
+    if include_content_type:
+        headers["Content-Type"] = "application/json"
+    return headers
 
 
 def get_dataset_ids(base_url: str, secret: str, dataset_keys: list[str]) -> list[int]:
     url = f"{base_url}/robo-datasets"
     headers = make_headers(url, "", secret)
     resp = requests.get(url, headers=headers)
+    if not resp.ok:
+        logger.info(f"robo-datasets {resp.status_code}: {resp.text[:300]}")
     resp.raise_for_status()
     data = resp.json()
     logger.info(f"robo-datasets response: {json.dumps(data, ensure_ascii=False)[:500]}")
@@ -114,7 +118,7 @@ def submit_eval(
             "description": description,
         }
     )
-    headers = make_headers(url, body, secret)
+    headers = make_headers(url, body, secret, include_content_type=True)
     resp = requests.post(url, headers=headers, data=body)
     if resp.status_code == 401:
         sys.exit("Authentication failed — check FLAGEVAL_SECRET")
