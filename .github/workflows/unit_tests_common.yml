@@ -258,6 +258,6 @@ jobs:
           NO_PROXY: "flagcicd-inner.flagos.net"
         with:
           user_id: '000000000000000000'
-          backend_url: 'http://flagcicd-inner.flagos.net:8000'
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
           report_path: '${{ env.PROJECT_ROOT }}/coverage-report/coverage.json'
           fail_on_error: 'false'
