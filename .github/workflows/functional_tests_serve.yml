@@ -165,6 +165,8 @@ jobs:
 
       - name: Run functional tests
         id: functional_test
+        env:
+          no_proxy: "localhost"
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
