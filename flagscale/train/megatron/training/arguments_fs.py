@@ -385,6 +385,7 @@ class FSTrainArguments:
                     self.args.engram_embedding_parallel_size = None   
             elif self.args.engram_embedding_parallel_method == "alltoall":
                 assert self.args.engram_embedding_parallel_size is not None, "embedding parallel size should be specified when using alltoall"
+                assert self.args.engram_embedding_parallel_size >= self.args.tensor_model_parallel_size, f"Engram parallel size {self.args.engram_embedding_parallel_size} should be greater than or equal to tensor_model_parallel_size {self.args.tensor_model_parallel_size}, otherwise the random seed may be different in engram_dp_ranks. It will be fixed in a later version."
             elif self.args.engram_embedding_parallel_method == "offload":
                 if self.args.engram_embedding_parallel_size is None:
                     self.args.engram_embedding_parallel_size = 1
@@ -392,6 +393,7 @@ class FSTrainArguments:
                 raise ValueError(f"Invalid embedding parallel method: {self.args.engram_embedding_parallel_method}")
             assert not self.args.use_megatron_fsdp, "Megatron FSDP is not supported yet; support is planned for a later version."
             assert not self.args.init_model_with_meta_device, "Init_model_with_meta_device is not supported yet; support is planned for a later version."
+            assert self.args.use_distributed_optimizer, "When use engram, distributed_optimizer must be enabled, because there is a bug caused by allreduce grad norm in model parallel group when do not use distributed_optimizer. We have not found a pretty solution yet, so disable it temporarily."
         assert not (args.pipeline_model_parallel_size == 1 and args.overlap_moe_expert_parallel_comm), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
 
 

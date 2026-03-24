@@ -118,8 +118,9 @@ class EngramMemory(nn.Module):
     
     def enable_parallel(self):
         assert not self.offloading_flag, "Cannot enable parallelism after offloading is enabled."
-        setattr(self.weight, "is_engram_embedding", True)
-        setattr(self.weight, "allreduce", False)
+        if self.embedding_parallel_size > 1:
+            setattr(self.weight, "is_engram_embedding", True)
+            setattr(self.weight, "allreduce", False)
         self.parallel_flag = True
     
     def enable_offloading(self):
