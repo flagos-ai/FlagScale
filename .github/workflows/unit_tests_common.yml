@@ -252,10 +252,10 @@ jobs:
 
       - name: Upload coverage report to FlagCICD
         if: always()
-        uses: flagos-ai/FlagOps/actions/post-pytest-report@v1
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         env:
-          NO_PROXY: "10.1.4.167"
+          NO_PROXY: "flagcicd-inner.flagos.net"
         with:
-          backend_url: 'http://10.1.4.167:30180/flagcicd-backend/metrics/'
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/flagcicd-backend/metrics/'
           report_path: '${{ env.PROJECT_ROOT }}/coverage-report/coverage.json'
           fail_on_error: 'false'
