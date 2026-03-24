@@ -90,6 +90,8 @@ def get_dataset_ids(base_url: str, secret: str, dataset_keys: list[str]) -> list
     resp = requests.get(url, headers=headers)
     if not resp.ok:
         logger.info(f"robo-datasets {resp.status_code}: {resp.text[:300]}")
+        resp2 = requests.get(url)
+        logger.info(f"robo-datasets no-auth {resp2.status_code}: {resp2.text[:300]}")
     resp.raise_for_status()
     data = resp.json()
     logger.info(f"robo-datasets response: {json.dumps(data, ensure_ascii=False)[:500]}")
