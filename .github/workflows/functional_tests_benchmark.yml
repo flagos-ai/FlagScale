@@ -290,7 +290,7 @@ jobs:
           report_path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results/${{ matrix.test_config.case }}/logs/benchmark_metrics.json
           list_code: 'ft_${{ matrix.test_config.task }}_${{ matrix.test_config.model }}_${{ matrix.test_config.case }}'
           list_name: 'Benchmark ${{ matrix.test_config.task }} ${{ matrix.test_config.model }} ${{ matrix.test_config.case }}'
-          header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Values","required":true,"sortable":false,"type":"array"}]'
+          header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Values","required":false,"sortable":false,"type":"array"},{"field":"avg","name":"Avg","required":true,"sortable":true,"type":"number"},{"field":"p50","name":"P50","required":true,"sortable":true,"type":"number"},{"field":"p99","name":"P99","required":true,"sortable":true,"type":"number"}]'
           repository_name: '${{ github.repository }}'
           commit_id: '${{ github.event.pull_request.head.sha || github.sha }}'
           workflow_id: '${{ github.run_id }}'
