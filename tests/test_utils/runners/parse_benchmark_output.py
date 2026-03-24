@@ -135,7 +135,9 @@ def main():
     print(f"Benchmark results written to {output_json}")
     print(f"Metrics extracted: {list(benchmark.keys())}")
     for key, data in benchmark.items():
-        print(f"  {key}: {len(data['values'])} values  avg={data['avg']}  p50={data['p50']}  p99={data['p99']}")
+        print(
+            f"  {key}: {len(data['values'])} values  avg={data['avg']}  p50={data['p50']}  p99={data['p99']}"
+        )
 
 
 if __name__ == "__main__":
