@@ -243,8 +243,3 @@ jobs:
           path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
           retention-days: 7
           if-no-files-found: warn
-
-      - name: Debug Sleep
-        if: failure()
-        run: |
-          sleep 3600
