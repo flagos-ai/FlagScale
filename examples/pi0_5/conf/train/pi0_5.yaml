@@ -1,6 +1,6 @@
 system:
   batch_size: 16
-  train_steps: 10000
+  train_steps: 30000
   log_freq: 10
   grad_clip_norm: 1.0
   use_amp: true
@@ -12,7 +12,7 @@ system:
     # Whether to save checkpoint
     save_checkpoint: true
     # Number of steps between checkpoints
-    save_freq: 1
+    save_freq: 1000
   # TODO(yupu): Support resuming from checkpoint
 
 model:

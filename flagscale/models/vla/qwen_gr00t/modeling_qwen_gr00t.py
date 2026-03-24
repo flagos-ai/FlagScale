@@ -69,7 +69,9 @@ class QwenGr00t(TrainablePolicy):
         if config.output_features:
             self.output_features = config.output_features
 
-    def forward(self, batch: list[dict] | dict, vlm_batch: dict[str, torch.Tensor] | None = None) -> dict[str, torch.Tensor]:
+    def forward(
+        self, batch: list[dict] | dict, vlm_batch: dict[str, torch.Tensor] | None = None
+    ) -> dict[str, torch.Tensor]:
         """ """
         if isinstance(batch, list):  # wds: list of per-sample dicts
             images = [ex["image"] for ex in batch]

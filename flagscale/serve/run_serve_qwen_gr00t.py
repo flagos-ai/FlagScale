@@ -12,11 +12,50 @@ import flagscale.serve.processor  # noqa: F401 — registers serve-specific proc
 from flagscale.logger import logger
 from flagscale.models.utils.constants import ACTION, OBS_IMAGES, OBS_STATE
 from flagscale.models.vla import TrainablePolicy
+from flagscale.serve.processor.image_layout_processor import ImageLayoutProcessorStep
+from flagscale.serve.processor.image_resize_processor import ImageResizeProcessorStep
 from flagscale.serve.websocket_policy_server import WebsocketPolicyServer
 from flagscale.train.processor import PolicyProcessorPipeline, ProcessorStepRegistry
 
 # TODO: (yupu) to constant.py?
 TASK_KEY = "task"
+
+
+def _default_serve_preprocessor(model_variant: str) -> PolicyProcessorPipeline | None:
+    """Return the default serve preprocessor for a given model variant, or None if not needed."""
+    variant = model_variant.lower()
+    if variant == "pi0.5":
+        return _default_pi05_serve_preprocessor()
+    if variant == "qwengr00t":
+        return _default_qwen_gr00t_serve_preprocessor()
+    return None
+
+
+def _default_pi05_serve_preprocessor() -> PolicyProcessorPipeline:
+    """Default serve preprocessor for pi0.5.
+
+    pi0.5's ``_preprocess_images`` expects images as [B, C, H, W] float32 [0, 1].
+    Client observations arrive as HWC uint8 numpy arrays, so this pipeline converts them.
+    """
+    return PolicyProcessorPipeline(
+        steps=[
+            ImageLayoutProcessorStep(
+                src_layout="hwc",
+                dst_layout="chw",
+                add_batch_dim=True,
+                to_float=True,
+            )
+        ]
+    )
+
+
+def _default_qwen_gr00t_serve_preprocessor() -> PolicyProcessorPipeline:
+    """Default serve preprocessor for QwenGr00t.
+
+    Resizes images to the training resolution (224x224). The Qwen VL processor
+    handles further preprocessing (normalization, patching) internally.
+    """
+    return PolicyProcessorPipeline(steps=[ImageResizeProcessorStep(image_size=[224, 224])])
 
 
 def validate_batch(batch: dict) -> list[str]:
@@ -126,7 +165,9 @@ class Policy:
         """
         serve_preproc_cfg = self.config_engine.get("serve_preprocessor")
         if not serve_preproc_cfg or not serve_preproc_cfg.get("steps"):
-            return None
+            # TODO: (yupu) No way to explicitly opt out of the default — need a flag like
+            # ``serve_preprocessor: {disabled: true}`` for cases where no steps are wanted.
+            return _default_serve_preprocessor(self.config_engine.get("model_variant", ""))
         steps = []
         for step_cfg in serve_preproc_cfg.steps:
             step_cls = ProcessorStepRegistry.get(step_cfg.registry_name)
