@@ -25,6 +25,8 @@ a100:
         mixtral: ["tp2_pp1_ep2", "tp4_pp1_ep2"]
       hetero_train:
         aquila: ["tp2pp1_tp4pp1_tp2pp1", "tp2dp1pp1_tp2dp2pp1_tp1dp2pp1", "dp2dp4_shared_embedding"]
+      benchmark:
+        qwen3: ["tp2_pp2"]
       inference:
         qwen3: ["4b_tp2"]
       serve:

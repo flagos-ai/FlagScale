@@ -91,9 +91,10 @@ run_test() {
     fi
 
     # Map task name to flagscale CLI subcommand
-    # e.g. hetero_train -> train, train -> train, others unchanged
+    # e.g. hetero_train -> train, train -> train, benchmark -> train, others unchanged
     local cli_task="$task"
     case "$task" in
+        benchmark) cli_task="train" ;;
         *train*) cli_task="train" ;;
     esac
 
@@ -109,6 +110,9 @@ run_test() {
     #   - *: Unsupported task type, throw error and exit execution
     local compare_function
     case "$task" in
+        benchmark)
+            compare_function="test_benchmark_equal"
+            ;;
         *train*)
             compare_function="test_train_equal"
             ;;

@@ -27,6 +27,7 @@ jobs:
       inference_test_matrix: ${{ steps.config.outputs.inference_test_matrix }}
       serve_test_matrix: ${{ steps.config.outputs.serve_test_matrix }}
       rl_test_matrix: ${{ steps.config.outputs.rl_test_matrix }}
+      benchmark_test_matrix: ${{ steps.config.outputs.benchmark_test_matrix }}
       pkg_mgr: ${{ steps.config.outputs.pkg_mgr }}
       env_path: ${{ steps.config.outputs.env_path }}
       env_name_train: ${{ steps.config.outputs.env_name_train }}
@@ -99,8 +100,22 @@ jobs:
           # Load configuration and group tests by task
           load_platform_config "$PLATFORM"
 
-  unit_tests:
+  # CLI validation runs first (outside virtual env) as a gate for all subsequent tests
+  cli_validation:
     needs: checkout_and_config
+    uses: ./.github/workflows/functional_tests_cli.yml
+    with:
+      platform: ${{ inputs.platform }}
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
+
+  unit_tests:
+    needs:
+      - checkout_and_config
+      - cli_validation
     strategy:
       fail-fast: false
       matrix:
@@ -155,7 +170,6 @@ jobs:
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
-  # NOTE: Inference, serve, and rl functional tests are temporarily disabled
   functional_tests_inference:
     needs:
       - checkout_and_config
@@ -192,6 +206,7 @@ jobs:
       env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
+  # NOTE: rl functional tests are temporarily disabled
   # functional_tests_rl:
   #   needs:
   #     - checkout_and_config
@@ -210,18 +225,38 @@ jobs:
   #     env_name: ${{ needs.checkout_and_config.outputs.env_name_rl }}
   #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
+  functional_tests_benchmark:
+    needs:
+      - checkout_and_config
+      - unit_tests
+    if: fromJson(needs.checkout_and_config.outputs.benchmark_test_matrix)[0] != null
+    uses: ./.github/workflows/functional_tests_benchmark.yml
+    with:
+      platform: ${{ inputs.platform }}
+      test_matrix: ${{ needs.checkout_and_config.outputs.benchmark_test_matrix }}
+      image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
+      runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
+      container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
+      container_options: ${{ needs.checkout_and_config.outputs.container_options }}
+      source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+
   all_tests_complete:
     defaults:
       run:
         shell: bash
     needs:
       - checkout_and_config
+      - cli_validation
       - unit_tests
       - functional_tests_train
       - functional_tests_hetero_train
+      - functional_tests_benchmark
+      - functional_tests_inference
+      - functional_tests_serve
       # NOTE: Disabled tests removed from needs
-      # - functional_tests_inference
-      # - functional_tests_serve
       # - functional_tests_rl
     runs-on: ubuntu-latest
     if: always()
@@ -233,6 +268,11 @@ jobs:
 
           if [ "${{ needs.unit_tests.result }}" != "success" ]; then
             echo "❌ Unit tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.cli_validation.result }}" != "success" ]; then
+            echo "❌ CLI validation failed"
             failed=true
           fi
 
@@ -249,19 +289,25 @@ jobs:
             failed=true
           fi
 
+          if [ "${{ needs.functional_tests_benchmark.result }}" != "success" ] && \
+             [ "${{ needs.functional_tests_benchmark.result }}" != "skipped" ]; then
+            echo "❌ Benchmark tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.functional_tests_inference.result }}" != "success" ] && \
+             [ "${{ needs.functional_tests_inference.result }}" != "skipped" ]; then
+            echo "❌ Inference functional tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.functional_tests_serve.result }}" != "success" ] && \
+             [ "${{ needs.functional_tests_serve.result }}" != "skipped" ]; then
+            echo "❌ Serve functional tests failed"
+            failed=true
+          fi
+
           # NOTE: Inference, serve, and rl checks disabled
-          # if [ "${{ needs.functional_tests_inference.result }}" != "success" ] && \
-          #    [ "${{ needs.functional_tests_inference.result }}" != "skipped" ]; then
-          #   echo "❌ Inference functional tests failed"
-          #   failed=true
-          # fi
-
-          # if [ "${{ needs.functional_tests_serve.result }}" != "success" ] && \
-          #    [ "${{ needs.functional_tests_serve.result }}" != "skipped" ]; then
-          #   echo "❌ Serve functional tests failed"
-          #   failed=true
-          # fi
-
           # if [ "${{ needs.functional_tests_rl.result }}" != "success" ] && \
           #    [ "${{ needs.functional_tests_rl.result }}" != "skipped" ]; then
           #   echo "❌ RL functional tests failed"

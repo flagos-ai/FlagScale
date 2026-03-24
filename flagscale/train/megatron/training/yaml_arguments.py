@@ -38,6 +38,9 @@ str_dtype_to_torch = {
     "bfloat16" : torch.bfloat16
 }
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 def validate_yaml(args, defaults={}):
     
     # This is for legacy script env var setting
@@ -257,7 +260,7 @@ def validate_yaml(args, defaults={}):
 
     if args.language_model.moe_grouped_gemm:
         assert args.model_parallel.bf16, 'Currently GroupedGEMM for MoE only supports bf16 dtype.'
-        dc = torch.cuda.get_device_capability()
+        dc = cur_platform.get_device_capability()
         assert dc[0] >= 8, "Unsupported compute capability for GroupedGEMM kernels."
 
     if args.weight_decay_incr_style == 'constant':

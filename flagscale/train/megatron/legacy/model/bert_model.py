@@ -16,6 +16,8 @@ from megatron.legacy.model.utils import init_method_normal
 from megatron.legacy.model.utils import scaled_init_method_normal
 from .module import MegatronModule
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def bert_extended_attention_mask(attention_mask):
     # We create a 3D attention mask from a 2D tensor mask.
@@ -200,7 +202,7 @@ class BertModel(MegatronModule):
                 output = torch.zeros(
                     size=(embeddings.shape[0], embeddings.shape[2]),
                     dtype=torch.float32,
-                    device=torch.cuda.current_device())
+                    device=cur_platform.current_device())
                 for i, (embedding, mask) in enumerate(zip(embeddings, masks)):
                     output[i, :] = torch.mean(embedding[1: mask - 1], dim=0)
 

@@ -1,0 +1,67 @@
+defaults:
+  - data
+
+system:
+  tensor_model_parallel_size: 2
+  pipeline_model_parallel_size: 2
+  disable_bias_linear: true
+  qk_layernorm: true
+  sequence_parallel: true
+  use_distributed_optimizer: true
+  overlap_grad_reduce: true
+  overlap_param_gather: true
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    log_throughput: true
+    no_log_loss_scale_to_tensorboard: true
+  checkpoint:
+    no_save_optim: true
+    no_save_rng: true
+    save_interval: 100000
+    tensorboard_log_interval: 999999
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 4
+  hidden_size: 1024
+  ffn_hidden_size: 3072
+  kv_channels: 128
+  num_attention_heads: 16
+  group_query_attention: true
+  num_query_groups: 8
+  seq_length: 4096
+  max_position_embeddings: 40960
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  rotary_base: 1000000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: false
+  no_position_embedding: true
+  no_rope_fusion: true
+
+  seed: 42
+  micro_batch_size: 1
+  global_batch_size: 16
+  eval_iters: 0
+  train_iters: 20
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-3
+      min_lr: 3.0e-4
+      lr_warmup_samples: 0
+      lr_warmup_fraction: 0.01
+      lr_decay_style: cosine

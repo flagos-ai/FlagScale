@@ -10,6 +10,9 @@ from megatron.legacy.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.legacy.model.utils import attention_mask_func
 from megatron.legacy.fused_kernels import load
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 def test_load_fused_kernels():
     try:
         import fused_layer_norm_cuda
@@ -23,7 +26,7 @@ def test_load_fused_kernels():
         raise e
 
 def test_fused_softmax():
-    bert = BertModel.from_pretrained("bert-base-cased").cuda().half()
+    bert = BertModel.from_pretrained("bert-base-cased").to(cur_platform.device()).half()
     tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
     test_text = (
         "Hello. How are you? I am fine thank you and you? yes Good. "
@@ -36,16 +39,16 @@ def test_fused_softmax():
     )
 
     embedding_output = bert.embeddings(
-        input_ids=tokens["input_ids"].cuda(),
+        input_ids=tokens["input_ids"].to(cur_platform.device()),
         position_ids=None,
-        token_type_ids=tokens["token_type_ids"].cuda(),
+        token_type_ids=tokens["token_type_ids"].to(cur_platform.device()),
         inputs_embeds=None,
         past_key_values_length=0,
     )
 
     # (bsz, 1, 1, seq_len)
     mask = bert.get_extended_attention_mask(
-        attention_mask=tokens["attention_mask"].cuda(),
+        attention_mask=tokens["attention_mask"].to(cur_platform.device()),
         input_shape=tokens["input_ids"].shape,
         device=bert.device,
     )
@@ -69,7 +72,7 @@ def test_fused_softmax():
             attn_mask_type=AttnMaskType.padding,
             scaled_masked_softmax_fusion=True,
         )
-        .cuda()
+        .to(cur_platform.device())
         .half()
     )
 
@@ -88,7 +91,7 @@ def test_fused_softmax():
             attn_mask_type=AttnMaskType.padding,
             scaled_masked_softmax_fusion=False,
         )
-        .cuda()
+        .to(cur_platform.device())
         .half()
     )
 
@@ -121,7 +124,7 @@ def test_fused_softmax():
 
 
 def test_fused_upper_triangle_mask_softmax():
-    gpt = GPT2Model.from_pretrained("gpt2").cuda().half()
+    gpt = GPT2Model.from_pretrained("gpt2").to(cur_platform.device()).half()
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     test_text = (
         "Hello. How are you? I am fine thank you and you? yes Good. "
@@ -133,14 +136,14 @@ def test_fused_upper_triangle_mask_softmax():
         return_tensors="pt",
     )
 
-    attention_mask = tokens["attention_mask"].cuda()
+    attention_mask = tokens["attention_mask"].to(cur_platform.device())
     attention_mask = attention_mask.view(attention_mask.size(0), -1)
     attention_mask = attention_mask[:, None, None, :]
     attention_mask = (1.0 - attention_mask) * -10000.0
     attention_mask = attention_mask.repeat(1, 1, attention_mask.size()[-1], 1)
     attn = gpt.h[0]
 
-    hidden_states = gpt.wte(tokens["input_ids"].cuda())
+    hidden_states = gpt.wte(tokens["input_ids"].to(cur_platform.device()))
     q, k, v = attn.attn.c_attn(hidden_states).split(768, dim=-1)
     q = attn.attn._split_heads(q, attn.attn.num_heads, attn.attn.head_dim)
     k = attn.attn._split_heads(k, attn.attn.num_heads, attn.attn.head_dim)
@@ -169,7 +172,7 @@ def test_fused_upper_triangle_mask_softmax():
             attn_mask_type=AttnMaskType.causal,
             scaled_masked_softmax_fusion=True,
         )
-        .cuda()
+        .to(cur_platform.device())
         .half()
     )
 
@@ -188,7 +191,7 @@ def test_fused_upper_triangle_mask_softmax():
             attn_mask_type=AttnMaskType.causal,
             scaled_masked_softmax_fusion=False,
         )
-        .cuda()
+        .to(cur_platform.device())
         .half()
     )
 
@@ -221,7 +224,7 @@ def test_fused_upper_triangle_mask_softmax():
 
 
 def test_layer_norm():
-    bert = BertModel.from_pretrained("bert-base-cased").cuda().half()
+    bert = BertModel.from_pretrained("bert-base-cased").to(cur_platform.device()).half()
     tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
     test_text = (
         "Hello. How are you? I am fine thank you and you? yes Good. "
@@ -236,22 +239,22 @@ def test_layer_norm():
     # [bsz, seq_len, d_model]
     embedding_output = (
         bert.embeddings(
-            input_ids=tokens["input_ids"].cuda(),
+            input_ids=tokens["input_ids"].to(cur_platform.device()),
             position_ids=None,
-            token_type_ids=tokens["token_type_ids"].cuda(),
+            token_type_ids=tokens["token_type_ids"].to(cur_platform.device()),
             inputs_embeds=None,
             past_key_values_length=0,
         )
-        .cuda()
+        .to(cur_platform.device())
         .half()
     )
 
     fused_layernorm_layer = (
-        MixedFusedLayerNorm(normalized_shape=embedding_output.size(-1)).cuda().half()
+        MixedFusedLayerNorm(normalized_shape=embedding_output.size(-1)).to(cur_platform.device()).half()
     )
 
     torch_layernorm_layer = (
-        LayerNorm(normalized_shape=embedding_output.size(-1)).cuda().half()
+        LayerNorm(normalized_shape=embedding_output.size(-1)).to(cur_platform.device()).half()
     )
 
     fused_output = fused_layernorm_layer(embedding_output)
@@ -299,8 +302,8 @@ def test_masked_softmax_forward():
     scale_t = torch.tensor([1.0])
     for qlen in [128, 256, 1024, 2048, 4096]:
         for klen in [128, 256, 1024, 2048]:
-            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device='cuda:0')
-            masks = torch.randint(0, 2, (batch, 1, qlen, klen), dtype=torch.bool, device='cuda:0')
+            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device=cur_platform.device_name(0))
+            masks = torch.randint(0, 2, (batch, 1, qlen, klen), dtype=torch.bool, device=cur_platform.device_name(0))
             softmax_results = scaled_masked_softmax_cuda.forward(inputs, masks, scale_t[0].item())
             softmax_results_torch = forward_torch_softmax(inputs, masks, scale_t[0].item())
             error = (softmax_results_torch - softmax_results).abs().max()
@@ -314,9 +317,9 @@ def test_masked_softmax_backward():
     scale_t = torch.tensor([1.0])
     for qlen in [128, 256, 1024, 2048, 4096]:
         for klen in [128, 256, 1024, 2048]:
-            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device='cuda:0')
-            backward = torch.rand_like(inputs, dtype=torch.float16, device='cuda:0')
-            masks = torch.randint(0, 2, (batch, 1, qlen, klen), dtype=torch.bool, device='cuda:0')
+            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device=cur_platform.device_name(0))
+            backward = torch.rand_like(inputs, dtype=torch.float16, device=cur_platform.device_name(0))
+            masks = torch.randint(0, 2, (batch, 1, qlen, klen), dtype=torch.bool, device=cur_platform.device_name(0))
             softmax_results = scaled_masked_softmax_cuda.forward(inputs, masks, scale_t[0].item())
             back_grad = scaled_masked_softmax_cuda.backward(backward, softmax_results, scale_t[0].item())
 
@@ -335,8 +338,8 @@ def test_allmasked_softmax_forward():
     scale_t = torch.tensor([1.0])
     for qlen in [128, 256, 1024, 2048, 4096]:
         for klen in [128, 256, 1024, 2048]:
-            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device='cuda:0')
-            masks = torch.ones((batch, 1, qlen, klen), dtype=torch.bool, device='cuda:0')
+            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device=cur_platform.device_name(0))
+            masks = torch.ones((batch, 1, qlen, klen), dtype=torch.bool, device=cur_platform.device_name(0))
             softmax_results = scaled_masked_softmax_cuda.forward(inputs, masks, scale_t[0].item())
             softmax_results_torch = torch.zeros_like(inputs)
             error = (softmax_results_torch - softmax_results).abs().max()
@@ -351,9 +354,9 @@ def test_allmasked_softmax_backward():
     scale_t = torch.tensor([1.0])
     for qlen in [128, 256, 1024, 2048, 4096]:
         for klen in [128, 256, 1024, 2048]:
-            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device='cuda:0')
-            backward = torch.rand_like(inputs, dtype=torch.float16, device='cuda:0')
-            masks = torch.ones((batch, 1, qlen, klen), dtype=torch.bool, device='cuda:0')
+            inputs = torch.normal(0, 2, (batch, attn, qlen, klen), dtype=torch.float16, device=cur_platform.device_name(0))
+            backward = torch.rand_like(inputs, dtype=torch.float16, device=cur_platform.device_name(0))
+            masks = torch.ones((batch, 1, qlen, klen), dtype=torch.bool, device=cur_platform.device_name(0))
             softmax_results = scaled_masked_softmax_cuda.forward(inputs, masks, scale_t[0].item())
             back_grad = scaled_masked_softmax_cuda.backward(backward, softmax_results, scale_t[0].item())
             inputs.requires_grad = True

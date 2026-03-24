@@ -49,6 +49,9 @@ from megatron.core.quantization.utils import (
 )
 from megatron.training.arguments_fs import add_flagscale_arguments
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 def add_megatron_arguments(parser: argparse.ArgumentParser):
     """"Add Megatron-LM arguments to the given parser."""
 
@@ -898,7 +901,7 @@ def validate_args(args, defaults={}):
 
     if args.moe_grouped_gemm:
         assert args.bf16, 'Currently GroupedGEMM for MoE only supports bf16 dtype.'
-        dc = torch.cuda.get_device_capability()
+        dc = cur_platform.get_device_capability()
         assert dc[0] >= 8, "Unsupported compute capability for GroupedGEMM kernels."
 
     if args.weight_decay_incr_style == 'constant':

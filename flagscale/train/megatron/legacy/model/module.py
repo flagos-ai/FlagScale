@@ -10,9 +10,12 @@ from megatron.training import get_args
 from megatron.core import mpu, tensor_parallel
 
 
-_FLOAT_TYPES = (torch.FloatTensor, torch.cuda.FloatTensor)
-_HALF_TYPES = (torch.HalfTensor, torch.cuda.HalfTensor)
-_BF16_TYPES = (torch.BFloat16Tensor, torch.cuda.BFloat16Tensor)
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
+_FLOAT_TYPES = (torch.FloatTensor, cur_platform.FloatTensor)
+_HALF_TYPES = (torch.HalfTensor, cur_platform.HalfTensor)
+_BF16_TYPES = (torch.BFloat16Tensor, cur_platform.BFloat16Tensor)
 
 
 def param_is_not_shared(param):
@@ -117,7 +120,7 @@ class MegatronModule(torch.nn.Module):
         # values.
         if mpu.is_rank_in_embedding_group(ignore_virtual=False):
             self.shared_embedding_or_output_weight().data = (
-                self.shared_embedding_or_output_weight().data.cuda()
+                self.shared_embedding_or_output_weight().data.to(cur_platform.device())
             )
             torch.distributed.all_reduce(
                 self.shared_embedding_or_output_weight().data, group=mpu.get_embedding_group()

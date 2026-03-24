@@ -8,6 +8,8 @@ from megatron.legacy.data.image_folder import ImageFolder
 
 _FEATURE_BANK = None
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def build_data_loader(dataset, drop_last=True, shuffle=False):
     """Data loader. Note that batch-size is the local (per GPU) batch-size."""
@@ -54,8 +56,8 @@ def compute_feature_bank(model):
 
     with torch.no_grad():
         for i, batch in enumerate(dataloader):
-            images = batch[0].cuda().contiguous()
-            labels = batch[1].cuda().contiguous()
+            images = batch[0].to(cur_platform.device()).contiguous()
+            labels = batch[1].to(cur_platform.device()).contiguous()
             student_feature, teacher_feature = model[0](images)
             feature = F.normalize(teacher_feature.float(), dim=1)
             feature_bank.append(feature)

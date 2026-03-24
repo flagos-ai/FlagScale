@@ -451,6 +451,162 @@ def test_serve_equal(path, task, model, case):
                 print("[Serve] Gold value check PASSED")
 
 
+@pytest.mark.usefixtures("path", "task", "model", "case", "platform", "device")
+def test_benchmark_equal(path, task, model, case, platform, device):
+    """
+    Compare performance metrics from benchmark run against baseline gold values.
+
+    This test extracts performance metrics (elapsed time per iteration,
+    throughput per GPU) from stdout.log and compares them against
+    pre-recorded baseline values with configurable tolerance thresholds.
+
+    Metrics checked:
+    - elapsed time per iteration (ms): must not exceed baseline by more than tolerance
+    - throughput per GPU (TFLOP/s/GPU): must not fall below baseline by more than tolerance
+    """
+    test_result_path = os.path.join(path, task, model, "test_results", case)
+    result_path = os.path.join(test_result_path, "logs/host_0_localhost.output")
+
+    print(f"result_path: {result_path}")
+
+    assert os.path.exists(result_path), f"Failed to find 'host_0_localhost.output' at {result_path}"
+
+    with open(result_path, "r") as file:
+        lines = file.readlines()
+
+    # Load gold values (performance baselines)
+    gold_value_path = os.path.join(path, task, model, "gold_values", case + ".json")
+    assert os.path.exists(gold_value_path), f"Failed to find gold result JSON at {gold_value_path}"
+
+    with open(gold_value_path, "r") as f:
+        gold_result_json = json.load(f)
+
+    # Extract platform/device-specific gold values (structure: {platform: {device: {metrics}}})
+    def _is_metric_keys(keys):
+        """Metric keys contain ':', device/platform names don't."""
+        return any(":" in k for k in keys)
+
+    top_keys = list(gold_result_json.keys())
+    if top_keys and not _is_metric_keys(top_keys):
+        # Top level is platform classification
+        p = platform if platform and platform != "none" else None
+        assert p, (
+            f"Gold values are platform-classified ({top_keys}) but no --platform was specified"
+        )
+        assert p in gold_result_json, (
+            f"Platform '{p}' not found in gold values. Available: {top_keys}"
+        )
+        gold_result_json = gold_result_json[p]
+
+        # Second level is device classification
+        device_keys = list(gold_result_json.keys())
+        if device_keys and not _is_metric_keys(device_keys):
+            d = device if device and device != "none" else None
+            assert d, (
+                f"Gold values are device-classified ({device_keys}) but no --device was specified"
+            )
+            assert d in gold_result_json, (
+                f"Device '{d}' not found in gold values. Available: {device_keys}"
+            )
+            gold_result_json = gold_result_json[d]
+
+    metric_keys = list(gold_result_json.keys())
+
+    # Extract metrics from log
+    result_json = extract_metrics_from_log(lines, metric_keys)
+
+    print("\nBenchmark Result Checking")
+    print(f"Metric keys: {metric_keys}")
+    print(f"Result: {result_json}")
+    print(f"Gold Result: {gold_result_json}")
+
+    all_passed = True
+    print(f"\n{'=' * 70}")
+    print("BENCHMARK PERFORMANCE REPORT")
+    print(f"{'=' * 70}")
+
+    for key in metric_keys:
+        result_values = result_json.get(key, {}).get("values", [])
+        gold_entry = gold_result_json.get(key, {})
+        gold_values = gold_entry.get("values", [])
+        threshold_config = gold_entry.get("threshold", {})
+        threshold_type = threshold_config.get("type", "upper_bound")
+        tolerance = threshold_config.get("tolerance", 0.1)
+
+        print(f"\n{'=' * 70}")
+        print(f"Metric: {key}")
+        print(f"Threshold type: {threshold_type}, tolerance: {tolerance}")
+        print(f"{'=' * 70}")
+
+        if len(result_values) == 0:
+            print(f"WARNING: No values extracted for metric '{key}'")
+            if len(gold_values) == 0:
+                print("No baseline values set yet - skipping comparison")
+                continue
+            all_passed = False
+            continue
+
+        # If no gold values, this is the first run - just report
+        if len(gold_values) == 0:
+            stable_values = result_values[5:] if len(result_values) > 5 else result_values
+            avg_value = np.mean(stable_values)
+            print(f"No baseline set. Current average (excluding warmup): {avg_value:.4f}")
+            print(f"ACTUAL VALUES ({len(result_values)} values): {result_values}")
+            print("Please update gold_values with baseline data from this run")
+            continue
+
+        # Compare using tolerance-based approach
+        # Skip warmup iterations for comparison
+        skip_warmup = min(5, len(gold_values))
+        result_stable = (
+            result_values[skip_warmup:] if len(result_values) > skip_warmup else result_values
+        )
+        gold_stable = gold_values[skip_warmup:] if len(gold_values) > skip_warmup else gold_values
+
+        if len(result_stable) == 0 or len(gold_stable) == 0:
+            print("WARNING: Not enough values after skipping warmup")
+            continue
+
+        result_avg = np.mean(result_stable)
+        gold_avg = np.mean(gold_stable)
+
+        print(f"BASELINE average (post-warmup): {gold_avg:.4f}")
+        print(f"CURRENT average (post-warmup): {result_avg:.4f}")
+
+        if threshold_type == "upper_bound":
+            upper_limit = gold_avg * (1 + tolerance)
+            passed = result_avg <= upper_limit
+            print(f"Upper limit ({tolerance * 100:.0f}% tolerance): {upper_limit:.4f}")
+            print(f"Status: {'PASS' if passed else 'FAIL'}")
+            if not passed:
+                regression_pct = ((result_avg - gold_avg) / gold_avg) * 100
+                print(
+                    f"Regression: +{regression_pct:.1f}% (exceeded {tolerance * 100:.0f}% tolerance)"
+                )
+                all_passed = False
+        elif threshold_type == "lower_bound":
+            lower_limit = gold_avg * (1 - tolerance)
+            passed = result_avg >= lower_limit
+            print(f"Lower limit ({tolerance * 100:.0f}% tolerance): {lower_limit:.4f}")
+            print(f"Status: {'PASS' if passed else 'FAIL'}")
+            if not passed:
+                regression_pct = ((gold_avg - result_avg) / gold_avg) * 100
+                print(
+                    f"Regression: -{regression_pct:.1f}% (below {tolerance * 100:.0f}% tolerance)"
+                )
+                all_passed = False
+
+    print(f"\n{'=' * 70}")
+    print(
+        f"Overall benchmark result: {'ALL CHECKS PASSED' if all_passed else 'PERFORMANCE REGRESSION DETECTED'}"
+    )
+    print(f"{'=' * 70}\n")
+
+    assert all_passed, (
+        "Performance regression detected - one or more metrics exceeded tolerance thresholds"
+    )
+
+
 @pytest.mark.usefixtures("path", "task", "model", "case")
 def test_rl_equal(path, task, model, case):
     """

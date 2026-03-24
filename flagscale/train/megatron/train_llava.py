@@ -22,6 +22,8 @@ from megatron.training.utils import average_losses_across_data_parallel_group
 from examples.multimodal.dataloader_provider import train_valid_test_dataloaders_provider
 from megatron.training.training import pretrain
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True,
@@ -132,7 +134,7 @@ def get_batch(data_iterator):
     position_ids = None
 
     # Broadcast data.
-    torch.cuda.nvtx.range_push("get_data")
+    cur_platform.range_push("get_data")
     if data_iterator is not None:
         data = next(data_iterator)
     else:
@@ -142,22 +144,22 @@ def get_batch(data_iterator):
     data_img = tensor_parallel.broadcast_data(["img"], data, torch.float32)
     prompt_len = tensor_parallel.broadcast_data(["prompt_len"], data, torch.int64)["prompt_len"]
 
-    torch.cuda.nvtx.range_pop()
+    cur_platform.range_pop()
 
     tokens_ = data_text.long()
 
     img_raw = data_img['img'].reshape(-1, 3, args.img_h, args.img_w)
 
-    torch.cuda.nvtx.range_push("index tokens")
+    cur_platform.range_push("index tokens")
     tokenizer = get_tokenizer()
     text_length = args.decoder_seq_length - args.seq_length
     tokens = tokens_[:, :text_length].contiguous()
     labels = tokens_[:, 1:text_length+1].contiguous()
 
     assert tokens.shape == labels.shape, f"tokens: {tokens.shape} != labels: {labels.shape}"
-    torch.cuda.nvtx.range_pop()
+    cur_platform.range_pop()
 
-    torch.cuda.nvtx.range_push("get_ltor_masks_and_position_ids")
+    cur_platform.range_push("get_ltor_masks_and_position_ids")
     if hasattr(tokenizer, 'eod'):
         eod_token = tokenizer.eod
     elif hasattr(tokenizer, 'eos_id'):
@@ -168,7 +170,7 @@ def get_batch(data_iterator):
                                         args.reset_attention_mask,
                                         args.eod_mask_loss,
                                         question_length=prompt_len)
-    torch.cuda.nvtx.range_pop()
+    cur_platform.range_pop()
 
     return tokens, labels, loss_mask, attention_mask, position_ids, img_raw
 

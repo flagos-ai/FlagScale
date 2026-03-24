@@ -28,6 +28,9 @@ from tools.datasets.vla.data.dataset_helpers_preprocess import TaskEncoder
 from flagscale.logger import logger
 from flagscale.models.robobrain_x.qwen_groot import Qwen_GR00T
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -100,14 +103,14 @@ def init_ddp(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    cur_platform.manual_seed_all(seed)
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     torch.use_deterministic_algorithms(True)
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(local_rank)
+    cur_platform.set_device(local_rank)
     torch.distributed.init_process_group(backend="nccl", init_method="env://")
     return local_rank
 
@@ -160,7 +163,7 @@ def main(cfg) -> None:
         resuming = cfg.resume
         init_wandb(cfg, resuming=resuming, enabled=cfg.wandb_enabled)
 
-    vla = vla.cuda()
+    vla = vla.to(cur_platform.device())
     vla = DDP(vla, device_ids=[int(os.environ["LOCAL_RANK"])], find_unused_parameters=True)
 
     step = 0
