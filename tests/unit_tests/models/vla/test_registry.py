@@ -24,13 +24,12 @@ class TestRegistry(unittest.TestCase):
     def test_register_action_model(self):
         @register_action_model("test-model")
         class TestModel:
-            def __init__(self, vlm_config, action_config):
-                self.vlm_config = vlm_config
-                self.action_config = action_config
+            def __init__(self, config):
+                self.config = config
 
         self.assertIn("test-model", ACTION_MODEL_REGISTRY)
-        model = build_action_model("test-model", vlm_config={}, action_config={"action_dim": 7})
-        self.assertEqual(model.action_config["action_dim"], 7)
+        model = build_action_model("test-model", config={"action_dim": 7})
+        self.assertEqual(model.config["action_dim"], 7)
 
     def test_build_unknown_vlm_raises(self):
         with self.assertRaises(ValueError):
@@ -38,4 +37,4 @@ class TestRegistry(unittest.TestCase):
 
     def test_build_unknown_action_model_raises(self):
         with self.assertRaises(ValueError):
-            build_action_model("nonexistent-model-xyz", vlm_config={}, action_config={})
+            build_action_model("nonexistent-model-xyz")
