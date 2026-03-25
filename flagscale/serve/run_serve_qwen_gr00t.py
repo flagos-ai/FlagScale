@@ -263,7 +263,7 @@ def main(config: DictConfig | ListConfig) -> None:
         port=policy.port,
         metadata={"env": "simpler_env"},
     )
-    logger.info("Server running ...")
+    logger.info(f"Server running at {policy.host}:{policy.port}...")
     server.serve_forever()
 
 
