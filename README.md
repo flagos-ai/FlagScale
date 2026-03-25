@@ -39,11 +39,11 @@
 
 ## Overview
 
-FlagScale is part of [FlagOS](https://flagos.io/), a unified, open-source AI system software stack that
-aims to foster an open technology ecosystem by seamlessly integrating various models, systems and chips.
-By "develop once, migrate across various chips", FlagOS aims to unlock the full computational potential
-of hardware, break down the barriers between different chip software stacks, and effectively reduce
-migration costs.
+FlagScale is part of [FlagOS](https://flagos.io/), a fully open-source system software stack
+designed to unify the model–system–chip layers and foster an open and collaborative ecosystem.
+It enables a "develop once, run anywhere" workflow across diverse AI accelerators,
+unlocking hardware performance, eliminating fragmentation among AI chipset-specific software stacks,
+and substantially lowering the cost of porting and maintaining AI workloads.
 
 FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models.
 It builds on the strengths of several prominent open-source projects, including
