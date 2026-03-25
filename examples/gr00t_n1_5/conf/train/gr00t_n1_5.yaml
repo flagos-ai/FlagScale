@@ -10,8 +10,7 @@ system:
   checkpoint:
     output_directory: ${experiment.exp_dir}
     save_checkpoint: true
-    # save_freq: 1000
-    save_freq: 1
+    save_freq: 1000
     # Path to a checkpoint directory to resume training from (e.g. outputs/gr00t_n1_5_train/checkpoints/001000)
     # resume_from:
 

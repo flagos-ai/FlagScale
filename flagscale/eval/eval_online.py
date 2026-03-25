@@ -137,6 +137,7 @@ def poll_eval(base_url: str, secret: str, batch_id: int, poll_interval: int) -> 
         resp.raise_for_status()
         data = resp.json()
         status = data.get("status")
+        logger.info(f"result: {data}")
         for detail in data.get("details", []):
             name = detail.get("dataset", "?")
             logger.info(f"  [{name}] status={detail.get('status', '?')}")
