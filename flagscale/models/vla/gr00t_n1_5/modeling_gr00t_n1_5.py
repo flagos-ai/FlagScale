@@ -39,31 +39,34 @@ import torch
 from torch import Tensor
 
 from flagscale.models.vla.base_policy import TrainablePolicy
+from flagscale.models.vla.gr00t_n1_5.configuration_gr00t_n1_5 import Gr00tN15Config
 from flagscale.models.vla.gr00t_n1_5.gr00t_n1 import GR00TN15
-from flagscale.train.train_config import TrainConfig
 
 
 class Gr00tN15(TrainablePolicy):
     """Wrapper around GR00T N1.5 model for FlagScale training integration."""
 
-    def __init__(self, config: TrainConfig, **kwargs):
-        super().__init__()
-        self._config = config
+    def __init__(self, config: Gr00tN15Config):
+        super().__init__(config)
+        config.validate_features()
 
         self._handle_flash_attention_compatibility()
 
-        model_cfg = config.model
         self._groot_model = GR00TN15.from_pretrained(
-            pretrained_model_name_or_path=model_cfg.checkpoint_dir,
-            tune_llm=model_cfg.get("tune_llm", False),
-            tune_visual=model_cfg.get("tune_visual", False),
-            tune_projector=model_cfg.get("tune_projector", True),
-            tune_diffusion_model=model_cfg.get("tune_diffusion_model", True),
+            pretrained_model_name_or_path=config.base_model_path,
+            tune_llm=config.tune_llm,
+            tune_visual=config.tune_visual,
+            tune_projector=config.tune_projector,
+            tune_diffusion_model=config.tune_diffusion_model,
         )
 
-        compute_dtype = model_cfg.get("compute_dtype", "bfloat16")
-        self._groot_model.compute_dtype = compute_dtype
-        self._groot_model.config.compute_dtype = compute_dtype
+        self._groot_model.compute_dtype = config.compute_dtype
+        self._groot_model.config.compute_dtype = config.compute_dtype
+
+        if config.input_features:
+            self.input_features = config.input_features
+        if config.output_features:
+            self.output_features = config.output_features
 
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """Training forward pass.
@@ -84,7 +87,7 @@ class Gr00tN15(TrainablePolicy):
 
         # Run GR00T forward under bf16 autocast when enabled to reduce activation memory
         # Rationale: Matches original GR00T finetuning (bf16 compute, fp32 params) and avoids fp32 upcasts.
-        use_bf16 = self._config.model.get("compute_dtype", "bfloat16") == "bfloat16"
+        use_bf16 = self.config.compute_dtype == "bfloat16"
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_bf16):
             outputs = self._groot_model.forward(groot_inputs)
 
@@ -115,7 +118,7 @@ class Gr00tN15(TrainablePolicy):
         device = next(self.parameters()).device
 
         # Use bf16 autocast for inference to keep memory low and match backbone dtype
-        use_bf16 = self._config.model.get("compute_dtype", "bfloat16") == "bfloat16"
+        use_bf16 = self.config.compute_dtype == "bfloat16"
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_bf16):
             outputs = self._groot_model.get_action(groot_inputs)
 

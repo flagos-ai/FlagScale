@@ -16,18 +16,18 @@ import torch
 import torch.distributed as dist
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateDictOptions
+from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_optimizer_state_dict, StateDictOptions
 from torch.optim import Optimizer
 
 from flagscale.logger import logger
-from flagscale.train.train_config import TrainConfig, DataConfig
+from flagscale.train.train_config import TrainConfig
 from flagscale.train.datasets.lerobot_dataset import (
     LeRobotDataset,
     LeRobotDatasetMetadata,
 )
 from flagscale.train.datasets.utils import dataset_to_policy_features
 from flagscale.train.processor import PolicyProcessorPipeline
-from flagscale.models.utils.constants import ACTION, OBS_PREFIX, PRETRAINED_MODEL_DIR, REWARD
+from flagscale.models.utils.constants import ACTION, OBS_PREFIX
 from flagscale.models.configs.types import FeatureType
 from flagscale.train.utils.logging_utils import (
     AverageMeter,
@@ -35,12 +35,15 @@ from flagscale.train.utils.logging_utils import (
     format_big_number,
 )
 from flagscale.train.utils.train_utils import (
-    save_vla_checkpoint,
     get_step_checkpoint_dir,
+    load_training_state_fsdp2,
+    save_checkpoint,
     update_last_checkpoint,
 )
+from flagscale.train.utils.random_utils import serialize_rng_state, deserialize_rng_state
 from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
-from flagscale.models.vla.gr00t_n1_5 import Gr00tN15
+from flagscale.models.vla.base_policy import TrainablePolicy
+from flagscale.models.vla.pretrained_config import PreTrainedConfig
 import flagscale.models.vla.gr00t_n1_5.processor_gr00t  # noqa: F401  register GR00T processor steps
 
 
@@ -81,35 +84,35 @@ def apply_fsdp2(policy, device_mesh):
     fully_shard(policy, **fsdp_config)
 
 
-def make_dataset(cfg: DataConfig):
+def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
     # TODO: (yupu) Remove hard-coded video backend
     # After not much testing, It feels like that `torchcodec` is more robust than `pyav`
     # `pyav` crashes sometimes
     video_backend = "torchcodec"
 
     # Leave the revision to None
-    ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
-    delta_timestamps = resolve_delta_timestamps(cfg, ds_meta)
+    ds_meta = LeRobotDatasetMetadata(root=config.data.data_path, revision=None)
+    delta_timestamps = _resolve_delta_timestamps(policy_config, ds_meta)
 
     dataset = LeRobotDataset(
-        root=cfg.data_path,
+        root=config.data.data_path,
         episodes=None,
         delta_timestamps=delta_timestamps,
         revision=None,
         video_backend=video_backend,
-        tolerance_s=cfg.tolerance_s,
+        tolerance_s=config.data.tolerance_s,
     )
 
     return dataset
 
 
-def resolve_delta_timestamps(
-    cfg: DataConfig, ds_meta: LeRobotDatasetMetadata
+def _resolve_delta_timestamps(
+    cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata
 ) -> dict[str, list] | None:
     """Resolves delta_timestamps by reading from the 'delta_indices' properties of the PreTrainedConfig.
 
     Args:
-        cfg: The policy config (PI0Config or PI05Config) to read delta_indices from.
+        cfg: The policy config (PreTrainedConfig) to read delta_indices from.
         ds_meta (LeRobotDatasetMetadata): The dataset from which features and fps are used to build
             delta_timestamps against.
 
@@ -123,8 +126,6 @@ def resolve_delta_timestamps(
     """
     delta_timestamps = {}
     for key in ds_meta.features:
-        if key == REWARD and cfg.reward_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.reward_delta_indices]
         if key == ACTION and cfg.action_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
         if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
@@ -175,7 +176,7 @@ def format_train_tracker_step(train_tracker: MetricsTracker) -> str:
 
 
 def make_policy(
-    config: TrainConfig,
+    config: PreTrainedConfig,
     ds_meta: LeRobotDatasetMetadata | None = None,
 ):
     features = dataset_to_policy_features(ds_meta.features)
@@ -189,10 +190,12 @@ def make_policy(
     }
     input_features = {key: ft for key, ft in features.items() if key not in output_features}
 
-    policy = Gr00tN15(config=config)
-    policy.input_features = input_features
-    policy.output_features = output_features
+    config.output_features = output_features
+    config.input_features = input_features
+
+    policy = TrainablePolicy.from_config(config)
     policy.to("cuda")
+    policy.train()
 
     return policy
 
@@ -398,6 +401,8 @@ def update_policy(
 def main(config: TrainConfig, seed: int):
     set_seed(seed)
 
+    policy_config = PreTrainedConfig.from_train_config(config)
+
     dist.init_process_group(backend="nccl")
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
@@ -406,10 +411,10 @@ def main(config: TrainConfig, seed: int):
     world_size = dist.get_world_size()
     is_main_process = rank == 0
 
-    dataset = make_dataset(config.data)
+    dataset = make_dataset(config, policy_config)
     dist.barrier()
 
-    policy = make_policy(config=config, ds_meta=dataset.meta)
+    policy = make_policy(config=policy_config, ds_meta=dataset.meta)
     dist.barrier()
 
     # Create processors - only provide dataset_stats if not resuming from saved processors
@@ -491,6 +496,18 @@ def main(config: TrainConfig, seed: int):
 
     dl_iter = cycle(dataloader)
 
+    step = 0
+    resume_from = config.system.checkpoint.resume_from
+    if resume_from:
+        step = load_training_state_fsdp2(
+            Path(resume_from), policy, optimizer, lr_scheduler,
+        )
+        saved_rng = serialize_rng_state()
+        for _ in range(step):
+            next(dl_iter)
+        deserialize_rng_state(saved_rng)
+        logger.info(f"Resumed from checkpoint at step {step}")
+
     dist.barrier()
 
     policy.train()
@@ -505,8 +522,6 @@ def main(config: TrainConfig, seed: int):
 
     effective_batch_size = config.system.batch_size * world_size
 
-    step = 0
-
     train_tracker = MetricsTracker(
         effective_batch_size,
         num_frames,
@@ -517,6 +532,8 @@ def main(config: TrainConfig, seed: int):
 
     epoch = 0
     samples_per_epoch = num_frames // effective_batch_size
+    if resume_from and samples_per_epoch > 0:
+        epoch = step // samples_per_epoch
     sampler.set_epoch(epoch)
 
     for _ in range(step, config.system.train_steps):
@@ -560,9 +577,10 @@ def main(config: TrainConfig, seed: int):
             and step % config.system.checkpoint.save_freq == 0
         ):
             dist.barrier()
-            # get_model_state_dict is a collective — all ranks must call it
+            # get_model_state_dict and get_optimizer_state_dict are collectives — all ranks must call
             options = StateDictOptions(full_state_dict=True, cpu_offload=True)
             state_dict = get_model_state_dict(policy, options=options)
+            optimizer_state_dict = get_optimizer_state_dict(policy, optimizer, options=options)
 
             if is_main_process:
                 logger.info(f"Saving checkpoint at step {step}")
@@ -570,18 +588,16 @@ def main(config: TrainConfig, seed: int):
                 checkpoint_dir = get_step_checkpoint_dir(
                     output_dir, config.system.train_steps, step
                 )
-                pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
-                policy.save_pretrained_artifacts(pretrained_dir)
-                ckpt_config = OmegaConf.merge(
-                    config.to_omegaconf(),
-                    policy.checkpoint_config_overrides(),
-                )
-                save_vla_checkpoint(
+                save_checkpoint(
                     checkpoint_dir=checkpoint_dir,
-                    model_or_state_dict=state_dict,
-                    config=ckpt_config,
+                    step=step,
+                    config=config,
+                    policy=policy,
+                    optimizer_state_dict=optimizer_state_dict,
+                    lr_scheduler=lr_scheduler,
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
+                    state_dict=state_dict,
                 )
                 update_last_checkpoint(checkpoint_dir)
 
