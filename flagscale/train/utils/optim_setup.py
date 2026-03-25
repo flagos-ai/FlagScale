@@ -31,13 +31,16 @@ Example config (YAML):
           - "qwen_vl_interface\\.model\\.visual\\.merger\\..*"
 """
 
+import math
 import re
 from collections import defaultdict
 from collections.abc import Generator, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import LambdaLR
 from transformers import get_scheduler
 
 from flagscale.logger import logger
@@ -326,17 +329,74 @@ def _get_optimizer_class(name: str) -> type[torch.optim.Optimizer]:
     return _OPTIMIZER_REGISTRY[name]
 
 
+@dataclass
+class CosineDecayWithWarmupSchedulerConfig:
+    """Cosine decay with linear warmup, used by lerobot for Pi0 and GR00T.
+
+    Automatically scales warmup and decay steps if num_training_steps < num_decay_steps.
+    This ensures the learning rate schedule completes properly even with shorter training runs.
+    """
+
+    num_warmup_steps: int
+    num_decay_steps: int
+    peak_lr: float
+    decay_lr: float
+
+    def build(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> LambdaLR:
+        actual_warmup_steps = self.num_warmup_steps
+        actual_decay_steps = self.num_decay_steps
+
+        if num_training_steps < self.num_decay_steps:
+            scale_factor = num_training_steps / self.num_decay_steps
+            actual_warmup_steps = int(self.num_warmup_steps * scale_factor)
+            actual_decay_steps = num_training_steps
+
+            logger.info(
+                f"Auto-scaling LR scheduler: "
+                f"num_training_steps ({num_training_steps}) < num_decay_steps ({self.num_decay_steps}). "
+                f"Scaling warmup: {self.num_warmup_steps} → {actual_warmup_steps}, "
+                f"decay: {self.num_decay_steps} → {actual_decay_steps} "
+                f"(scale factor: {scale_factor:.3f})"
+            )
+
+        def lr_lambda(current_step):
+            def linear_warmup_schedule(current_step):
+                if current_step <= 0:
+                    return 1 / (actual_warmup_steps + 1)
+                frac = 1 - current_step / actual_warmup_steps
+                return (1 / (actual_warmup_steps + 1) - 1) * frac + 1
+
+            def cosine_decay_schedule(current_step):
+                step = min(current_step, actual_decay_steps)
+                cosine_decay = 0.5 * (1 + math.cos(math.pi * step / actual_decay_steps))
+                alpha = self.decay_lr / self.peak_lr
+                decayed = (1 - alpha) * cosine_decay + alpha
+                return decayed
+
+            if current_step < actual_warmup_steps:
+                return linear_warmup_schedule(current_step)
+
+            return cosine_decay_schedule(current_step)
+
+        return LambdaLR(optimizer, lr_lambda, -1)
+
+
 def setup_scheduler(
     optimizer: torch.optim.Optimizer,
     scheduler_config: "SchedulerConfig",
     num_training_steps: int,
 ) -> torch.optim.lr_scheduler.LRScheduler:
     """
-    Create LR scheduler using transformers' get_scheduler.
+    Create LR scheduler.
+
+    Supports two modes:
+    - "cosine_decay_with_warmup": Built-in cosine decay with auto-scaling (from lerobot).
+      Requires scheduler_config fields: warmup_steps, decay_steps, peak_lr, decay_lr.
+    - Any other name: Delegates to transformers.get_scheduler().
 
     Args:
         optimizer: The optimizer to schedule.
-        scheduler_config: Config with name, warmup_steps, scheduler_kwargs.
+        scheduler_config: Config with name, warmup_steps, scheduler_kwargs, etc.
         num_training_steps: Total training steps.
 
     Returns:
@@ -348,6 +408,18 @@ def setup_scheduler(
 
     if scheduler_config.name is None:
         raise ValueError("scheduler_config.name must be specified to use setup_scheduler")
+
+    if scheduler_config.name == "cosine_decay_with_warmup":
+        peak_lr = scheduler_config.peak_lr
+        if peak_lr is None:
+            peak_lr = optimizer.defaults.get("lr", optimizer.param_groups[0]["lr"])
+        config = CosineDecayWithWarmupSchedulerConfig(
+            num_warmup_steps=scheduler_config.warmup_steps,
+            num_decay_steps=scheduler_config.decay_steps,
+            peak_lr=peak_lr,
+            decay_lr=scheduler_config.decay_lr,
+        )
+        return config.build(optimizer, num_training_steps)
 
     return get_scheduler(
         name=scheduler_config.name,

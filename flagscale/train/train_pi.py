@@ -8,9 +8,7 @@ from typing import Any, Iterator, TypedDict
 import os
 import pathlib
 import random
-from dataclasses import dataclass
 from typing_extensions import Unpack
-import math
 import time
 from contextlib import nullcontext
 
@@ -54,6 +52,7 @@ from flagscale.models.pi0.modeling_pi0 import PI0Policy
 from flagscale.models.pi05.configuration_pi05 import PI05Config
 from flagscale.models.pi05.modeling_pi05 import PI05Policy
 from flagscale.train.utils.logging_utils import AverageMeter, MetricsTracker
+from flagscale.train.utils.optim_setup import CosineDecayWithWarmupSchedulerConfig
 from flagscale.train.utils.train_utils import (
     save_checkpoint,
     get_step_checkpoint_dir,
@@ -396,60 +395,6 @@ def make_pre_post_processors(
             to_output=transition_to_policy_action,
         ),
     )
-
-
-@dataclass
-class CosineDecayWithWarmupSchedulerConfig:
-    """Used by Physical Intelligence to train Pi0.
-
-    Automatically scales warmup and decay steps if num_training_steps < num_decay_steps.
-    This ensures the learning rate schedule completes properly even with shorter training runs.
-    """
-
-    num_warmup_steps: int
-    num_decay_steps: int
-    peak_lr: float
-    decay_lr: float
-
-    def build(self, optimizer: Optimizer, num_training_steps: int) -> LambdaLR:
-        # Auto-scale scheduler parameters if training steps are shorter than configured decay steps
-        actual_warmup_steps = self.num_warmup_steps
-        actual_decay_steps = self.num_decay_steps
-
-        if num_training_steps < self.num_decay_steps:
-            # Calculate scaling factor to fit the schedule into the available training steps
-            scale_factor = num_training_steps / self.num_decay_steps
-            actual_warmup_steps = int(self.num_warmup_steps * scale_factor)
-            actual_decay_steps = num_training_steps
-
-            logger.info(
-                f"Auto-scaling LR scheduler: "
-                f"num_training_steps ({num_training_steps}) < num_decay_steps ({self.num_decay_steps}). "
-                f"Scaling warmup: {self.num_warmup_steps} → {actual_warmup_steps}, "
-                f"decay: {self.num_decay_steps} → {actual_decay_steps} "
-                f"(scale factor: {scale_factor:.3f})"
-            )
-
-        def lr_lambda(current_step):
-            def linear_warmup_schedule(current_step):
-                if current_step <= 0:
-                    return 1 / (actual_warmup_steps + 1)
-                frac = 1 - current_step / actual_warmup_steps
-                return (1 / (actual_warmup_steps + 1) - 1) * frac + 1
-
-            def cosine_decay_schedule(current_step):
-                step = min(current_step, actual_decay_steps)
-                cosine_decay = 0.5 * (1 + math.cos(math.pi * step / actual_decay_steps))
-                alpha = self.decay_lr / self.peak_lr
-                decayed = (1 - alpha) * cosine_decay + alpha
-                return decayed
-
-            if current_step < actual_warmup_steps:
-                return linear_warmup_schedule(current_step)
-
-            return cosine_decay_schedule(current_step)
-
-        return LambdaLR(optimizer, lr_lambda, -1)
 
 
 def has_method(cls: object, method_name: str) -> bool:
