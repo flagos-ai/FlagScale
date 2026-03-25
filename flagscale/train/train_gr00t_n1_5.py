@@ -45,7 +45,7 @@ from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
 from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 import flagscale.models.vla.gr00t_n1_5.processor_gr00t  # noqa: F401  register GR00T processor steps
-from flagscale.platform import get_platform
+from flagscale.platforms import get_platform
 
 # Monkey-patch: transformers 4.57+ kernel-hub discovery can't find flash_attn on some platforms
 # (e.g. MUSA), but direct import works fine. Replace _lazy_imports so transformers uses flash_attn directly.

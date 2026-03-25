@@ -50,7 +50,7 @@ from flagscale.train.utils.random_utils import serialize_rng_state, deserialize_
 from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
 from flagscale.models.vla import TrainablePolicy
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
-from flagscale.platform import get_platform
+from flagscale.platforms import get_platform
 
 
 def set_seed(seed: int):

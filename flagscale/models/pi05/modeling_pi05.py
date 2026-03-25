@@ -46,7 +46,7 @@ from flagscale.models.utils.constants import (
     OPENPI_ATTENTION_MASK_VALUE,
 )
 from flagscale.models.vla.base_policy import TrainablePolicy
-from flagscale.platform import get_platform
+from flagscale.platforms import get_platform
 
 T = TypeVar("T", bound="PI05Policy")
 
