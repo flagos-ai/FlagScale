@@ -299,6 +299,7 @@ jobs:
       - name: Upload Benchmark Test Logs
         if: always() && steps.benchmark_test.outcome == 'failure'
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: benchmark_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
           path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
