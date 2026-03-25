@@ -8,6 +8,7 @@ defined in the gold values file, then writes a structured JSON report.
 """
 
 import json
+import math
 import re
 import sys
 
@@ -43,6 +44,32 @@ def extract_metrics_from_log(lines, metric_keys):
                             continue
 
     return results
+
+
+def percentile(sorted_values, p):
+    """Compute the p-th percentile (0-100) of a pre-sorted list using linear interpolation."""
+    n = len(sorted_values)
+    if n == 0:
+        return None
+    if n == 1:
+        return sorted_values[0]
+    index = (p / 100) * (n - 1)
+    lo = math.floor(index)
+    hi = math.ceil(index)
+    frac = index - lo
+    return sorted_values[lo] * (1 - frac) + sorted_values[hi] * frac
+
+
+def reduce_metrics(values):
+    """Return avg, p50, p99 for a list of floats."""
+    if not values:
+        return {"avg": None, "p50": None, "p99": None}
+    sv = sorted(values)
+    return {
+        "avg": sum(sv) / len(sv),
+        "p50": percentile(sv, 50),
+        "p99": percentile(sv, 99),
+    }
 
 
 def main():
@@ -98,7 +125,8 @@ def main():
     # Each value is an object whose keys match header_config field names
     benchmark = {}
     for key in metric_keys:
-        benchmark[key] = {"values": metrics.get(key, [])}
+        values = metrics.get(key, [])
+        benchmark[key] = {"values": values, **reduce_metrics(values)}
 
     # Write output
     with open(output_json, "w") as f:
@@ -107,7 +135,9 @@ def main():
     print(f"Benchmark results written to {output_json}")
     print(f"Metrics extracted: {list(benchmark.keys())}")
     for key, data in benchmark.items():
-        print(f"  {key}: {len(data['values'])} values")
+        print(
+            f"  {key}: {len(data['values'])} values  avg={data['avg']}  p50={data['p50']}  p99={data['p99']}"
+        )
 
 
 if __name__ == "__main__":

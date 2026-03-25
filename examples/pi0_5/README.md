@@ -24,7 +24,9 @@ Install FlagScale and robotics dependencies:
 
 ```sh
 cd FlagScale/
-pip install ".[cuda]"
+# replace "[cuda]" with "[ascend]" on Huawei Ascend, or "[musa]" on Moore Threads MUSA
+pip install ".[cuda]" --verbose
+
 pip install git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
 ```
 
@@ -134,11 +136,11 @@ vim examples/pi0_5/conf/train.yaml
 ```
 
 Configure the following fields:
-
-- `experiment.envs.CUDA_VISIBLE_DEVICES` - GPU devices to use (e.g., `"0,1,2,3"` for 4 GPUs, `"0,1"` for 2 GPUs)
-- `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`)
+- `experiment.envs.CUDA_VISIBLE_DEVICES` - GPU devices to use (e.g., `"0,1,2,3"` for 4 GPUs, `"0,1"` for 2 GPUs)，Use `ASCEND_RT_VISIBLE_DEVICES` for Huawei Ascend, `MUSA_VISIBLE_DEVICES` for Moore Threads MUSA
+- `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`)，Use `MUSA_DEVICE_MAX_CONNECTIONS` for Moore Threads MUSA
 - `experiment.exp_name` - Experiment name
 - `experiment.exp_dir` - Output directory for checkpoints and logs
+- `runner.nproc_per_node` - Number of processes per node for multi-GPU training (required for Huawei Ascend)
 
 #### Task-Level Config
 
@@ -256,7 +258,7 @@ Configure the following fields:
 - `engine.model` - Path to pretrained model (e.g., `/workspace/models/lerobot/pi05_base`)
 - `engine.tokenizer` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `engine.stat_path` - Path to dataset statistics (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json`)
-- `engine.device` - Device to use (e.g., `"cuda"`)
+- `engine.device` - Device to use (e.g., `"cuda", "npu", "musa"`)
 - `engine.use_quantiles` - Whether to use quantile normalization (default: `false` for pi0.5)
 
 **Generate settings:**
@@ -308,7 +310,7 @@ Configure the following fields:
 - `engine_args.model` - Path to pretrained model (e.g., `/workspace/models/lerobot/pi05_base`)
 - `engine_args.tokenizer` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `engine_args.stat_path` - Path to dataset statistics (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json`)
-- `engine_args.device` - Device to use (e.g., `"cuda"`)
+- `engine_args.device` - Device to use (e.g., `"cuda", "npu", "musa"`)
 - `engine_args.use_quantiles` - Whether to use quantile normalization (default: `false` for pi0.5)
 - `engine_args.images_keys` - List of image keys expected by the model (do not change):
   ```yaml

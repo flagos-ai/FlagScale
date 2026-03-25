@@ -1,8 +1,6 @@
-# Ascend platform-specific base dependencies
+# MUSA platform-specific base dependencies
 
 -r ../common.txt
-
-torchvision==0.22.1
 
 # for robotics
 datasets==4.5.0

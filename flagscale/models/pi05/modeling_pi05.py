@@ -46,6 +46,8 @@ from flagscale.models.utils.constants import (
     OPENPI_ATTENTION_MASK_VALUE,
 )
 from flagscale.models.vla.base_policy import TrainablePolicy
+from flagscale.platform import get_platform
+from flagscale.train.utils.hub import HubMixin
 
 T = TypeVar("T", bound="PI05Policy")
 
@@ -90,10 +92,11 @@ def create_sinusoidal_pos_embedding(  # see openpi `create_sinusoidal_pos_embedd
 
 
 def sample_beta(alpha, beta, bsize, device):  # see openpi `sample_beta` (exact copy)
-    alpha_t = torch.as_tensor(alpha, dtype=torch.float32, device=device)
-    beta_t = torch.as_tensor(beta, dtype=torch.float32, device=device)
+    sample_device = "cpu" if not get_platform().supports_distributions_on_device() else device
+    alpha_t = torch.as_tensor(alpha, dtype=torch.float32, device=sample_device)
+    beta_t = torch.as_tensor(beta, dtype=torch.float32, device=sample_device)
     dist = torch.distributions.Beta(alpha_t, beta_t)
-    return dist.sample((bsize,))
+    return dist.sample((bsize,)).to(device)
 
 
 def make_att_2d_masks(pad_masks, att_masks):  # see openpi `make_att_2d_masks` (exact copy)

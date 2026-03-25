@@ -282,12 +282,15 @@ jobs:
       - name: Upload benchmark data to backend
         if: always() && steps.benchmark_test.outcome == 'success'
         uses: flagos-ai/FlagOps/actions/post-benchmark-report@main
+        env:
+          NO_PROXY: "flagcicd-inner.flagos.net"
         with:
-          backend_url: 'http://10.1.4.167:30180'
+          backend_url: 'http://flagcicd-inner.flagos.net:8000'
+          user_id: '000000000000000000'
           report_path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results/${{ matrix.test_config.case }}/logs/benchmark_metrics.json
-          list_code: 'ft_${{ matrix.test_config.task }}_${{ matrix.test_config.model }}_${{ matrix.test_config.case }}'
-          list_name: 'Benchmark ${{ matrix.test_config.task }} ${{ matrix.test_config.model }} ${{ matrix.test_config.case }}'
-          header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Values","required":true,"sortable":false,"type":"array"}]'
+          list_code: 'benchmark_${{ matrix.test_config.task }}_${{ matrix.test_config.model }}_${{ matrix.test_config.case }}'
+          list_name: 'Benchmark-${{ matrix.test_config.model }}-${{ matrix.test_config.case }}'
+          header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Per Step Details","required":false,"sortable":false,"type":"array"},{"field":"avg","name":"Avg","required":true,"sortable":true,"type":"number"},{"field":"p50","name":"P50","required":true,"sortable":true,"type":"number"},{"field":"p99","name":"P99","required":true,"sortable":true,"type":"number"}]'
           repository_name: '${{ github.repository }}'
           commit_id: '${{ github.event.pull_request.head.sha || github.sha }}'
           workflow_id: '${{ github.run_id }}'
@@ -296,6 +299,7 @@ jobs:
       - name: Upload Benchmark Test Logs
         if: always() && steps.benchmark_test.outcome == 'failure'
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: benchmark_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
           path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results

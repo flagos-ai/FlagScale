@@ -24,7 +24,8 @@ Install FlagScale and robotics dependencies:
 
 ```sh
 cd FlagScale/
-pip install ".[cuda]"
+# replace "[cuda-train]" with "[ascend-train]" on Huawei Ascend, or "[musa-train]" on Moore Threads MUSA
+pip install ".[cuda-train]" --verbose
 ```
 
 Install additional dependencies for downloading models/datasets:
@@ -115,10 +116,11 @@ vim examples/gr00t_n1_5/conf/train.yaml
 
 Configure the following fields:
 
-- `experiment.envs.CUDA_VISIBLE_DEVICES` - GPU devices to use (e.g., `"0,1,2,3"` for 4 GPUs, `"0,1"` for 2 GPUs)
-- `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`)
+- `experiment.envs.CUDA_VISIBLE_DEVICES` - GPU devices to use (e.g., `"0,1,2,3"` for 4 GPUs, `"0,1"` for 2 GPUs), Use `ASCEND_RT_VISIBLE_DEVICES` for Huawei Ascend, `MUSA_VISIBLE_DEVICES` for Moore Threads MUSA
+- `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`), Use `MUSA_DEVICE_MAX_CONNECTIONS` for Moore Threads MUSA
 - `experiment.exp_name` - Experiment name
 - `experiment.exp_dir` - Output directory for checkpoints and logs
+- `experiment.runner.nproc_per_node` - Number of processes per node for multi-GPU training (required for Huawei Ascend)
 
 #### Task-Level Config
 
@@ -203,7 +205,7 @@ Configure the following fields:
 - `engine_args.port` - Server port (default: `5000`)
 - `engine_args.model_variant` - Model variant: `"Gr00tN15"`
 - `engine_args.model` - Path to pretrained or fine-tuned model checkpoint (e.g., `/workspace/models/nvidia/GR00T-N1.5-3B`)
-- `engine_args.device` - Device to use (e.g., `"cuda"`)
+- `engine_args.device` - Device to use (e.g., `"cuda"`, `"npu"`, `"musa"`)
 
 ### Run Serving
 

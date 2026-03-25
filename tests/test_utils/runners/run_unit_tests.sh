@@ -75,19 +75,54 @@ run_unit_tests_for_device() {
     INCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^INCLUDE=" | cut -d= -f2-)
     EXCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^EXCLUDE=" | cut -d= -f2-)
 
-    # Build pytest command with torchrun for distributed test support
-    PYTEST_CMD="torchrun --nproc_per_node=8 -m pytest tests/unit_tests/ -v --tb=short"
+    # Build coverage config if COVERAGE_DIR is set
+    USE_COVERAGE=false
+    if [ -n "${COVERAGE_DIR:-}" ]; then
+        USE_COVERAGE=true
+        mkdir -p "$COVERAGE_DIR"
+        COVERAGERC="$COVERAGE_DIR/.coveragerc"
+        cat > "$COVERAGERC" <<EOF
+[run]
+parallel = true
+source = $PROJECT_ROOT
+data_file = $COVERAGE_DIR/.coverage
+EOF
+    fi
+
+    # Auto-detect number of GPUs
+    NPROC=$(python -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo "1")
+    [ "$NPROC" -le 0 ] 2>/dev/null && NPROC=1
+    log_info "Detected $NPROC GPU(s)"
+
+    # Use 'coverage run' instead of pytest-cov to avoid SQLite concurrent write conflicts:
+    # each torchrun rank writes its own .coverage.<host>.<pid>.<random> fragment independently.
+    if [ "$USE_COVERAGE" = true ]; then
+        RUNNER_CMD="-m coverage run --rcfile=$COVERAGERC -m pytest"
+    else
+        RUNNER_CMD="-m pytest"
+    fi
+
+    PYTEST_CMD="torchrun --nproc_per_node=$NPROC $RUNNER_CMD tests/unit_tests/ -v --tb=short"
     wait_for_gpu
     # Apply exclude patterns if any
     if [ -n "$EXCLUDE" ]; then
-        PYTEST_CMD="torchrun --nproc_per_node=8 -m pytest $EXCLUDE tests/unit_tests/ -v --tb=short"
+        PYTEST_CMD="torchrun --nproc_per_node=$NPROC $RUNNER_CMD $EXCLUDE tests/unit_tests/ -v --tb=short"
     fi
 
     log_info "Command: $PYTEST_CMD"
 
     # Run unit tests
     eval "$PYTEST_CMD"
-    return $?
+    local test_exit=$?
+
+    # All ranks have exited — safe to combine fragment files and generate report
+    if [ "$USE_COVERAGE" = true ]; then
+        log_info "Combining distributed coverage data..."
+        coverage combine --rcfile="$COVERAGERC" "$COVERAGE_DIR" 2>/dev/null || true
+        coverage json --rcfile="$COVERAGERC" -o "$COVERAGE_DIR/coverage.json" 2>/dev/null || true
+    fi
+
+    return $test_exit
 }
 
 # If device is specified, run for that device only

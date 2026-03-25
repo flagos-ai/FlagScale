@@ -220,12 +220,18 @@ jobs:
           echo "Python location: $(which python)"
           echo "Python version: $(python --version)"
 
-          # Run unit tests using run_tests.sh
+          # Install coverage if not already present
+          pip install coverage --quiet
+
+          # Export COVERAGE_DIR so run_unit_tests.sh can pick it up
+          export COVERAGE_DIR="$PROJECT_ROOT/coverage-report"
+
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
             --platform "$PLATFORM" \
             --device "$DEVICE" \
             --type unit
           exit_code=$?
+
           if [ $exit_code -eq 0 ]; then
             echo "✅ Unit tests passed for $PLATFORM/$DEVICE"
           else
@@ -235,3 +241,23 @@ jobs:
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
         timeout-minutes: 15
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}
+          path: ${{ env.PROJECT_ROOT }}/coverage-report/coverage.json
+          retention-days: 7
+
+      - name: Upload coverage report to FlagCICD
+        if: always()
+        continue-on-error: true
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        env:
+          NO_PROXY: "flagcicd-inner.flagos.net"
+        with:
+          user_id: '000000000000000000'
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          report_path: '${{ env.PROJECT_ROOT }}/coverage-report/coverage.json'
+          fail_on_error: 'false'
