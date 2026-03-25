@@ -235,6 +235,8 @@ class Policy:
 
         # Convert to numpy for msgpack serialization; squeeze batch dim [1,T,D] → [T,D]
         action[ACTION] = action[ACTION].squeeze(0).detach().cpu().numpy()
+        # TODO: (yupu): rename_map for output key
+        action["actions"] = action[ACTION]
         logger.info(f"Final action shape: {action[ACTION].shape}, first_step={action[ACTION][0]}")
 
         return action
