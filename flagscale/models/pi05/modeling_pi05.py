@@ -47,7 +47,6 @@ from flagscale.models.utils.constants import (
 )
 from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.platform import get_platform
-from flagscale.train.utils.hub import HubMixin
 
 T = TypeVar("T", bound="PI05Policy")
 

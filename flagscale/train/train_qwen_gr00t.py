@@ -50,18 +50,19 @@ from flagscale.train.utils.random_utils import serialize_rng_state, deserialize_
 from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
 from flagscale.models.vla import TrainablePolicy
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
+from flagscale.platform import get_platform
 
 
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.enabled = True
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = False
-    torch.backends.cuda.matmul.allow_tf32 = False
+    get_platform().manual_seed_all(seed)
+    if get_platform().name() == "cuda":
+        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def apply_fsdp2(policy, device_mesh):
@@ -94,10 +95,9 @@ def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
     delta_timestamps = _resolve_delta_timestamps(policy_config, ds_meta)
 
 
-    # TODO: (yupu) Remove hard-coded video backend
-    # After not much testing, It feels like that `torchcodec` is more robust than `pyav`
-    # `pyav` crashes sometimes
-    video_backend = "torchcodec"
+    # torchcodec depends on NVIDIA NVDEC which is not available on all platforms (e.g. MUSA);
+    # fall back to pyav for non-CUDA platforms.
+    video_backend = "torchcodec" if get_platform().name() == "cuda" else "pyav"
 
     def _resize_to_uint8_hwc(frame: torch.Tensor) -> torch.Tensor:
         """float32 CHW [0,1] from torchcodec → uint8 HWC 224x224 via PIL resize."""
@@ -133,7 +133,7 @@ def make_policy(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
     cfg.output_features = {k: f for k, f in features.items() if f.type is FeatureType.ACTION}
     cfg.input_features = {k: f for k, f in features.items() if k not in cfg.output_features}
     policy = TrainablePolicy.from_config(cfg)
-    policy.to("cuda")
+    policy.to(get_platform().name())
     policy.train()
     return policy
 
@@ -412,7 +412,7 @@ def update_policy(
     optimizer.zero_grad()
 
     autocast_context = (
-        torch.amp.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
+        torch.amp.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16) if use_amp else nullcontext()
     )
     with autocast_context:
         output = policy(batch, vlm_batch=vlm_batch)
@@ -453,10 +453,10 @@ def main(config: TrainConfig, seed: int):
 
     policy_config = PreTrainedConfig.from_train_config(config)
 
-    dist.init_process_group(backend="nccl")
+    dist.init_process_group(backend=get_platform().dist_backend())
     local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    device = torch.device("cuda", local_rank)
+    get_platform().set_device(local_rank)
+    device = get_platform().device(local_rank)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     is_main_process = rank == 0
@@ -472,7 +472,7 @@ def main(config: TrainConfig, seed: int):
             )
 
         policy = TrainablePolicy.from_config(policy_config)
-        policy.to("cuda")
+        policy.to(get_platform().name())
 
         ds = get_train_dataset(
             config.data.data_path,
@@ -552,7 +552,7 @@ def main(config: TrainConfig, seed: int):
         vlm_dl_iter = None
 
     # --- Apply FSDP2 ---
-    device_mesh = init_device_mesh("cuda", (world_size,))
+    device_mesh = init_device_mesh(get_platform().name(), (world_size,))
     apply_fsdp2(policy, device_mesh)
 
     # Setup optimizer and scheduler (applies freeze config internally)
