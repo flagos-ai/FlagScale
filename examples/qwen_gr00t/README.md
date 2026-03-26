@@ -306,3 +306,32 @@ Serving logs are saved to `outputs/<exp_name>/logs/host_0_localhost.output` by d
 cd FlagScale/
 flagscale serve qwen_gr00t --stop
 ```
+
+## Evaluation
+
+FlagScale supports online evaluation via FlagEval. You will need a `FLAGEVAL_SECRET` — contact the team to obtain one before proceeding.
+
+### Run Evaluation
+
+```sh
+cd FlagScale/
+FLAGEVAL_SECRET=<your_secret> python flagscale/eval/eval_online.py \
+    --model-name qwen_gr00t \
+    --datasets libero_10 \
+    --server-host <your_model_server_host> \
+    --server-port <your_model_server_port> \
+    --poll-interval 30 \
+    --model-id <your_model_id>
+```
+
+Configure the following fields:
+
+- `FLAGEVAL_SECRET` - Authentication secret (contact the team to obtain)
+- `--model-name` - Model name: `"qwen_gr00t"`
+- `--datasets` - Evaluation dataset(s), e.g. `libero_10`
+- `--server-host` - Host/IP of your model server (FlagEval will connect back to this address)
+- `--server-port` - Port of your model server
+- `--poll-interval` - How often (in seconds) to poll for results
+- `--model-id` - A unique identifier for this evaluation run (e.g., `qwen_gr00t_exp1`)
+
+By default the script automatically starts the model server before submitting the evaluation. If your model server is already running, add `--attach` to skip the startup step.
