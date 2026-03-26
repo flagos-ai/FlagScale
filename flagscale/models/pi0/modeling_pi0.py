@@ -42,7 +42,7 @@ from flagscale.models.pi05.pi_gemma import (
     layernorm_forward,
 )
 from flagscale.models.vla.base_policy import TrainablePolicy
-from flagscale.platform import get_platform
+from flagscale.platforms import get_platform
 
 T = TypeVar("T", bound="PI0Policy")
 

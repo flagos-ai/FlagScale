@@ -58,7 +58,7 @@ from flagscale.train.utils.train_utils import (
     get_step_checkpoint_dir,
     update_last_checkpoint,
 )
-from flagscale.platform import get_platform
+from flagscale.platforms import get_platform
 
 IMAGENET_STATS = {
     "mean": [[[0.485]], [[0.456]], [[0.406]]],  # (c,1,1)
