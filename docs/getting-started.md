@@ -16,57 +16,85 @@ All valid configurations in the task-level YAML file correspond to the arguments
 used in backend engines such as Megatron-LM and vllm, with hyphens (`-`)
 replaced by underscores (`_`).
 For a complete list of available configurations, please refer to the backend engine documentation.
-You can simply copy and modify the existing YAML files in the [examples](./examples)
+You can simply copy and modify the existing YAML files in the [examples](../examples/)
 folder to get started.
 
 ## 🔧 Setup
-We recommend using the latest release of [NGC's PyTorch container](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch) for setup.
 
-1. Clone the repository:
+1. Install FlagScale
+
+   **Option 1: Install via pip**
+    ```sh
+    pip install flagscale --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+    ```
+
+   **Option 2: Install from source**
     ```sh
     git clone https://github.com/flagos-ai/FlagScale.git
+    cd FlagScale
+    pip install .
     ```
 
-2. Install FlagScale requirements
-    ```sh
-    pip install . --verbose
-    ```
 
-3. Install backends
+2. Install backends
 
 - **Inference/Serving backend**
 
-    vLLM-FL:
+    We recommend using the latest release of flagscale-inference image.
     ```sh
-    git clone https://github.com/flagos-ai/vllm-FL
-    cd vllm-FL
-    pip install -e .
+    docker pull harbor.baai.ac.cn/flagscale/flagscale-inference:dev-cu128-py3.12-20260302102033
+    docker run -itd --privileged --gpus all --net=host --ipc=host --device=/dev/infiniband --shm-size 512g --ulimit memlock=-1 --name <name>  harbor.baai.ac.cn/flagscale/flagscale-inference:dev-cu128-py3.12-20260302102033
+    docker exec -it <name> /bin/bash
+    conda activate flagscale-inference
     ```
-    See more details in [vLLM-FL](https://github.com/flagos-ai/vllm-FL)
 
-    If you need vLLM-plugin-FL, see details in [vLLM-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL)
+    vLLM:
+    ```sh
+    pip install vllm==0.13.0
+    ```
+
+    vLLM-plugin-FL:
+    ```sh
+    pip install vllm-plugin-fl==0.1.0+vllm0.13.0 --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+    ```
+    See more details in [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL)
 
 
 - **Training backend**
+
+    We recommend using the latest release of flagscale-train image.
+    ```sh
+    docker pull harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-20260319182856
+    docker run -itd --gpus all --shm-size=500g --name <name>  harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-20260319182856 /bin/bash
+    docker exec -it <name> /bin/bash
+    conda activate flagscale-train
+    ```
+
     Megatron-LM-FL:
     ```sh
-    git clone https://github.com/flagos-ai/Megatron-LM-FL
-    cd Megatron-LM-FL
-    pip install --no-build-isolation .[mlm,dev]
-
-    git clone https://github.com/NVIDIA/apex
-    cd apex
-    APEX_CPP_EXT=1 APEX_CUDA_EXT=1 pip install -v --no-build-isolation .
+    pip install megatron_core==0.1.0+megatron0.15.0rc7 --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
     ```
     See more details in [Megatron-LM-FL](https://github.com/flagos-ai/Megatron-LM-FL)
 
+    TransformerEngine-FL:
+    ```sh
+    pip install transformer_engine==0.1.0+te2.9.0 --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+    ```
+    See more details in [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL)
+
 
 - **RL backend**
+
+    We recommend using the latest release of flagscale-train image.
+    ```sh
+    docker pull harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-20260319182856
+    docker run -itd --gpus all --shm-size=500g --name <name>  harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-20260319182856 /bin/bash
+    docker exec -it <name> /bin/bash
+    conda activate flagscale-train
+    ```
     verl-FL:
     ```sh
-    git clone https://github.com/flagos-ai/verl-FL.git
-    cd verl-FL
-    pip install --no-deps -e .
+    pip install verl==0.1.0+verl0.7.0 --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
     ```
     See more details in [verl-FL](https://github.com/flagos-ai/verl-FL.git) to get full installation instructions.
 
@@ -105,7 +133,7 @@ Require Megatron-LM-FL env
 
 2. Edit config:
 
-    Modify the data_path and tokenizer_path in ./examples/qwen3/conf/train/0_6b.yaml at line 81 and line 87
+    Modify the data_path and tokenizer_path in ./examples/qwen3/conf/train/0_6b.yaml
     ```yaml
     data:
         data_path: ./data/enron_emails_demo_text_document_qwen    # modify data_path here
@@ -119,7 +147,7 @@ Require Megatron-LM-FL env
             make_vocab_size_divisible_by: 64
     ```
 
-    Modify config in ./examples/qwen3/conf/train.yaml at line 3
+    Modify config in ./examples/qwen3/conf/train.yaml
     ```yaml
     defaults:
       - _self_
@@ -142,19 +170,19 @@ Require Megatron-LM-FL env
 
 ### Inference
 
-Require vLLM-FL env
+Require vLLM-Plugin-FL env
 
 1. Prepare model
     ```sh
-    modelscope download --model Qwen/Qwen3-0.6B --local_dir ./Qwen3-0.6B
+    modelscope download --model Qwen/Qwen3-4B --local_dir ./Qwen3-4B
     ```
 
 2. Edit config
 
-    Modify model path in ./examples/qwen3/conf/inference/0_6b.yaml at line 2
+    Modify model path in ./examples/qwen3/conf/inference/4b.yaml
     ```yaml
     llm:
-        model: ./Qwen3-0.6B         # modify: Set model directory
+        model: ./Qwen3-4B         # modify: Set model directory
         trust_remote_code: true
         tensor_parallel_size: 1
         pipeline_parallel_size: 1
@@ -162,11 +190,11 @@ Require vLLM-FL env
         seed: 1234
     ```
 
-    Modify config in ./examples/qwen3/conf/inference_fl.yaml at line 3
+    Modify config in ./examples/qwen3/conf/inference_fl.yaml
     ```yaml
     defaults:
       - _self_
-      - inference: 0_6b    # modify: Inference value must match its corresponding config file name
+      - inference: 4b    # modify: Inference value must match its corresponding config file name
     ```
 
 3. Start inference:
@@ -184,7 +212,7 @@ Require vLLM-FL env
 
 2. Edit Config
 
-    Modify model path in ./examples/qwen3/conf/serve/0_6b.yaml at line 3
+    Modify model path in ./examples/qwen3/conf/serve/0_6b.yaml
     ```yaml
     - serve_id: vllm_model
       engine_args:
@@ -196,7 +224,7 @@ Require vLLM-FL env
         port: 30000                  # A port available in your env, for example: 30000
     ```
 
-    Modify config in ./examples/qwen3/conf/serve.yaml at line 3
+    Modify config in ./examples/qwen3/conf/serve.yaml
     ```yaml
     defaults:
       - _self_
@@ -245,7 +273,7 @@ Require verl-FL env
 
 3. Edit config
 
-    Modify model path in ./examples/qwen3/conf/rl/0_6b.yaml at line 12 for dataset
+    Modify model path in ./examples/qwen3/conf/rl/0_6b.yaml
     ```yaml
     data:
         train_files: /workspace/data/gsm8k/train.parquet # modify: Set your train dataset
@@ -257,7 +285,7 @@ Require verl-FL env
         truncation: "error"
     ```
 
-    Modify model path in ./examples/qwen3/conf/rl/0_6b.yaml at line 21 for model checkpoint
+    Modify model path in ./examples/qwen3/conf/rl/0_6b.yaml
     ```yaml
     actor_rollout_ref:
         model:
@@ -292,48 +320,3 @@ You can check the output in your experiment directory.
     ```sh
     ray stop
     ```
-
-### Serving DeepSeek-R1 <a name="deepseek-r1-serving"></a>
-
-We support serving the DeepSeek-R1 model and have implemented the `flagscale serve`
-command for one-click deployment. By configuring just two YAML files,
-you can easily serve the model using the `flagscale serve` command.
-
-1. **Configure the YAML files:**
-
-   ```none
-   FlagScale/
-    ├─ examples/
-    │   └─ deepseek_r1/
-    │        └─ conf/
-    │            └─ serve.yaml
-    |            └─ hostfile.txt # Set hostfile (optional)
-    │            └─ serve/
-    │               └─ 671b.yaml # Set model parameters and server port
-   ```
-
-   > [!Note]
-   > When a task spans more than one nodes, a [hostfile.txt](./examples/deepseek/conf/hostfile.txt)
-   > is required. Its path should be set in the `serve.yaml` configuration file.
-
-2. Install FlagScale CLI:
-
-   ```shell
-   cd FlagScale
-   pip install . --verbose --no-build-isolation
-   ```
-
-3. Start serving:
-
-   ```shell
-   flagscale serve deepseek_r1
-   ```
-
-Note that the `flagscale` command line supports customzation of service parameters:
-
-```shell
-flagscale serve <MODEL_NAME> <MODEL_CONFIG_YAML>
-```
-
-The configuration files allow you to specify the necessary parameters and settings
-for your deployment, ensuring a smooth and efficient serving process.

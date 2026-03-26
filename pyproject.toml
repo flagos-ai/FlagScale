@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flagscale"
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 description = "FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models, developed with the backing of the Beijing Academy of Artificial Intelligence (BAAI)."
 readme = "README.md"
 license = {text = "Apache-2.0"}

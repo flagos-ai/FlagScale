@@ -1,5 +1,18 @@
 ## Change History
 
+- **[2026/03]** Released [v1.0.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0):
+
+  - Major updates: Major updates: Introduced a unified FlagScale CLI as the single entry point for all operations,
+    with unified multi-chip training support across NVIDIA GPU, Ascend, and MUSA.
+    Replaced third-party verl with [VeRL-FL](https://github.com/flagos-ai/verl-FL) and expanded model support
+    to include Qwen3-VL, Qwen2.5-VL, GR00T N1.5, and DeepSeek Engram.
+    Enhanced CI/CD coverage with Megatron-LM-FL integration tests and automated CLI validation workflows.
+
+  - Compatibility caveats: This is the first stable release built on top of `v1.0.0-alpha.0`.
+    If you are using or upgrading from a version earlier than `v1.0.0-alpha.0`,
+    please use the [`main-legacy`](https://github.com/flagos-ai/FlagScale/tree/main-legacy) branch.
+    It will continue to receive critical bug fixes and minor updates for a period of time.
+
 - **[2026/01]** Released [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0):
 
   - Major updates: Refactored the code base by moving hardware-specific (multi-chip) support into plugin repositories
