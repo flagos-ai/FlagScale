@@ -249,7 +249,7 @@ class ModelConfig(BaseModel):
     def get_model_config_dict(self) -> dict[str, Any]:
         """Get all model-specific config fields (excluding train-level fields)."""
         return self.model_dump(
-            exclude={"model_name", "checkpoint_dir", "freeze", "optimizer", "tokenizer_path"}
+            exclude={"model_name", "checkpoint_dir", "freeze", "optimizer"}
         )
 
 

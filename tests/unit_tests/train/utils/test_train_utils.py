@@ -220,11 +220,8 @@ requires_cuda = pytest.mark.skipif(
 
 
 def _make_fsdp_model():
-    from torch.distributed.device_mesh import init_device_mesh
-
     model = SimpleModel().cuda()
-    mesh = init_device_mesh("cuda", (1,))
-    fully_shard(model, mesh=mesh)
+    fully_shard(model)
     return model
 
 
