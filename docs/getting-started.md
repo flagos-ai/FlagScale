@@ -21,22 +21,7 @@ folder to get started.
 
 ## 🔧 Setup
 
-1. Install FlagScale
-
-   **Option 1: Install via pip**
-    ```sh
-    pip install flagscale --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
-    ```
-
-   **Option 2: Install from source**
-    ```sh
-    git clone https://github.com/flagos-ai/FlagScale.git
-    cd FlagScale
-    pip install .
-    ```
-
-
-2. Install backends
+1. Install backends
 
 - **Inference/Serving backend**
 
@@ -98,6 +83,19 @@ folder to get started.
     ```
     See more details in [verl-FL](https://github.com/flagos-ai/verl-FL.git) to get full installation instructions.
 
+2. Install FlagScale
+
+   **Option 1: Install via pip**
+    ```sh
+    pip install flagscale --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple
+    ```
+
+   **Option 2: Install from source**
+    ```sh
+    git clone https://github.com/flagos-ai/FlagScale.git
+    cd FlagScale
+    pip install .
+    ```
 
 ## Run a Task
 
