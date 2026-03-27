@@ -59,6 +59,15 @@ folder to get started.
     ```
     See more details in [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL)
 
+    FlagGems:
+    ```sh
+    pip install -U scikit-build-core==0.11 pybind11 ninja cmake
+    git clone https://github.com/flagos-ai/FlagGems
+    cd FlagGems
+    pip install --no-build-isolation . 
+    ```
+    See more details in [FlagGems](https://github.com/flagos-ai/FlagGems)
+
 
 - **Training backend**
 
