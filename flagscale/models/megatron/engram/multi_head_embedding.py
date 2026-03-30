@@ -113,20 +113,14 @@ class EngramMemory(nn.Module):
             )
             if config.perform_initialization:
                 _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=1)
-        self.parallel_flag = False
-        self.offloading_flag = False
     
     def enable_parallel(self):
-        assert not self.offloading_flag, "Cannot enable parallelism after offloading is enabled."
         if self.embedding_parallel_size > 1:
             setattr(self.weight, "is_engram_embedding", True)
             setattr(self.weight, "allreduce", False)
-        self.parallel_flag = True
     
     def enable_offloading(self):
-        assert not self.parallel_flag, "Cannot enable offloading after parallelism is enabled."
         setattr(self.weight, "is_offloading_candidate", True)
-        self.offloading_flag = True
 
     def _dispatch(self, input_ids):
         torch.cuda.nvtx.range_push("engram_embedding_dispatch")
@@ -295,8 +289,8 @@ class MultiHeadEmbedding(nn.Module):
             )
             if self.engram_cfg.engram_embedding_parallel_method == "alltoall":
                 self.memory.enable_parallel()
-            elif self.engram_cfg.engram_embedding_parallel_method == "offload":
-                self.memory.enable_offloading()
+                if self.engram_cfg.engram_offload_embedding_optimizer_states:
+                    self.memory.enable_offloading()
             else:
                 raise ValueError(f"Unsupported engram_embedding_parallel_method: {self.engram_cfg.engram_embedding_parallel_method}")
 
