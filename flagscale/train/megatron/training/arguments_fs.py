@@ -763,6 +763,73 @@ def _add_regularization_args(parser):
                        help='If set, disable Nesterov momentum for muon')
     return parser
 
+def _add_perf_monitor_args(parser):
+    group = parser.add_argument_group(title="flagscale perf monitor")
+
+    group.add_argument(
+        "--enable-perf-monitor",
+        action="store_true",
+        default=False,
+        help="Enable FlagScale performance monitoring during training.",
+    )
+    group.add_argument(
+        "--perf-log-interval",
+        type=int,
+        default=10,
+        help="Log performance metrics every N iterations.",
+    )
+    group.add_argument(
+        "--perf-log-dir",
+        type=str,
+        default=None,
+        help="Directory used to save performance monitor logs.",
+    )
+    group.add_argument(
+        "--perf-console-output",
+        action="store_true",
+        default=False,
+        help="Also emit performance monitor logs to stdout on rank 0.",
+    )
+    group.add_argument(
+        "--perf-log-format",
+        type=str,
+        choices=["text", "json", "both"],
+        default="both",
+        help="Output format for performance monitor files.",
+    )
+    group.add_argument(
+        "--perf-memory-tracking",
+        dest="perf_memory_tracking",
+        action="store_true",
+        help="Track CUDA memory usage in the performance monitor.",
+    )
+    group.add_argument(
+        "--no-perf-memory-tracking",
+        dest="perf_memory_tracking",
+        action="store_false",
+        help="Disable CUDA memory tracking in the performance monitor.",
+    )
+    group.set_defaults(perf_memory_tracking=True)
+    group.add_argument(
+        "--perf-breakdown",
+        action="store_true",
+        default=False,
+        help="Include estimated component breakdowns in performance logs.",
+    )
+    group.add_argument(
+        "--perf-max-log-files",
+        type=int,
+        default=10,
+        help="Maximum number of historical performance log files to keep.",
+    )
+    group.add_argument(
+        "--perf-model-type",
+        type=str,
+        choices=["auto", "gpt", "llama", "qwen", "mixtral", "aquila", "moe"],
+        default="auto",
+        help="Model type hint used for FLOPS estimation.",
+    )
+    return parser
 
 def _add_flagos_args(parser):
     group = parser.add_argument_group(title="flagscale transformer engine fl")
@@ -878,6 +945,7 @@ def add_flagscale_arguments(parser):
     parser = _add_auto_skip_spiky_loss(parser)
     parser = _add_peft_args(parser)
     parser = _add_regularization_args(parser)
+    parser = _add_perf_monitor_args(parser)
     parser = _add_flagos_args(parser)
     parser = _add_engram_args(parser)
     return parser

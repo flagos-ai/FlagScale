@@ -7,9 +7,11 @@ from datetime import datetime
 import functools
 import gc
 import inspect
+import json
 import logging
 import math
 import os
+import socket
 import sys
 from typing import Any, Optional
 
@@ -138,6 +140,12 @@ from megatron.training.stablelm2_scheduler import StableLM2SchedulerConfig
 from megatron.training.global_vars import get_spiky_loss_detector
 from megatron.training.fs_theoretical_memory_usage import report_theoretical_memory as fs_report_theoretical_memory
 from megatron.plugin.hetero.parallel_context import get_parallel_context
+from flagscale.train.perf_monitor.hooks import (
+    initialize_perf_monitor,
+    perf_monitor_end_iteration,
+    perf_monitor_end_training,
+    perf_monitor_start_iteration,
+)
 
 stimer = StragglerDetector()
 
@@ -2453,6 +2461,7 @@ def train(
     timers('interval-time', log_level=0).start(barrier=True)
     print_datetime('before the start of training step')
     report_memory_flag = True
+    perf_callback = initialize_perf_monitor(args)
     pre_hook_enabled = False
     should_exit = False
     exit_code = 0
@@ -2483,6 +2492,7 @@ def train(
 
     num_microbatches = get_num_microbatches()
 
+    writer = get_tensorboard_writer()
     wandb_writer = get_wandb_writer()
     if wandb_writer and args.wandb_log_model:
         # wandb.watch's log_freg needs to take the accumulated number of microbatches into account
@@ -2665,7 +2675,8 @@ def train(
                         model, optimizer, iteration, ref_state_dict,
                     )
                 train_data_iterator = buffered_rollouts
-
+        if perf_callback is not None:
+            perf_monitor_start_iteration(iteration)
         ft_integration.on_training_step_start()
         (
             loss_dict,
@@ -2679,6 +2690,8 @@ def train(
             forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func
         )
         ft_integration.on_training_step_end()
+        if perf_callback is not None:
+            perf_monitor_end_iteration(iteration, writer, wandb_writer)
         if should_checkpoint:
             save_checkpoint_and_time(
                 iteration,
@@ -2891,6 +2904,7 @@ def train(
 
     # Flush TensorBoard, WandB writers and one-logger.
     writer = get_tensorboard_writer()
+    perf_monitor_end_training(writer, wandb_writer)
     if writer:
         writer.flush()
 
