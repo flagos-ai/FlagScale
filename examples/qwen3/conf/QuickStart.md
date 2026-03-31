@@ -63,7 +63,7 @@ defaults:
   - train: 10b_hetero
 
 experiment:
-  exp_name: Qwen3-10b_muxi
+  exp_name: Qwen3-10b_hetero
   seed: 42
   save_steps: 1000
   load: null
@@ -81,16 +81,17 @@ experiment:
     nnodes: 2
     nproc_per_node: 8
     rdzv_backend: static
-    hostfile: ./muxi_hostfile  
+    hostfile: ./hetero_hostfile  
   cmds:
     before_start: source /root/miniconda3/bin/activate flagscale-train
   envs:
-    FLAGCX_ENABLE_TOPO_DETECT: TRUE
-    FLAGCX_DEBUG: TRACE
+    #FLAGCX_ENABLE_TOPO_DETECT: TRUE
+    #FLAGCX_DEBUG: TRACE
     FLAGCX_IB_HCA: mlx5
+    FLAGCX_IB_GID_INDEX: 3
     CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
     CUDA_DEVICE_MAX_CONNECTIONS: 1
-    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    #NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
     device_type_specific:
       C550:
         LOGLEVEL: "INFO"
@@ -127,8 +128,33 @@ hydra:
 system:
   distributed_backend: flagcx
   no_shared_fs: ${experiment.runner.no_shared_fs}
-  ...
-  ...
+  num_workers: 16
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 2
+  context_parallel_size: 1
+  disable_bias_linear: true
+  reset_position_ids: True
+  reset_attention_mask: True
+  qk_layernorm: true
+  sequence_parallel: true
+  use_distributed_optimizer: true
+  overlap_grad_reduce: true
+  overlap_param_gather: true
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+    log_timers_to_tensorboard: true
+    log_validation_ppl_to_tensorboard: true
+    log_throughput: true
+    log_params_norm: false
+    log_num_zeros_in_grad: true
+    log_memory_to_tensorboard: true
   checkpoint:
     save_interval: ${experiment.save_steps}
     load: ${experiment.load}
@@ -146,8 +172,47 @@ system:
     standalone_embedding_stage: False
     hetero_current_device_type: "A800"
 
-    ...
-    ...
+model:
+  transformer_impl: transformer_engine
+  num_layers: 56
+  hidden_size: 2560
+  ffn_hidden_size: 19456
+  kv_channels: 128
+  group_query_attention: true
+  num_attention_heads: 32
+  num_query_groups: 8 # num_key_value_heads
+  seq_length: 4096
+  max_position_embeddings: 32768
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  rotary_base: 1000000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 6e-3
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: true
+  no_position_embedding: true
+  no_rope_fusion: true
+  attention_backend: flash
+  # training
+  seed: ${experiment.seed}
+  # finetune: false
+  micro_batch_size: 1
+  global_batch_size: 2048
+  eval_iters: 0
+  train_samples: 244142080 #1T #29297664 #120B tokens
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.0e-3
+      min_lr: 1.0e-4
+      lr_warmup_samples: 2048000
+      lr_decay_style: cosine
 
 data:
   data_path: /path/pile_wikipedia_demo
@@ -156,13 +221,14 @@ data:
   tokenizer:
     legacy_tokenizer: true
     tokenizer_type: QwenTokenizerFS
-    tokenizer_path: xxx
+    tokenizer_path: xxx # Download the official Qwen3-0.6B model from ModelScope to get tokenizer-related files
     vocab_size: 151851
     padded_vocab_size: 151936
     make_vocab_size_divisible_by: 64
+
 ```
 
-#### File Path: ./muxi_hostfile
+#### File Path: ./hetero_hostfile
 
 ```
 ip slots=8 type=A800
@@ -172,13 +238,13 @@ ip slots=8 type=C550
 ### 2.3 Start Training
 
 ```bash
-python run.py --config-path ./examples/qwen3conf  --config-name train_hetero_10b action=run
+python run.py --config-path ./examples/qwen3/conf  --config-name train_hetero_10b action=run
 ```
 
 ### 2.4 Stop Training
 
 ```bash
-python run.py --config-path ./examples/qwen3conf  --config-name train_hetero_10b action=stop
+python run.py --config-path ./examples/qwen3/conf  --config-name train_hetero_10b action=stop
 ```
 
 
