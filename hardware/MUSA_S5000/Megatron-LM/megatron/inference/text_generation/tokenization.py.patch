@@ -1,0 +1,21 @@
+diff --git a/megatron/inference/text_generation/tokenization.py b/megatron/inference/text_generation/tokenization.py
+index 541cc47b3..a41c7f592 100644
+--- a/megatron/inference/text_generation/tokenization.py
++++ b/megatron/inference/text_generation/tokenization.py
+@@ -41,6 +41,15 @@ def detokenize_generations(tokens_gpu_tensor,
+                     word = bytearray([tokenizer.tokenizer.byte_decoder[c] for c in word]).decode(
+                         "utf-8", errors="replace"
+                     )
++                    args = get_args()
++                    if args.tokenizer_type == 'AquilaTokenizer':
++                        if token in tokenizer.tokenizer.special_tokens_decoder:
++                            word = tokenizer.tokenizer.special_tokens_decoder[token]
++                        else :
++                            word = tokenizer.tokenizer.decoder[token]
++                            word = bytearray(
++                                [tokenizer.tokenizer.byte_decoder[c] for c in word]).decode(
++                                    'utf-8', errors='replace')
+                     words.append(word)
+ 
+             prompts_plus_generations_segments.append(words)
+

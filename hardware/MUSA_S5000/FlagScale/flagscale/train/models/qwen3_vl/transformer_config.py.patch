@@ -1,0 +1,18 @@
+diff --git a/flagscale/train/models/qwen3_vl/transformer_config.py b/flagscale/train/models/qwen3_vl/transformer_config.py
+index e0136875..a6c9d3a8 100644
+--- a/flagscale/train/models/qwen3_vl/transformer_config.py
++++ b/flagscale/train/models/qwen3_vl/transformer_config.py
+@@ -94,7 +94,11 @@ def get_vision_model_config(args, config):
+     config.in_channels = 3
+     config.spatial_merge_size = 2
+     config.num_position_embeddings = 2304
+-
++    
++    config.pipeline_model_parallel_size = 1
++    config.first_pipeline_num_layers = None
++    config.num_layers_in_first_pipeline_stage = None
++    config.num_layers_in_last_pipeline_stage = None
+     # Reset recompute settings for vision encoder, otherwise it may use the language's settings.
+     if args.vision_recompute_activations:
+         config.recompute_granularity = 'full'
+

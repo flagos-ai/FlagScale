@@ -1,0 +1,22 @@
+diff --git a/flagscale/train/theoretical_memory_usage.py b/flagscale/train/theoretical_memory_usage.py
+index e5da1d04..a09c6719 100644
+--- a/flagscale/train/theoretical_memory_usage.py
++++ b/flagscale/train/theoretical_memory_usage.py
+@@ -219,11 +219,11 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
+         attn_params += 2 * args.hidden_size
+ 
+         if args.qk_layernorm:
+-            if not args.qk_layernorm_hidden_dim:
+-                attn_params += 2 * query_projection_size // args.num_attention_heads
+-            else:
+-                attn_params += query_projection_size
+-                attn_params += kv_projection_size
++            # if not args.qk_layernorm_hidden_dim:
++            #     attn_params += 2 * query_projection_size // args.num_attention_heads
++            # else:
++            attn_params += query_projection_size
++            attn_params += kv_projection_size
+ 
+     # Part 2: MLP or MoE ====================================================================
+     moe_ffn_hidden_size = (
+

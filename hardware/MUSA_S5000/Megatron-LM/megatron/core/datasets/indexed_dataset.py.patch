@@ -1,0 +1,14 @@
+diff --git a/megatron/core/datasets/indexed_dataset.py b/megatron/core/datasets/indexed_dataset.py
+index 13c9df341..972434baa 100644
+--- a/megatron/core/datasets/indexed_dataset.py
++++ b/megatron/core/datasets/indexed_dataset.py
+@@ -627,6 +627,8 @@ class IndexedDataset(torch.utils.data.Dataset):
+         """
+         idx_path = get_idx_path(path_prefix)
+         bin_path = get_bin_path(path_prefix)
++        idx_path = '/data/train-data/Nemotron-CC-v2__High-Quality__part1_text_document.idx'
++        bin_path = '/data/train-data/Nemotron-CC-v2__High-Quality__part1_text_document.bin'
+         if object_storage_config is None:
+             assert os.path.exists(idx_path) and os.path.exists(
+                 bin_path
+

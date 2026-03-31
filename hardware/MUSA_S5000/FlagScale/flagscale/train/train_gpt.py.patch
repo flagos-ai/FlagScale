@@ -1,0 +1,123 @@
+diff --git a/flagscale/train/train_gpt.py b/flagscale/train/train_gpt.py
+index 780d2478..d9296134 100644
+--- a/flagscale/train/train_gpt.py
++++ b/flagscale/train/train_gpt.py
+@@ -3,6 +3,57 @@
+ """Pretrain and SFT GPT."""
+ 
+ import torch
++import torch_musa
++import os
++import debugpy
++import sys
++import importlib.metadata
++import traceback
++# rank = int(os.environ.get('RANK', 0))
++# if rank == 0:
++#     debugpy.listen(("0.0.0.0", 5678))
++#     print("Waiting for debugger attach...")
++#     debugpy.wait_for_client()
++#     debugpy.breakpoint()
++
++
++_original_get_pkg_version = importlib.metadata.version
++
++def _patched_get_pkg_version(package_name):
++    if package_name == "flash-attn":
++        # 检查调用栈，只有从 backends.py 调用时才替换
++        stack = traceback.extract_stack()
++        for frame in stack:
++            if "backends.py" in frame.filename:
++                return _original_get_pkg_version("flash-attn11")
++    return _original_get_pkg_version(package_name)
++
++importlib.metadata.version = _patched_get_pkg_version
++
++
++def patch_cuda_to_musa():
++    if hasattr(torch, "musa"):
++        # 把 cuda.device 替换成 musa.device
++        torch.cuda.device = torch.musa.device
++
++        # 可选：有些库会用 torch.cuda.current_device / set_device
++        if hasattr(torch.musa, "current_device"):
++            torch.cuda.current_device = torch.musa.current_device
++        if hasattr(torch.musa, "set_device"):
++            torch.cuda.set_device = torch.musa.set_device
++
++
++patch_cuda_to_musa()
++
++import sys,os
++# Get the directory of the current file
++current_dir = os.path.dirname(os.path.abspath(__file__))
++# Go up two levels to reach FlagScale root directory
++flagscale_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
++# Append the relative paths
++sys.path.append('/home/megatron-lm-musa-patch')
++sys.path.append(os.path.join(flagscale_root, 'third_party', 'Megatron-LM'))
++import musa_patch
+ 
+ from functools import partial
+ from typing import List, Optional, Tuple
+@@ -20,12 +71,14 @@ from megatron.training.utils import (
+     get_batch_on_this_cp_rank,
+     get_batch_on_this_tp_rank,
+     get_blend_and_blend_per_split,
+-    is_first_or_last_pipeline_stage,
++    # is_first_or_last_pipeline_stage,
+ )
+ from megatron.training.datasets.sft_dataset import SFTDataset
+ from model_provider import model_provider
+ from gpt_builders import gpt_builder
+ 
++# from megatron.post_training.model_provider import model_provider
++
+ try:
+     from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
+@@ -45,8 +98,8 @@ stimer = StragglerDetector()
+ def get_batch(data_iterator, vp_stage=None):
+     """Generate a batch."""
+     # TODO: this is pretty hacky, find a better way
+-    if not is_first_or_last_pipeline_stage(vp_stage):
+-        return None, None, None, None, None
++    # if not is_first_or_last_pipeline_stage(vp_stage):
++    #     return None, None, None, None, None
+ 
+     # get batches based on the TP rank you are on
+     batch = get_batch_on_this_tp_rank(data_iterator)
+@@ -163,14 +216,16 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
+ 
+ 
+ def is_dataset_built_on_rank(vp_stage=None):
+-    return is_first_or_last_pipeline_stage(vp_stage) and parallel_state.get_tensor_model_parallel_rank() == 0
++    return 1 
++    # is_first_or_last_pipeline_stage(vp_stage) and parallel_state.get_tensor_model_parallel_rank() == 0
+ 
+ 
+ def core_gpt_dataset_config_from_args(args):
+-    if args.legacy_tokenizer:
+-        tokenizer = get_tokenizer()
+-    else:
+-        tokenizer = build_tokenizer(args)
++    # if args.legacy_tokenizer:
++    #     tokenizer = get_tokenizer()
++    # else:
++    tokenizer = get_tokenizer()
++    # tokenizer = build_tokenizer(args)
+ 
+     # Sometimes --data-path is too long, instead we parse it from a file.
+     blend: Optional[Tuple[List[str], Optional[List[float]]]]
+@@ -183,8 +238,8 @@ def core_gpt_dataset_config_from_args(args):
+         blend=blend,
+         blend_per_split=blend_per_split,
+         split=args.split,
+-        multiple_validation_sets=args.multiple_validation_sets,
+-        full_validation=args.full_validation,
++        # multiple_validation_sets=False,
++        # full_validation=args.full_validation,
+         num_dataset_builder_threads=args.num_dataset_builder_threads,
+         path_to_cache=args.data_cache_path,
+         mmap_bin_files=args.mmap_bin_files,
+

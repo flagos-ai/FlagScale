@@ -1,0 +1,64 @@
+diff --git a/examples/qwen3/conf/train.yaml b/examples/qwen3/conf/train.yaml
+index fb0ec63b..57932e30 100644
+--- a/examples/qwen3/conf/train.yaml
++++ b/examples/qwen3/conf/train.yaml
+@@ -1,7 +1,7 @@
+ defaults:
+   - _self_
+   # - train: 30b_a3b
+-  - train: 32b
++  - train: 0_6b
+ 
+ experiment:
+   # exp_name: Qwen3-30b-a3b-Train
+@@ -16,17 +16,43 @@ experiment:
+     backend: megatron
+     entrypoint: flagscale/train/train_gpt.py
+   runner:
++    # backend: torchrun
++    # nnodes: 1
++    # nproc_per_node: 1
++    # rdzv_backend: static
++    # no_shared_fs: false
++
+     per_node_task: false
+     no_shared_fs: false
+     rdzv_backend: static
+-    hostfile: null
+-  cmds:
+-    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
++    ssh_port: 22
++    hostfile: hostfile
++
++    # # per_node_task: false
++    # hostfile: null
++  # cmds:
++  #   before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
++
++  # cmds:
++  #   before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate flagscale-train
+   envs:
+-    LOGLEVEL: "INFO"
+-    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
++    LOGLEVEL: INFO
++    MUSA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+     CUDA_DEVICE_MAX_CONNECTIONS: 1
+-
++    MUSA_KERNEL_TIMEOUT: 3200000
++    ACCELERATOR_BACKEND: musa
++    MCCL_PROTOS: 2
++    MCCL_CHECK_POINTERS: 0
++    OMP_NUM_THREADS: 4
++    MCCL_ALGOS: 1
++    MCCL_BUFFSIZE: 20971520
++    MUSA_BLOCK_SCHEDULE_MODE: 1
++    MCCL_IB_GID_INDEX: 3
++    MCCL_NET_SHARED_BUFFERS: 0
++    MCCL_CROSS_NIC: 1
++    MCCL_SOCKET_IFNAME: bond0
++    MUSA_ENABLE_SQMMA: 1
++    TE_FL_PREFER: reference
+ action: run
+ 
+ hydra:
+

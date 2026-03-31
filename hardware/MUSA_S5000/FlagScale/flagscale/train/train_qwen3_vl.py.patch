@@ -1,0 +1,94 @@
+diff --git a/flagscale/train/train_qwen3_vl.py b/flagscale/train/train_qwen3_vl.py
+index d2b37db7..f69e20ed 100644
+--- a/flagscale/train/train_qwen3_vl.py
++++ b/flagscale/train/train_qwen3_vl.py
+@@ -28,7 +28,13 @@ from argparse import Namespace
+ 
+ # # For pytorch 2.6
+ # torch.serialization.add_safe_globals([Namespace])
++# sys.path.append("/home/dist/megatron-lm-musa-patch")
+ 
++# if os.getenv("ACCELERATOR_BACKEND", "musa") == "musa":
++#     import musa_patch
++# else:
++#     pass
++# import musa_patch
+ from megatron.core import parallel_state
+ from megatron.training.checkpointing import get_checkpoint_name # for dataloder
+ from megatron.core.enums import ModelType
+@@ -158,6 +164,58 @@ def model_provider(
+         freeze_vision_projection=False
+     )
+ 
++    def forward_output(name):
++        def forward_hook(module, input, output):
++            print(f"Inside {module.__class__.__name__} forward hook")
++            print(f"Input: {input}")  # 假设输入是个张量
++            print(f"Output: {output}")
++            if len(input) > 0 and input[0] != None :
++                try:
++                    print("is_inf1:", torch.isinf(input[0]).any(), "is_nan1:",torch.isnan(input[0]).any())
++                    print("is_inf1:", torch.isinf(output[0]).any(), "is_nan1:",torch.isnan(output[0]).any())
++                except:
++                    pass
++            try:
++                print("weight:", module.weight)
++            except:
++                pass
++            index = 0
++            
++        return forward_hook
++
++    def backward_output(name):
++       def print_backward_hook(module, grad_input, grad_output):
++           #torch.set_printoptions(profile='full')
++            if len(grad_output) > 0 and grad_output[0] != None :
++                for idx, output in enumerate(grad_output):
++                    if output is not None and (torch.isinf(output).any() or torch.isnan(output).any()):
++                        global_rank = torch.distributed.get_rank()
++                        print(module.__class__, 'backward ends', name, len(grad_output), len(grad_input))
++                        print("is_inf1:", torch.isinf(output).any(), "is_nan1:",torch.isnan(output).any(), output,'global_rank', global_rank)
++            if len(grad_input) > 0 and grad_input[0] !=None:
++                for idx, input in enumerate(grad_input):
++                    print(module.__class__, 'backward ends', name, grad_output, grad_input)
++                    if input is not None and (torch.isinf(input).any() or torch.isnan(input).any()):
++                        global_rank = torch.distributed.get_rank()
++                        print(module.__class__, 'backward ends', name, len(grad_output), len(grad_input))
++                        print("is_inf2:", torch.isinf(input).any(), "is_nan2:",torch.isnan(input).any(),input, 'global_rank', global_rank, "idx:", idx)
++                    #     for idx1, output in enumerate(grad_output):
++                    #         torch.save(input.cpu(), f'global-{global_rank}.{name}.{idx1}.nan1.grad_output.pt')
++                    #     for idx2, input in enumerate(grad_input):
++                    #         torch.save(input.cpu(), f'global-{global_rank}.{name}.{idx2}.nan2.grad_input.pt')
++       return print_backward_hook
++    # print(model)
++    for name, module in model.named_modules():
++
++        # print(name, model_module)
++       # module.register_forward_pre_hook(print_pre_forward_hook)
++       # module.register_forward_hook(print_forward_hook)
++    #    if name == 'model.layers.2.self_attn.core_attention.pv' or name == 'model.layers.2.self_attn.core_attention.softmax':
++           #module.register_full_backward_pre_hook(print_pre_backward_hook)
++           #if name == 'model.layers.25.input_layernorm':
++        module.register_forward_hook(forward_output(name))
++        module.register_full_backward_hook(backward_output(name))
++
+     return model
+ 
+ def get_ltor_masks_and_position_ids(
+@@ -295,6 +353,7 @@ def loss_func(
+ 
+     losses = output_tensor.view(-1).float()
+     loss_mask = loss_mask.view(-1).float()
++    print(losses, loss_mask)
+     loss = torch.sum(losses * loss_mask)
+ 
+     # Check individual rank losses are not NaN prior to DP all-reduce.
+@@ -364,6 +423,7 @@ def forward_step(data_iterator, model: Qwen3VLModel):
+     timers('batch-generator').stop()
+     vision_data = torch.cat([imgs, videos], dim=0)
+     vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
++    print(vision_data, vision_grid)
+     with stimer:
+         output_tensor = model(
+             input_ids = tokens,
+

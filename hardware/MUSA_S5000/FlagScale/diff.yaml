@@ -1,11 +1,12 @@
-backends_commit: {}
+backends_commit:
+  Megatron-LM: 8479eb35fbca9631acb846c3ad5d868e02214227
 backends_version:
-  FlagScale: v0.11.0
-commit: 66a37a7391987705624d7be1221c147f65236d71
-contact: lingfeng.qiu@mthreads.com
+  FlagScale: v0.8.0
+  Megatron-LM: core_v0.15.0rc5
+commit: c632b27986130d42a451970a93c1b3c905600626
+contact: jiaming.wang@mthreads.com
 device_type: MUSA_S5000
 models:
-- Qwen2.5VL-32B
-- Qwen3-8B
+- Qwen3-0.6B
 task:
-- inference
+- train
