@@ -10,12 +10,8 @@ class FLOPSFormulas:
     def attention_flops(batch_size, seq_length, hidden_size, num_attention_heads):
         head_dim = hidden_size // max(num_attention_heads, 1)
         qkv_flops = 3 * 2 * batch_size * seq_length * hidden_size * hidden_size
-        score_flops = (
-            2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
-        )
-        value_flops = (
-            2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
-        )
+        score_flops = 2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
+        value_flops = 2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
         out_flops = 2 * batch_size * seq_length * hidden_size * hidden_size
         return qkv_flops + score_flops + value_flops + out_flops
 
@@ -27,12 +23,8 @@ class FLOPSFormulas:
         kv_hidden_size = head_dim * max(num_query_groups, 1)
         q_flops = 2 * batch_size * seq_length * hidden_size * hidden_size
         kv_flops = 2 * 2 * batch_size * seq_length * hidden_size * kv_hidden_size
-        score_flops = (
-            2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
-        )
-        value_flops = (
-            2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
-        )
+        score_flops = 2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
+        value_flops = 2 * batch_size * num_attention_heads * seq_length * seq_length * head_dim
         out_flops = 2 * batch_size * seq_length * hidden_size * hidden_size
         return q_flops + kv_flops + score_flops + value_flops + out_flops
 

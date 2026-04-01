@@ -140,7 +140,7 @@ class PerfMonitorLogger:
         if len(log_files) <= self.max_log_files:
             return
 
-        for old_file in log_files[:-self.max_log_files]:
+        for old_file in log_files[: -self.max_log_files]:
             try:
                 old_file.unlink()
                 summary_file = self.log_dir / (

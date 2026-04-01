@@ -35,6 +35,7 @@ from flagscale.runner.utils import (
 
 _MAX_CPU_COUNT = multiprocessing.cpu_count()
 
+
 def _get_profile_args(config, backend="vllm"):
     serve_config = config.get("serve", [])
     if not serve_config:

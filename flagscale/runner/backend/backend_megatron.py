@@ -22,6 +22,7 @@ PERF_MONITOR_RUNNER_KEYS = (
     "perf_model_type",
 )
 
+
 class MegatronBackend(BackendBase):
     def __init__(self, config: DictConfig):
         super().__init__(config)
@@ -41,7 +42,7 @@ class MegatronBackend(BackendBase):
         self.node_specific = self.config.get("node_specific", None)
         logger.info("\n************** configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
-    
+
     def _prepare_perf_monitor_config(self):
         system_config = self.config.train.system
         runner_config = self.config.experiment.runner

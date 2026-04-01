@@ -195,8 +195,8 @@ class PerformanceMonitor:
             self.metrics.tflops_total = model_flops / (1e12 * avg_step_time)
             self.metrics.tflops_per_gpu = self.metrics.tflops_total / world_size
             self.metrics.samples_per_second = batch_size / avg_step_time
-            self.metrics.tokens_per_second = (
-                self.metrics.samples_per_second * getattr(self.args, "seq_length", 0)
+            self.metrics.tokens_per_second = self.metrics.samples_per_second * getattr(
+                self.args, "seq_length", 0
             )
 
         breakdown = self.flops_calculator.get_flops_breakdown()
@@ -239,9 +239,7 @@ class PerformanceMonitor:
             writer.add_scalar(
                 "performance/samples_per_second", metrics.samples_per_second, iteration
             )
-            writer.add_scalar(
-                "performance/tokens_per_second", metrics.tokens_per_second, iteration
-            )
+            writer.add_scalar("performance/tokens_per_second", metrics.tokens_per_second, iteration)
             if self.enable_memory_tracking:
                 writer.add_scalar("memory/current_gb", self.current_memory_gb, iteration)
                 writer.add_scalar("memory/peak_gb", self.peak_memory_gb, iteration)

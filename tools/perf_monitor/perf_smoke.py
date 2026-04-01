@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
-import time
 
 import torch
 import torch.distributed as dist
