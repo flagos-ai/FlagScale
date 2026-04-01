@@ -168,7 +168,7 @@ class TestResolveConfigEdgeCases:
         assert name == "config"
 
 
-runner = CliRunner()
+runner = CliRunner(color=False)
 
 
 class TestEvalRobo:
