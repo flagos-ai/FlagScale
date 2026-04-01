@@ -259,6 +259,70 @@ def compress(
     run_task(cfg_path, cfg_name, action)
 
 
+eval_app = typer.Typer(
+    help="Run evaluation. Use 'flagscale eval --help' to see available eval types."
+)
+app.add_typer(eval_app, name="eval")
+
+
+@eval_app.command("robo")
+def eval_robo(
+    model_name: str = typer.Option(
+        ..., "--model-name", help="Model name (e.g., pi0_5, qwen_gr00t)"
+    ),
+    datasets: list[str] = typer.Option(
+        ..., "--datasets", help="Dataset keys to evaluate (e.g., libero_10)"
+    ),
+    server_host: str = typer.Option(
+        ..., "--server-host", help="IP/hostname that FlagEval calls back to"
+    ),
+    server_port: int | None = typer.Option(None, "--server-port", help="Server port"),
+    base_url: str = typer.Option(
+        "https://flageval.baai.ac.cn/api/hf", "--base-url", help="FlagEval API base URL"
+    ),
+    model_id: str | None = typer.Option(
+        None, "--model-id", help="Model ID for FlagEval UI (defaults to model-name)"
+    ),
+    description: str = typer.Option("", "--description", help="Eval description"),
+    attach: bool = typer.Option(False, "--attach", help="Server already running, skip startup"),
+    detach: bool = typer.Option(False, "--detach", help="Leave server running after eval"),
+    poll_interval: int = typer.Option(30, "--poll-interval", help="Polling interval in seconds"),
+    server_timeout: int = typer.Option(
+        300, "--server-timeout", help="Server startup timeout in seconds"
+    ),
+):
+    """Online evaluation via FlagEval-Robo API
+
+    Requires FLAGEVAL_SECRET environment variable.
+
+    Example:
+        FLAGEVAL_SECRET=xxx flagscale eval robo --model-name qwen_gr00t --datasets libero_10 --server-host example.com --attach
+    """
+    from flagscale.eval.robo import main as eval_main
+
+    args = ["eval_online.py", "--model-name", model_name]
+    for ds in datasets:
+        args.extend(["--datasets", ds])
+    args.extend(["--server-host", server_host])
+    if server_port is not None:
+        args.extend(["--server-port", str(server_port)])
+    args.extend(["--base-url", base_url])
+    if model_id:
+        args.extend(["--model-id", model_id])
+    if description:
+        args.extend(["--description", description])
+    if attach:
+        args.append("--attach")
+    if detach:
+        args.append("--detach")
+    args.extend(["--poll-interval", str(poll_interval)])
+    args.extend(["--server-timeout", str(server_timeout)])
+
+    typer.echo(f"Eval [robo] model={model_name} datasets={datasets}")
+    sys.argv = args
+    eval_main()
+
+
 # ============================================================================
 # Install Command (delegates to tools/install)
 # ============================================================================
