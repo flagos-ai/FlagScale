@@ -1,8 +1,7 @@
 """Section-level timing utilities for straggler detection."""
 
-from functools import wraps
 import time
-from typing import Dict, Optional
+from functools import wraps
 
 try:
     import torch
@@ -20,8 +19,8 @@ class SectionContext:
         self.detector = detector
         self.name = name
         self.profile_cuda = profile_cuda
-        self.start_time: Optional[float] = None
-        self.end_time: Optional[float] = None
+        self.start_time: float | None = None
+        self.end_time: float | None = None
         self.cuda_start_event = None
         self.cuda_end_event = None
 
@@ -69,7 +68,7 @@ class OptionalSectionContext:
         self.name = name
         self.enabled = enabled
         self.profile_cuda = profile_cuda
-        self.context: Optional[SectionContext] = None
+        self.context: SectionContext | None = None
 
     def __enter__(self):
         if self.enabled:
@@ -106,7 +105,7 @@ class SectionProfiler:
 
     def __init__(self, detector):
         self.detector = detector
-        self.active_sections: Dict[str, SectionContext] = {}
+        self.active_sections: dict[str, SectionContext] = {}
 
     def start_section(self, name: str, profile_cuda: bool = False) -> SectionContext:
         if name in self.active_sections:

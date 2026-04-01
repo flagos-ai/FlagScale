@@ -1,9 +1,8 @@
 """Main detector implementation for FlagScale straggler analysis."""
 
-from collections import defaultdict
 import json
 import time
-from typing import Dict, List, Optional, Tuple
+from collections import defaultdict
 
 try:
     import torch
@@ -27,13 +26,13 @@ class StragglerDetector:
         config: StragglerConfig,
         rank: int = 0,
         world_size: int = 1,
-        node_name: Optional[str] = None,
+        node_name: str | None = None,
     ):
         self.config = config
         self.rank = rank
         self.world_size = world_size
         self.node_name = node_name or f"rank-{rank}"
-        self.section_timings: Dict[str, List[Tuple[int, float, Optional[float]]]] = defaultdict(list)
+        self.section_timings: dict[str, list[tuple[int, float, float | None]]] = defaultdict(list)
         self.current_step = 0
         self.enabled = config.enabled
         self.straggler_threshold = config.straggler_threshold
@@ -42,8 +41,8 @@ class StragglerDetector:
         self,
         name: str,
         cpu_time: float,
-        gpu_time: Optional[float] = None,
-        step: Optional[int] = None,
+        gpu_time: float | None = None,
+        step: int | None = None,
     ):
         if not self.enabled:
             return
@@ -56,7 +55,7 @@ class StragglerDetector:
     def increment_step(self):
         self.current_step += 1
 
-    def should_profile(self, step: Optional[int] = None) -> bool:
+    def should_profile(self, step: int | None = None) -> bool:
         if not self.enabled:
             return False
         if step is None:
@@ -65,7 +64,7 @@ class StragglerDetector:
             return False
         return (step - self.config.warmup_steps) % self.config.profiling_interval == 0
 
-    def should_report(self, step: Optional[int] = None) -> bool:
+    def should_report(self, step: int | None = None) -> bool:
         if not self.enabled:
             return False
         if step is None:
@@ -75,8 +74,8 @@ class StragglerDetector:
     def compute_section_scores(
         self,
         section_name: str,
-        sample_size: Optional[int] = None,
-    ) -> Dict[int, float]:
+        sample_size: int | None = None,
+    ) -> dict[int, float]:
         if sample_size is None:
             sample_size = self.config.sample_size
         avg_time = self.get_recent_section_time(section_name, num_samples=sample_size)
@@ -86,8 +85,8 @@ class StragglerDetector:
 
     def compute_all_section_scores(
         self,
-        sample_size: Optional[int] = None,
-    ) -> Dict[str, Dict[int, float]]:
+        sample_size: int | None = None,
+    ) -> dict[str, dict[int, float]]:
         all_scores = {}
         for section_name in self.config.monitor_sections:
             scores = self.compute_section_scores(section_name, sample_size)
@@ -95,7 +94,7 @@ class StragglerDetector:
                 all_scores[section_name] = scores
         return all_scores
 
-    def compute_gpu_scores(self, sample_size: Optional[int] = None) -> Dict[int, float]:
+    def compute_gpu_scores(self, sample_size: int | None = None) -> dict[int, float]:
         if not self.config.enable_gpu_profile:
             return {}
 
@@ -114,9 +113,9 @@ class StragglerDetector:
 
     def identify_stragglers(
         self,
-        section_scores: Optional[Dict[str, Dict[int, float]]] = None,
-        threshold: Optional[float] = None,
-    ) -> List[int]:
+        section_scores: dict[str, dict[int, float]] | None = None,
+        threshold: float | None = None,
+    ) -> list[int]:
         if threshold is None:
             threshold = self.straggler_threshold
         if section_scores is None:
@@ -133,11 +132,13 @@ class StragglerDetector:
         except Exception:
             backend = ""
 
-        if ("cuda" in backend or "nccl" in backend or "flagcx" in backend) and torch.cuda.is_available():
+        if (
+            "cuda" in backend or "nccl" in backend or "flagcx" in backend
+        ) and torch.cuda.is_available():
             return torch.device("cuda", torch.cuda.current_device())
         return torch.device("cpu")
 
-    def _gather_section_times_across_ranks(self) -> Dict[str, Dict[int, float]]:
+    def _gather_section_times_across_ranks(self) -> dict[str, dict[int, float]]:
         if not TORCH_DISTRIBUTED_AVAILABLE or not dist.is_initialized():
             result = {}
             for section_name in self.config.monitor_sections:
@@ -167,7 +168,7 @@ class StragglerDetector:
 
         return result
 
-    def _gather_node_names_across_ranks(self) -> Dict[int, str]:
+    def _gather_node_names_across_ranks(self) -> dict[int, str]:
         if not TORCH_DISTRIBUTED_AVAILABLE or not dist.is_initialized():
             return {self.rank: self.node_name}
 
@@ -177,8 +178,8 @@ class StragglerDetector:
 
     def generate_report(
         self,
-        step: Optional[int] = None,
-        gather_on_rank0: Optional[bool] = None,
+        step: int | None = None,
+        gather_on_rank0: bool | None = None,
     ) -> StragglerReport:
         if step is None:
             step = self.current_step
@@ -213,9 +214,9 @@ class StragglerDetector:
 
     def _identify_stragglers_from_times(
         self,
-        section_times: Dict[str, Dict[int, float]],
-        threshold: Optional[float] = None,
-    ) -> List[int]:
+        section_times: dict[str, dict[int, float]],
+        threshold: float | None = None,
+    ) -> list[int]:
         if threshold is None:
             threshold = self.straggler_threshold
         if not section_times:
@@ -254,7 +255,7 @@ class StragglerDetector:
         self,
         section_name: str,
         num_samples: int = 1,
-    ) -> Optional[float]:
+    ) -> float | None:
         timings = self.section_timings.get(section_name, [])
         if not timings:
             return None
@@ -270,7 +271,7 @@ class StragglerDetector:
             count += 1
         return total_time / count if count > 0 else None
 
-    def get_section_statistics(self) -> Dict[str, Dict[str, float]]:
+    def get_section_statistics(self) -> dict[str, dict[str, float]]:
         stats = {}
         for section_name, timings in self.section_timings.items():
             if not timings:

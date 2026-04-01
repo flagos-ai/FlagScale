@@ -3,7 +3,6 @@
 import socket
 import subprocess
 import time
-from typing import Dict, List, Tuple
 
 
 class NetworkHealthChecker:
@@ -12,15 +11,15 @@ class NetworkHealthChecker:
     def __init__(self, rank: int = 0, world_size: int = 1):
         self.rank = rank
         self.world_size = world_size
-        self.node_health: Dict[int, bool] = {}
-        self.latency_matrix: Dict[Tuple[int, int], float] = {}
+        self.node_health: dict[int, bool] = {}
+        self.latency_matrix: dict[tuple[int, int], float] = {}
 
     def check_node_connectivity(
         self,
-        node_ips: List[str],
+        node_ips: list[str],
         port: int = 29500,
         timeout: float = 5.0,
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         results = {}
         for ip in node_ips:
             try:
@@ -35,17 +34,16 @@ class NetworkHealthChecker:
 
     def measure_latency(
         self,
-        node_ips: List[str],
+        node_ips: list[str],
         port: int = 29500,
         num_pings: int = 3,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         latencies = {}
         for ip in node_ips:
             try:
                 result = subprocess.run(
                     ["ping", "-c", str(num_pings), "-W", "1", ip],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    capture_output=True,
                     text=True,
                 )
                 if result.returncode != 0:
@@ -67,9 +65,9 @@ class NetworkHealthChecker:
 
     def check_bandwidth(
         self,
-        node_ips: List[str],
+        node_ips: list[str],
         test_size: int = 1024 * 1024,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         bandwidths = {}
         for ip in node_ips:
             try:
@@ -91,9 +89,9 @@ class NetworkHealthChecker:
 
     def comprehensive_health_check(
         self,
-        node_ips: List[str],
+        node_ips: list[str],
         port: int = 29500,
-    ) -> Dict[str, Dict[str, object]]:
+    ) -> dict[str, dict[str, object]]:
         results = {}
         connectivity = self.check_node_connectivity(node_ips, port)
         latencies = self.measure_latency(node_ips, port)
@@ -110,10 +108,10 @@ class NetworkHealthChecker:
 
     def identify_unhealthy_nodes(
         self,
-        health_results: Dict[str, Dict[str, object]],
+        health_results: dict[str, dict[str, object]],
         max_latency_ms: float = 100.0,
         min_bandwidth_mbps: float = 10.0,
-    ) -> List[str]:
+    ) -> list[str]:
         unhealthy = []
         for ip, metrics in health_results.items():
             if not metrics["connectivity"]:
@@ -126,9 +124,9 @@ class NetworkHealthChecker:
 
     def get_network_summary(
         self,
-        node_ips: List[str],
+        node_ips: list[str],
         port: int = 29500,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         health_results = self.comprehensive_health_check(node_ips, port)
         unhealthy = self.identify_unhealthy_nodes(health_results)
 
@@ -160,7 +158,7 @@ class NetworkHealthChecker:
 
     def save_health_report(
         self,
-        health_results: Dict[str, Dict[str, object]],
+        health_results: dict[str, dict[str, object]],
         filepath: str,
     ):
         try:
@@ -183,15 +181,15 @@ class ElasticTrainingHealthChecker(NetworkHealthChecker):
 
     def __init__(self, rank: int = 0, world_size: int = 1):
         super().__init__(rank, world_size)
-        self.health_history: List[Dict[str, object]] = []
+        self.health_history: list[dict[str, object]] = []
 
     def monitor_elastic_health(
         self,
-        node_ips: List[str],
+        node_ips: list[str],
         port: int = 29500,
         check_interval: float = 30.0,
         num_checks: int = 10,
-    ) -> List[Dict[str, object]]:
+    ) -> list[dict[str, object]]:
         results = []
         for check_id in range(num_checks):
             check_result = {
@@ -207,9 +205,9 @@ class ElasticTrainingHealthChecker(NetworkHealthChecker):
 
     def detect_unstable_nodes(
         self,
-        health_history: List[Dict[str, object]],
+        health_history: list[dict[str, object]],
         instability_threshold: float = 0.3,
-    ) -> List[str]:
+    ) -> list[str]:
         node_failures = {}
         for check in health_history:
             for ip, metrics in check["health_results"].items():

@@ -206,7 +206,9 @@ class TestStragglerDetectorWithMockedDistributed:
         mock_dist.is_initialized.return_value = True
         mock_dist.get_backend.return_value = "gloo"
         detector = StragglerDetector(
-            config=StragglerConfig(enabled=True, monitor_sections=["forward_backward", "optimizer"]),
+            config=StragglerConfig(
+                enabled=True, monitor_sections=["forward_backward", "optimizer"]
+            ),
             rank=0,
             world_size=4,
             node_name="node0:gpu0",

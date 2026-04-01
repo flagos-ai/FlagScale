@@ -1,7 +1,7 @@
 """Configuration types for FlagScale straggler detection."""
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional
+from typing import Literal
 
 
 @dataclass
@@ -13,8 +13,8 @@ class StragglerConfig:
     gather_on_rank0: bool = True
     profiling_interval: int = 10
     report_interval_steps: int = 100
-    node_name: Optional[str] = None
-    monitor_sections: List[str] = field(
+    node_name: str | None = None
+    monitor_sections: list[str] = field(
         default_factory=lambda: [
             "dataloader",
             "forward",

@@ -28,9 +28,8 @@ class TestSectionContext:
         assert call_args.kwargs["cpu_time"] >= 0.01
 
     def test_exception_handling(self, mock_detector):
-        with pytest.raises(ValueError):
-            with SectionContext(mock_detector, "error_section"):
-                raise ValueError("Test error")
+        with pytest.raises(ValueError), SectionContext(mock_detector, "error_section"):
+            raise ValueError("Test error")
         mock_detector.record_section.assert_called_once()
 
     def test_nested_contexts(self, mock_detector):

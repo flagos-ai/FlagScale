@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import socket
 import time
+from pathlib import Path
 
 import torch
 import torch.distributed as dist

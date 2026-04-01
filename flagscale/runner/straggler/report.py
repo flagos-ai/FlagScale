@@ -1,6 +1,6 @@
 """Serialization and text formatting for straggler reports."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class StragglerReport:
@@ -9,11 +9,11 @@ class StragglerReport:
     def __init__(
         self,
         step: int,
-        section_scores: Optional[Dict[str, Dict[int, float]]] = None,
-        comm_stats: Optional[Dict[str, Any]] = None,
-        gpu_scores: Optional[Dict[int, float]] = None,
-        straggler_ranks: Optional[List[int]] = None,
-        node_names: Optional[Dict[int, str]] = None,
+        section_scores: dict[str, dict[int, float]] | None = None,
+        comm_stats: dict[str, Any] | None = None,
+        gpu_scores: dict[int, float] | None = None,
+        straggler_ranks: list[int] | None = None,
+        node_names: dict[int, str] | None = None,
     ):
         self.step = step
         self.section_scores = section_scores or {}
@@ -23,7 +23,7 @@ class StragglerReport:
         self.node_names = node_names or {}
         self.timestamp = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "step": self.step,
             "section_scores": self.section_scores,
@@ -88,7 +88,7 @@ class StragglerReport:
 
         return "\n".join(lines)
 
-    def identify_stragglers(self, threshold: float = 1.5) -> List[int]:
+    def identify_stragglers(self, threshold: float = 1.5) -> list[int]:
         stragglers = []
         for _, rank_scores in self.section_scores.items():
             if not rank_scores:
@@ -106,7 +106,7 @@ class StragglerReport:
                 stragglers.append(rank)
         return sorted(stragglers)
 
-    def identify_gpu_stragglers(self, threshold: float = 1.5) -> List[int]:
+    def identify_gpu_stragglers(self, threshold: float = 1.5) -> list[int]:
         if not self.gpu_scores:
             return []
 
@@ -120,7 +120,7 @@ class StragglerReport:
                 stragglers.append(rank)
         return sorted(stragglers)
 
-    def get_worst_sections(self, top_k: int = 3) -> List[tuple]:
+    def get_worst_sections(self, top_k: int = 3) -> list[tuple]:
         section_performance = []
         for section_name, rank_scores in self.section_scores.items():
             if len(rank_scores) < 2:

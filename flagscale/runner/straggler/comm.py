@@ -1,8 +1,8 @@
 """Communication monitoring helpers for straggler analysis."""
 
-from collections import defaultdict
 import time
-from typing import Any, Dict, Optional
+from collections import defaultdict
+from typing import Any
 
 
 class CommStatsCollector:
@@ -10,7 +10,7 @@ class CommStatsCollector:
 
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
-        self.operation_stats: Dict[str, Dict[str, Any]] = defaultdict(
+        self.operation_stats: dict[str, dict[str, Any]] = defaultdict(
             lambda: {
                 "count": 0,
                 "total_time": 0.0,
@@ -34,8 +34,8 @@ class CommStatsCollector:
         op_name: str,
         start_time: float,
         end_time: float,
-        data_size: Optional[int] = None,
-        target_ranks: Optional[list] = None,
+        data_size: int | None = None,
+        target_ranks: list | None = None,
     ):
         if not self.enabled:
             return
@@ -55,10 +55,10 @@ class CommStatsCollector:
         if target_ranks is not None:
             stats["target_ranks"] = target_ranks
 
-    def get_operation_stats(self, op_type: str, op_name: str) -> Dict[str, Any]:
+    def get_operation_stats(self, op_type: str, op_name: str) -> dict[str, Any]:
         return self.operation_stats[f"{op_type}_{op_name}"].copy()
 
-    def get_all_stats(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_stats(self) -> dict[str, dict[str, Any]]:
         return dict(self.operation_stats)
 
     def get_straggler_operations(self, threshold: float = 2.0) -> list:
@@ -182,7 +182,7 @@ class CommProfiler:
         op_name: str,
         start_time: float,
         end_time: float,
-        data_size: Optional[int] = None,
+        data_size: int | None = None,
     ):
         self.collector.record_operation(
             op_type,
