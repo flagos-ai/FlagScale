@@ -115,6 +115,7 @@ jobs:
           git config --global --add safe.directory $PROJECT_ROOT
 
       - name: Setup environment for inference
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -163,6 +164,27 @@ jobs:
           echo "✅ Environment ready for inference tests"
 
         timeout-minutes: 5
+
+      - name: Install dependencies for inference ascend
+        if: inputs.platform == 'ascend'
+        run: |
+          set -euo pipefail
+
+          # Install vllm-plugin-FL
+          pip install vllm-plugin-fl==0.1.0+vllm0.13.0 \
+            --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
+            || { echo "❌ vllm-plugin-FL install failed"; exit 1; }
+          echo "✅ vllm-plugin-FL installed successfully"
+
+          # Install FlagScale and dependencies
+          cd $PROJECT_ROOT
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
+          echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+          echo "✅ Environment ready for inference tests"
+        timeout-minutes: 15
 
       - name: Run functional tests
         id: functional_test

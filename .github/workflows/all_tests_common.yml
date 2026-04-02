@@ -111,11 +111,15 @@ jobs:
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
       source_artifact: flagscale-source-${{ github.sha }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
 
   unit_tests:
     needs:
       - checkout_and_config
       - cli_validation
+    if: fromJson(needs.checkout_and_config.outputs.device_types)[0] != null
     strategy:
       fail-fast: false
       matrix:
@@ -266,12 +270,14 @@ jobs:
           # Check all test jobs (skip if not run)
           failed=false
 
-          if [ "${{ needs.unit_tests.result }}" != "success" ]; then
+          if [ "${{ needs.unit_tests.result }}" != "success" ] && \
+             [ "${{ needs.unit_tests.result }}" != "skipped" ]; then
             echo "❌ Unit tests failed"
             failed=true
           fi
 
-          if [ "${{ needs.cli_validation.result }}" != "success" ]; then
+          if [ "${{ needs.cli_validation.result }}" != "success" ] && \
+             [ "${{ needs.cli_validation.result }}" != "skipped" ]; then
             echo "❌ CLI validation failed"
             failed=true
           fi

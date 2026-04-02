@@ -157,7 +157,7 @@ class TrainablePolicy(nn.Module, ABC):
         missing, unexpected = load_model(
             model,
             str(weights_path),
-            device=device,
+            device="cpu" if str(device) == "musa" else device,
             strict=False,
         )
         if missing:

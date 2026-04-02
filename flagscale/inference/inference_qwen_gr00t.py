@@ -8,6 +8,7 @@ from PIL import Image
 from flagscale.logger import logger
 from flagscale.models.utils.constants import OBS_STATE
 from flagscale.models.vla import TrainablePolicy
+from flagscale.platforms import get_platform  # noqa: F401 must be before model imports
 from flagscale.train.processor import PolicyProcessorPipeline
 
 

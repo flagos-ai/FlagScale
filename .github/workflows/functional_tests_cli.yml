@@ -23,6 +23,21 @@ on:
         required: true
         type: string
         description: Name of the artifact containing source code
+      pkg_mgr:
+        required: false
+        type: string
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
+        default: ""
+      env_path:
+        required: false
+        type: string
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
 
 jobs:
   functional_test_cli:
@@ -93,11 +108,40 @@ jobs:
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          echo "Installing FlagScale CLI (outside virtual environment)"
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Installing FlagScale CLI"
+          echo "Installing dependencies for training"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
           echo "Python location: $(which python)"
           echo "Python version: $(python --version)"
 
-          # Install FlagScale CLI using system pip
+          # Install FlagScale CLI
           pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
 
           # Verify installation
@@ -111,7 +155,32 @@ jobs:
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          echo "Validating CLI (outside virtual environment)"
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Validating CLI"
           echo "Python location: $(which python)"
           echo "Python version: $(python --version)"
 

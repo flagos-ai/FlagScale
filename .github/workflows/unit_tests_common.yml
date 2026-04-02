@@ -108,6 +108,7 @@ jobs:
           git config --global --add safe.directory $PROJECT_ROOT
 
       - name: Install dependencies for unit tests
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -178,6 +179,7 @@ jobs:
 
       - name: Run unit tests
         id: unit_test
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -243,7 +245,7 @@ jobs:
         timeout-minutes: 15
 
       - name: Upload coverage report
-        if: always()
+        if: steps.unit_test.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ inputs.platform }}-${{ inputs.device }}
@@ -251,7 +253,7 @@ jobs:
           retention-days: 7
 
       - name: Upload coverage report to FlagCICD
-        if: always()
+        if: steps.unit_test.outcome == 'success'
         continue-on-error: true
         uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
         env:

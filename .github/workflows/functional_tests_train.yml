@@ -112,6 +112,7 @@ jobs:
           git config --global --add safe.directory $PROJECT_ROOT
 
       - name: Install dependencies for training
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -174,6 +175,71 @@ jobs:
             --retry-count 3
 
           echo "Environment ready for train tests"
+        timeout-minutes: 30
+
+      - name: Install dependencies for serve metax
+        if: inputs.platform == 'metax'
+        run: |
+          set -euo pipefail
+
+          # Clone FlagOS's Megatron-LM fork required by the serve task on MetaX platform
+          git clone https://github.com/flagos-ai/Megatron-LM-FL.git /workspace/Megatron-LM-FL
+
+          cd $PROJECT_ROOT
+
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          echo "Installing dependencies for training"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "⚠️  Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "⚠️  UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "ℹ️  Running tests with pip/system Python"
+              ;;
+          esac
+
+          # Display Python environment info
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install Megatron-LM-FL
+          pip install megatron_core==0.1.0+megatron0.15.0rc7 \
+            --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
+            || { echo "❌ Megatron-LM-FL install failed"; exit 1; }
+          echo "✅ Megatron-LM-FL installed successfully"
+
+          # Install TransformerEngine-FL and dependencies
+          git clone --depth 1 https://github.com/flagos-ai/TransformerEngine-FL.git /workspace/TransformerEngine-FL \
+            || { echo "❌ TransformerEngine-FL clone failed"; exit 1; }
+          TE_FL_SKIP_CUDA=1 pip install /workspace/TransformerEngine-FL --no-build-isolation \
+            || { echo "❌ TransformerEngine-FL install failed"; exit 1; }
+          echo "✅ TransformerEngine-FL installed successfully"
+
+          # Install FlagScale
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
+          echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+          echo "✅ Environment ready for train tests"
         timeout-minutes: 30
 
       - name: Run functional tests

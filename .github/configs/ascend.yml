@@ -1,0 +1,74 @@
+# Ascend NPU Hardware Configuration
+# This file defines CI/CD settings for Huawei Ascend NPU-based testing
+# Test configurations are defined in tests/test_utils/config/platforms/ascend.yaml
+
+hardware_name: ascend
+display_name: "Ascend NPU Tests"
+
+# Docker image for this hardware
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-ascend-ci
+ci_train_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-ascend-ci
+ci_inference_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-ascend-ci
+
+# Runner labels for this hardware
+runner_labels:
+  - self-hosted
+  - Linux
+  - ARM64
+  - ascend-72
+  - npus-8
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /home/flagscale_cicd/flask/static:/workspace/report
+  - /home/flagscale_cicd/flask/config:/workspace/config
+  - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+  - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
+  - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
+  - /usr/local/Ascend/add-ons:/usr/local/Ascend/add-ons:ro
+  - /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi:ro
+
+# Container options for Ascend NPU (no --gpus, use --device for NPU cards)
+container_options: >-
+  --device /dev/davinci0
+  --device /dev/davinci1
+  --device /dev/davinci2
+  --device /dev/davinci3
+  --device /dev/davinci4
+  --device /dev/davinci5
+  --device /dev/davinci6
+  --device /dev/davinci7
+  --device /dev/davinci8
+  --device /dev/davinci9
+  --device /dev/davinci10
+  --device /dev/davinci11
+  --device /dev/davinci12
+  --device /dev/davinci13
+  --device /dev/davinci14
+  --device /dev/davinci15
+  --device /dev/davinci_manager
+  --device /dev/devmm_svm
+  --device /dev/hisi_hdc
+  --privileged
+  --ipc=host
+  --shm-size=500g
+  --hostname flagscale_cicd
+  --user root
+  --ulimit nofile=65535:65535
+
+# =============================================================================
+# Package Manager Configuration
+# =============================================================================
+# Ascend CI image has all dependencies pre-installed; use pip directly.
+pkg_mgr: "pip"
+
+# Environment path (not used for pip, kept for compatibility)
+env_path: ""
+
+# Conda environment name (not used for pip)
+env_names:
+  train: ""
+  hetero_train: ""
+  inference: ""
+  serve: ""
+  rl: ""

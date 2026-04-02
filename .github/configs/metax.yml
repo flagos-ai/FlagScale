@@ -1,0 +1,42 @@
+# MetaX C500 Hardware Configuration
+# This file defines CI/CD settings for MetaX C500 GPU (MACA) testing
+# Test configurations are defined in tests/test_utils/config/platforms/metax.yaml
+
+hardware_name: metax
+display_name: "MetaX C500 Tests"
+
+# Docker images for MetaX C500 (MACA-based)
+ci_image: localhost:5000/megatron-lm-with-te:202603231839
+ci_train_image: localhost:5000/megatron-lm-with-te:202603231839
+ci_inference_image: localhost:5000/megatron-lm-with-te:202603231839
+
+# Runner labels for MetaX C500 hardware
+runner_labels:
+  - self-hosted
+  - Linux
+  - X64
+  - metax-c500
+  - gpus-2
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
+  - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
+
+# Container options for MetaX C500 (MACA runtime)
+container_options: "--hostname=flagscale-ci --ipc=host --privileged --group-add video --shm-size=100g --ulimit memlock=-1 --security-opt seccomp=unconfined --security-opt apparmor=unconfined --device=/dev/dri --device=/dev/mxcd --device=/dev/infiniband --user root --ulimit nofile=65535:65535"
+
+# =============================================================================
+# Package Manager Configuration
+# =============================================================================
+pkg_mgr: "conda"
+
+# Environment path (conda installation path)
+env_path: "/opt/conda"
+
+# Conda environment names
+env_names:
+  train: "base"
+  hetero_train: ""
+  inference: ""
+  rl: ""

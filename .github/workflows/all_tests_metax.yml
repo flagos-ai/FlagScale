@@ -1,0 +1,32 @@
+name: metax_c500_tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
+  cancel-in-progress: true
+
+jobs:
+  run_tests:
+    # Hardware and environment settings are read from .github/configs/metax.yml
+    # Test selection is configured in tests/test_utils/config/platforms/metax.yaml
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: metax
+
+  all_tests:
+    needs: run_tests
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify workflow status
+        run: |
+          if [ "${{ needs.run_tests.result }}" != "success" ]; then
+            echo "❌ Tests workflow failed"
+            exit 1
+          fi
+          echo "✅ All MetaX C500 tests passed!"

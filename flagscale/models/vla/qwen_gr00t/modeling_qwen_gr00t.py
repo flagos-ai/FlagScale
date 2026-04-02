@@ -30,6 +30,7 @@ from flagscale.models.utils.constants import (
 from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.models.vla.registry import build_action_model, build_vlm
 from flagscale.models.vla.utils import get_vlm_config
+from flagscale.platforms.platform_manager import get_platform
 
 
 class QwenGr00t(TrainablePolicy):
@@ -90,7 +91,7 @@ class QwenGr00t(TrainablePolicy):
         qwen_inputs = self.vlm.build_qwenvl_inputs(images, instructions)
 
         # TODO: (yupu) Hard-coded autocast and dtype, matches starVLA
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16):
             vlm_output = self.vlm.forward(qwen_inputs, output_attentions=False)
             # last_hidden_state: [B, seq_len, H]
             last_hidden = vlm_output["hidden_states"][-1]  # [B, L, H]
@@ -121,7 +122,7 @@ class QwenGr00t(TrainablePolicy):
             padded_actions.append(final_a)
             action_masks.append(mask)
 
-        with torch.autocast("cuda", dtype=torch.float32):
+        with torch.autocast(get_platform().amp_device_type(), dtype=torch.float32):
             # TODO: (yupu) Is this a bug or a feature? The action dtype would stay as bf16 under this autocast.
             actions = torch.stack(padded_actions).to(
                 device=last_hidden.device, dtype=last_hidden.dtype
@@ -155,7 +156,7 @@ class QwenGr00t(TrainablePolicy):
         result = {"loss": output["loss"]}
 
         if vlm_batch is not None:
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16):
                 vlm_loss = self.vlm.model(**vlm_batch, return_dict=True).loss
             result["vlm_loss"] = vlm_loss
 
@@ -187,7 +188,7 @@ class QwenGr00t(TrainablePolicy):
 
         qwen_inputs = self.vlm.build_qwenvl_inputs(images, instructions)
 
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16):
             vlm_output = self.vlm.forward(qwen_inputs, output_attentions=False)
             # last_hidden_state: [B, seq_len, H]
             last_hidden = vlm_output["hidden_states"][-1]  # [B, L, H]
@@ -196,7 +197,7 @@ class QwenGr00t(TrainablePolicy):
             state = state.to(device=last_hidden.device, dtype=last_hidden.dtype)
 
         # Step 4: Action Expert Forward
-        with torch.autocast("cuda", dtype=torch.float32):
+        with torch.autocast(get_platform().amp_device_type(), dtype=torch.float32):
             vlm_output_for_action = {"hidden_states": last_hidden}
             action_input = {"state": state}
             output = self.action_model.predict_action(vlm_output_for_action, action_input)

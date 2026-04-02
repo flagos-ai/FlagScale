@@ -34,7 +34,7 @@ def get_platform_config(platform, device=None):
     """
     if not platform:
         raise ValueError(
-            "Platform must be specified. Available platforms: cuda. See template.yaml for creating new platforms."
+            "Platform must be specified. Available platforms: cuda, ascend. See template.yaml for creating new platforms."
         )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +45,10 @@ def get_platform_config(platform, device=None):
         "a100": "cuda.yaml",
         "a800": "cuda.yaml",
         "h100": "cuda.yaml",
+        "ascend": "ascend.yaml",
+        "ascend910": "ascend.yaml",
+        "metax": "metax.yaml",
+        "c500": "metax.yaml",
     }
 
     # If platform is a device type (a100, a800, h100) and no device specified
@@ -109,10 +113,14 @@ def get_device_types(platform):
         ValueError: If platform is not specified
     """
     if not platform:
-        raise ValueError("Platform must be specified. Available platforms: cuda")
+        raise ValueError("Platform must be specified. Available platforms: cuda, ascend")
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    platform_file_map = {"cuda": "cuda.yaml"}
+    platform_file_map = {
+        "cuda": "cuda.yaml",
+        "ascend": "ascend.yaml",
+        "metax": "metax.yaml",
+    }
 
     yaml_file = platform_file_map.get(platform, f"{platform}.yaml")
     config_file = os.path.join(script_dir, "../config/platforms", yaml_file)
@@ -224,7 +232,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Parse test configuration with platform and device support"
     )
-    parser.add_argument("--platform", required=True, help="Platform type (cuda, etc.) - REQUIRED")
+    parser.add_argument(
+        "--platform", required=True, help="Platform type (cuda, ascend, metax, etc.) - REQUIRED"
+    )
     parser.add_argument("--device", help="Device type within platform (a100, a800, h100, etc.)")
     parser.add_argument("--type", choices=["unit", "functional", "device_types"], help="Query type")
     parser.add_argument("--task", help="Functional task name (train, hetero_train)")
