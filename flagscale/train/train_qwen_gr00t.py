@@ -71,8 +71,8 @@ def apply_fsdp2(policy, device_mesh):
     Uses a MixedPrecisionPolicy that matches DeepSpeed bf16 behavior:
       bf16.enabled=true + ZeRO-2 → param_dtype=bf16, reduce_dtype=bf16, reshard=False
     """
-    # Cast everything to fp32 first so the root param group has uniform dtype.
-    policy = policy.float()
+    # Cast everything to bf16 first so the root param group has uniform dtype.
+    policy = policy.bfloat16()
 
     # `reduce_dtype=torch.float32` would make evaluation on libero_goal drop to 94.8% (from 97.0%)
     mp_policy = MixedPrecisionPolicy(
@@ -592,7 +592,7 @@ def main(config: TrainConfig, seed: int):
     effective_batch_size = config.system.batch_size * world_size
 
     train_tracker = MetricsTracker(
-        effective_batch_size,
+        config.system.batch_size,
         num_frames,
         num_episodes,
         train_metrics,

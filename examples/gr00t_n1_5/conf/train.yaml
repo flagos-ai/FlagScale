@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - train: gr00t_n1_5
+  - train: libero_spatial_demo
 
 experiment:
   exp_name: gr00t_n1_5_train

@@ -161,9 +161,9 @@ class TrainablePolicy(nn.Module, ABC):
             strict=False,
         )
         if missing:
-            logger.warning(f"Missing keys when loading checkpoint: {len(missing)} keys")
+            logger.warning(f"Missing keys when loading checkpoint: {len(missing)} keys: {missing}")
         if unexpected:
-            logger.warning(f"Unexpected keys in checkpoint: {len(unexpected)} keys")
+            logger.warning(f"Unexpected keys in checkpoint: {len(unexpected)} keys: {unexpected}")
 
         model.to(device)
         model.eval()

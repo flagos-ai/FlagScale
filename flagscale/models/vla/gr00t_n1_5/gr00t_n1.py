@@ -164,6 +164,7 @@ class EagleBackbone(nn.Module):
             self.eagle_model.language_model.model.layers.pop(-1)
 
         self.select_layer = select_layer
+        self._is_fsdp2: bool | None = None
         self.set_trainable_parameters(tune_llm, tune_visual)
 
     def set_trainable_parameters(self, tune_llm: bool, tune_visual: bool):
@@ -223,14 +224,23 @@ class EagleBackbone(nn.Module):
 
         # YL (TODO HACK): to resolve DDP issue when tune_visual=True
         # Ensure all trainable parameters in vision_model are used in the forward pass for DDP compatibility
+        # Skip under FSDP2 — it doesn't require all params to participate in forward,
+        # and the DTensor params cause mixed Tensor/DTensor errors in both forward and backward.
         if self.training and self.tune_visual:
-            dummy_term = torch.tensor(
-                0.0, device=eagle_embeds.device, dtype=eagle_embeds.dtype, requires_grad=True
-            )
-            for param in self.eagle_model.vision_model.parameters():
-                if param.requires_grad:
-                    dummy_term = dummy_term + 0.0 * param.sum()
-            eagle_embeds = eagle_embeds + dummy_term
+            if self._is_fsdp2 is None:
+                from torch.distributed.tensor import DTensor
+
+                self._is_fsdp2 = any(
+                    isinstance(p, DTensor) for p in self.eagle_model.vision_model.parameters()
+                )
+            if not self._is_fsdp2:
+                dummy_term = torch.tensor(
+                    0.0, device=eagle_embeds.device, dtype=eagle_embeds.dtype, requires_grad=True
+                )
+                for param in self.eagle_model.vision_model.parameters():
+                    if param.requires_grad:
+                        dummy_term = dummy_term + 0.0 * param.sum()
+                eagle_embeds = eagle_embeds + dummy_term
 
         return BatchFeature(
             data={"backbone_features": eagle_embeds, "backbone_attention_mask": eagle_mask}
