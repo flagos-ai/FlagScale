@@ -318,7 +318,7 @@ FlagScale supports online evaluation via FlagEval. You will need a `FLAGEVAL_SEC
 
 ```sh
 cd FlagScale/
-FLAGEVAL_SECRET=<your_secret> python flagscale/eval/eval_online.py \
+FLAGEVAL_SECRET=<your_secret> flagscale eval robo \
     --model-name qwen_gr00t \
     --datasets libero_10 \
     --server-host <your_model_server_host> \
