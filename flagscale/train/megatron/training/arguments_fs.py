@@ -765,7 +765,9 @@ def _add_regularization_args(parser):
 
 
 def _add_flagos_args(parser):
-    group = parser.add_argument_group(title="flagscale transformer engine fl")
+    group = parser.add_argument_group(title="flagscale fl")
+    group.add_argument('--mg-fl-prefer', type=str, choices=['cuda', 'musa', 'txda'], default='',
+                       help='Backend selection for megatron fl.')
     group.add_argument('--te-fl-prefer', type=str, choices=['flagos', 'vendor', 'reference'], default='vendor',
                        help='Backend selection for transformer engine fl.')
     group.add_argument('--te-fl-per-op', type=str, default=None,
