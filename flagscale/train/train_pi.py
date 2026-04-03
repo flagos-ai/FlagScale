@@ -47,6 +47,7 @@ from flagscale.models.utils.constants import (
 from flagscale.models.configs.types import PolicyFeature
 from flagscale.models.utils.constants import ACTION, OBS_PREFIX, REWARD
 from flagscale.models.configs.types import FeatureType
+from flagscale.models.utils.hub_utils import resolve_model_path
 from flagscale.models.pi0.configuration_pi0 import PI0Config
 from flagscale.models.pi0.modeling_pi0 import PI0Policy
 from flagscale.models.pi05.configuration_pi05 import PI05Config
@@ -74,7 +75,7 @@ def set_seed(seed: int):
     if get_platform().name() == "cuda":
         torch.backends.cudnn.enabled = True
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = False 
+        torch.backends.cudnn.deterministic = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
 
@@ -486,11 +487,21 @@ def main(config: TrainConfig, seed: int):
             f"Invalid model_name: {model_name}. Must be 'pi0' or 'pi0.5'"
         )
 
+    # Resolve repo IDs to local paths up front.
+    # Note: config.model uses __getattr__ that reads from `raw` (OmegaConf) first,
+    # so attribute assignment doesn't stick. Use local variables instead.
+    tokenizer_path = resolve_model_path(
+        config.model.tokenizer_path,
+        ignore_patterns=["*.safetensors", "*.bin", "*.pt", "*.gguf"],
+    )
+
+    checkpoint_dir = resolve_model_path(config.model.checkpoint_dir)
+
     # Load base config from checkpoint
     if model_name == "pi0.5":
-        policy_config = PI05Config.from_pretrained(config.model.checkpoint_dir)
+        policy_config = PI05Config.from_pretrained(checkpoint_dir)
     else:
-        policy_config = PI0Config.from_pretrained(config.model.checkpoint_dir)
+        policy_config = PI0Config.from_pretrained(checkpoint_dir)
 
     # Override with any model-specific fields from YAML
     model_config_overrides = config.model.get_model_config_dict()
@@ -501,7 +512,7 @@ def main(config: TrainConfig, seed: int):
             logger.warning(f"Model config field '{key}' not found in {model_name} config, ignoring")
 
     # Set training-specific fields
-    policy_config.pretrained_path = config.model.checkpoint_dir
+    policy_config.pretrained_path = checkpoint_dir
     policy_config.use_amp = config.system.use_amp
 
     local_rank = init_distributed()
@@ -554,7 +565,7 @@ def main(config: TrainConfig, seed: int):
             },
             "norm_map": policy.config.normalization_mapping,
         },
-        "tokenizer_processor": {"tokenizer_name": config.model.tokenizer_path},
+        "tokenizer_processor": {"tokenizer_name": tokenizer_path},
     }
 
     if rename_map is not None:

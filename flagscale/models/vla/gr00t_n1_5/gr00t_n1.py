@@ -20,8 +20,7 @@ from shutil import copytree
 
 import torch
 import torch.nn.functional as F
-from huggingface_hub import hf_hub_download, snapshot_download
-from huggingface_hub.errors import HFValidationError, RepositoryNotFoundError
+from huggingface_hub import hf_hub_download
 from torch import nn
 from torch.distributions import Beta
 from transformers import PretrainedConfig, PreTrainedModel
@@ -696,17 +695,7 @@ class GR00TN15(PreTrainedModel):
         print(f"Tune action head projector: {tune_projector}")
         print(f"Tune action head DiT: {tune_diffusion_model}")
 
-        # get the current model path being downloaded
-        try:
-            # NOTE(YL) This downloads the model to the local cache and returns the local path to the model
-            # saved in ~/.cache/huggingface/hub/
-            local_model_path = snapshot_download(pretrained_model_name_or_path, repo_type="model")
-            # HFValidationError, RepositoryNotFoundError
-        except (HFValidationError, RepositoryNotFoundError):
-            print(
-                f"Model not found or avail in the huggingface hub. Loading from local path: {pretrained_model_name_or_path}"
-            )
-            local_model_path = pretrained_model_name_or_path
+        local_model_path = pretrained_model_name_or_path
 
         pretrained_model = super().from_pretrained(
             local_model_path, local_model_path=local_model_path, **kwargs

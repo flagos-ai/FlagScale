@@ -30,7 +30,7 @@ pip install ".[cuda]" --verbose
 pip install git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
 ```
 
-Install additional dependencies for downloading models/datasets:
+Install additional dependencies for downloading datasets:
 
 ```sh
 # For HuggingFace Hub
@@ -39,45 +39,6 @@ pip install huggingface_hub
 # For ModelScope (optional)
 pip install modelscope
 ```
-
-## Download Models and Tokenizers
-
-Download models and tokenizers using the provided script. Choose either HuggingFace Hub or ModelScope based on your preference:
-
-**Using HuggingFace Hub:**
-
-```sh
-cd FlagScale/
-python examples/pi0/download.py \
-    --repo_id lerobot/pi0_base \
-    --output_dir /workspace/models \
-    --source huggingface
-
-python examples/pi0/download.py \
-    --repo_id google/paligemma-3b-pt-224 \
-    --output_dir /workspace/models \
-    --source huggingface
-```
-
-**Using ModelScope:**
-
-```sh
-cd FlagScale/
-python examples/pi0/download.py \
-    --repo_id lerobot/pi0_base \
-    --output_dir /workspace/models \
-    --source modelscope
-
-python examples/pi0/download.py \
-    --repo_id google/paligemma-3b-pt-224 \
-    --output_dir /workspace/models \
-    --source modelscope
-```
-
-The models will be downloaded to (example with `/workspace/models`):
-- `/workspace/models/lerobot/pi0_base`
-- `/workspace/models/google/paligemma-3b-pt-224`
-
 
 ## Training
 

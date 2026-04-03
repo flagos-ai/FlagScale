@@ -26,6 +26,7 @@ experiment:
     CUDA_DEVICE_MAX_CONNECTIONS: 1
     WANDB_MODE: offline
     OTEL_SDK_DISABLED: true
+    FLAGSCALE_USE_MODELSCOPE: true
 
 action: run
 

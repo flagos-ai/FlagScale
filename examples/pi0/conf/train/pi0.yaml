@@ -18,9 +18,9 @@ system:
 model:
   model_name: pi0
   # Path to the pretrained pi0_base model checkpoint
-  checkpoint_dir: /workspace/models/lerobot/pi0_base
+  checkpoint_dir: lerobot/pi0_base
   # Path to paligemma tokenizer
-  tokenizer_path: /workspace/models/google/paligemma-3b-pt-224
+  tokenizer_path: google/paligemma-3b-pt-224
   tokenizer_max_length: 48
 
   optimizer:

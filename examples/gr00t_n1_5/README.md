@@ -28,7 +28,7 @@ cd FlagScale/
 pip install ".[cuda-train]" --verbose
 ```
 
-Install additional dependencies for downloading models/datasets:
+Install additional dependencies for downloading datasets:
 
 ```sh
 # For HuggingFace Hub
@@ -37,33 +37,6 @@ pip install huggingface_hub
 # For ModelScope (optional)
 pip install modelscope
 ```
-
-## Download Models
-
-Download the pretrained GR00T N1.5 model using the provided script. Choose either HuggingFace Hub or ModelScope:
-
-**Using HuggingFace Hub:**
-
-```sh
-cd FlagScale/
-python examples/pi0/download.py \
-    --repo_id nvidia/GR00T-N1.5-3B \
-    --output_dir /workspace/models \
-    --source huggingface
-```
-
-**Using ModelScope:**
-
-```sh
-cd FlagScale/
-python examples/pi0/download.py \
-    --repo_id nvidia/GR00T-N1.5-3B \
-    --output_dir /workspace/models \
-    --source modelscope
-```
-
-The model will be downloaded to (example with `/workspace/models`):
-- `/workspace/models/nvidia/GR00T-N1.5-3B`
 
 ## Training
 

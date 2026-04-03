@@ -17,7 +17,7 @@ system:
 model:
   model_name: gr00t_n1_5
   # Path or HuggingFace model ID for the pretrained GR00T N1.5 model
-  checkpoint_dir: /workspace/models/nvidia/GR00T-N1.5-3B
+  checkpoint_dir: nvidia/GR00T-N1.5-3B
 
   # Fine-tuning control
   tune_llm: true

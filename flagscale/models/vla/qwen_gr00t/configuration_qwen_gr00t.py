@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from flagscale.models.configs.types import NormalizationMode
 from flagscale.models.utils.constants import ACTION
+from flagscale.models.utils.hub_utils import resolve_model_path
 from flagscale.models.vla.action_model.gr00t_action_header import GR00TActionHeadConfig
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 from flagscale.models.vla.vlm.qwenvl_backbone import QwenVLConfig
@@ -45,6 +46,10 @@ class QwenGr00tConfig(PreTrainedConfig):
         action_ft = self.action_feature
         if action_ft is None:
             raise ValueError(f"output_features must contain '{ACTION}' with type ACTION")
+
+    def resolve_pretrained_paths(self) -> None:
+        if self.vlm.base_vlm:
+            self.vlm.base_vlm = resolve_model_path(self.vlm.base_vlm)
 
     @classmethod
     def from_train_config(cls, train_config: TrainConfig) -> QwenGr00tConfig:

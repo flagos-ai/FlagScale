@@ -23,7 +23,7 @@ model:
   model_name: qwen_gr00t
   vlm:
     type: qwen3-vl
-    base_vlm: /workspace/models/Qwen/Qwen3-VL-4B-Instruct/
+    base_vlm: Qwen/Qwen3-VL-4B-Instruct
     attn_implementation: flash_attention_2
   action_model:
     # Whether to condition the action model on proprioceptive state (observation.state)
