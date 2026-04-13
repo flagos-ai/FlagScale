@@ -88,11 +88,7 @@ class EngramTransformerLayer(TransformerLayer):
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
-        sharded_dict =  super().sharded_state_dict(prefix, sharded_offsets, metadata)
-        engram_prefix = f"{prefix}engram."
-        engram_sharded = self.engram.sharded_state_dict(engram_prefix, sharded_offsets, metadata)
-        sharded_dict.update(engram_sharded)
-        return sharded_dict
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)
 
 
 class EngramTransformerBlock(TransformerBlock):
@@ -348,3 +344,14 @@ class EngramTransformerBlock(TransformerBlock):
             hidden_states = hidden_states.clone()
 
         return hidden_states
+    
+    def sharded_state_dict(
+        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
+    ):
+        # Engram let the layers be non-homogeneous, so we need to set the flag in metadata to let the sharded state dict logic know.
+        # This is usefule when all layer are same, the TransformerBlock will be homogeneous, it generate sharded_state_dict will same keys for all layer and need all layers have the same structure.
+        # The layer has engram module does not fit this assumption.
+        # If the flag is set to True, the sharded_state_dict will use layer_number to generate different keys for different layer, which is same to models has dense layer leading and moe layer following.
+        # Actually, engram really causes the layers to be non-homogeneous.
+        metadata["non_homogeneous_layers"] = True
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)

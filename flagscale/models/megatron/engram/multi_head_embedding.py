@@ -235,6 +235,7 @@ class EngramMemory(nn.Module):
             *sharded_offsets,
             *new_offsets,
             replica_id=replica_id,
+            prepend_axis_num=prepend_axis_num,
             allow_shape_mismatch=True,
             **kwargs
         )
