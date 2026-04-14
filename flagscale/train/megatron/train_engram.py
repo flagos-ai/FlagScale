@@ -15,10 +15,10 @@ from megatron.core.models.gpt import GPTModel
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import get_attr_wrapped_model, StragglerDetector
 from megatron.core.tokenizers.text.utils.build_tokenizer import build_tokenizer
+from megatron.core import mpu
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
-    get_batch_on_this_tp_rank,
     get_blend_and_blend_per_split,
     is_first_or_last_pipeline_stage,
 )
@@ -43,6 +43,143 @@ from flagscale.models.megatron.engram.engram_builder import engram_builder
 stimer = StragglerDetector()
 
 
+def get_batch_on_this_tp_rank(data_iterator):
+
+    args = get_args()
+
+    def _broadcast(item):
+        if item is not None:
+            torch.distributed.broadcast(
+                item,
+                mpu.get_tensor_model_parallel_src_rank(),
+                group=mpu.get_tensor_model_parallel_group(),
+            )
+
+    if mpu.get_tensor_model_parallel_rank() == 0:
+
+        assert data_iterator is not None
+        data = next(data_iterator)
+        batch = {
+            'tokens': data["tokens"].cuda(non_blocking=True),
+            'labels': data["labels"].cuda(non_blocking=True),
+            'loss_mask': data["loss_mask"].cuda(non_blocking=True),
+            'attention_mask': (
+                None
+                if "attention_mask" not in data
+                else data["attention_mask"].cuda(non_blocking=True)
+            ),
+            'position_ids': data["position_ids"].cuda(non_blocking=True),
+        }
+
+        if args.pipeline_model_parallel_size == 1:
+            _broadcast(batch['tokens'])
+            _broadcast(batch['labels'])
+            _broadcast(batch['loss_mask'])
+            _broadcast(batch['attention_mask'])
+            _broadcast(batch['position_ids'])
+
+        elif mpu.is_pipeline_first_stage():
+           _broadcast(batch['tokens'])
+           _broadcast(batch['attention_mask'])
+           _broadcast(batch['position_ids'])
+            ######### FlagScale Begin ########
+           if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
+                _broadcast(batch['loss_mask'])
+                _broadcast(batch['labels'])
+            ######### FlagScale End ########
+
+        elif mpu.is_pipeline_last_stage():
+            # Multi-Token Prediction (MTP) layers need tokens and position_ids to calculate embedding.
+            # Currently the Multi-Token Prediction (MTP) layers is fixed on the last stage, so we need
+            # to broadcast tokens and position_ids to all of the tensor parallel ranks on the last stage.
+            _broadcast(batch['tokens'])
+            if args.mtp_num_layers is not None:
+                _broadcast(batch['position_ids'])
+            _broadcast(batch['labels'])
+            _broadcast(batch['loss_mask'])
+            _broadcast(batch['attention_mask'])
+
+        else:
+            _broadcast(batch['tokens'])
+
+    else:
+
+        tokens = torch.empty(
+            (args.micro_batch_size, args.seq_length),
+            dtype=torch.int64,
+            device=torch.cuda.current_device(),
+        )
+        labels = torch.empty(
+            (args.micro_batch_size, args.seq_length),
+            dtype=torch.int64,
+            device=torch.cuda.current_device(),
+        )
+        loss_mask = torch.empty(
+            (args.micro_batch_size, args.seq_length),
+            dtype=torch.float32,
+            device=torch.cuda.current_device(),
+        )
+        if args.create_attention_mask_in_dataloader:
+            attention_mask = torch.empty(
+                (args.micro_batch_size, 1, args.seq_length, args.seq_length),
+                dtype=torch.bool,
+                device=torch.cuda.current_device(),
+            )
+        else:
+            attention_mask = None
+        position_ids = torch.empty(
+            (args.micro_batch_size, args.seq_length),
+            dtype=torch.int64,
+            device=torch.cuda.current_device(),
+        )
+
+        if args.pipeline_model_parallel_size == 1:
+            _broadcast(tokens)
+            _broadcast(labels)
+            _broadcast(loss_mask)
+            _broadcast(attention_mask)
+            _broadcast(position_ids)
+
+        elif mpu.is_pipeline_first_stage():
+            _broadcast(tokens)
+            _broadcast(attention_mask)
+            _broadcast(position_ids)
+            ######### FlagScale Modify ########
+            if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
+                _broadcast(loss_mask)
+                _broadcast(labels)
+            else:
+                labels = None
+                loss_mask = None
+
+        elif mpu.is_pipeline_last_stage():
+            # Multi-Token Prediction (MTP) layers need tokens and position_ids to calculate embedding.
+            # Currently the Multi-Token Prediction (MTP) layers is fixed on the last stage, so we need
+            # to broadcast tokens and position_ids to all of the tensor parallel ranks on the last stage.
+            _broadcast(tokens)
+            if args.mtp_num_layers is not None:
+                _broadcast(position_ids)
+            else:
+                position_ids = None
+
+            _broadcast(labels)
+            _broadcast(loss_mask)
+            _broadcast(attention_mask)
+
+        else:
+            _broadcast(tokens)
+
+        batch = {
+            'tokens': tokens,
+            'labels': labels,
+            'loss_mask': loss_mask,
+            'attention_mask': attention_mask,
+            'position_ids': position_ids,
+        }
+
+    return batch
+
+
 def get_batch(data_iterator, vp_stage=None):
     """Generate a batch."""
     # # TODO: this is pretty hacky, find a better way
@@ -51,31 +188,8 @@ def get_batch(data_iterator, vp_stage=None):
 
     # get batches based on the TP rank you are on
     batch = get_batch_on_this_tp_rank(data_iterator)
-    ## NOTE: This should be handled in the get_batch_on_this_tp_rank.
-    # In order to minimize the impact of the engram on the framework's internal structure, it has been extracted
-    # from the function. Better solutions will be found in the future.
-    # Broadcast tokens within TP group for each pipeline_stage except the first stage.
-    # Already broadcast tokens in above function:
-    # 1. pp_size = 1
-    # 2. is_pp_first_stage
-    # 3. is_pp_last_stage and enbale_mtp
-    args = get_args()
-    already_broadcast_tokens = (parallel_state.get_pipeline_model_parallel_world_size() == 1) or parallel_state.is_pipeline_first_stage() or (parallel_state.is_pipeline_last_stage() and args.mtp_num_layers is not None)
-    if not already_broadcast_tokens:
-        if parallel_state.get_tensor_model_parallel_rank() == 0:
-            torch.distributed.broadcast(batch["tokens"], src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
-        else:
-            # Allocate a placeholder tensor to receive the broadcasted tokens.
-            tokens = torch.empty(
-                (args.micro_batch_size, args.seq_length),
-                dtype=torch.long,
-                device=torch.cuda.current_device(),
-            )
-            torch.distributed.broadcast(tokens, src=parallel_state.get_tensor_model_parallel_src_rank(), group=parallel_state.get_tensor_model_parallel_group())
-            batch["tokens"] = tokens
+
     # slice batch along sequence dimension for context parallelism
-    # I am not sure why broadcast here needs a synchronize but does not need in the get_batch_on_this_tp_rank. Anyway, make it happy.
-    torch.cuda.synchronize()
     batch = get_batch_on_this_cp_rank(batch)
 
     return batch.values()

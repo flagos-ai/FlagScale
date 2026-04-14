@@ -385,7 +385,6 @@ class FSTrainArguments:
                     self.args.engram_embedding_parallel_size = None   
             elif self.args.engram_embedding_parallel_method == "alltoall":
                 assert self.args.engram_embedding_parallel_size is not None, "embedding parallel size should be specified when using alltoall"
-                assert self.args.engram_embedding_parallel_size >= self.args.tensor_model_parallel_size, f"Engram parallel size {self.args.engram_embedding_parallel_size} should be greater than or equal to tensor_model_parallel_size {self.args.tensor_model_parallel_size}, otherwise the random seed may be different in engram_dp_ranks. It will be fixed in a later version."
             else:
                 raise ValueError(f"Invalid embedding parallel method: {self.args.engram_embedding_parallel_method}")
             if self.args.engram_offload_embedding_optimizer_states:

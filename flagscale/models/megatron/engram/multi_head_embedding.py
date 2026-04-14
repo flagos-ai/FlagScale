@@ -12,7 +12,7 @@ from torch.nn.parameter import Parameter
 from megatron.core import tensor_parallel
 from megatron.core.utils import get_pg_size, get_pg_rank, get_tensor_model_parallel_group_if_none
 from megatron.core.tensor_parallel.utils import VocabUtility
-from megatron.core.tensor_parallel.layers import _initialize_affine_weight_cpu, _initialize_affine_weight_gpu
+from megatron.core.tensor_parallel.layers import _initialize_affine_weight_cpu
 from megatron.core import parallel_state
 from megatron.core.model_parallel_config import ModelParallelConfig
 from megatron.core.dist_checkpointing.mapping import ShardedTensor
@@ -31,6 +31,15 @@ def _vocab_size_with_padding(orig_vocab_size, tp_size):
     return after
 
 
+def _initialize_engram_weight_gpu_with_seed(weight, init_method, local_init_seed, partition_dim=0, stride=1):
+    tensor_parallel.set_tensor_model_parallel_attributes(
+        tensor=weight, is_parallel=True, dim=partition_dim, stride=stride
+    )
+    with torch.random.fork_rng(devices=[weight.device]):
+        torch.manual_seed(local_init_seed)
+        init_method(weight)
+
+
 class EngramMemory(nn.Module):
     """Embedding parallelized in the vocabulay dimension.
 
@@ -39,8 +48,6 @@ class EngramMemory(nn.Module):
     Unlike to the MCore VocabParallelEmbedding, the embedding parallel use parallelism like expert parallel.
     The parallel group is the subset of data parallel, which is given as the engram_model_parallel_size.
     Input of each rank is different, when forwarding, the input will be transmit to other rank using an All2All operator.
-
-    TODO: The All2All version is experimental, we just use the expert_model_parallel_group for the performance tuning.
     
     Args:
         num_embeddings: vocabulary size.
@@ -83,7 +90,7 @@ class EngramMemory(nn.Module):
         self.num_embeddings_per_partition = self.vocab_end_index - self.vocab_start_index
         self.deterministic_mode = config.deterministic_mode
 
-        # Allocate weights and initialize.
+        # Allocate weights and initialize on GPU only.
         if config.use_cpu_initialization:
             self.weight = Parameter(
                 torch.empty(
@@ -112,7 +119,13 @@ class EngramMemory(nn.Module):
                 )
             )
             if config.perform_initialization:
-                _initialize_affine_weight_gpu(self.weight, init_method, partition_dim=0, stride=1)
+                engram_seed = int(getattr(config, "engram_seed", 0))
+                pp_rank = parallel_state.get_pipeline_model_parallel_rank()
+                local_init_seed = 2718 + engram_seed + pp_rank * 100 + int(self.embedding_parallel_rank)
+                _initialize_engram_weight_gpu_with_seed(
+                    self.weight, init_method, local_init_seed, partition_dim=0, stride=1
+                )
+
     
     def enable_parallel(self):
         if self.embedding_parallel_size > 1:
