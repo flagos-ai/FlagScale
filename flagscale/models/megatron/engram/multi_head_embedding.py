@@ -41,7 +41,7 @@ def _initialize_engram_weight_gpu_with_seed(weight, init_method, local_init_seed
 
 
 class EngramMemory(nn.Module):
-    """Embedding parallelized in the vocabulay dimension.
+    """Embedding parallelized in the vocabulary dimension.
 
     This is mainly adapted from torch.nn.Embedding and all the default values are kept.
 
@@ -230,7 +230,7 @@ class EngramMemory(nn.Module):
         self,
         prefix: str = '',
         sharded_offsets: Tuple[Tuple[int, int, int]] = (),
-        metadata: Optional[dict] = None,** kwargs,
+        metadata: Optional[dict] = None, **kwargs,
     ):
         state_dict = self.state_dict(prefix="", keep_vars=True)
         weight_prefix = f"{prefix}weight"

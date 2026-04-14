@@ -376,13 +376,13 @@ class FSTrainArguments:
             if self.args.engram_embedding_parallel_method == "allreduce":
                 if self.args.rank == 0:
                     warnings.warn(f"[rank0]: We do not recommend using allreduce for engram embedding, this is deprecated and will be removed in a later version.", DeprecationWarning)
-                if self.args.engram_embedding_parallel_size is not None:
-                    warnings.warn(
-                        "[rank0]: If set the embedding_parallel_method to allreduce, " \
-                        "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel." \
-                        "So the embedding_parallel_size is useless and set to None."
-                    )
-                    self.args.engram_embedding_parallel_size = None   
+                    if self.args.engram_embedding_parallel_size is not None:
+                        warnings.warn(
+                            "[rank0]: If set the embedding_parallel_method to allreduce, " \
+                            "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel." \
+                            "So the embedding_parallel_size is useless and set to None."
+                        )
+                        self.args.engram_embedding_parallel_size = None   
             elif self.args.engram_embedding_parallel_method == "alltoall":
                 assert self.args.engram_embedding_parallel_size is not None, "embedding parallel size should be specified when using alltoall"
             else:
@@ -393,7 +393,7 @@ class FSTrainArguments:
                 warnings.warn("Offloading embedding optimizer states will offload all embedding optimizer states to CPU, which may cause slowdown. " \
                 "Please make sure this is what you want. This is typically used to save GPU memory when Engram embedding is large while accelerators are limited." \
                 "If you do not want to offload all embedding optimizer states to CPU, please disable this and set the --optimizer-offload-fraction to a value less than 1 to offload part of the optimizer states to CPU." \
-                "Of cource you can set the --optimizer-offload-fraction to offload other params meanwhile enable this to offload all embedding optimizer states to CPU.")                
+                "Of course you can set the --optimizer-offload-fraction to offload other params meanwhile enable this to offload all embedding optimizer states to CPU.")                
             assert not self.args.use_megatron_fsdp, "Megatron FSDP is not supported yet; support is planned for a later version."
             assert not self.args.init_model_with_meta_device, "Init_model_with_meta_device is not supported yet; support is planned for a later version."
             assert self.args.use_distributed_optimizer, "When use engram, distributed_optimizer must be enabled, because there is a bug caused by allreduce grad norm in model parallel group when do not use distributed_optimizer. We have not found a pretty solution yet, so disable it temporarily."
