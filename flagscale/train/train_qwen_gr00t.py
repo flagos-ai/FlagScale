@@ -52,6 +52,23 @@ from flagscale.models.vla import TrainablePolicy
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 from flagscale.platforms import get_platform
 
+# Monkey-patch: transformers 4.57+ kernel-hub discovery can't find flash_attn on some platforms
+# (e.g. MUSA), but direct import works fine. Replace _lazy_imports so transformers uses flash_attn directly.
+try:
+    platform = get_platform()
+    if platform.name() == "musa":
+        from flash_attn import flash_attn_func, flash_attn_varlen_func
+        from flash_attn.bert_padding import pad_input, unpad_input
+        import transformers.modeling_flash_attention_utils as _fa_utils
+        _fa_utils._flash_fn = flash_attn_func
+        _fa_utils._flash_varlen_fn = flash_attn_varlen_func
+        _fa_utils._pad_fn = pad_input
+        _fa_utils._unpad_fn = unpad_input
+        def _patched_lazy_imports(implementation=None):
+            return flash_attn_func, flash_attn_varlen_func, pad_input, unpad_input
+        _fa_utils._lazy_imports = _patched_lazy_imports
+except ImportError:
+    pass
 
 def set_seed(seed: int):
     random.seed(seed)

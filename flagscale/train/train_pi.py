@@ -96,7 +96,7 @@ def apply_fsdp(policy):
         policy,
         sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
         mixed_precision=mp_policy,
-        device_id=torch.cuda.current_device(),
+        device_id=get_platform().device(),
         use_orig_params=True,
     )
     return policy
@@ -127,8 +127,9 @@ def apply_fsdp(policy):
 def make_dataset(cfg: DataConfig, policy_config):
     # TODO: (yupu) Support image transforms
     enable_image_transform = False
-    # TODO: (yupu) Remove hard-coded video backend
-    video_backend = "torchcodec"
+    # torchcodec depends on NVIDIA NVDEC which is not available on all platforms (e.g. MUSA);
+    # fall back to pyav for non-CUDA platforms.
+    video_backend = "torchcodec" if get_platform().name() == "cuda" else "pyav"
 
     image_transforms = (
         ImageTransforms(cfg.image_transforms) if enable_image_transform else None

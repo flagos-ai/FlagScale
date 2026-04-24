@@ -120,7 +120,6 @@ Configure the following fields:
 - `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`), Use `MUSA_DEVICE_MAX_CONNECTIONS` for Moore Threads MUSA
 - `experiment.exp_name` - Experiment name
 - `experiment.exp_dir` - Output directory for checkpoints and logs
-- `experiment.runner.nproc_per_node` - Number of processes per node for multi-GPU training (required for Huawei Ascend)
 
 #### Task-Level Config
 

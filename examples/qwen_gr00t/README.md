@@ -122,7 +122,6 @@ Configure the following fields:
 - `experiment.envs.MUSA_LAUNCH_BLOCKING` - Set to `"1"` on Moore Threads MUSA to enable synchronous kernel execution, useful for debugging
 - `experiment.exp_name` - Experiment name
 - `experiment.exp_dir` - Output directory for checkpoints and logs
-- `experiment.runner.nproc_per_node` - Number of processes per node for multi-GPU training (required for Huawei Ascend)
 
 #### Task-Level Config
 

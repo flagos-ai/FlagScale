@@ -18,6 +18,7 @@
 import concurrent.futures
 import contextlib
 import logging
+import random
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -1058,7 +1059,18 @@ class LeRobotDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.num_frames
 
-    def __getitem__(self, idx) -> dict:
+    def __getitem__(self, idx, max_retries=10) -> dict:
+        for attempt in range(max_retries):
+            try:
+                return self._getitem_impl(idx)
+            except Exception as e:
+                logging.warning(
+                    f"Error loading sample {idx} (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                idx = random.randint(0, len(self) - 1)
+        raise RuntimeError(f"Failed to load a valid sample after {max_retries} retries")
+
+    def _getitem_impl(self, idx) -> dict:
         # Ensure dataset is loaded when we actually need to read from it
         self._ensure_hf_dataset_loaded()
         item = self.hf_dataset[idx]
