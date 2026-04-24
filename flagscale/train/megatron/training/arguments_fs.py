@@ -725,6 +725,72 @@ def _add_regularization_args(parser):
                        help='If set, disable Nesterov momentum for muon')
     return parser
 
+def _add_straggler_args(parser):
+    group = parser.add_argument_group(title="flagscale straggler")
+
+    group.add_argument(
+        "--enable-straggler-detection",
+        action="store_true",
+        default=False,
+        help="Enable FlagScale straggler detection.",
+    )
+    group.add_argument(
+        "--straggler-profiling-interval",
+        type=int,
+        default=10,
+        help="Record straggler samples every N steps after warmup.",
+    )
+    group.add_argument(
+        "--straggler-report-interval",
+        type=int,
+        default=100,
+        help="Generate a straggler report every N steps.",
+    )
+    group.add_argument(
+        "--straggler-threshold",
+        type=float,
+        default=1.5,
+        help="Slowdown ratio used to mark a rank as a straggler.",
+    )
+    group.add_argument(
+        "--straggler-warmup-steps",
+        type=int,
+        default=10,
+        help="Skip the first N steps before profiling stragglers.",
+    )
+    group.add_argument(
+        "--straggler-enable-comm-logging",
+        dest="straggler_enable_comm_logging",
+        action="store_true",
+        help="Enable communication logging in the FlagScale straggler detector.",
+    )
+    group.add_argument(
+        "--no-straggler-enable-comm-logging",
+        dest="straggler_enable_comm_logging",
+        action="store_false",
+        help="Disable communication logging in the FlagScale straggler detector.",
+    )
+    group.set_defaults(straggler_enable_comm_logging=True)
+    group.add_argument(
+        "--straggler-enable-gpu-profile",
+        dest="straggler_enable_gpu_profile",
+        action="store_true",
+        help="Enable CUDA event timing for straggler profiling when available.",
+    )
+    group.add_argument(
+        "--no-straggler-enable-gpu-profile",
+        dest="straggler_enable_gpu_profile",
+        action="store_false",
+        help="Disable CUDA event timing for straggler profiling.",
+    )
+    group.set_defaults(straggler_enable_gpu_profile=True)
+    group.add_argument(
+        "--straggler-log-dir",
+        type=str,
+        default=None,
+        help="Directory used to save FlagScale straggler reports.",
+    )
+    return parser
 
 def _add_flagos_args(parser):
     group = parser.add_argument_group(title="flagscale fl")
@@ -861,6 +927,7 @@ def add_flagscale_arguments(parser):
     parser = _add_auto_skip_spiky_loss(parser)
     parser = _add_peft_args(parser)
     parser = _add_regularization_args(parser)
+    parser = _add_straggler_args(parser)
     parser = _add_flagos_args(parser)
     parser = _add_engram_args(parser)
     return parser
