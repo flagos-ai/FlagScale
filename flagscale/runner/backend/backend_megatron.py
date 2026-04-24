@@ -10,6 +10,18 @@ from flagscale.runner.runner_train import (
 )
 from flagscale.runner.utils import get_pkg_dir, logger, parse_hostfile, resolve_path
 
+PERF_MONITOR_RUNNER_KEYS = (
+    "enable_perf_monitor",
+    "perf_log_interval",
+    "perf_log_dir",
+    "perf_console_output",
+    "perf_log_format",
+    "perf_memory_tracking",
+    "perf_breakdown",
+    "perf_max_log_files",
+    "perf_model_type",
+)
+
 
 class MegatronBackend(BackendBase):
     def __init__(self, config: DictConfig):
@@ -20,6 +32,7 @@ class MegatronBackend(BackendBase):
 
     def _prepare(self):
         _update_config_train(self.config)
+        self._prepare_perf_monitor_config()
         self.user_args = _get_args_megatron(self.config)
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
         self.user_envs = self.config.experiment.get("envs", {})
@@ -29,6 +42,22 @@ class MegatronBackend(BackendBase):
         self.node_specific = self.config.get("node_specific", None)
         logger.info("\n************** configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
+
+    def _prepare_perf_monitor_config(self):
+        system_config = self.config.train.system
+        runner_config = self.config.experiment.runner
+
+        OmegaConf.set_struct(system_config, False)
+        for key in PERF_MONITOR_RUNNER_KEYS:
+            if runner_config.get(key, None) is not None and system_config.get(key, None) is None:
+                system_config[key] = runner_config.get(key)
+
+        if system_config.get("perf_log_dir", None) is not None:
+            system_config.perf_log_dir = resolve_path(
+                system_config.perf_log_dir, "system.perf_log_dir"
+            )
+        elif system_config.get("enable_perf_monitor", False):
+            system_config.perf_log_dir = os.path.join(system_config.logging.log_dir, "perf_monitor")
 
     def generate_run_script(
         self,
@@ -78,6 +107,8 @@ class MegatronBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.details_dir}\n")
             f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
             f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
+            if system_config.get("perf_log_dir", None):
+                f.write(f"mkdir -p {system_config.perf_log_dir}\n")
             f.write("\n")
             f.write(f"cd {pkg_dir}\n")
             f.write("\n")
