@@ -95,6 +95,9 @@ from megatron.core.transformer.moe.moe_utils import track_moe_metrics
 from megatron.core.transformer.multi_token_prediction import MTPLossLoggingHelper
 from megatron.core.parallel_state import destroy_global_memory_buffer, destroy_model_parallel
 from megatron.core.pipeline_parallel import get_forward_backward_func
+from megatron.training.dualpipe_schedule import (  # FlagScale DualPipe
+    get_dualpipe_forward_backward_func,
+)
 from megatron.core.num_microbatches_calculator import (
     destroy_num_microbatches_calculator,
     get_current_global_batch_size,
@@ -148,6 +151,24 @@ from megatron.training.peft import PEFT
 
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
+
+########## FlagScale DualPipe Begin ##########
+def _fs_get_forward_backward_func():
+    """Return the appropriate forward-backward schedule function for the current configuration.
+
+    Returns ``forward_backward_dualpipe`` when ``--use-dualpipe`` is enabled;
+    otherwise falls back to Megatron-Core's standard ``get_forward_backward_func()``.
+
+    Returns
+    -------
+    Callable
+        The forward-backward function for the current pipeline configuration.
+    """
+    args = get_args()
+    if getattr(args, 'use_dualpipe', False):
+        return get_dualpipe_forward_backward_func()
+    return get_forward_backward_func()
+########## FlagScale DualPipe End ##########
 
 def destroy_global_state():
     destroy_global_vars()
@@ -1067,6 +1088,15 @@ def pretrain(
                 extra_iterators = build_extra_valid_data_iterators(
                     extra_valid_dataset_provider)
                 extra_valid_data_iterator.append(extra_iterators)
+        ########## FlagScale DualPipe Begin ##########
+        elif getattr(args, 'use_dualpipe', False):
+            # DualPipe uses two independent data iterators (one per direction).
+            extra_valid_data_iterator = []
+            for _ in range(2):
+                extra_iterators = build_extra_valid_data_iterators(
+                    extra_valid_dataset_provider)
+                extra_valid_data_iterator.append(extra_iterators)
+        ########## FlagScale DualPipe End ##########
         else:
             extra_valid_data_iterator = (
                 build_extra_valid_data_iterators(extra_valid_dataset_provider)
@@ -1181,6 +1211,39 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
             )
             second_model.model_type = model_type
             model.append(second_model)
+        elif getattr(args, 'use_dualpipe', False):
+            ########## FlagScale DualPipe Begin ##########
+            # DualPipe: each rank holds two model chunks.
+            # chunk[0] sits at pipeline stage pp_rank         (forward direction)
+            # chunk[1] sits at pipeline stage N-1-pp_rank     (mirror / reverse direction)
+            #
+            # Communication flows:
+            #   phase 0 (forward):  rank 0 → rank 1 → … → rank N-1
+            #   phase 1 (reverse):  rank N-1 → rank N-2 → … → rank 0
+            #
+            # Consequently:
+            #   chunk[0]: pre_process = (rank == 0),     post_process = (rank == N-1)
+            #   chunk[1]: pre_process = (rank == N-1),   post_process = (rank == 0)
+            model = []
+            num_pipeline_ranks = mpu.get_pipeline_model_parallel_world_size()
+            pp_rank = mpu.get_pipeline_model_parallel_rank()
+
+            # Forward-direction chunk (pipeline position = pp_rank)
+            chunk0 = model_provider_func(
+                pre_process=(pp_rank == 0),
+                post_process=(pp_rank == num_pipeline_ranks - 1),
+            )
+            chunk0.model_type = model_type
+            model.append(chunk0)
+
+            # Mirror chunk (pipeline position = N-1-pp_rank)
+            chunk1 = model_provider_func(
+                pre_process=(pp_rank == num_pipeline_ranks - 1),
+                post_process=(pp_rank == 0),
+            )
+            chunk1.model_type = model_type
+            model.append(chunk1)
+            ########## FlagScale DualPipe End ##########
         else:
             pre_process = mpu.is_pipeline_first_stage()
             post_process = mpu.is_pipeline_last_stage()
@@ -2496,7 +2559,7 @@ def train(
     extra_eval_duration = 0.0
     extra_eval_iterations = 0
     # Wrap forward_backward_func for Full iteration CUDA graph
-    forward_backward_func = get_forward_backward_func()
+    forward_backward_func = _fs_get_forward_backward_func()  ########## FlagScale DualPipe ##########
     if args.enable_cuda_graph and args.cuda_graph_scope=="full_iteration":
         forward_backward_func = FullCudaGraphWrapper(forward_backward_func, cuda_graph_warmup_steps=args.cuda_graph_warmup_steps)
 
@@ -2820,6 +2883,14 @@ def train(
                     extra_iterators = build_extra_valid_data_iterators(
                         extra_valid_dataset_provider)
                     extra_valid_data_iterator.append(extra_iterators)
+            ########## FlagScale DualPipe Begin ##########
+            elif getattr(args, 'use_dualpipe', False):
+                extra_valid_data_iterator = []
+                for _ in range(2):
+                    extra_iterators = build_extra_valid_data_iterators(
+                        extra_valid_dataset_provider)
+                    extra_valid_data_iterator.append(extra_iterators)
+            ########## FlagScale DualPipe End ##########
             else:
                 extra_valid_data_iterator = (
                     build_extra_valid_data_iterators(extra_valid_dataset_provider)
@@ -2962,7 +3033,7 @@ def evaluate(
     # make validation batch size independent from training batch size
     eval_batch_size = args.global_batch_size
     eval_num_microbatches = eval_batch_size // (args.micro_batch_size * args.data_parallel_size)
-    forward_backward_func = get_forward_backward_func()
+    forward_backward_func = _fs_get_forward_backward_func()  ########## FlagScale DualPipe ##########
     if args.enable_cuda_graph and args.cuda_graph_scope=="full_iteration":
         forward_backward_func = FullCudaGraphWrapper(forward_backward_func, cuda_graph_warmup_steps=args.cuda_graph_warmup_steps)
 
