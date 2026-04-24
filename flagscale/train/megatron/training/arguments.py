@@ -892,6 +892,18 @@ def validate_args(args, defaults={}):
         if args.save_retain_interval is not None:
             assert args.save_retain_interval > 0
             assert args.save_retain_interval % args.save_interval == 0
+    
+    if args.save_hf is not None:
+        assert args.save is not None
+        assert args.save_interval is not None
+        assert args.save_interval > 0
+        assert args.save_hf_interval is not None
+        assert args.save_hf_interval > 0
+        assert args.save_hf_interval >= args.save_interval and args.save_hf_interval % args.save_interval == 0, \
+                "save_hf_interval must be greater than save_interval and be an integer multiple of it"     
+        #assert args.hf_config_path is not None
+        assert args.model_name is not None
+
     # Mixed precision checks.
     if args.fp16_lm_cross_entropy:
         assert args.fp16, 'lm cross entropy in fp16 only support in fp16 mode.'
@@ -2580,6 +2592,19 @@ def _add_checkpointing_args(parser):
                             ' rank for saving. Turn on only if experiencing host or device memory'
                             ' issues. Has affect only with `--dist-ckpt-optim-fully-reshardable`'
                             ' flag.')
+    group.add_argument('--load-hf', action='store_true',default=None,
+                       help='Use the HF format for warm start, and save it in the torch_dict'
+                            'format while also saving it in the HF format.')
+    group.add_argument('--save-hf', action='store_true',default=None,
+                       help='Save as Hugging Face format checkpoint.')
+    group.add_argument('--hf-config-path', type=str,default=None,
+                       help='Load the HF model from config.')
+    group.add_argument('--save-hf-interval', type=int, default=None,
+                       help='Number of iterations between hf checkpoint saves.')
+    group.add_argument('--model-name', type=str, default=None,
+                       help='convert Architecture of HF Model.')
+    group.add_argument('--model-path', type=str, default=None,
+                       help='convert modeling_py path of HF Model .')
     return parser
 
 

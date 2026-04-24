@@ -474,6 +474,23 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
     # Save dataloader state if the dataloader supports it (currently only Megatron Energon).
     maybe_save_dataloader_state(train_data_iterator, iteration, getattr(args, "dataloader_save", None))
 
+    # save hf format model weight
+    hf_checkpoint_name = get_checkpoint_name(save_dir, iteration, release=False, pipeline_parallel=pipeline_parallel,
+        tensor_rank=tensor_rank, pipeline_rank=pipeline_rank, expert_parallel=expert_parallel, expert_rank=expert_rank, return_base_dir=True)
+    if args.save_hf and args.save_hf_interval :
+        if iteration % args.save_hf_interval == 0 or iteration == args.train_iters:
+            #use megatron bridge
+            from megatron.nemo_bridge.models import AutoBridge
+            #Load the HF model from config
+            safe_save = os.path.join(hf_checkpoint_name, 'safetensor')
+            model_name = args.model_name
+            model_path = args.model_path
+            hf_config = AutoBridge.convert_mg2hf_config(args, safe_save, model_name)
+            bridge = AutoBridge.from_hf_config(hf_config, model_path, model_name)
+            #Save the HF model weights in the corresponding iteration's safetensor folder.
+            bridge.save_hf_pretrained(model=model,path=safe_save)
+
+
     # Save distributed optimizer's custom parameter state.
     if (
         args.use_distributed_optimizer
@@ -1410,6 +1427,17 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
     """
     args = get_args()
     load_dir = getattr(args, load_arg)
+
+    # load hf format
+    if args.load_hf:
+        # use megatron bridge
+        from megatron.nemo_bridge.models import AutoBridge
+        bridge=AutoBridge.from_hf_pretrained(load_dir)
+        bridge.load_hf_weights(ddp_model)
+        # no optimizer weight
+        iteration=0
+        num_floating_point_operations_so_far=0
+        return iteration, num_floating_point_operations_so_far
 
     # Finetuning directories
     pretrained_dir = getattr(args, 'pretrained_checkpoint', None)

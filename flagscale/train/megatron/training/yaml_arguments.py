@@ -412,7 +412,7 @@ def core_transformer_config_from_yaml(args, transfomer_key = "language_model"):
     # Hardcoded 
     kw_args['deallocate_pipeline_outputs'] = True
     kw_args['pipeline_dtype'] = kw_args['params_dtype']
-    kw_args['batch_p2p_comm'] = not args.overlap_p2p_comm 
+    kw_args['batch_p2p_comm'] = not args.overlap_p2p_comm
     
     assert args.activation_func in ["swiglu","squaredrelu","gelu"], f"{args.activation_func} is not a supported activation function"
     if args.activation_func == "swiglu":
