@@ -29,7 +29,7 @@ from megatron.training.utils import (
     get_batch_on_this_tp_rank,
     get_blend_and_blend_per_split,
 )
-
+from megatron.training.training import pretrain
 from flagscale.models.megatron.rwkv.rwkv_model import RWKVModel
 
 try:

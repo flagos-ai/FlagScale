@@ -16,7 +16,7 @@ from .bert_tokenization import FullTokenizer as FullBertTokenizer
 from .gpt2_tokenization import GPT2Tokenizer, AquilaTokenizer
 from megatron.training.tokenizer.multimodal_tokenizer import MultimodalTokenizer
 from megatron.training.tokenizer.sft_tokenizer import SFTTokenizer
-
+from megatron.training.tokenizer.rwkv_tokenization import RWKVTokenizer
 
 def build_tokenizer(args, **kwargs):
     """Initialize tokenizer."""
