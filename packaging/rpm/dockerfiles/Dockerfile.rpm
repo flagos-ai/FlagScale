@@ -1,0 +1,32 @@
+# Dockerfile to build FlagScale RPM packages
+# No vendor SDK needed - pure Python package
+
+ARG BASE_IMAGE=fedora
+ARG BASE_IMAGE_VERSION=43
+
+FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
+
+RUN dnf install -y \
+    rpm-build rpmdevtools \
+    python3-devel python3-setuptools python3-wheel python3-pip \
+    && dnf clean all
+
+RUN rpmdev-setuptree
+
+COPY . /workspace/FlagScale
+
+# Create source tarball
+RUN SPEC_VERSION=$(grep '^Version:' /workspace/FlagScale/packaging/rpm/specs/flagscale.spec | awk '{print $2}') && \
+    tar czf /root/rpmbuild/SOURCES/flagscale-${SPEC_VERSION}.tar.gz \
+        -C /workspace \
+        --transform "s|^FlagScale|flagscale-${SPEC_VERSION}|" \
+        FlagScale
+
+# Build RPM
+RUN rpmbuild -ba /workspace/FlagScale/packaging/rpm/specs/flagscale.spec
+
+# Collect output
+RUN mkdir -p /output && \
+    find /root/rpmbuild/RPMS -name "*.rpm" -exec cp {} /output/ \; && \
+    find /root/rpmbuild/SRPMS -name "*.rpm" -exec cp {} /output/ \; && \
+    ls -lh /output/

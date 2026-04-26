@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export PYBUILD_NAME = flagscale
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_test:
+	# Skip tests - requires torch and other heavy deps
+	@echo "Skipping tests"

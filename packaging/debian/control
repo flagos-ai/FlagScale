@@ -1,0 +1,27 @@
+Source: flagscale
+Section: python
+Priority: optional
+Maintainer: FlagOS Contributors <contact@flagos.io>
+Build-Depends: debhelper-compat (= 13),
+               dh-python,
+               python3-all,
+               python3-setuptools,
+               python3-wheel,
+               pybuild-plugin-pyproject
+Standards-Version: 4.6.2
+Homepage: https://github.com/flagos-ai/FlagScale
+
+Package: python3-flagscale
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
+Recommends: python3-typer, python3-hydra-core
+Description: FlagScale large model training toolkit
+ FlagScale is a comprehensive toolkit designed to support the entire
+ lifecycle of large models, including training, serving, inference,
+ and reinforcement learning. Developed by the Beijing Academy of
+ Artificial Intelligence (BAAI).
+ .
+ This package provides the core library and the flagscale CLI.
+ Heavy dependencies (PyTorch, Megatron, vLLM, etc.) are not included
+ and should be installed via pip extras when needed:
+   pip install "flagscale[cuda-train]"
