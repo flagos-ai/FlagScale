@@ -371,71 +371,33 @@ class FSTrainArguments:
             assert args.recompute_method is None and args.recompute_granularity is None and args.recompute_num_layers is None, "PEFT will raise comfilcts with recompute currently"
             assert args.ckpt_format == 'torch', "PEFT is only tested with torch format checkpoint"
 
-        # DualPipeV related
-        if args.use_dualpipev:
-            assert args.pipeline_model_parallel_size > 1, (
-                "DualPipeV can only be used for pipeline scheduling in MoE models, "
-            "thus requiring both pipeline parallelism and expert parallelism."
-            )
-            assert args.expert_model_parallel_size > 1, (
-                "DualPipeV can only be used for pipeline scheduling in MoE models, "
-            "thus requiring both pipeline parallelism and expert parallelism."
-            )
-
-            middle_stage_layers = args.num_layers
-            num_middle_stages = args.pipeline_model_parallel_size
-            if args.decoder_first_pipeline_num_layers is not None:
-                middle_stage_layers = middle_stage_layers - args.decoder_first_pipeline_num_layers
-                num_middle_stages = num_middle_stages - 1
-                assert args.decoder_first_pipeline_num_layers % 2 == 0, (
-                    "The first pipeline stage must contain an even number of Transformer layers, "
-                    "so that DualPipeV can split it into two model chunks."
-                )
-            if args.decoder_last_pipeline_num_layers is not None:
-                middle_stage_layers = middle_stage_layers - args.decoder_last_pipeline_num_layers
-                num_middle_stages = num_middle_stages - 1
-                assert args.decoder_last_pipeline_num_layers % 2 == 0, (
-                    "The last pipeline stage must contain an even number of Transformer layers, "
-                    "so that DualPipeV can split it into two model chunks."
-                )
-            if num_middle_stages > 0:
-                assert middle_stage_layers > 0, "Layers can not be empty"
-                assert middle_stage_layers % num_middle_stages == 0, "Layers must be even split"
-                num_layers_in_middle_stages = middle_stage_layers // num_middle_stages
-                assert num_layers_in_middle_stages % 2 == 0, (
-                    "The middle pipeline stage must contain an even number of Transformer layers, "
-                    "so that DualPipeV can split it into two model chunks."
-                )
-
-            assert args.moe_shared_expert_overlap is False, (
-                    " DualPipeV does not support simultaneous use with moe_shared_expert_overlap currently."
-            )
-
-            if args.moe_fb_overlap:
-                assert args.overlap_grad_reduce is False and args.overlap_param_gather is False, (
-                    " DualPipeV configured with moe_fb_overlap is incompatible with either overlap_grad_reduce or overlap_param_gather. "
-                    " When moe_fb_overlap is enabled, DualPipeV activates the DW-split mechanism provided by Transformer Engine, "
-                    " which causes all param.grad attributes to be None during the backward-for-inputs phase. "
-                    " This absence of gradient tensors violates the assumptions of both overlap_grad_reduce and overlap_param_gather, precipitating an assertion failure within DDP."
-                )
-                assert not args.moe_use_legacy_grouped_gemm, \
-                    'delay_wgrad_compute is not supported with legacy groupedgemm implementation'
-                assert args.transformer_impl == 'transformer_engine', \
-                    'delay_wgrad_compute is only supported with transformer_engine implementation'
-
-            assert args.untie_embeddings_and_output_weights is True, (
-                " DualPipeV is not supported with shared embedding and lm head"
-            )
-            assert args.mtp_num_layers is None, (
-                "DualPipeV is not supported with multi-token-predictor currently"
-            )
-
-        if args.peft_type is not None:
-                assert args.transformer_impl == 'transformer_engine', \
-                    'PEFT is only supported with transformer_engine implementation'
-                assert args.num_experts is None, "PEFT is not tested with MoE currently"
-                assert args.recompute_method is None and args.recompute_granularity is None and args.recompute_num_layers is None, "PEFT will raise comfilcts with recompute currently"
-                assert args.ckpt_format == 'torch', "PEFT is only tested with torch format checkpoint"
+        # Engram related.
+        if self.args.use_engram:
+            if self.args.engram_embedding_parallel_method == "allreduce":
+                if self.args.rank == 0:
+                    warnings.warn(f"[rank0]: We do not recommend using allreduce for engram embedding, this is deprecated and will be removed in a later version.", DeprecationWarning)
+                    if self.args.engram_embedding_parallel_size is not None:
+                        warnings.warn(
+                            "[rank0]: If set the embedding_parallel_method to allreduce, " \
+                            "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel." \
+                            "So the embedding_parallel_size is useless and set to None."
+                        )
+                        self.args.engram_embedding_parallel_size = None   
+            elif self.args.engram_embedding_parallel_method == "alltoall":
+                assert self.args.engram_embedding_parallel_size is not None, "embedding parallel size should be specified when using alltoall"
+            else:
+                raise ValueError(f"Invalid embedding parallel method: {self.args.engram_embedding_parallel_method}")
+            if self.args.engram_offload_embedding_optimizer_states:
+                assert self.args.engram_embedding_parallel_method == "alltoall", f"Offloading embedding optimizer states is only supported when using alltoall for engram embedding parallelism, now is {self.args.engram_embedding_parallel_method}."
+                assert self.args.optimizer_cpu_offload, "Offloading embedding optimizer states requires optimizer_cpu_offload to be enabled."
+                warnings.warn("Offloading embedding optimizer states will offload all embedding optimizer states to CPU, which may cause slowdown. " \
+                "Please make sure this is what you want. This is typically used to save GPU memory when Engram embedding is large while accelerators are limited." \
+                "If you do not want to offload all embedding optimizer states to CPU, please disable this and set the --optimizer-offload-fraction to a value less than 1 to offload part of the optimizer states to CPU." \
+                "Of course you can set the --optimizer-offload-fraction to offload other params meanwhile enable this to offload all embedding optimizer states to CPU.")                
+            assert not self.args.use_megatron_fsdp, "Megatron FSDP is not supported yet; support is planned for a later version."
+            assert not self.args.init_model_with_meta_device, "Init_model_with_meta_device is not supported yet; support is planned for a later version."
+            assert self.args.use_distributed_optimizer, "When use engram, distributed_optimizer must be enabled, because there is a bug caused by allreduce grad norm in model parallel group when do not use distributed_optimizer. We have not found a pretty solution yet, so disable it temporarily."
+        assert not (args.pipeline_model_parallel_size == 1 and args.overlap_moe_expert_parallel_comm), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
 
 
 def _add_hetero_args(parser):
@@ -765,7 +727,9 @@ def _add_regularization_args(parser):
 
 
 def _add_flagos_args(parser):
-    group = parser.add_argument_group(title="flagscale transformer engine fl")
+    group = parser.add_argument_group(title="flagscale fl")
+    group.add_argument('--mg-fl-prefer', type=str, choices=['cuda', 'musa', 'txda'], default='',
+                       help='Backend selection for megatron fl.')
     group.add_argument('--te-fl-prefer', type=str, choices=['flagos', 'vendor', 'reference'], default='vendor',
                        help='Backend selection for transformer engine fl.')
     group.add_argument('--te-fl-per-op', type=str, default=None,
@@ -852,6 +816,25 @@ def _add_engram_args(parser):
         type=int,
         default=1,
         help='Hyper-connection multiplicity for Engram',
+    )
+    group.add_argument(
+        '--engram-embedding-parallel-size',
+        type=int,
+        default=1,
+        help='Parallel size for Engram embedding',
+    )
+    group.add_argument(
+        '--engram-embedding-parallel-method',
+        type=str,
+        default="alltoall",
+        choices=["alltoall", "allreduce"],
+        help='Parallel method for Engram embedding across embedding parallel(alltoall) / tensor parallel(allreduce) groups',
+    )
+    group.add_argument(
+        "--engram-offload-embedding-optimizer-states",
+        action="store_true",
+        help="Whether to offload Engram embedding optimizer states to CPU when using alltoall for Engram embedding parallelism. " \
+        "This is typically used to save GPU memory when Engram embedding is large while accelerators are limited."
     )
     return parser
 

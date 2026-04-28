@@ -1,6 +1,9 @@
 # Mainly adopted from:
 # https://github.com/starVLA/starVLA/blob/3f7feefbc5fc25890ad3a7d262b8a0aea1339aa7/starVLA/model/modules/vlm/QWen3.py
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -15,8 +18,17 @@ from transformers import (
     Qwen3VLForConditionalGeneration,
 )
 
+from flagscale.logger import logger
 from flagscale.models.vla.registry import register_vlm
-from flagscale.train.train_config import TrainConfig
+from flagscale.platforms.platform_manager import get_platform
+
+
+@dataclass
+class QwenVLConfig:
+    type: str = "qwen3-vl"
+    base_vlm: str = ""
+    load_pretrained: bool = True
+    attn_implementation: str | None = None
 
 
 def _to_pil(img):
@@ -38,22 +50,20 @@ class QwenVLBackbone(nn.Module):
     Base class for Qwen VL backends.
 
     Args:
-        config: TrainConfig object with config.model.qwenvl namespace.
+        vlm_config: QwenVLConfig with base_vlm, load_pretrained, attn_implementation.
+        prompt_template: Optional prompt template with {instruction} placeholder.
     """
 
-    def __init__(self, config: TrainConfig, **kwargs):
+    def __init__(self, vlm_config: QwenVLConfig, prompt_template: str | None = None, **kwargs):
         super().__init__()
-        qwenvl_config = config.model.qwenvl
-        self.model_id = qwenvl_config.base_vlm
-        # When loading from checkpoint, base_vlm is resolved via OmegaConf
-        # interpolation: "${_pretrained_dir}/vlm_config" → absolute path.
-        self._load_pretrained = qwenvl_config.get("load_pretrained", True)
-        self._attn_implementation = qwenvl_config.get("attn_implementation", None)
+        self.model_id = vlm_config.base_vlm
+        self._load_pretrained = vlm_config.load_pretrained
+        self._attn_implementation = vlm_config.attn_implementation
 
         if not self._load_pretrained and not Path(self.model_id).exists():
             raise FileNotFoundError(
                 f"VLM config directory not found: {self.model_id}. "
-                "Ensure the checkpoint was saved with save_pretrained_artifacts."
+                "Ensure the checkpoint was saved with save_pretrained."
             )
 
         # TODO: (yupu) The model loaded by `from_pretrained` is eval mode by default, is this expected? I removed `policy.train()` in train_qwen_gr00t.py to match starVLA, but not sure if this is the right way to do this.
@@ -61,7 +71,7 @@ class QwenVLBackbone(nn.Module):
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         # FIXME: Hard-coded padding side
         self.processor.tokenizer.padding_side = "left"
-        self._config: TrainConfig = config
+        self._prompt_template = prompt_template
 
     def _load_model(self, model_id: str):
         raise NotImplementedError
@@ -81,9 +91,14 @@ class QwenVLBackbone(nn.Module):
         if isinstance(instructions, str):
             instructions = [instructions]
 
+        logger.info(f"[prepare_input] image_feature_keys={image_feature_keys}")
         batch_images: list[list[Image.Image]] | None = None
         for key in image_feature_keys:
             imgs = batch[key]
+            if isinstance(imgs, torch.Tensor):
+                logger.info(
+                    f"[prepare_input] key={key} tensor shape={imgs.shape} dtype={imgs.dtype}"
+                )
             if isinstance(imgs, torch.Tensor) and imgs.ndim == 3:
                 imgs = [imgs]
             key_images = [_to_pil(img) for img in imgs]
@@ -96,6 +111,9 @@ class QwenVLBackbone(nn.Module):
         for idx, sample_images in enumerate(batch_images):
             batch_images[idx] = [img for img in sample_images if img is not None]
 
+        logger.info(
+            f"[prepare_input] batch_size={len(batch_images)} images_per_sample={[len(s) for s in batch_images]} pil_size={batch_images[0][0].size if batch_images else None}"
+        )
         return batch_images, instructions
 
     def build_qwenvl_inputs(
@@ -111,9 +129,8 @@ class QwenVLBackbone(nn.Module):
         for imgs, instruction in zip(images, instructions):
             content = [{"type": "image", "image": img} for img in imgs]
 
-            if "CoT_prompt" in self._config.data.vla_data:
-                cot_prompt = self._config.data.vla_data.get("CoT_prompt", "")
-                prompt = cot_prompt.replace("{instruction}", instruction)
+            if self._prompt_template is not None:
+                prompt = self._prompt_template.replace("{instruction}", instruction)
             else:
                 prompt = instruction
 
@@ -122,13 +139,20 @@ class QwenVLBackbone(nn.Module):
         return messages
 
     def forward(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
-        with torch.autocast("cuda", dtype=torch.bfloat16):
+        logger.info(
+            f"[VLM.forward] input keys={list(batch.keys())} "
+            + " ".join(f"{k}={v.shape}" for k, v in batch.items() if isinstance(v, torch.Tensor))
+        )
+        with torch.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16):
             outputs = self.model(
                 **batch,
                 output_hidden_states=True,
                 return_dict=True,
                 **kwargs,
             )
+        logger.info(
+            f"[VLM.forward] hidden_states: {len(outputs.hidden_states)} layers, last={outputs.hidden_states[-1].shape}"
+        )
         # TODO: (yupu) We should output the original outputs, not just the hidden states.
         return {"hidden_states": outputs.hidden_states}
 
@@ -146,8 +170,7 @@ class Qwen25VLBackbone(QwenVLBackbone):
             hf_config = AutoConfig.from_pretrained(
                 model_id, attn_implementation=attn_impl, torch_dtype="auto"
             )
-            with torch.device("meta"):
-                return Qwen2_5_VLForConditionalGeneration(hf_config)
+            return Qwen2_5_VLForConditionalGeneration(hf_config)
         return Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_id,
             attn_implementation=attn_impl,
@@ -174,9 +197,16 @@ class Qwen25VLBackbone(QwenVLBackbone):
             text=texts, images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt"
         )
 
+        logger.info(
+            "[Qwen25.build_qwenvl_inputs] "
+            + " ".join(
+                f"{k}={v.shape}" for k, v in batch_input.items() if isinstance(v, torch.Tensor)
+            )
+        )
+
         # Use current CUDA device instead of self.model.device, which returns
         # a DTensor device under FSDP2 and causes mixed Tensor/DTensor errors.
-        return batch_input.to(f"cuda:{torch.cuda.current_device()}")
+        return batch_input.to(get_platform().device())
 
 
 @register_vlm("qwen3-vl")
@@ -189,8 +219,7 @@ class Qwen3VLBackbone(QwenVLBackbone):
             hf_config = AutoConfig.from_pretrained(
                 model_id, attn_implementation=attn_impl, torch_dtype=torch.bfloat16
             )
-            with torch.device("meta"):
-                model = Qwen3VLForConditionalGeneration(hf_config)
+            model = Qwen3VLForConditionalGeneration(hf_config)
         else:
             # FIXME: hard-coded torch_dtype matches starVLA
             model = Qwen3VLForConditionalGeneration.from_pretrained(
@@ -216,6 +245,13 @@ class Qwen3VLBackbone(QwenVLBackbone):
             return_tensors="pt",
         )
 
+        logger.info(
+            "[Qwen3.build_qwenvl_inputs] "
+            + " ".join(
+                f"{k}={v.shape}" for k, v in batch_inputs.items() if isinstance(v, torch.Tensor)
+            )
+        )
+
         # Use current CUDA device instead of self.model.device, which returns
         # a DTensor device under FSDP2 and causes mixed Tensor/DTensor errors.
-        return batch_inputs.to(f"cuda:{torch.cuda.current_device()}")
+        return batch_inputs.to(get_platform().device())

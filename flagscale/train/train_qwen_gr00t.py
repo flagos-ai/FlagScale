@@ -17,7 +17,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateDictOptions
+from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_optimizer_state_dict, StateDictOptions
 from torch.optim import Optimizer
 
 from flagscale.logger import logger
@@ -27,37 +27,46 @@ from flagscale.train.datasets.lerobot_dataset import (
     LeRobotDatasetMetadata,
 )
 from flagscale.train.datasets.utils import dataset_to_policy_features
-from flagscale.train.processor import PolicyProcessorPipeline
-from flagscale.models.utils.constants import ACTION, OBS_PREFIX, PRETRAINED_MODEL_DIR, REWARD
 from flagscale.models.configs.types import FeatureType
+from flagscale.train.processor import PolicyProcessorPipeline
+from flagscale.models.utils.constants import (
+    ACTION,
+    OBS_PREFIX,
+    POLICY_POSTPROCESSOR_DEFAULT_NAME,
+    POLICY_PREPROCESSOR_DEFAULT_NAME,
+)
 from flagscale.train.utils.logging_utils import (
     AverageMeter,
     MetricsTracker,
     format_big_number,
 )
 from flagscale.train.utils.train_utils import (
-    save_vla_checkpoint,
     get_step_checkpoint_dir,
+    load_training_state_fsdp2,
+    save_checkpoint,
     update_last_checkpoint,
 )
+from flagscale.train.utils.random_utils import serialize_rng_state, deserialize_rng_state
 from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
-from flagscale.models.vla.qwen_gr00t import QwenGr00t
+from flagscale.models.vla import TrainablePolicy
+from flagscale.models.vla.pretrained_config import PreTrainedConfig
+from flagscale.platforms import get_platform
 
 
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.enabled = True
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = False
-    torch.backends.cuda.matmul.allow_tf32 = False
+    get_platform().manual_seed_all(seed)
+    if get_platform().name() == "cuda":
+        torch.backends.cudnn.enabled = True
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def apply_fsdp2(policy, device_mesh):
-    """Apply FSDP2 sharding to QwenGr00t.
+    """Apply FSDP2 sharding to a VLA policy.
 
     Uses a MixedPrecisionPolicy that matches DeepSpeed bf16 behavior:
       bf16.enabled=true + ZeRO-2 → param_dtype=bf16, reduce_dtype=bf16, reshard=False
@@ -75,23 +84,29 @@ def apply_fsdp2(policy, device_mesh):
     # reshard_after_forward=False keeps params unsharded during forward+backward
     reshard = False
 
-    for unit in policy.vlm.fsdp_units():
-        fully_shard(unit, **fsdp_config, reshard_after_forward=reshard)
-
-    for unit in policy.action_model.fsdp_units():
+    for unit in policy.fsdp_units():
         fully_shard(unit, **fsdp_config, reshard_after_forward=reshard)
 
     fully_shard(policy, **fsdp_config)
 
 
-def make_dataset(cfg: DataConfig):
-    # TODO: (yupu) Remove hard-coded video backend
-    # After not much testing, It feels like that `torchcodec` is more robust than `pyav`
-    # `pyav` crashes sometimes
-    video_backend = "torchcodec"
+def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
+    ds_meta = LeRobotDatasetMetadata(root=config.data.data_path, revision=None)
+    delta_timestamps = _resolve_delta_timestamps(policy_config, ds_meta)
+
+
+    # torchcodec depends on NVIDIA NVDEC which is not available on all platforms (e.g. MUSA);
+    # fall back to pyav for non-CUDA platforms.
+    video_backend = "torchcodec" if get_platform().name() == "cuda" else "pyav"
 
     def _resize_to_uint8_hwc(frame: torch.Tensor) -> torch.Tensor:
         """float32 CHW [0,1] from torchcodec → uint8 HWC 224x224 via PIL resize."""
+        if frame.dim() == 4:
+            # delta_timestamps adds a leading T dim; squeeze single-frame case
+            if frame.shape[0] == 1:
+                frame = frame.squeeze(0)
+            else:
+                return torch.stack([_resize_to_uint8_hwc(f) for f in frame])
 
         frame_uint8 = (frame.permute(1, 2, 0) * 255).round().clamp(0, 255).to(torch.uint8)
         # PIL default is BICUBIC, matching starVLA's Image.fromarray(image).resize((224, 224))
@@ -99,30 +114,37 @@ def make_dataset(cfg: DataConfig):
         return torch.from_numpy(np.array(pil))
 
     image_transforms = _resize_to_uint8_hwc
-    # Leave the revision to None
-    ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
-    delta_timestamps = resolve_delta_timestamps(cfg, ds_meta)
 
     dataset = LeRobotDataset(
-        root=cfg.data_path,
+        root=config.data.data_path,
         episodes=None,
         delta_timestamps=delta_timestamps,
         image_transforms=image_transforms,
         revision=None,
         video_backend=video_backend,
-        tolerance_s=cfg.tolerance_s,
+        tolerance_s=config.data.tolerance_s,
     )
 
     return dataset
 
 
-def resolve_delta_timestamps(
-    cfg: DataConfig, ds_meta: LeRobotDatasetMetadata
+def make_policy(cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata):
+    features = dataset_to_policy_features(ds_meta.features)
+    cfg.output_features = {k: f for k, f in features.items() if f.type is FeatureType.ACTION}
+    cfg.input_features = {k: f for k, f in features.items() if k not in cfg.output_features}
+    policy = TrainablePolicy.from_config(cfg)
+    policy.to(get_platform().name())
+    policy.train()
+    return policy
+
+
+def _resolve_delta_timestamps(
+    cfg: PreTrainedConfig, ds_meta: LeRobotDatasetMetadata
 ) -> dict[str, list] | None:
     """Resolves delta_timestamps by reading from the 'delta_indices' properties of the PreTrainedConfig.
 
     Args:
-        cfg: The policy config (PI0Config or PI05Config) to read delta_indices from.
+        cfg (PreTrainedConfig): The policy config to read delta_indices from.
         ds_meta (LeRobotDatasetMetadata): The dataset from which features and fps are used to build
             delta_timestamps against.
 
@@ -136,8 +158,6 @@ def resolve_delta_timestamps(
     """
     delta_timestamps = {}
     for key in ds_meta.features:
-        if key == REWARD and cfg.reward_delta_indices is not None:
-            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.reward_delta_indices]
         if key == ACTION and cfg.action_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
         if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
@@ -187,35 +207,73 @@ def format_train_tracker_step(train_tracker: MetricsTracker) -> str:
 
 
 
-def make_policy(
-    config: TrainConfig,
-    ds_meta: LeRobotDatasetMetadata | None = None,
-):
-    features = dataset_to_policy_features(ds_meta.features)
+def make_pre_post_processors(
+    policy,
+    data_config,
+    dataset_stats: dict[str, Any],
+    device: str,
+) -> tuple[PolicyProcessorPipeline | None, PolicyProcessorPipeline | None]:
+    """Build pre- and post-processor pipelines from YAML config + policy config.
 
-    # Use == instead of `is` for FeatureType.ACTION comparison
-    # because flagscale.FeatureType and lerobot.FeatureType are different enum classes
-    output_features = {
-        key: ft
-        for key, ft in features.items()
-        if ft.type == FeatureType.ACTION
-    }
-    input_features = {key: ft for key, ft in features.items() if key not in output_features}
+    The policy config is the single source of truth for features and norm_map.
+    YAML (``data_config.preprocessor`` / ``data_config.postprocessor``) defines
+    the step list; runtime values (stats, features, norm_map, device) are
+    injected as overrides.
 
-    policy = QwenGr00t(config=config)
-    policy.input_features = input_features
-    policy.output_features = output_features
-    policy.to("cuda")
+    Args:
+        policy: The policy model — provides input_features, output_features,
+            and config.normalization_mapping.
+        data_config: The ``data`` section of the training config (OmegaConf).
+            Must have ``preprocessor`` and/or ``postprocessor`` fields, each
+            with ``name`` and ``steps``.
+        dataset_stats: Per-feature statistics from the dataset metadata.
+        device: Target device string (e.g. ``"cuda"``).
 
-    return policy
+    Returns:
+        (preprocessor, postprocessor) — either may be None if not configured.
+    """
+    features = {**policy.input_features, **policy.output_features}
+    norm_map = policy.config.normalization_mapping
+
+    preprocessor = None
+    if getattr(data_config, "preprocessor", None) is not None:
+        preprocessor = _build_pipeline_from_config(
+            data_config.preprocessor,
+            name=POLICY_PREPROCESSOR_DEFAULT_NAME,
+            overrides={
+                "device_processor": {"device": device},
+                "normalizer_processor": {
+                    "stats": dataset_stats,
+                    "features": features,
+                    "norm_map": norm_map,
+                },
+            },
+        )
+
+    postprocessor = None
+    if getattr(data_config, "postprocessor", None) is not None:
+        postprocessor = _build_pipeline_from_config(
+            data_config.postprocessor,
+            name=POLICY_POSTPROCESSOR_DEFAULT_NAME,
+            overrides={
+                "unnormalizer_processor": {
+                    "stats": dataset_stats,
+                    "features": features,
+                    "norm_map": norm_map,
+                },
+            },
+        )
+
+    return preprocessor, postprocessor
 
 
-def make_preprocessor_from_config(
+def _build_pipeline_from_config(
     config: dict[str, Any] | list[str | dict[str, Any]],
+    name: str,
     overrides: dict[str, Any] | None = None,
 ) -> PolicyProcessorPipeline[dict[str, Any], dict[str, Any]]:
     """
-    Create a preprocessor pipeline from step configurations with optional overrides.
+    Create a processor pipeline from step configurations with optional overrides.
 
     This function creates a PolicyProcessorPipeline directly from step configurations,
     without requiring a pretrained path. It supports overriding step configurations
@@ -227,41 +285,13 @@ def make_preprocessor_from_config(
               {"name": "policy_preprocessor", "steps": [...]}
             - A list of step configurations (concise format):
               ["step_name", {"step_name": {...}}]
+        name: Pipeline name (e.g. "policy_preprocessor", "policy_postprocessor").
         overrides: Optional dictionary to override step configurations. Keys should
-            match the step's registry_name. Example:
-            {"device_processor": {"device": "cuda"},
-             "normalizer_processor": {"stats": dataset.meta.stats}}
+            match the step's registry_name.
 
     Returns:
         A PolicyProcessorPipeline instance with the configured steps.
 
-    Example (JSON format with overrides):
-        ```python
-        config = {
-            "name": "policy_preprocessor",
-            "steps": [
-                {"registry_name": "device_processor", "config": {"device": "cpu"}},
-                {"registry_name": "normalizer_processor", "config": {"eps": 1e-8}},
-            ],
-        }
-        overrides = {
-            "device_processor": {"device": "cuda"},
-            "normalizer_processor": {"stats": dataset.meta.stats, "features": {...}},
-        }
-        preprocessor = make_preprocessor_from_config(config, overrides=overrides)
-        # device_processor will use device="cuda" (overridden)
-        # normalizer_processor will use eps=1e-8 (from config) and stats from overrides
-        ```
-
-    Example (concise list format):
-        ```python
-        steps = [
-            "rename_observations_processor",
-            "device_processor",
-            {"normalizer_processor": {"eps": 1e-8}},
-        ]
-        preprocessor = make_preprocessor_from_config(steps)
-        ```
 
     Raises:
         ValueError: If a step configuration is invalid or step cannot be instantiated.
@@ -277,11 +307,9 @@ def make_preprocessor_from_config(
         if isinstance(config, DictConfig):
             config = OmegaConf.to_container(config, resolve=True)
         step_configs = config["steps"]
-        pipeline_name = config.get("name", "policy_preprocessor")
     elif isinstance(config, list):
         # Concise list format
         step_configs = config
-        pipeline_name = "policy_preprocessor"
     else:
         raise ValueError(f"Config must be a dict with 'steps' key or a list, got {type(config)}")
 
@@ -334,7 +362,7 @@ def make_preprocessor_from_config(
 
     return PolicyProcessorPipeline(
         steps=steps,
-        name=pipeline_name,
+        name=name,
     )
 
 
@@ -351,6 +379,8 @@ def update_policy(
     grad_clip_norm: float,
     lr_scheduler=None,
     lock=None,
+    vlm_batch: Any = None,
+    vlm_loss_scale: float = 0.0,
 ) -> MetricsTracker:
     """
     Performs a single training step to update the policy's weights.
@@ -361,12 +391,18 @@ def update_policy(
     Args:
         train_metrics: A MetricsTracker instance to record training statistics.
         policy: The policy model to be trained (FSDP2-sharded).
-        batch: A batch of training data.
+        batch: A batch of VLA training data (robot observations + actions).
         optimizer: The optimizer used to update the policy's parameters.
         use_amp: Whether to use automatic mixed precision.
         grad_clip_norm: The maximum norm for gradient clipping.
         lr_scheduler: An optional learning rate scheduler.
         lock: An optional lock for thread-safe optimizer updates.
+        vlm_batch: Optional batch of VLM co-training data. When provided, the policy
+            computes an additional language modelling loss on this batch (via the VLM
+            backbone's causal LM head) and adds it to the action loss. Expected keys
+            match the HF Qwen model inputs: input_ids, attention_mask, labels, and
+            optionally pixel_values / image_grid_thw for multimodal samples.
+        vlm_loss_scale: Weight applied to the VLM loss before adding to action loss.
 
     Returns:
         The updated MetricsTracker with new statistics for this step.
@@ -376,11 +412,13 @@ def update_policy(
     optimizer.zero_grad()
 
     autocast_context = (
-        torch.amp.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
+        torch.amp.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16) if use_amp else nullcontext()
     )
     with autocast_context:
-        output = policy(batch)
+        output = policy(batch, vlm_batch=vlm_batch)
         loss = output["loss"]
+        if "vlm_loss" in output:
+            loss = loss + vlm_loss_scale * output["vlm_loss"]
 
     loss.backward()
 
@@ -404,6 +442,8 @@ def update_policy(
     train_metrics.grad_norm = grad_norm.full_tensor().item() if hasattr(grad_norm, 'full_tensor') else grad_norm.item()
     train_metrics.lr = optimizer.param_groups[0]["lr"]
     train_metrics.update_s = time.perf_counter() - start_time
+    if "vlm_loss" in output and "vlm_loss" in train_metrics.metrics:
+        train_metrics.vlm_loss = output["vlm_loss"].item()
 
     return train_metrics
 
@@ -411,21 +451,28 @@ def update_policy(
 def main(config: TrainConfig, seed: int):
     set_seed(seed)
 
-    # --- Distributed init ---
-    dist.init_process_group(backend="nccl")
+    policy_config = PreTrainedConfig.from_train_config(config)
+
+    dist.init_process_group(backend=get_platform().dist_backend())
     local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    device = torch.device("cuda", local_rank)
+    get_platform().set_device(local_rank)
+    device = get_platform().device(local_rank)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     is_main_process = rank == 0
 
     if config.data.dataset_type == "wds":
         from megatron.energon import get_train_dataset, get_loader, WorkerConfig
-        from flagscale.models.vla.qwen_gr00t_task_encoder import TaskEncoder
+        from flagscale.models.vla.qwen_gr00t import QwenGr00tConfig
+        from flagscale.models.vla.qwen_gr00t.task_encoder_qwen_gr00t import TaskEncoder
 
-        policy = QwenGr00t(config=config)
-        policy.to("cuda")
+        if not isinstance(policy_config, QwenGr00tConfig):
+            raise ValueError(
+                f"wds dataset_type only supports QwenGr00t, got {type(policy_config).__name__}"
+            )
+
+        policy = TrainablePolicy.from_config(policy_config)
+        policy.to(get_platform().name())
 
         ds = get_train_dataset(
             config.data.data_path,
@@ -433,11 +480,30 @@ def main(config: TrainConfig, seed: int):
             task_encoder=TaskEncoder(config.data.wds),
             shuffle_buffer_size=1000,
             max_samples_per_sequence=100,
-            worker_config=WorkerConfig.default_worker_config(num_workers=1, data_parallel_group=None),
+            worker_config=WorkerConfig.default_worker_config(
+                num_workers=config.system.num_workers,
+                data_parallel_group=None,
+            ),
             repeat=True,
         )
         dataloader = get_loader(ds)
         dl_iter = iter(dataloader)
+
+        vlm_dl_iter = None
+        if getattr(config.data, "vlm_data_path", None):
+            vlm_ds = get_train_dataset(
+                config.data.vlm_data_path,
+                batch_size=config.system.batch_size,
+                task_encoder=TaskEncoder(config.data.wds),
+                shuffle_buffer_size=1000,
+                max_samples_per_sequence=100,
+                worker_config=WorkerConfig.default_worker_config(
+                    num_workers=config.system.num_workers,
+                    data_parallel_group=None,
+                ),
+                repeat=True,
+            )
+            vlm_dl_iter = iter(get_loader(vlm_ds))
         preprocessor = None
         postprocessor = None
         sampler = None
@@ -445,23 +511,16 @@ def main(config: TrainConfig, seed: int):
         num_frames = 1
         num_episodes = 1
     else:
-        dataset = make_dataset(config.data)
+        dataset = make_dataset(config, policy_config)
         dist.barrier()
 
-        policy = make_policy(config=config, ds_meta=dataset.meta)
+        policy = make_policy(policy_config, dataset.meta)
         dist.barrier()
 
         # Create processors - only provide dataset_stats if not resuming from saved processors
-        preprocessor_overrides = {
-            "device_processor": {"device": device.type},
-            "normalizer_processor": {
-                "stats": dataset.meta.stats,
-                "features": {
-                    **policy.input_features,
-                    **policy.output_features,
-                },
-            },
-        }
+        preprocessor, postprocessor = make_pre_post_processors(
+            policy, config.data, dataset_stats=dataset.meta.stats, device=device.type,
+        )
 
         num_workers = 0  # config.system.num_workers
         shuffle = config.system.shuffle
@@ -486,42 +545,39 @@ def main(config: TrainConfig, seed: int):
             prefetch_factor=2 if num_workers > 0 else None,
         )
 
-        # Setup preprocessor
-        preprocessor = None
-        if config.data.preprocessor is not None:
-            preprocessor = make_preprocessor_from_config(
-                config.data.preprocessor, overrides=preprocessor_overrides
-            )
-
-        # Setup postprocessor (unnormalization for inference)
-        postprocessor = None
-        postprocessor_config = getattr(config.data, "postprocessor", None)
-        if postprocessor_config is not None:
-            postprocessor_overrides = {
-                "unnormalizer_processor": {
-                    "stats": dataset.meta.stats,
-                    "features": {
-                        **policy.input_features,
-                        **policy.output_features,
-                    },
-                },
-            }
-            postprocessor = make_preprocessor_from_config(
-                postprocessor_config, overrides=postprocessor_overrides
-            )
 
         dl_iter = cycle(dataloader)
         num_frames = dataset.num_frames
         num_episodes = dataset.num_episodes
+        vlm_dl_iter = None
 
     # --- Apply FSDP2 ---
-    device_mesh = init_device_mesh("cuda", (world_size,))
+    device_mesh = init_device_mesh(get_platform().name(), (world_size,))
     apply_fsdp2(policy, device_mesh)
 
     # Setup optimizer and scheduler (applies freeze config internally)
     optimizer, lr_scheduler = setup_optimizer_and_scheduler(policy, config)
 
     dist.barrier()
+
+    step = 0
+    resume_from = config.system.checkpoint.resume_from
+    if resume_from:
+        step = load_training_state_fsdp2(
+            Path(resume_from), policy, optimizer, lr_scheduler,
+        )
+        # Advance the dataloader iterator to the correct position. The data
+        # ordering is deterministic from the DistributedSampler's own seed
+        # (not the global RNG), so calling next() `step` times moves the
+        # cursor to the right batch. We save/restore the global RNG around
+        # this so the fast-forward's incidental RNG consumption is discarded
+        # and training resumes with the exact RNG state from the checkpoint.
+        saved_rng = serialize_rng_state()
+        # TODO: (yupu) Maybe save/restore the dataloader state?
+        for _ in range(step):
+            next(dl_iter)
+        deserialize_rng_state(saved_rng)
+        logger.info(f"Resumed from checkpoint at step {step}")
 
     train_metrics = {
         "loss": AverageMeter("loss", ":.3f"),
@@ -530,10 +586,10 @@ def main(config: TrainConfig, seed: int):
         "update_s": AverageMeter("updt_s", ":.3f"),
         "dataloading_s": AverageMeter("data_s", ":.3f"),
     }
+    if vlm_dl_iter is not None:
+        train_metrics["vlm_loss"] = AverageMeter("vlm_loss", ":.3f")
 
     effective_batch_size = config.system.batch_size * world_size
-
-    step = 0
 
     train_tracker = MetricsTracker(
         effective_batch_size,
@@ -543,10 +599,11 @@ def main(config: TrainConfig, seed: int):
         initial_step=step,
     )
 
-    # Ensures proper data shuffling across epochs in distributed training
     epoch = 0
     if sampler is not None:
         samples_per_epoch = num_frames // effective_batch_size
+        if resume_from and samples_per_epoch > 0:
+            epoch = step // samples_per_epoch
         sampler.set_epoch(epoch)
     else:
         samples_per_epoch = 0
@@ -560,6 +617,8 @@ def main(config: TrainConfig, seed: int):
                 for k, v in batch.items()
             }
 
+        vlm_batch = next(vlm_dl_iter) if vlm_dl_iter is not None else None
+
         if preprocessor is not None:
             batch = preprocessor(batch)
         train_tracker.dataloading_s = time.perf_counter() - start_time
@@ -572,6 +631,8 @@ def main(config: TrainConfig, seed: int):
             use_amp=config.system.use_amp,
             grad_clip_norm=config.system.grad_clip_norm,
             lr_scheduler=lr_scheduler,
+            vlm_batch=vlm_batch,
+            vlm_loss_scale=getattr(config.system, "vlm_loss_scale", 0.1),
         )
 
         step += 1
@@ -593,9 +654,10 @@ def main(config: TrainConfig, seed: int):
         ):
             dist.barrier()
 
-            # get_model_state_dict is a collective — all ranks must call it
+            # get_model_state_dict and get_optimizer_state_dict are collectives — all ranks must call
             options = StateDictOptions(full_state_dict=True, cpu_offload=True)
             state_dict = get_model_state_dict(policy, options=options)
+            optimizer_state_dict = get_optimizer_state_dict(policy, optimizer, options=options)
 
             if is_main_process:
                 logger.info(f"Saving checkpoint at step {step}")
@@ -603,18 +665,16 @@ def main(config: TrainConfig, seed: int):
                 checkpoint_dir = get_step_checkpoint_dir(
                     output_dir, config.system.train_steps, step
                 )
-                pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
-                policy.save_pretrained_artifacts(pretrained_dir)
-                ckpt_config = OmegaConf.merge(
-                    config.to_omegaconf(),
-                    policy.checkpoint_config_overrides(),
-                )
-                save_vla_checkpoint(
+                save_checkpoint(
                     checkpoint_dir=checkpoint_dir,
-                    model_or_state_dict=state_dict,
-                    config=ckpt_config,
+                    step=step,
+                    config=config,
+                    policy=policy,
+                    optimizer_state_dict=optimizer_state_dict,
+                    lr_scheduler=lr_scheduler,
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
+                    state_dict=state_dict,
                 )
                 update_last_checkpoint(checkpoint_dir)
 

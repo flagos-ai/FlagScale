@@ -7,6 +7,8 @@ system:
   tensor_model_parallel_size: 2
   pipeline_model_parallel_size: 2
   expert_model_parallel_size: 2
+  expert_tensor_parallel_size: 1
+  engram_embedding_parallel_size: 2
   finetune: false
   no_load_rng: true
   no_load_optim: true
@@ -19,7 +21,7 @@ system:
   use_distributed_optimizer: true
   overlap_grad_reduce: true
   overlap_param_gather: true
-  attention_backend: auto
+  attention_backend: unfused
   precision:
     bf16: true
     attention_softmax_in_fp32: true
@@ -69,11 +71,11 @@ model:
   moe_grouped_gemm: true
   moe_shared_expert_intermediate_size: 2816
   num_experts: 4
-  moe_router_load_balancing_type: "seq_aux_loss"
+  # moe_router_load_balancing_type: "seq_aux_loss"
   moe_router_score_function: sigmoid
   moe_router_enable_expert_bias: true
   moe_router_bias_update_rate: 0.001
-  moe_aux_loss_coeff: 0.02
+  # moe_aux_loss_coeff: 0.02
   moe_layer_freq: "[0]+[1]*3"
   # node limited routing
   moe_router_num_groups: 1
@@ -84,7 +86,7 @@ model:
   # moe_permute_fusion: true
 
   # mtp_args
-  mtp_num_layers: 1
+  # mtp_num_layers: 1
 
   # engram args =================
   use_engram: true
@@ -98,6 +100,7 @@ model:
   engram_seed: 0
   engram_kernel_size: 4
   engram_hc_mult: 1
+  engram_embedding_parallel_method: "alltoall"
 
   # training
   seed: 42

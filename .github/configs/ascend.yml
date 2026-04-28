@@ -1,0 +1,59 @@
+# Ascend NPU Hardware Configuration
+# This file defines CI/CD settings for Huawei Ascend NPU-based testing
+# Test configurations are defined in tests/test_utils/config/platforms/ascend.yaml
+
+hardware_name: ascend
+display_name: "Ascend NPU Tests"
+
+# Docker image for this hardware
+ci_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-ascend-ci
+ci_train_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-ascend-ci
+ci_inference_image: harbor.baai.ac.cn/flagscale/vllm-plugin-fl:v0.1.0-ascend-ci
+
+# Runner labels for this hardware
+runner_labels: ["flagscale-ascend-ascend910-gpu2-32c-128g"]
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /public-ks3/cicd/baai_datasets:/home/gitlab-runner/data
+  - /public-ks3/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
+  - /usr/local/Ascend/driver:/usr/local/Ascend/driver:ro
+  - /usr/local/Ascend/add-ons:/usr/local/Ascend/add-ons:ro
+  - /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi:ro
+
+# Container options for Ascend NPU (no --gpus, use --device for NPU cards)
+container_options: >-
+  --device /dev/davinci_manager
+  --device /dev/devmm_svm
+  --device /dev/hisi_hdc
+  --ipc=host
+  --shm-size=500g
+  --hostname flagscale_cicd
+  --user root
+  --ulimit nofile=65535:65535
+  --cap-add SYS_ADMIN
+  --cap-add SYS_PTRACE
+  --cap-add IPC_LOCK
+  --cap-add NET_ADMIN
+  --cap-add SYS_RAWIO
+  --cap-add SYS_NICE
+  --security-opt seccomp=unconfined
+  --security-opt apparmor=unconfined
+  --privileged
+
+# =============================================================================
+# Package Manager Configuration
+# =============================================================================
+# Ascend CI image has all dependencies pre-installed; use pip directly.
+pkg_mgr: "pip"
+
+# Environment path (not used for pip, kept for compatibility)
+env_path: ""
+
+# Conda environment name (not used for pip)
+env_names:
+  train: ""
+  hetero_train: ""
+  inference: ""
+  serve: ""
+  rl: ""

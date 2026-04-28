@@ -22,7 +22,6 @@ model:
   # Path to paligemma tokenizer
   tokenizer_path: /workspace/models/google/paligemma-3b-pt-224
   tokenizer_max_length: 48
-  action_steps: 50
 
   optimizer:
     name: AdamW

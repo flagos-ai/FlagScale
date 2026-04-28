@@ -3,5 +3,17 @@
     host: 0.0.0.0
     port: 5000
     model_variant: QwenGr00t
-    model: /workspace/models/qwen_gr00t_train/checkpoints/last
+    model: /share/project/fengyupu/github/FlagScale_2/outputs/260320_qwen_gr00t_train_libero_goal_old_dataset/checkpoints/last
     device: "cuda"
+    # Maps client-sent observation keys to the keys the model was trained with.
+    # Format: {key_from_client: key_expected_by_model}
+    rename_map:
+      "observation/image": "observation.images.image"
+      "observation/wrist_image": "observation.images.wrist_image"
+      "observation/state": "observation.state"
+      "prompt": "task"
+    serve_preprocessor:
+      steps:
+        - registry_name: image_resize_processor
+          config:
+            image_size: [224, 224]

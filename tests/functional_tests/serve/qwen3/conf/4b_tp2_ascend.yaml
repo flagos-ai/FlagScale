@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - serve: 4b_tp2_ascend
+
+experiment:
+  exp_name: qwen3
+  exp_dir: tests/functional_tests/serve/qwen3/test_results/4b_tp2_ascend
+  task:
+    type: serve
+    entrypoint: null
+  runner:
+    hostfile: null
+    deploy:
+      port: 6703
+      use_fs_serve: false
+  envs:
+    ASCEND_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+    HCCL_WHITELIST_DISABLE: 1
+    VLLM_TARGET_DEVICE: "npu"
+    no_proxy: "127.0.0.1,localhost"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

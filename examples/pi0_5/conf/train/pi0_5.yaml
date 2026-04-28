@@ -1,10 +1,10 @@
 system:
-  batch_size: 1
-  train_steps: 100000
+  batch_size: 16
+  train_steps: 30000
   log_freq: 10
   grad_clip_norm: 1.0
-  use_amp: false
-  shuffle: false
+  use_amp: true
+  shuffle: true
   num_workers: 4
 
   checkpoint:
@@ -18,11 +18,12 @@ system:
 model:
   model_name: pi0.5
   # Path to the pretrained pi05_base model checkpoint
-  checkpoint_dir: /workspace/models/lerobot/pi05_base
+  checkpoint_dir: /workspace/models/lerobot/pi05_libero_base
   # Path to paligemma tokenizer
   tokenizer_path: /workspace/models/google/paligemma-3b-pt-224
   tokenizer_max_length: 200
-  action_steps: 50
+  gradient_checkpointing: true
+  freeze_vision_encoder: false
 
   optimizer:
     name: AdamW
@@ -37,14 +38,12 @@ model:
 
 data:
   # Path to the training data
-  data_path: /workspace/datasets/lerobot/aloha_mobile_cabinet
+  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
   tolerance_s: 0.0001
   use_imagenet_stats: true
   # To match the input features naming from the dataset to the policy config
   # For example, for the aloha_mobile_cabinet dataset, the rename_map is:
   rename_map:
-    observation.images.cam_high: observation.images.base_0_rgb
-    observation.images.cam_left_wrist: observation.images.left_wrist_0_rgb
-    observation.images.cam_right_wrist: observation.images.right_wrist_0_rgb
+    "observation.images.wrist_image": "observation.images.image2"
   # By default, Pi0.5 uses quantiles for state and action normalization, if false, it uses mean and std instead
-  use_quantiles: false
+  use_quantiles: true

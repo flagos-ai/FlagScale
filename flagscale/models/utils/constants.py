@@ -42,6 +42,7 @@ CHECKPOINTS_DIR = "checkpoints"
 LAST_CHECKPOINT_LINK = "last"
 PRETRAINED_MODEL_DIR = "pretrained_model"
 VLM_CONFIG_DIR = "vlm_config"
+SAFETENSORS_FILE = "model.safetensors"
 TRAINING_STATE_DIR = "training_state"
 RNG_STATE = "rng_state.safetensors"
 TRAINING_STEP = "training_step.json"
@@ -51,6 +52,19 @@ SCHEDULER_STATE = "scheduler_state.json"
 
 POLICY_PREPROCESSOR_DEFAULT_NAME = "policy_preprocessor"
 POLICY_POSTPROCESSOR_DEFAULT_NAME = "policy_postprocessor"
+
+
+def resolve_pretrained_dir(path: Path, sentinel: str) -> Path:
+    """Resolve a checkpoint root dir to the pretrained_model subdir if needed.
+
+    If ``sentinel`` (e.g. ``config.json``) does not exist directly under
+    ``path`` but does exist under ``path / pretrained_model/``, returns the
+    latter.  Otherwise returns ``path`` unchanged.
+    """
+    if not (path / sentinel).exists() and (path / PRETRAINED_MODEL_DIR / sentinel).exists():
+        return path / PRETRAINED_MODEL_DIR
+    return path
+
 
 if "LEROBOT_HOME" in os.environ:
     raise ValueError(

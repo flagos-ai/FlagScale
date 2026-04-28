@@ -1,0 +1,33 @@
+# MetaX C500 Platform Configuration
+# Flexible test selection mechanism for MetaX C500 GPU (MACA) environments
+#
+# MetaX C500 specs: 2x C500 GPUs, 65536 MiB each, MACA 3.3.0
+#
+# Users can modify the following:
+# - functional: Add/remove test case names in the support lists
+#   Example: qwen3: ["0_6b"] -> add or remove items
+# - unit: Add/remove paths in include and exclude lists
+#   Example: include: "*" or ["test_basic.py", "runner/*"]
+#            exclude: [] or ["test_spiky_loss_detector.py"]
+
+# Define device types available for this platform
+device_types:
+  - c500
+
+# Device-specific test configurations
+c500:
+  name: "c500"
+  tests:
+    functional:
+      # Add or remove test cases per model
+      train:
+        qwen3: ["0_6b_metax"]
+      hetero_train: {}
+      benchmark: {}
+      inference: {}
+      serve: {}
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

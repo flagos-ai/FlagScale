@@ -36,6 +36,14 @@ ARG UV_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
 # PyTorch wheel index (derived from CUDA version)
 ARG PYTORCH_INDEX=https://download.pytorch.org/whl/cu128
 
+# Proxy settings (build-time only, not persisted in image)
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
 # =============================================================================
 # BASE STAGE - System dependencies
 # =============================================================================
@@ -45,6 +53,14 @@ ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG UV_VERSION
 ARG PKG_MGR
+
+# Proxy settings (build-time only)
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
 
 # Root installation directory (single source of truth)
 ARG FLAGSCALE_HOME=/root
@@ -127,6 +143,14 @@ ARG PKG_MGR
 ARG FLAGSCALE_HOME=/root
 ARG PYTHON_VERSION=3.12
 
+# Proxy settings (build-time only)
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
 # PyPI index URLs (re-declare to use in this stage)
 ARG PIP_INDEX_URL
 ARG PIP_EXTRA_INDEX_URL
@@ -185,6 +209,14 @@ ARG PYTORCH_INDEX
 ARG PKG_MGR
 ARG FLAGSCALE_HOME=/root
 ARG PYTHON_VERSION=3.12
+
+# Proxy settings (build-time only)
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
 
 # PyPI index URLs
 ARG PIP_INDEX_URL

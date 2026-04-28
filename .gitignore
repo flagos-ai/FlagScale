@@ -23,4 +23,4 @@ template_conf.yaml
 template_funcs.py
 
 # data files
-assets/
+# assets/

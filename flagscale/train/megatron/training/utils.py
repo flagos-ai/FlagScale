@@ -77,6 +77,7 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
     # Seperate moe and dense params
     params_data = []
     moe_params_data = []
+    engram_embedding_data = []
     sharded_params_data = []
     data_parallel_group = None
 
@@ -88,10 +89,16 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
                 continue
             assert is_not_tp_duplicate
             if not getattr(param, 'allreduce', True):
-                # TODO: Implement memory optimization for MoE parameters.
-                assert param_is_not_shared(param)
-                param = to_local_if_dtensor(param)
-                moe_params_data.append(param.data.float() if args.bf16 else param.data)
+                if not getattr(param, "is_engram_embedding", False):
+                    # TODO: Implement memory optimization for MoE parameters.
+                    assert param_is_not_shared(param)
+                    param = to_local_if_dtensor(param)
+                    moe_params_data.append(param.data.float() if args.bf16 else param.data)
+                else:
+                    # Engram embedding param
+                    assert param_is_not_shared(param)
+                    param = to_local_if_dtensor(param)
+                    engram_embedding_data.append(param.data.float() if args.bf16 else param.data)
             else:
                 if param_is_not_shared(param):
                     param = to_local_if_dtensor(param)
@@ -162,6 +169,18 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
     # See details in https://gitlab-master.nvidia.com/ADLR/megatron-lm/-/issues/409
     else:
         moe_norm_2 = torch.zeros_like(norm_2)
+    
+    # Add norm contribution from engram embedding.
+    if len(engram_embedding_data) > 0:
+        engram_embedding_norm, _ = multi_tensor_applier(
+            multi_tensor_l2norm,
+            dummy_overflow_buf,
+            [engram_embedding_data],
+            False,  # no per-parameter norm.
+        )
+        engram_embedding_norm_2 = engram_embedding_norm * engram_embedding_norm
+    else:
+        engram_embedding_norm_2 = torch.zeros_like(norm_2)
 
     ########## FlagScale Begin ##########
     # Sum across all model-parallel GPUs(tensor + pipeline).
@@ -192,6 +211,7 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
                     moe_norm_2, op=torch.distributed.ReduceOp.SUM, group=emp_group
                 )
             norm_2 += moe_norm_2
+        assert len(engram_embedding_data) <= 0, "Engram embedding does not support hetero."
     ########## FlagScale End ##########
     else:  # original code
 
@@ -202,6 +222,8 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
         # Expert params should sum across all model-parallel GPUs (expert + tensor + pipeline).
         expert_reduce_group = mpu.get_expert_tensor_model_pipeline_parallel_group()
         ranks_in_expert_reduce_group = torch.distributed.get_process_group_ranks(expert_reduce_group)
+        # Engram params should sum across engram-embed-parallel GPUs.(Engram embedding and pipeline, for which has no engram module, the engram_module_initialized is False, and the param_norm is set to 0.)
+        engram_mp_group = mpu.get_engram_model_parallel_group()
 
     # If dense and expert reduce groups are the same, sum then reduce.
     if ranks_in_dense_reduce_group == ranks_in_expert_reduce_group:
@@ -218,10 +240,18 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
             moe_norm_2, op=torch.distributed.ReduceOp.SUM, group=expert_reduce_group
         )
         norm_2 += moe_norm_2
+    # Reduce and add engram embedding norm if the group exists. 
+    # Because engram_mp_group is different with other two groups in most cases, in order to reduce the impact of original code, allreduce and add independently here even if the engram embedding parallel group is the same as dense or expert group.
+    if engram_mp_group is not None:
+        torch.distributed.all_reduce(
+            engram_embedding_norm_2, op=torch.distributed.ReduceOp.SUM, group=engram_mp_group
+        )
+    norm_2 += engram_embedding_norm_2
 
     if comm_device == "cpu":
         norm_2 = norm_2.to(cur_platform.device())
         moe_norm_2 = moe_norm_2.to(cur_platform.device())
+        engram_embedding_norm_2 = engram_embedding_norm_2.to(cur_platform.device())
 
     return norm_2.item() ** 0.5
 

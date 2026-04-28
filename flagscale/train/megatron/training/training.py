@@ -805,6 +805,8 @@ def pretrain(
 
     ###### FlagScale Begin ######
     args = get_args()
+    if args.mg_fl_prefer:
+        os.environ['MG_FL_PREFER'] = args.mg_fl_prefer
     # enable flagos:triton / vendor:cuda / reference:torch backend for transformer engine fl
     if args.te_fl_prefer:
         os.environ['TE_FL_PREFER'] = args.te_fl_prefer

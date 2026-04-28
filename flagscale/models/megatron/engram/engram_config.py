@@ -17,3 +17,6 @@ class EngramConfig(MLATransformerConfig):
     engram_seed: int = 0
     engram_kernel_size: int = 1
     engram_hc_mult: int = 1
+    engram_embedding_parallel_size: int | None = 1
+    engram_embedding_parallel_method: str = "alltoall"
+    engram_offload_embedding_optimizer_states: bool = False

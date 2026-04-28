@@ -155,7 +155,7 @@ def test_train_equal(path, task, model, case):
 
     print(f"result_path: {result_path}")
 
-    with open(result_path, "r") as file:
+    with open(result_path, "r", errors="replace") as file:
         lines = file.readlines()
 
     # Load gold values first to determine which metrics to extract
@@ -206,7 +206,12 @@ def test_train_equal(path, task, model, case):
             # Try to compare what we have
             min_len = min(len(result_values), len(gold_values))
             if min_len > 0:
-                is_close = np.allclose(gold_values[:min_len], result_values[:min_len])
+                gold_entry = gold_result_json.get(key, {})
+                rtol = gold_entry.get("rtol", 1e-5) if isinstance(gold_entry, dict) else 1e-5
+                atol = gold_entry.get("atol", 1e-8) if isinstance(gold_entry, dict) else 1e-8
+                is_close = np.allclose(
+                    gold_values[:min_len], result_values[:min_len], rtol=rtol, atol=atol
+                )
                 diff = np.abs(np.array(gold_values[:min_len]) - np.array(result_values[:min_len]))
                 print(f"\nPartial comparison (first {min_len} values):")
                 print(f"  Status: {'✅ PASS' if is_close else '❌ FAIL'}")
@@ -217,9 +222,15 @@ def test_train_equal(path, task, model, case):
 
         # Calculate differences
         diff = np.abs(np.array(gold_values) - np.array(result_values))
-        is_close = np.allclose(gold_values, result_values)
+        # Support optional per-metric tolerance in the gold values JSON
+        gold_entry = gold_result_json.get(key, {})
+        rtol = gold_entry.get("rtol", 1e-5) if isinstance(gold_entry, dict) else 1e-5
+        atol = gold_entry.get("atol", 1e-8) if isinstance(gold_entry, dict) else 1e-8
+        is_close = np.allclose(gold_values, result_values, rtol=rtol, atol=atol)
 
-        print(f"\nComparison result: {'✅ PASS' if is_close else '❌ FAIL'}")
+        print(
+            f"\nComparison result: {'✅ PASS' if is_close else '❌ FAIL'} (rtol={rtol}, atol={atol})"
+        )
         print(f"  Max diff: {np.max(diff):.6e}")
         print(f"  Mean diff: {np.mean(diff):.6e}")
 
@@ -267,7 +278,7 @@ def test_inference_equal(path, task, model, case):
     # Assertion check: ensure the inference output file exists
     assert os.path.exists(result_path), f"Failed to find 'host_0_localhost.output' at {result_path}"
 
-    with open(result_path, "r") as file:
+    with open(result_path, "r", errors="replace") as file:
         lines = file.readlines()
 
     # Extract inference output content within the marker range
@@ -277,9 +288,11 @@ def test_inference_equal(path, task, model, case):
         # Assertion check: ensure no 'flag_gems' import failure errors exist
         assert "Failed to import 'flag_gems'" not in line, "Failed to import 'flag_gems''"
 
-        if line == "**************************************************\n":
+        if line.rstrip("\n").endswith("**************************************************"):
             output = True
-        if line == "##################################################\n":
+            result_lines.append("**************************************************\n")
+            continue
+        if line.rstrip("\n").endswith("##################################################"):
             output = False
         if output:
             result_lines.append(line)
@@ -471,7 +484,7 @@ def test_benchmark_equal(path, task, model, case, platform, device):
 
     assert os.path.exists(result_path), f"Failed to find 'host_0_localhost.output' at {result_path}"
 
-    with open(result_path, "r") as file:
+    with open(result_path, "r", errors="replace") as file:
         lines = file.readlines()
 
     # Load gold values (performance baselines)
@@ -640,7 +653,7 @@ def test_rl_equal(path, task, model, case):
     assert os.path.exists(result_path), f"Failed to find 'host_0_localhost.output' at {result_path}"
 
     # 2. Read log file content
-    with open(result_path, "r") as file:
+    with open(result_path, "r", errors="replace") as file:
         lines = file.readlines()
 
     # 3. Initialize result storage dictionary for extracted reward metrics

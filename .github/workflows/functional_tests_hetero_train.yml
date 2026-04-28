@@ -111,6 +111,9 @@ jobs:
         run: |
           git config --global --add safe.directory $PROJECT_ROOT
 
+      - name: Check environment info
+        run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
+
       - name: Install dependencies for heterogeneous training
         run: |
           set -euo pipefail

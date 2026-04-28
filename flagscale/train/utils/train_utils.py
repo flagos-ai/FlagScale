@@ -1,4 +1,4 @@
-# Copied from https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/utils/train_utils.py
+# Adapted from https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/utils/train_utils.py
 
 #!/usr/bin/env python
 
@@ -17,17 +17,29 @@
 # limitations under the License.
 from pathlib import Path
 
-from omegaconf import OmegaConf
-from safetensors.torch import load_model, save_file
+import torch.nn as nn
+from safetensors.torch import load_file, save_file
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
+from torch.optim import Optimizer
 
-from flagscale.logger import logger
 from flagscale.models.utils.constants import (
     CHECKPOINTS_DIR,
     LAST_CHECKPOINT_LINK,
+    OPTIMIZER_PARAM_GROUPS,
+    OPTIMIZER_STATE,
     PRETRAINED_MODEL_DIR,
+    SAFETENSORS_FILE,
+    SCHEDULER_STATE,
+    TRAINING_STATE_DIR,
     TRAINING_STEP,
 )
-from flagscale.train.datasets.utils import load_json, write_json
+from flagscale.train.datasets.utils import flatten_dict, load_json, unflatten_dict, write_json
+from flagscale.train.utils.io_utils import deserialize_json_into_object
+from flagscale.train.utils.random_utils import load_rng_state, save_rng_state
 
 
 def get_step_identifier(step: int, total_steps: int) -> str:
@@ -58,162 +70,139 @@ def update_last_checkpoint(checkpoint_dir: Path) -> Path:
     last_checkpoint_dir.symlink_to(relative_target)
 
 
-def save_checkpoint(checkpoint_dir: Path, policy) -> None:
-    """This function creates the following directory structure:
-
-    005000/  #  training step at checkpoint
-    ├── pretrained_model/
-    │   ├── config.json  # policy config
-    │   ├── model.safetensors  # policy weights
-    │   ├── train_config.json  # train config
-    │   ├── processor.json  # processor config (if preprocessor provided)
-    │   └── step_*.safetensors  # processor state files (if any)
-    └── training_state/
-        ├── optimizer_param_groups.json  #  optimizer param groups
-        ├── optimizer_state.safetensors  # optimizer state
-        ├── rng_state.safetensors  # rng states
-        ├── scheduler_state.json  # scheduler state
-        └── training_step.json  # training step
-    """
-    pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
-    policy.save_pretrained(pretrained_dir)
-
-
-def save_vla_checkpoint(
+def save_checkpoint(
     checkpoint_dir: Path,
-    model_or_state_dict,
+    step: int,
     config,
+    policy,
+    optimizer_state_dict: dict | None = None,
+    lr_scheduler=None,
     preprocessor=None,
     postprocessor=None,
+    state_dict: dict | None = None,
 ) -> None:
-    """Save model weights, config, and preprocessor state.
+    """Save a full training checkpoint.
 
     Creates the following directory structure:
-        005000/
-        └── pretrained_model/
-            ├── train_config.yaml              # train config (OmegaConf)
-            ├── model.safetensors              # All weights (VLM + action head)
-            ├── policy_preprocessor.json       # Preprocessor pipeline config
-            └── policy_preprocessor_step_*.safetensors  # Norm stats
+
+    005000/
+    ├── pretrained_model/
+    │   ├── config.json                     # policy config
+    │   ├── model.safetensors               # policy weights
+    │   ├── vlm_config/                     # VLM artifacts (model-specific)
+    │   ├── train_config.json               # training config
+    │   ├── policy_preprocessor.json        # preprocessor config
+    │   ├── policy_preprocessor_step_*.safetensors
+    │   ├── policy_postprocessor.json       # postprocessor config
+    │   └── policy_postprocessor_step_*.safetensors
+    └── training_state/
+        ├── training_step.json
+        ├── optimizer_state.safetensors
+        ├── optimizer_param_groups.json
+        ├── scheduler_state.json
+        └── rng_state.safetensors
 
     Args:
-        checkpoint_dir: Directory to save checkpoint (e.g., checkpoints/005000)
-        model_or_state_dict: nn.Module or a pre-gathered state_dict (e.g. from FSDP2)
-        config: Training config (OmegaConf, Pydantic, or dict)
-        preprocessor: Optional PolicyProcessorPipeline
+        checkpoint_dir: Root checkpoint directory (e.g., checkpoints/005000).
+        step: Current training step.
+        config: TrainConfig instance.
+        policy: The policy model.
+        optimizer_state_dict: Pre-gathered optimizer state dict (e.g. from
+            get_optimizer_state_dict for FSDP2).
+        lr_scheduler: Optional LR scheduler.
+        preprocessor: Optional preprocessor pipeline.
+        postprocessor: Optional postprocessor pipeline.
+        state_dict: Pre-gathered model state dict (e.g. from FSDP2). If None, uses
+            policy.state_dict().
     """
     pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
-    pretrained_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save train config as YAML
-    # Handle OmegaConf, Pydantic, and dict configs
-    if hasattr(config, "model_dump"):
-        config = OmegaConf.create(config.model_dump())
-    elif not OmegaConf.is_config(config):
-        config = OmegaConf.create(config)
-    OmegaConf.save(config, pretrained_dir / "train_config.yaml")
-
-    # Clone tensors to avoid safetensors errors with non-contiguous views.
-    if isinstance(model_or_state_dict, dict):
-        state_dict = {k: v.clone().contiguous() for k, v in model_or_state_dict.items()}
-    else:
-        state_dict = {
-            k: v.clone().contiguous() for k, v in model_or_state_dict.state_dict().items()
-        }
-    save_file(state_dict, pretrained_dir / "model.safetensors")
-
+    policy.save_pretrained(pretrained_dir, state_dict=state_dict)
+    config._save_pretrained(pretrained_dir)
     if preprocessor is not None:
         preprocessor.save_pretrained(pretrained_dir)
     if postprocessor is not None:
         postprocessor.save_pretrained(pretrained_dir)
+    save_training_state(checkpoint_dir, step, optimizer_state_dict, lr_scheduler)
 
 
-def load_checkpoint(
-    checkpoint_dir: str | Path,
-    model_cls,
-    device: str = "cpu",
-):
-    """Load config, model weights, and preprocessor from checkpoint.
+def save_training_state(
+    checkpoint_dir: Path,
+    train_step: int,
+    optimizer_state_dict: dict | None = None,
+    scheduler=None,
+) -> None:
+    save_dir = checkpoint_dir / TRAINING_STATE_DIR
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_training_step(train_step, save_dir)
+    save_rng_state(save_dir)
+    if optimizer_state_dict is not None:
+        save_optimizer_state(optimizer_state_dict, save_dir)
+    if scheduler is not None:
+        save_scheduler_state(scheduler, save_dir)
 
-    Args:
-        checkpoint_dir: Checkpoint directory (e.g., checkpoints/005000)
-        model_cls: Model class.
-        device: Device to load weights to
 
-    Returns:
-        If model_cls provided: tuple of (model, preprocessor)
-        If model_cls is None: tuple of (config, state_dict, preprocessor)
+def load_model_state_fsdp2(model: nn.Module, pretrained_dir: Path) -> None:
+    """Load a full (non-sharded) safetensors checkpoint into an FSDP2-wrapped model."""
+    full_sd = load_file(str(pretrained_dir / SAFETENSORS_FILE))
+    set_model_state_dict(model, full_sd, options=StateDictOptions(full_state_dict=True))
 
-    Raises:
-        FileNotFoundError: If checkpoint directory or required files don't exist
+
+def load_optimizer_state_fsdp2(model: nn.Module, optimizer: Optimizer, save_dir: Path) -> None:
+    """Load optimizer state into an FSDP2-wrapped model's optimizer.
+
+    FSDP2 optimizer state uses FQN string keys (not integer indices).
+    Params that never received gradients won't have state entries;
+    pad them with empty dicts so set_optimizer_state_dict doesn't KeyError.
     """
-    from flagscale.train.processor import PolicyProcessorPipeline
+    flat_optim = load_file(str(save_dir / OPTIMIZER_STATE))
+    optim_state = unflatten_dict(flat_optim)
+    param_groups = load_json(save_dir / OPTIMIZER_PARAM_GROUPS)
+    all_pg_params = {p for g in param_groups for p in g["params"]}
+    for p in all_pg_params - set(optim_state.get("state", {}).keys()):
+        optim_state.setdefault("state", {})[p] = {}
+    optim_state["param_groups"] = param_groups
+    set_optimizer_state_dict(
+        model, optimizer, optim_state, options=StateDictOptions(full_state_dict=True)
+    )
 
-    logger.info(f"Loading checkpoint from {checkpoint_dir}")
 
-    if isinstance(checkpoint_dir, str):
-        checkpoint_dir = Path(checkpoint_dir)
+def load_training_state_fsdp2(
+    checkpoint_dir: Path,
+    model: nn.Module,
+    optimizer: Optimizer,
+    scheduler,
+) -> int:
+    """Load full training state into an FSDP2-wrapped model and optimizer.
 
+    Returns the training step to resume from.
+    """
     pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
+    training_state_dir = checkpoint_dir / TRAINING_STATE_DIR
 
-    if not pretrained_dir.is_dir():
-        raise FileNotFoundError(f"Checkpoint directory not found: {pretrained_dir}")
+    load_model_state_fsdp2(model, pretrained_dir)
+    step = load_training_step(training_state_dir)
+    load_rng_state(training_state_dir)
+    load_optimizer_state_fsdp2(model, optimizer, training_state_dir)
 
-    config_path = pretrained_dir / "train_config.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    config = OmegaConf.load(config_path)
-    # Set _pretrained_dir so OmegaConf resolves ${_pretrained_dir} interpolations
-    # (e.g., model.qwenvl.base_vlm saved as "${_pretrained_dir}/vlm_config")
-    OmegaConf.update(config, "_pretrained_dir", str(pretrained_dir))
+    if scheduler is not None:
+        load_scheduler_state(scheduler, training_state_dir)
 
-    model = model_cls(config)
+    return step
 
-    # Materialize any meta tensors (from torch.device("meta") init) before loading weights.
-    has_meta = any(p.is_meta for p in model.parameters())
-    if has_meta:
-        model.to_empty(device=device)
 
-    weights_path = pretrained_dir / "model.safetensors"
-    if not weights_path.exists():
-        raise FileNotFoundError(f"Weights file not found: {weights_path}")
-    # strict=False to handle tied weights saved as separate entries
-    missing_keys, unexpected_keys = load_model(model, weights_path, device=device, strict=False)
-    if missing_keys:
-        logger.warning(f"Missing keys when loading checkpoint: {len(missing_keys)} keys")
-        if len(missing_keys) <= 10:
-            for key in missing_keys:
-                logger.warning(f"  - {key}")
-        else:
-            for key in missing_keys[:10]:
-                logger.warning(f"  - {key}")
-            logger.warning(f"  ... and {len(missing_keys) - 10} more")
-    if unexpected_keys:
-        logger.warning(f"Unexpected keys in checkpoint: {len(unexpected_keys)} keys")
-        if len(unexpected_keys) <= 10:
-            for key in unexpected_keys:
-                logger.warning(f"  - {key}")
-        else:
-            for key in unexpected_keys[:10]:
-                logger.warning(f"  - {key}")
-            logger.warning(f"  ... and {len(unexpected_keys) - 10} more")
+def save_optimizer_state(state_dict: dict, save_dir: Path) -> None:
+    state_dict = dict(state_dict)
+    param_groups = state_dict.pop("param_groups")
+    flat_state = flatten_dict(state_dict)
+    save_file(flat_state, save_dir / OPTIMIZER_STATE)
+    write_json(param_groups, save_dir / OPTIMIZER_PARAM_GROUPS)
 
-    model.to(device)
 
-    preprocessor = None
-    preprocessor_config_path = pretrained_dir / "policy_preprocessor.json"
-    if preprocessor_config_path.exists():
-        preprocessor = PolicyProcessorPipeline.from_pretrained(
-            pretrained_dir,
-            config_filename="policy_preprocessor.json",
-        )
+def save_scheduler_state(scheduler, save_dir: Path) -> None:
+    write_json(scheduler.state_dict(), save_dir / SCHEDULER_STATE)
 
-    postprocessor = None
-    postprocessor_config_path = pretrained_dir / "policy_postprocessor.json"
-    if postprocessor_config_path.exists():
-        postprocessor = PolicyProcessorPipeline.from_pretrained(
-            pretrained_dir,
-            config_filename="policy_postprocessor.json",
-        )
 
-    return model, preprocessor, postprocessor
+def load_scheduler_state(scheduler, save_dir: Path):
+    state_dict = deserialize_json_into_object(save_dir / SCHEDULER_STATE, scheduler.state_dict())
+    scheduler.load_state_dict(state_dict)
+    return scheduler

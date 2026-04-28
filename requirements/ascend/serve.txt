@@ -7,6 +7,6 @@
 flagtree==0.4.0+ascend3.2
 
 # [--no-build-isolation]
-flag-gems @ git+https://github.com/flagos-ai/FlagGems.git
-# [--no-build-isolation]
-vllm-plugin-FL @ git+https://github.com/flagos-ai/vllm-plugin-FL.git
+flag-gems @ git+https://github.com/flagos-ai/FlagGems.git@v5.0.1.rc.0
+# [--extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple]
+vllm-plugin-fl==0.1.0+vllm0.13.0

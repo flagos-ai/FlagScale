@@ -8,7 +8,10 @@
 # Action repeat is inspired by CogACT
 
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -17,11 +20,65 @@ from torch.distributions import Beta
 from transformers import PretrainedConfig
 from transformers.feature_extraction_utils import BatchFeature
 
+if TYPE_CHECKING:
+    from omegaconf import DictConfig
+
+from flagscale.models.utils.constants import ACTION
 from flagscale.models.vla.action_model.flow_matching_head.cross_attention_dit import DiT
 from flagscale.models.vla.action_model.flow_matching_head.encoding_utils import (
     SinusoidalPositionalEncoding,
     swish,
 )
+from flagscale.models.vla.registry import register_action_model
+
+
+@dataclass
+class GR00TActionHeadConfig:
+    type: str = "gr00t_action_head"
+    action_model_type: str = "DiT-B"
+    hidden_size: int = 1024
+    action_dim: int = 7
+    state_dim: int = 7
+    future_action_window_size: int = 7
+    action_horizon: int = 8
+    use_state: bool = False
+    repeated_diffusion_steps: int = 4
+    add_pos_embed: bool = True
+    max_seq_len: int = 1024
+    noise_beta_alpha: float = 1.5
+    noise_beta_beta: float = 1.0
+    noise_s: float = 0.999
+    num_timestep_buckets: int = 1000
+    num_inference_timesteps: int = 4
+    num_target_vision_tokens: int = 32
+    diffusion_model_cfg: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_omegaconf(cls, cfg: DictConfig) -> GR00TActionHeadConfig:
+        if cfg.get("diffusion_model_cfg") is None:
+            raise ValueError("diffusion_model_cfg is required in action_model config")
+        diffusion_cfg = dict(cfg.diffusion_model_cfg)
+        return cls(
+            type=cfg.get("type", "gr00t_action_head"),
+            action_model_type=cfg.get("action_model_type", "DiT-B"),
+            hidden_size=cfg.get("hidden_size", 1024),
+            action_dim=cfg.get("action_dim", 7),
+            state_dim=cfg.get("state_dim", 7),
+            future_action_window_size=cfg.get("future_action_window_size", 7),
+            action_horizon=cfg.get("action_horizon", 8),
+            use_state=cfg.get("use_state", False),
+            repeated_diffusion_steps=cfg.get("repeated_diffusion_steps", 4),
+            add_pos_embed=cfg.get("add_pos_embed", True),
+            max_seq_len=cfg.get("max_seq_len", 1024),
+            noise_beta_alpha=cfg.get("noise_beta_alpha", 1.5),
+            noise_beta_beta=cfg.get("noise_beta_beta", 1.0),
+            noise_s=cfg.get("noise_s", 0.999),
+            num_timestep_buckets=cfg.get("num_timestep_buckets", 1000),
+            num_inference_timesteps=cfg.get("num_inference_timesteps", 4),
+            num_target_vision_tokens=cfg.get("num_target_vision_tokens", 32),
+            diffusion_model_cfg=diffusion_cfg,
+        )
+
 
 # TODO try to merge DiT Modules with follow_match_head, they are just the same arch, but diff loss, use diffusers package will be simple
 
@@ -37,7 +94,6 @@ class CategorySpecificLinear(nn.Module):
     def forward(self, x, cat_ids):
         selected_W = self.W[cat_ids]
         selected_b = self.b[cat_ids]
-        # import ipdb; ipdb.set_trace()
         return torch.bmm(x, selected_W) + selected_b.unsqueeze(1)
 
 
@@ -218,12 +274,10 @@ DiTConfig = {
 class FlowmatchingActionHead(nn.Module):
     def __init__(
         self,
-        full_config,
+        config: GR00TActionHeadConfig,
     ):
         super().__init__()
-        config = full_config.model.action_model
         self.hidden_size = config.hidden_size  # @JinhuiYE
-        self.full_config = full_config
         action_model_type = config.action_model_type
         action_model_cfg = DiTConfig[action_model_type]
 
@@ -405,3 +459,47 @@ class FlowmatchingActionHead(nn.Module):
     @property
     def dtype(self):
         return next(iter(self.parameters())).dtype
+
+
+@register_action_model("gr00t_action_head")
+class GR00TActionHead(nn.Module):
+    """
+    GR00T action head wrapper for VLA framework.
+
+    Adapts the FlowmatchingActionHead (tensor-based interface) to the
+    dict-based interface expected by the VLA framework (QwenGr00t).
+    """
+
+    def __init__(self, config: GR00TActionHeadConfig):
+        super().__init__()
+        self._head = FlowmatchingActionHead(config=config)
+
+    def forward(
+        self, vlm_output: dict[str, torch.Tensor], action_input: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        vl_embs = vlm_output["hidden_states"]
+        actions = action_input["actions"]
+        state = action_input.get("state")
+        encoder_attention_mask = action_input.get("attention_mask")
+        mask = action_input.get("mask")
+
+        loss = self._head.forward(
+            vl_embs=vl_embs,
+            actions=actions,
+            state=state,
+            encoder_attention_mask=encoder_attention_mask,
+            mask=mask,
+        )
+        return {"loss": loss}
+
+    def predict_action(
+        self, vlm_output: dict[str, torch.Tensor], action_input: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        vl_embs = vlm_output["hidden_states"]
+        state = action_input.get("state")
+
+        actions = self._head.predict_action(vl_embs=vl_embs, state=state)
+        return {ACTION: actions}
+
+    def fsdp_units(self) -> list[nn.Module]:
+        return list(self._head.model.transformer_blocks)
