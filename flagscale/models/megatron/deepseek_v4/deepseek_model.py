@@ -1,0 +1,173 @@
+from typing import Optional
+
+import torch
+
+## megatron-core
+from megatron.core.models.gpt import GPTModel
+from megatron.core.packed_seq_params import PackedSeqParams
+from megatron.core.utils import deprecate_inference_params
+from megatron.core.inference.contexts import BaseInferenceContext
+
+from .utils import LazyHashInputIds
+from .engram.ngram_hash import get_or_create_hash_mapping
+from .deepseek_transformer_block import DeepSeekTransformerBlock
+
+
+class DeepSeekModel(GPTModel):
+    def __init__(self, *args, **kwargs):
+        # NOTE: We temporarily replace TransformerBlock with DeepSeekTransformerBlock
+        # during super().__init__() to avoid creating decoder twice.
+        # This is necessary because GPTModel.__init__ hardcodes TransformerBlock.
+        # The replacement is scoped to this initialization only.
+        import megatron.core.models.gpt.gpt_model as gpt_module
+
+        original_block = gpt_module.TransformerBlock
+        gpt_module.TransformerBlock = DeepSeekTransformerBlock
+
+        try:
+            super().__init__(*args, **kwargs)
+            # self.decoder is now DeepSeekTransformerBlock, no need to recreate
+        finally:
+            gpt_module.TransformerBlock = original_block
+
+        self.engram_hash = get_or_create_hash_mapping(
+            engram_vocab_size=self.config.engram_vocab_size,
+            max_ngram_size=self.config.max_ngram_size,
+            n_embed_per_ngram=self.config.n_embed_per_ngram,
+            n_head_per_ngram=self.config.n_head_per_ngram,
+            layer_ids=self.config.engram_layer_ids,
+            tokenizer_name_or_path=self.config.engram_tokenizer_name_or_path,
+            pad_id=self.config.engram_pad_id,
+            seed=self.config.engram_seed,
+        )
+
+        # Optional: Create a separate CUDA stream for hash computation
+        # This allows overlapping hash computation with preprocessing
+        self._hash_stream = None
+        if torch.cuda.is_available():
+            self._hash_stream = torch.cuda.Stream()
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        decoder_input: torch.Tensor = None,
+        labels: torch.Tensor = None,
+        inference_context: BaseInferenceContext = None,
+        packed_seq_params: PackedSeqParams = None,
+        extra_block_kwargs: dict = None,
+        runtime_gather_output: bool | None = None,
+        *,
+        inference_params: BaseInferenceContext | None = None,
+        loss_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        assert input_ids is not None, "Input ids can not be None for EngramModel"
+        inference_context = deprecate_inference_params(inference_context, inference_params)
+
+        # Create lazy hash input IDs that computes asynchronously
+        # The computation will start immediately in a separate stream (if available)
+        # but will only synchronize when actually accessed in the decoder
+        if self.config.use_engram:
+            engram_hash_input_ids = LazyHashInputIds(
+                hash_mapping=self.engram_hash,
+                input_ids=input_ids,
+                hash_stream=self._hash_stream,
+            )
+        else:
+            engram_hash_input_ids = None
+
+        # Preprocessing can run in parallel with hash computation
+        preproc_output = self._preprocess(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            decoder_input=decoder_input,
+            inference_context=inference_context,
+            packed_seq_params=packed_seq_params,
+        )
+
+        (decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset) = (
+            preproc_output[:5]
+        )
+
+        rotary_pos_cos_sin = preproc_output[5] if len(preproc_output) == 6 else None
+
+        # Pass input_ids to decoder for hash-based MoE routing
+        decoder_extra_block_kwargs = extra_block_kwargs or {}
+        if self.config.moe_n_hash_layers > 0 and input_ids is not None:
+            decoder_extra_block_kwargs['input_ids'] = input_ids
+        if self.config.use_engram:
+            decoder_extra_block_kwargs['engram_hash_input_ids'] = engram_hash_input_ids
+        
+        # Run decoder
+        hidden_states = self.decoder(
+            hidden_states=decoder_input,
+            attention_mask=attention_mask,
+            inference_context=inference_context,
+            rotary_pos_emb=rotary_pos_emb,
+            rotary_pos_cos=rotary_pos_cos,
+            rotary_pos_sin=rotary_pos_sin,
+            rotary_pos_cos_sin=rotary_pos_cos_sin,
+            packed_seq_params=packed_seq_params,
+            sequence_len_offset=sequence_len_offset,
+            engram_hash_input_ids=engram_hash_input_ids,
+            **decoder_extra_block_kwargs,
+        )
+        # torch.cuda.nvtx.range_pop()
+
+        return self._postprocess(
+            hidden_states=hidden_states,
+            input_ids=input_ids,
+            position_ids=position_ids,
+            labels=labels,
+            rotary_pos_emb=rotary_pos_emb,
+            rotary_pos_cos=rotary_pos_cos,
+            rotary_pos_sin=rotary_pos_sin,
+            mtp_in_postprocess=self.mtp_process,
+            loss_mask=loss_mask,
+            decoder_input=decoder_input,
+            attention_mask=attention_mask,
+            inference_params=inference_params,
+            packed_seq_params=packed_seq_params,
+            sequence_len_offset=sequence_len_offset,
+            runtime_gather_output=runtime_gather_output,
+            extra_block_kwargs=extra_block_kwargs,
+            inference_context=inference_context,
+        )
+
+    def build_schedule_plan(
+        self,
+        input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        decoder_input: torch.Tensor = None,
+        labels: torch.Tensor = None,
+        inference_context: BaseInferenceContext = None,
+        packed_seq_params: PackedSeqParams = None,
+        extra_block_kwargs: dict = None,
+        runtime_gather_output: Optional[bool] = None,
+        inference_params: Optional[BaseInferenceContext] = None,
+        loss_mask: Optional[torch.Tensor] = None,
+    ):
+        """
+        Adaptation of overlap_moe_expert_parallel_comm.
+        """
+        # Precompute the engram_hash_iput_ids, it will be used to create a TransformerChunkSchedulePlan.
+        engram_hash_input_ids = LazyHashInputIds(
+            hash_mapping=self.engram_hash,
+            input_ids=input_ids,
+            hash_stream=self._hash_stream,
+        )
+        if extra_block_kwargs is None:
+            extra_block_kwargs = {
+                "engram_hash_input_ids": engram_hash_input_ids,
+            }
+        return super().build_schedule_plan(
+            input_ids,
+            position_ids,
+            attention_mask,
+            decoder_input,
+            labels=labels,
+            loss_mask=loss_mask,
+            extra_block_kwargs=extra_block_kwargs
+        )

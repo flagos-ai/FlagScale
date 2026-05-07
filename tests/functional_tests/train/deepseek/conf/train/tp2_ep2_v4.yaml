@@ -1,0 +1,144 @@
+defaults:
+  - data
+
+no_shared_fs: false
+num_workers: 16
+tensor_model_parallel_size: 2
+pipeline_model_parallel_size: 1
+expert_model_parallel_size: 2
+finetune: false
+no_load_rng: true
+no_load_optim: true
+context_parallel_size: 1
+disable_bias_linear: true
+reset_position_ids: true
+reset_attention_mask: true
+qk_layernorm: true
+sequence_parallel: true
+use_distributed_optimizer: true
+overlap_grad_reduce: true
+overlap_param_gather: true
+attention_backend: auto
+precision:
+  bf16: true
+  attention_softmax_in_fp32: true
+  accumulate_allreduce_grads_in_fp32: true
+logging:
+  log_interval: 1
+  no_log_loss_scale_to_tensorboard: true
+checkpoint:
+  no_save_optim: true
+  no_save_rng: true
+  save_interval: 100000
+  tensorboard_log_interval: 999999
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 61
+  hidden_size: 7168
+  num_attention_heads: 128
+  num_query_groups: 1
+  seq_length: 1048576
+  max_position_embeddings: 1048576
+  norm_epsilon: 1e-06
+  use_rotary_position_embeddings: true
+  rotary_base: 10000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: true
+  no_position_embedding: true
+  no_rope_fusion: true
+
+  # mla args ==================
+  multi_latent_attention: true
+  kv_lora_rank: 1536
+  qk_head_dim: 512
+  qk_pos_emb_head_dim: 64
+  v_head_dim: 512
+
+  # moe args ===================
+  ffn_hidden_size: 11264
+  moe_ffn_hidden_size: 3072
+  moe_grouped_gemm: true
+  moe_shared_expert_intermediate_size: 3072
+  num_experts: 384
+  moe_router_load_balancing_type: "seq_aux_loss"
+  moe_router_score_function: sqrtsoftplus
+  moe_router_enable_expert_bias: true
+  moe_router_bias_update_rate: 0.001
+  moe_aux_loss_coeff: 0.02
+  moe_layer_freq: "[0]+[1]*3"
+  # node limited routing
+  moe_router_num_groups: 1
+  moe_router_group_topk: 1
+  moe_router_topk: 6
+  moe_router_topk_scaling_factor: 2.5
+  moe_token_dispatcher_type: "alltoall"
+  # moe_permute_fusion: true
+  # v4 args
+  attention_bias: false
+  hc_eps: 1e-06
+  hc_mult: 4
+  hc_sinkhorn_iters: 20
+  head_dim: 512
+  hidden_act: silu
+  index_head_dim: 128
+  index_n_heads: 64
+  index_topk: 1024
+  n_routed_experts: 4
+  n_shared_experts: 1
+  norm_topk_prob: true
+  num_experts_per_tok: 2
+  moe_n_hash_layers: 1
+  o_groups: 16
+  o_lora_rank: 512
+  q_lora_rank: 512
+  # quantization_config:
+  #   activation_scheme: dynamic
+  #   fmt: e4m3
+  #   quant_method: fp8
+  #   scale_fmt: ue8m0
+  #   weight_block_size:
+  #     - 128
+  #     - 128
+  rms_norm_eps: 1e-06
+  rope_scaling:
+    beta_fast: 32
+    beta_slow: 1
+    factor: 16
+    original_max_position_embeddings: 65536
+    type: yarn
+  routed_scaling_factor: 2.5
+  sliding_window: 128
+  swiglu_limit: 10.0
+  topk_method: noaux_tc
+  vocab_size: 129280
+  compress_rope_theta: 160000
+  compress_ratios: "[128]+([128]+[4])*1"
+
+  # mtp_args
+  mtp_num_layers: 1
+
+  # training
+  seed: 42
+  micro_batch_size: 1
+  global_batch_size: 16
+  eval_iters: 0
+  train_samples: 160
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-3
+      min_lr: 3.0e-4
+      lr_warmup_samples: 32
+      lr_decay_style: WSD
+      lr_wsd_decay_style: cosine
+      lr_wsd_decay_samples: 16

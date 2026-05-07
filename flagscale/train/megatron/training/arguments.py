@@ -1678,15 +1678,14 @@ def core_transformer_config_from_args(args, config_class=None):
     config_class = config_class or TransformerConfig
 
     if args.multi_latent_attention:
-        config_class = MLATransformerConfig
-
+        if config_class == TransformerConfig:
+            config_class = MLATransformerConfig
+        else:
+            assert issubclass(config_class, MLATransformerConfig), "config_class should be a subclass of MLATransformerConfig when using multi_latent_attention."
+    
     if args.heterogeneous_layers_config_path is not None:
         assert not args.multi_latent_attention, "Multi latent attention with heterogeneous layers is not supported."
         config_class = HeterogeneousTransformerConfig
-
-    if args.use_engram:
-        from flagscale.models.megatron.engram.engram_config import EngramConfig
-        config_class = EngramConfig
 
     # Translate args to core transformer configuration
     kw_args = {}
@@ -1697,7 +1696,7 @@ def core_transformer_config_from_args(args, config_class=None):
     kw_args['deallocate_pipeline_outputs'] = True
     kw_args['pipeline_dtype'] = args.params_dtype
     kw_args['batch_p2p_comm'] = not args.overlap_p2p_comm
-    kw_args['num_moe_experts'] = args.num_experts
+    kw_args['actual_vocab_size'] = args.padded_vocab_size
     kw_args['rotary_interleaved'] = args.rotary_interleaved
     kw_args['num_layers_in_first_pipeline_stage']= args.decoder_first_pipeline_num_layers
     kw_args['num_layers_in_last_pipeline_stage']= args.decoder_last_pipeline_num_layers
