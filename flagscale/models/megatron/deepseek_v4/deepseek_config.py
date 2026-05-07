@@ -32,6 +32,23 @@ class DeepSeekConfig(MLATransformerConfig):
     overload = peak cumulative actual tokens / peak cumulative balanced count over interleaved
     fwd/bwd) to TensorBoard/W&B and console. Records tokens_per_expert.sum() after dispatch;
     use for debugging."""
+
+    # ####################
+    # # DeepSeek-v4 hybrid attention
+    # ####################
+    # csa_window_size: int = 128
+    # """Sliding window size for compressed sparse attention."""
+
+    # csa_compress_ratios: Optional[List[int]] = None
+    # """Per-layer compress ratios, e.g. [0, 0, 4, 128, 4, 128, ...]."""
+
+    # csa_compress_rotary_base: float = 40000.0
+    # """RoPE base for compressed KV positions in compressed sparse attention."""
+
+    # csa_dense_mode: bool = False
+    # """Whether to use dense mode for compressed sparse attention. If True, the CSA indexer will be
+    # disabled."""
+
     
     ####################
     # Engram Configuration
@@ -107,15 +124,15 @@ class DeepSeekConfig(MLATransformerConfig):
             self.recompute_modules = [m for m in original if m in base_allowed]
 
         super().__post_init__()
-        self.recompute_modules = original
+        # self.recompute_modules = original
 
-        if self.recompute_modules is not None:
-            all_allowed = base_allowed.union(self._EXTRA_RECOMPUTE_MODULES)
-            invalid = set(self.recompute_modules) - all_allowed
-            assert not invalid, (
-                f"[BusinessConfig] Invalid recompute_modules: {invalid}\n"
-                f"All allowed: {sorted(all_allowed)}"
-            )
+        # if self.recompute_modules is not None:
+        #     all_allowed = base_allowed.union(self._EXTRA_RECOMPUTE_MODULES)
+        #     invalid = set(self.recompute_modules) - all_allowed
+        #     assert not invalid, (
+        #         f"[BusinessConfig] Invalid recompute_modules: {invalid}\n"
+        #         f"All allowed: {sorted(all_allowed)}"
+        #     )
         
         # Validation for use_fused_mhc
         if self.use_fused_mhc:

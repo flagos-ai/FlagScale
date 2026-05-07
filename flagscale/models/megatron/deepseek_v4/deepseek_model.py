@@ -29,17 +29,19 @@ class DeepSeekModel(GPTModel):
             # self.decoder is now DeepSeekTransformerBlock, no need to recreate
         finally:
             gpt_module.TransformerBlock = original_block
-
-        self.engram_hash = get_or_create_hash_mapping(
-            engram_vocab_size=self.config.engram_vocab_size,
-            max_ngram_size=self.config.max_ngram_size,
-            n_embed_per_ngram=self.config.n_embed_per_ngram,
-            n_head_per_ngram=self.config.n_head_per_ngram,
-            layer_ids=self.config.engram_layer_ids,
-            tokenizer_name_or_path=self.config.engram_tokenizer_name_or_path,
-            pad_id=self.config.engram_pad_id,
-            seed=self.config.engram_seed,
-        )
+        if self.config.use_engram:
+            self.engram_hash = get_or_create_hash_mapping(
+                engram_vocab_size=self.config.engram_vocab_size,
+                max_ngram_size=self.config.max_ngram_size,
+                n_embed_per_ngram=self.config.n_embed_per_ngram,
+                n_head_per_ngram=self.config.n_head_per_ngram,
+                layer_ids=self.config.engram_layer_ids,
+                tokenizer_name_or_path=self.config.engram_tokenizer_name_or_path,
+                pad_id=self.config.engram_pad_id,
+                seed=self.config.engram_seed,
+            )
+        else:
+            self.engram_hash = None
 
         # Optional: Create a separate CUDA stream for hash computation
         # This allows overlapping hash computation with preprocessing
@@ -110,7 +112,6 @@ class DeepSeekModel(GPTModel):
             rotary_pos_cos_sin=rotary_pos_cos_sin,
             packed_seq_params=packed_seq_params,
             sequence_len_offset=sequence_len_offset,
-            engram_hash_input_ids=engram_hash_input_ids,
             **decoder_extra_block_kwargs,
         )
         # torch.cuda.nvtx.range_pop()

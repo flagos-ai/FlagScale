@@ -931,8 +931,54 @@ def _add_flagos_args(parser):
     return parser
 
 
-def _add_engram_args(parser):
-    group = parser.add_argument_group(title="flagscale engram")
+def _add_deepseekv4_args(parser):
+    group = parser.add_argument_group(title="flagscale deepseek_v4")
+    group.add_argument(
+        '--moe-n-hash-layers',
+        type=int,
+        default=8,
+        help="Number of groups for grouped output (wo_a). 0 = single linear."
+    )
+    group.add_argument(
+        '--o-groups',
+        type=int,
+        default=8,
+        help="Number of groups for grouped output (wo_a). 0 = single linear."
+    )
+    group.add_argument(
+        '--o-lora-rank',
+        type=int,
+        default=1024,
+        help="Low-rank dimension per group for grouped output (wo_a). Used when o-groups > 0."
+    )
+    # mhc
+    group.add_argument('--enable-hyper-connections', action='store_true', help='Use mHC module.')
+    group.add_argument(
+        '--num-residual-streams',
+        type=int,
+        default=4,
+        help="Number of residual streams (n in paper)."
+    )
+    group.add_argument(
+        '--mhc-sinkhorn-iterations',
+        type=int,
+        default=20,
+        help="Number of Sinkhorn-Knopp iterations for doubly stochastic projection."
+    )
+    group.add_argument(
+        '--mhc-init-gating-factor',
+        type=float,
+        default=0.01,
+        help="Initial value of Gating Factor (alpha in paper)."
+    )
+    group.add_argument('--use-fused-mhc', action='store_true', help='Use cuTile fused kernels for mHC operations.')
+    group.add_argument(
+        '--mhc-recompute-layer-num',
+        type=int,
+        default=None,
+        help="Number of layers per MHC recompute block."
+    )
+    # Engram
     group.add_argument('--use-engram', action='store_true', help='Use Engram module.')
     group.add_argument(
         '--engram-tokenizer-name-or-path',
@@ -1044,6 +1090,6 @@ def add_flagscale_arguments(parser):
     parser = _add_auto_skip_spiky_loss(parser)
     parser = _add_peft_args(parser)
     parser = _add_flagos_args(parser)
-    parser = _add_engram_args(parser)
+    parser = _add_deepseekv4_args(parser)
     parser = _add_flagscale_specific_args(parser)
     return parser

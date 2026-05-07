@@ -17,7 +17,7 @@ from megatron.core.models.gpt.gpt_layer_specs import (
     get_gpt_layer_local_spec,
     get_gpt_layer_with_inference_spec
 )
-
+from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
@@ -29,9 +29,16 @@ from megatron.core.transformer.transformer_block import (
     TransformerBlockSubmodules,
     get_num_layers_to_build,
 )
+
 from megatron.core.transformer.enums import LayerType
 from megatron.training.utils import get_args
-
+from megatron.core.models.gpt.experimental_attention_variant_module_specs import (
+    get_transformer_block_with_experimental_attention_variant_spec, 
+    _get_backend_spec_provider,
+    get_dsv4_hybrid_module_spec_for_backend,
+    _get_moe_module_spec,
+    get_moe_layer_pattern
+)
 try:
     import transformer_engine as te  # pylint: disable=unused-import
 
@@ -84,33 +91,21 @@ def get_deepseek_layer_spec(
     Build LayerSpec that inserts engram and mhc into TransformerLayer.
     Because not all layers have engram, we build the engram module as an optional submodule.
     """
-    args = get_args()
-    if use_te:
-        base_layer_spec = get_gpt_layer_with_transformer_engine_spec(
-            args.num_experts,
-            args.moe_grouped_gemm,
-            args.qk_layernorm,
-            args.multi_latent_attention,
-            moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
-            qk_l2_norm=args.qk_l2_norm,
-            use_kitchen=config.use_kitchen,
-        )
-    elif config.transformer_impl == "inference_optimized":
-        base_layer_spec = get_gpt_layer_with_inference_spec(
-            args.qk_layernorm,
-            args.multi_latent_attention,
-            qk_l2_norm=args.qk_l2_norm,
-        )
-    else:
-        base_layer_spec = get_gpt_layer_local_spec(
-            args.num_experts,
-            args.moe_grouped_gemm,
-            args.qk_layernorm,
-            args.multi_latent_attention,
-            moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
-            normalization=args.normalization,
-            use_kitchen=config.use_kitchen,
-        )
+    backend = _get_backend_spec_provider(config=config)
+    hybrid_attn_spec = get_dsv4_hybrid_module_spec_for_backend(config=config, backend=backend)
+
+    moe_layer_spec = _get_moe_module_spec(config=config, backend=backend)
+    rms_norm = config.normalization == "RMSNorm"
+    input_layernorm = (
+        IdentityOp
+        if hybrid_attn_spec.metainfo["fuse_input_layernorm"]
+        else backend.layer_norm(rms_norm=rms_norm, for_qk=False)
+    )
+    pre_mlp_layernorm = (
+        IdentityOp
+        if moe_layer_spec.metainfo["fuse_pre_mlp_layernorm"]
+        else backend.layer_norm(rms_norm=rms_norm, for_qk=False)
+    )
     if build_engram:
         engram_module = EngramMoule 
     else:
@@ -119,17 +114,20 @@ def get_deepseek_layer_spec(
         hyper_connection_module = HyperConnectionModule
     else:
         hyper_connection_module = IdentityOp
-    base_submodules = base_layer_spec.submodules
-    params = base_layer_spec.params
     submodules = DeepSeekTransformerLayerSubmodules(
-        **base_submodules.__dict__,
+        input_layernorm=input_layernorm,
+        self_attention=hybrid_attn_spec,
+        self_attn_bda=get_bias_dropout_add,
+        pre_mlp_layernorm=pre_mlp_layernorm,
+        mlp=moe_layer_spec,
+        mlp_bda=get_bias_dropout_add,
         engram=ModuleSpec(module=engram_module),
         self_attention_hyper_connection=ModuleSpec(module=hyper_connection_module),
         mlp_hyper_connection=ModuleSpec(module=hyper_connection_module),
         cross_attention_connection=ModuleSpec(module=IdentityOp),
     )
 
-    return ModuleSpec(module=DeepSeekTransformerLayer, submodules=submodules, params=params)
+    return ModuleSpec(module=DeepSeekTransformerLayer, submodules=submodules)
 
 
 def get_deepseek_decoder_block_spec(
@@ -146,17 +144,6 @@ def get_deepseek_decoder_block_spec(
 
     """GPT block spec."""
     layer_norm_impl = TENorm
-
-    dense_deepseek_engram_layer_spec = get_deepseek_layer_spec(
-        use_te=use_transformer_engine,
-        config=config,
-        build_engram=True,
-    )
-    dense_deepseek_layer_spec = get_deepseek_layer_spec(
-        use_te=use_transformer_engine,
-        config=config,
-        build_engram=False,
-    )
     moe_deepseek_engram_layer_spec = get_deepseek_layer_spec(
         use_te=use_transformer_engine,
         config=config,
@@ -168,28 +155,6 @@ def get_deepseek_decoder_block_spec(
         build_engram=False,
     )
 
-    # Parse config.moe_layer_freq to determine the pattern of expert/dense layers.
-    # 0 stands for dense layers, 1 stands for expert layers.
-    # For integer N: Creates a pattern with one expert layer every N layers.
-    # For string pattern: Evaluates the str directly (e.g. "[1,0,1]" for alternating expert/dense).
-    if use_moe:
-        if isinstance(config.moe_layer_freq, int):
-            moe_layer_pattern = [
-                1 if (i % config.moe_layer_freq == 0) else 0 for i in range(config.num_layers)
-            ]
-        elif isinstance(config.moe_layer_freq, list):
-            moe_layer_pattern = config.moe_layer_freq
-            assert len(moe_layer_pattern) == config.num_layers, (
-                f"Invalid length of moe_layer_pattern: {len(moe_layer_pattern)}, "
-                f"expected {config.num_layers}, "
-                f"current moe layer pattern: {config.moe_layer_freq}"
-            )
-        else:
-            raise ValueError(
-                f"Invalid moe_layer_freq: {type(config.moe_layer_freq)}, {config.moe_layer_freq}"
-            )
-    else:
-        moe_layer_pattern = [0] * config.num_layers
 
     # Create the layer specs for the model.
     layer_specs = []
@@ -198,14 +163,7 @@ def get_deepseek_decoder_block_spec(
             is_engram_layer = True
         else:
             is_engram_layer = False
-        if moe_layer_pattern[layer_number] == 1:
-            layer_specs.append(moe_deepseek_engram_layer_spec if is_engram_layer else moe_deepseek_layer_spec)
-        elif moe_layer_pattern[layer_number] == 0:
-            layer_specs.append(
-                dense_deepseek_engram_layer_spec if is_engram_layer else dense_deepseek_layer_spec
-            )
-        else:
-            raise ValueError(f"Invalid layer pattern: {moe_layer_pattern}")
+        layer_specs.append(moe_deepseek_engram_layer_spec if is_engram_layer else moe_deepseek_layer_spec)
 
     # Slice the layer specs to only include the layers that are built in this pipeline stage.
     # Note: MCore layer_number starts at 1
@@ -264,21 +222,14 @@ def deepseek_builder(args, pre_process, post_process, vp_stage=None, config=None
             if args.heterogeneous_layers_config_path is not None:
                 assert not (config.transformer_impl == "inference_optimized")
                 raise NotImplementedError("Using heterogeneous layers is not supported with deepseek builder.")
-            if args.num_experts:
-                transformer_layer_spec = get_deepseek_decoder_block_spec(
-                    config=config,
-                    use_transformer_engine=use_te,
-                    normalization=args.normalization,
-                    qk_l2_norm=args.qk_l2_norm,
-                    vp_stage=vp_stage,
-                )
-            else:
-                transformer_layer_spec = get_deepseek_layer_spec(
-                    use_te=use_te,
-                    config=config,
-                    normalization=args.normalization,
-                    qk_l2_norm=args.qk_l2_norm,
-                )
+            transformer_layer_spec = get_deepseek_decoder_block_spec(
+                config=config,
+                use_transformer_engine=use_te,
+                normalization=args.normalization,
+                qk_l2_norm=args.qk_l2_norm,
+                vp_stage=vp_stage,
+                use_moe=True
+            )
 
         mtp_block_spec = None
         if args.mtp_num_layers is not None:

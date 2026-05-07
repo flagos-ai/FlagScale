@@ -20,7 +20,7 @@ from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from megatron.core.utils import make_viewless_tensor, nvtx_range_pop, nvtx_range_push
 
-from .transformer_layer import TransformerLayer, TransformerLayerSubmodules
+from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,10 @@ class DeepSeekTransformerLayer(TransformerLayer):
             engram_cfg=self.config,
             layer_id=self.layer_number - 1,
         )
+        if self.config.engram_layer_ids is not None and self.layer_number - 1 in self.config.engram_layer_ids:
+            self.is_engram_layer = True
+        else:
+            self.is_engram_layer = False
         self.self_attention_hyper_connection = build_module(
             submodules.self_attention_hyper_connection,
             config=self.config,
@@ -171,7 +175,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
             nvtx_range_push(suffix="engram")
             hidden_states = self.engram(hidden_states, self._deepseek_engram_hash_input_ids)
             nvtx_range_pop(suffix="engram")
-
+        self._origin_attn_residual = hidden_states # [s, b, n, C]
         if not isinstance(self.self_attention_hyper_connection, IdentityOp):
             nvtx_range_push(suffix="self_attention_hyper_connection")
             hidden_states, self_attn_h_res, self_attn_hc_h_post = self._hyper_connection_forward(
@@ -220,7 +224,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
             and getattr(mhc_recompute_manager, "is_last_layer_in_recompute_block", False)
         )
         mhc_mlp_bda_manager = None if is_last_in_recompute_block else mhc_recompute_manager
-
+        self._mlp_origin_residual = hidden_states # [s, b, n, C]
         if not isinstance(self.mlp_hyper_connection, IdentityOp):
             nvtx_range_push(suffix="mlp_hyper_connection")
             hidden_states, mlp_h_res, mlp_hc_h_post = self._hyper_connection_forward(
@@ -314,7 +318,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
         return output
 
     def _patch_mlp_bda_forward(self):
-        original_forward = self.mlp_bda.forward
+        original_forward = self.mlp_bda
 
         def patched_forward(*bda_args, **bda_kwargs):
             if bda_args:
@@ -341,7 +345,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
 
                 return self.mlp_hyper_connection.fused_h_res_h_post_bda(
                     mlp_h_res,
-                    residual,
+                    self._mlp_origin_residual,
                     mlp_hc_h_post,
                     main_output_with_bias,
                     hidden_dropout,
@@ -352,10 +356,10 @@ class DeepSeekTransformerLayer(TransformerLayer):
 
             return apply
 
-        self.mlp_bda.forward = patched_forward
+        self.mlp_bda = patched_forward
 
     def _patch_self_attn_bda_forward(self):
-        original_forward = self.self_attn_bda.forward
+        original_forward = self.self_attn_bda
 
         def patched_forward(*bda_args, **bda_kwargs):
             if bda_args:
@@ -385,7 +389,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
 
                 return self.self_attention_hyper_connection.fused_h_res_h_post_bda(
                     h_res,
-                    residual,
+                    self._origin_attn_residual,
                     h_post,
                     main_output_with_bias,
                     hidden_dropout,
@@ -396,7 +400,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
 
             return apply
 
-        self.self_attn_bda.forward = patched_forward
+        self.self_attn_bda = patched_forward
 
     def _hyper_connection_forward(
         self,
@@ -416,6 +420,7 @@ class DeepSeekTransformerLayer(TransformerLayer):
         transformed_hidden_states, h_res, hc_h_post = output
         return transformed_hidden_states, h_res, hc_h_post
 
-    def pre_compute_embedding(self, hash_input_ids: Tensor):
+    def pre_compute_embedding(self, engram_hash_input_ids):
         if not isinstance(self.engram, IdentityOp):
+            hash_input_ids = engram_hash_input_ids[self.layer_number - 1]
             self.engram.pre_compute_embedding(hash_input_ids)

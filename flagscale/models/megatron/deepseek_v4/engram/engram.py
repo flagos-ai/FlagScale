@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 ## Flagscale
-from flagscale.models.megatron.deepseek.deepseek_config import DeepSeekConfig
+from flagscale.models.megatron.deepseek_v4.deepseek_config import DeepSeekConfig
 
 from .multi_head_embedding import MultiHeadEmbedding
 

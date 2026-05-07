@@ -11,6 +11,7 @@ experiment:
     entrypoint: flagscale/train/megatron/train_deepseek_v4.py
   runner:
     ssh_port: null
+    nproc_per_node: 1
   shell_cmds: null
   envs:
     HYDRA_FULL_ERROR: 1

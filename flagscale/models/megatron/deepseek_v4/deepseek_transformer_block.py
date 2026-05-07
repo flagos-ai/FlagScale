@@ -1,6 +1,6 @@
 ## built-in
 from contextlib import nullcontext
-from typing import List, Optional, Set, Tuple, Union, cast
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple, Union, cast
 
 import torch
 from torch import Tensor
@@ -11,6 +11,10 @@ from megatron.core.fp4_utils import get_fp4_context
 from megatron.core.fp8_utils import get_fp8_context
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.packed_seq_params import PackedSeqParams
+if TYPE_CHECKING:
+    from megatron.core.tensor_parallel.random import CheckpointManager
+else:
+    CheckpointManager = None
 
 # megatron-core
 from megatron.core.transformer.transformer_block import TransformerBlock, apply_module, get_transformer_layer_offset
@@ -21,14 +25,6 @@ from megatron.core.utils import (
     make_viewless_tensor,
 )
 from .hyper_connection import HyperConnectionModule
-
-
-class CheckpointManager:
-    """
-    This class is only implemented in megatron dev branch, not any release version.
-    And if not using mhc recompute, this is no needed. So we just keep the class signature and leave it empty for now.
-    """
-    pass
 
 
 class DeepSeekTransformerBlock(TransformerBlock):
@@ -261,6 +257,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
                     padding_mask=padding_mask,
                     extract_layer_indices=extract_layer_indices,
                     layer_offset=layer_offset,
+                    input_ids=input_ids
                 )
                 # Handle return value from _checkpointed_forward
                 if len(extract_layer_indices) > 0:
@@ -297,10 +294,8 @@ class DeepSeekTransformerBlock(TransformerBlock):
                         # Pre-compute embeddings for the next DeepSeekTransformerLayer if engram exists, to overlap with current layer's computation
                         if l_no < len(self.layers) - 1:
                             next_layer = self.layers[l_no + 1]
-                            global_layer_id = next_layer.layer_number - 1
-                            if global_layer_id in self.config.engram_layer_ids:
-                                hash_input_ids = engram_hash_input_ids[global_layer_id]
-                                next_layer.pre_compute_embedding(hash_input_ids)
+                            if getattr(next_layer, "is_engram_layer", False):
+                                next_layer.pre_compute_embedding(engram_hash_input_ids)
                         #### FlagScale End ####
                         hidden_states, context = layer(
                             hidden_states=hidden_states,
@@ -317,6 +312,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
                             sequence_len_offset=sequence_len_offset,
                             padding_mask=padding_mask,
                             mhc_recompute_manager=mhc_manager,
+                            input_ids=input_ids
                         )
 
                     self._finalize_mhc_recompute_layer(
