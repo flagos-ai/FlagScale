@@ -24,8 +24,10 @@ Install FlagScale and robotics dependencies:
 
 ```sh
 cd FlagScale/
-pip install . --verbose
-pip install -r requirements/train/robotics/requirements.txt
+# replace "[cuda]" with "[ascend]" on Huawei Ascend, or "[musa]" on Moore Threads MUSA
+pip install ".[cuda]" --verbose
+
+pip install git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
 ```
 
 Install additional dependencies for downloading models/datasets:
@@ -134,11 +136,11 @@ vim examples/pi0_5/conf/train.yaml
 ```
 
 Configure the following fields:
-
-- `experiment.envs.CUDA_VISIBLE_DEVICES` - GPU devices to use (e.g., `"0,1,2,3"` for 4 GPUs, `"0,1"` for 2 GPUs)
-- `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`)
+- `experiment.envs.CUDA_VISIBLE_DEVICES` - GPU devices to use (e.g., `"0,1,2,3"` for 4 GPUs, `"0,1"` for 2 GPUs)，Use `ASCEND_RT_VISIBLE_DEVICES` for Huawei Ascend, `MUSA_VISIBLE_DEVICES` for Moore Threads MUSA
+- `experiment.envs.CUDA_DEVICE_MAX_CONNECTIONS` - Connection limit (typically `1`)，Use `MUSA_DEVICE_MAX_CONNECTIONS` for Moore Threads MUSA
 - `experiment.exp_name` - Experiment name
 - `experiment.exp_dir` - Output directory for checkpoints and logs
+- `runner.nproc_per_node` - Number of processes per node for multi-GPU training (required for Huawei Ascend)
 
 #### Task-Level Config
 
@@ -154,17 +156,9 @@ Configure the following fields:
 **System settings** (training hyperparameters):
 - `system.batch_size` - Batch size per GPU
 - `system.train_steps` - Total training steps
-- `system.optimizer.name` - Optimizer name (default: `"AdamW"`)
-- `system.optimizer.lr` - Learning rate (default: `2.5e-5`)
-- `system.optimizer.betas` - Optimizer betas (default: `[0.9, 0.95]`)
-- `system.optimizer.eps` - Optimizer epsilon (default: `1.0e-8`)
-- `system.optimizer.weight_decay` - Weight decay (default: `0.01`)
-- `system.scheduler.warmup_steps` - Warmup steps (default: `1000`)
-- `system.scheduler.decay_steps` - Decay steps (default: `30000`)
-- `system.scheduler.decay_lr` - Final learning rate after decay (default: `2.5e-6`)
 - `system.checkpoint.save_checkpoint` - Whether to save checkpoints (default: `true`)
 - `system.checkpoint.save_freq` - Steps between checkpoints (default: `1000`)
-- `system.checkpoint.output_directory` - Checkpoint output directory (default: `${experiment.exp_dir}/ckpt`)
+- `system.checkpoint.output_directory` - Checkpoint output directory (default: `${experiment.exp_dir}`)
 
 **Model settings**:
 - `model.model_name` - Model name: `"pi0.5"`
@@ -172,6 +166,14 @@ Configure the following fields:
 - `model.tokenizer_path` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `model.tokenizer_max_length` - Maximum tokenizer sequence length (default: `200` for pi0.5)
 - `model.action_steps` - Number of action steps to predict
+- `model.optimizer.name` - Optimizer name (for example: `"AdamW"`)
+- `model.optimizer.lr` - Learning rate (for example: `2.5e-5`)
+- `model.optimizer.betas` - Optimizer betas (for example: `[0.9, 0.95]`)
+- `model.optimizer.eps` - Optimizer epsilon (for example: `1.0e-8`)
+- `model.optimizer.weight_decay` - Weight decay (for example: `0.01`)
+- `model.optimizer.scheduler.warmup_steps` - Warmup steps (for example: `1000`)
+- `model.optimizer.scheduler.decay_steps` - Decay steps (for example: `30000`)
+- `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (for example: `2.5e-6`)
 
 **Data settings**:
 - `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
@@ -188,17 +190,19 @@ Configure the following fields:
 ### Start Training
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0_5/conf --config-name train action=run
+flagscale train pi0_5 --config ./examples/pi0_5/conf/train.yaml
+# or
+flagscale train pi0_5 -c ./examples/pi0_5/conf/train.yaml
 ```
 
 Training logs are saved to `outputs/pi0_5_train/logs/host_0_localhost.output` by default.
 
-Checkpoints are saved to `${experiment.exp_dir}/ckpt` (default: `outputs/pi0_5_train/ckpt`).
+Checkpoints are saved to `${experiment.exp_dir}/checkpoints` (default: `outputs/pi0_5_train/checkpoints`).
 
 ### Stop Training
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0_5/conf --config-name train action=stop
+flagscale train pi0_5 --stop
 ```
 
 ## Inference
@@ -254,7 +258,7 @@ Configure the following fields:
 - `engine.model` - Path to pretrained model (e.g., `/workspace/models/lerobot/pi05_base`)
 - `engine.tokenizer` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `engine.stat_path` - Path to dataset statistics (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json`)
-- `engine.device` - Device to use (e.g., `"cuda"`)
+- `engine.device` - Device to use (e.g., `"cuda", "npu", "musa"`)
 - `engine.use_quantiles` - Whether to use quantile normalization (default: `false` for pi0.5)
 
 **Generate settings:**
@@ -279,10 +283,9 @@ Configure the following fields:
 
 ```sh
 cd FlagScale/
-python run.py \
-    --config-path ./examples/pi0_5/conf \
-    --config-name inference \
-    action=run
+flagscale inference pi0_5 --config ./examples/pi0_5/conf/inference.yaml
+# or
+flagscale inference pi0_5 -c ./examples/pi0_5/conf/inference.yaml
 ```
 
 Inference logs are saved to `outputs/pi0_5_inference/inference_logs/host_0_localhost.output` by default.
@@ -307,7 +310,7 @@ Configure the following fields:
 - `engine_args.model` - Path to pretrained model (e.g., `/workspace/models/lerobot/pi05_base`)
 - `engine_args.tokenizer` - Path to tokenizer (e.g., `/workspace/models/google/paligemma-3b-pt-224`)
 - `engine_args.stat_path` - Path to dataset statistics (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet/meta/stats.json`)
-- `engine_args.device` - Device to use (e.g., `"cuda"`)
+- `engine_args.device` - Device to use (e.g., `"cuda", "npu", "musa"`)
 - `engine_args.use_quantiles` - Whether to use quantile normalization (default: `false` for pi0.5)
 - `engine_args.images_keys` - List of image keys expected by the model (do not change):
   ```yaml
@@ -323,7 +326,9 @@ Configure the following fields:
 
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0_5/conf --config-name serve action=run
+flagscale serve pi0_5 --config ./examples/pi0_5/conf/serve.yaml
+# or
+flagscale serve pi0_5 -c ./examples/pi0_5/conf/serve.yaml
 ```
 
 Serving logs are saved to `outputs/pi0_5_serve/logs/host_0_localhost.output` by default.
@@ -332,8 +337,38 @@ Serving logs are saved to `outputs/pi0_5_serve/logs/host_0_localhost.output` by 
 
 ```sh
 cd FlagScale/
-python run.py --config-path ./examples/pi0_5/conf --config-name serve action=stop
+flagscale serve pi0_5 --stop
 ```
+
+## Evaluation
+
+FlagScale supports online evaluation via FlagEval. You will need a `FLAGEVAL_SECRET` — contact the team to obtain one before proceeding.
+
+### Run Evaluation
+
+```sh
+cd FlagScale/
+FLAGEVAL_SECRET=<your_secret> flagscale eval robo \
+    --model-name pi0_5 \
+    --datasets libero_10 \
+    --server-host <your_model_server_host> \
+    --server-port <your_model_server_port> \
+    --poll-interval 30 \
+    --model-id <your_model_id>
+```
+
+Configure the following fields:
+
+- `FLAGEVAL_SECRET` - Authentication secret (contact the team to obtain)
+- `--model-name` - Model name: `"pi0_5"`
+- `--datasets` - Evaluation dataset(s), e.g. `libero_10`
+- `--server-host` - Host/IP of your model server (FlagEval will connect back to this address)
+- `--server-port` - Port of your model server
+- `--poll-interval` - How often (in seconds) to poll for results
+- `--model-id` - A unique identifier for this evaluation run (e.g., `pi0_5_exp1`)
+
+By default the script automatically starts the model server before submitting the evaluation. If your model server is already running, add `--attach` to skip the startup step.
+
 
 ### Test Server with Client
 

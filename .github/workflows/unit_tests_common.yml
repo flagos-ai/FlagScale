@@ -27,16 +27,21 @@ on:
         required: true
         type: string
         description: Name of the artifact containing source code
-      conda_env:
+      pkg_mgr:
         required: false
         type: string
-        description: Conda environment name (optional, skips conda if not provided)
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
         default: ""
-      conda_path:
+      env_path:
         required: false
         type: string
-        description: Conda installation path (optional, auto-detects if not provided)
-        default: "/root/miniconda3"
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
 
 jobs:
   unit_test:
@@ -44,7 +49,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /workspace/FlagScale
+      PROJECT_ROOT: /tmp/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     name: unit-${{ inputs.device }}
     container:
@@ -102,25 +107,72 @@ jobs:
         run: |
           git config --global --add safe.directory $PROJECT_ROOT
 
+      - name: Check environment info
+        run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
+
       - name: Install dependencies for unit tests
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
-          # Build install command with optional conda parameters
-          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task train --retry-count 3"
-          if [ -n "$CONDA_ENV" ]; then
-            INSTALL_CMD="$INSTALL_CMD --conda-env $CONDA_ENV"
-            if [ -n "$CONDA_PATH" ]; then
-              INSTALL_CMD="$INSTALL_CMD --conda-path $CONDA_PATH"
-            fi
+          echo "Installing dependencies for unit tests"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
+
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install task source dependencies (pip deps are pre-installed in the env)
+          echo "Installing task source dependencies..."
+
+          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
+          INSTALL_DIR=""
+          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            INSTALL_DIR=$(dirname "$ENV_PATH")
           fi
 
-          # Run install script (handles conda activation internally if needed)
-          eval $INSTALL_CMD
+          # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
+          # Use --force-build to ensure Megatron-LM-FL replaces any pre-installed megatron-core
+          ./tools/install/install.sh \
+            --platform ${{ inputs.platform }} \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            ${ENV_NAME:+--env-name "$ENV_NAME"} \
+            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
+            --pip-deps typer \
+            --force-build \
+            --retry-count 3
+
+          # TODO: temp solution to install newly added deps, remove once the new image is built
+          pip install qwen_vl_utils==0.0.14 diffusers==0.36.0 websocket-client==1.8.0 websocket==0.2.1 websockets==15.0.1 msgpack==1.1.0 datasets==4.5.0
 
           # Copy test data (keep existing logic)
           mkdir -p /opt/data
@@ -130,40 +182,55 @@ jobs:
 
       - name: Run unit tests
         id: unit_test
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
           PLATFORM='${{ inputs.platform }}'
           DEVICE='${{ inputs.device }}'
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
           echo "Running unit tests"
           echo "Platform: $PLATFORM"
           echo "Device: $DEVICE"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
           echo "Project root: $PROJECT_ROOT"
 
-          # Source conda utilities for reusable functions
-          source ./tools/install/utils/conda_utils.sh
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
 
-          # Conditionally activate conda environment if specified
-          if [ -n "$CONDA_ENV" ]; then
-            if activate_conda "$CONDA_ENV" "$CONDA_PATH"; then
-              : # Success message already displayed by activate_conda
-            else
-              echo "⚠️  Conda environment requested but conda not found"
-              echo "Continuing without conda activation..."
-            fi
-          else
-            echo "ℹ️  Running tests with system Python"
-          fi
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "⚠️  Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "⚠️  UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "ℹ️  Running tests with pip/system Python"
+              ;;
+          esac
 
           # Display Python environment info
           echo "Python location: $(which python)"
           echo "Python version: $(python --version)"
 
-          # Run unit tests using run_tests.sh
+          # Install coverage if not already present
+          pip install coverage --quiet
+
+          # Export COVERAGE_DIR so run_unit_tests.sh can pick it up
+          export COVERAGE_DIR="$PROJECT_ROOT/coverage-report"
+
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
             --platform "$PLATFORM" \
             --device "$DEVICE" \
@@ -178,4 +245,24 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 90
+        timeout-minutes: 15
+
+      - name: Upload coverage report
+        if: steps.unit_test.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}
+          path: ${{ env.PROJECT_ROOT }}/coverage-report/coverage.json
+          retention-days: 7
+
+      - name: Upload coverage report to FlagCICD
+        if: steps.unit_test.outcome == 'success'
+        continue-on-error: true
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        env:
+          NO_PROXY: "flagcicd-inner.flagos.net"
+        with:
+          user_id: '000000000000000000'
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          report_path: '${{ env.PROJECT_ROOT }}/coverage-report/coverage.json'
+          fail_on_error: 'false'

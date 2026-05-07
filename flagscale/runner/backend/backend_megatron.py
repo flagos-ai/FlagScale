@@ -8,7 +8,7 @@ from flagscale.runner.runner_train import (
     _get_args_megatron,
     _update_config_train,
 )
-from flagscale.runner.utils import logger, parse_hostfile
+from flagscale.runner.utils import get_pkg_dir, logger, parse_hostfile, resolve_path
 
 
 class MegatronBackend(BackendBase):
@@ -36,9 +36,8 @@ class MegatronBackend(BackendBase):
         host,
         node_rank,
         cmd,
-        background=True,
-        with_test=False,
-        root_dir=None,
+        background=False,
+        pkg_dir=None,
         enable_monitoring=False,
     ):
         system_config = config.train.system
@@ -57,14 +56,13 @@ class MegatronBackend(BackendBase):
         host_pid_file = os.path.join(logging_config.pids_dir, f"host_{node_rank}_{host}.pid")
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
-        if root_dir is not None:
-            root_dir = os.path.abspath(root_dir)
-        else:
-            root_dir = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            )
-        assert os.path.exists(root_dir), f"ROOT_DIR {root_dir} does not exist."
-        megatron_dir = os.path.join(root_dir, "flagscale", "train")
+        pkg_dir = (
+            get_pkg_dir()
+            if pkg_dir is None
+            else resolve_path(pkg_dir, "build_dir", raise_missing=True)
+        )
+        assert os.path.exists(pkg_dir), f"PKG_DIR {pkg_dir} does not exist."
+        megatron_dir = os.path.join(pkg_dir, "flagscale", "train")
         cmds_config = config.experiment.get("cmds", None)
         if cmds_config:
             before_start = cmds_config.get("before_start", "")
@@ -81,15 +79,15 @@ class MegatronBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
             f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
             f.write("\n")
-            f.write(f"cd {root_dir}\n")
+            f.write(f"cd {pkg_dir}\n")
             f.write("\n")
-            f.write(f"export PYTHONPATH={root_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
+            f.write(f"export PYTHONPATH={pkg_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
             f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
             if enable_monitoring:
                 monitor_launcher_path = os.path.join(
-                    root_dir, "flagscale", "runner", "elastic", "monitor_launcher.py"
+                    pkg_dir, "flagscale", "runner", "elastic", "monitor_launcher.py"
                 )
                 ssh_port = config.experiment.runner.get("ssh_port", 22)
                 f.write("# Start monitoring service in background\n")
@@ -109,17 +107,13 @@ class MegatronBackend(BackendBase):
                 )
             f.write("\n")
 
-            if with_test:
-                f.write('bash -c "$cmd; sync" \n')
+            if background:
+                f.write(
+                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                )
             else:
-                # TODO: need a option to control whether to append or overwrite the output file
-                # Now, it always appends to the output file
-                if background:
-                    f.write(
-                        f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
-                    )
-                else:
-                    f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())

@@ -33,13 +33,15 @@ from megatron.training.utils import (
 from flagscale.models.megatron.rwkv.rwkv_model import RWKVModel
 
 try:
-    from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+    from megatron.post_training.arguments import add_modelopt_args
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
     from megatron.post_training.model_provider import model_provider as model_provider_modelopt
 
     has_nvidia_modelopt = True
 except ImportError:
     has_nvidia_modelopt = False
+
+from megatron.training.training import pretrain
 
 stimer = StragglerDetector()
 
@@ -104,7 +106,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and modelopt_args_enabled(args):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     # Reshape output tensor to 1D for element-wise multiplication.

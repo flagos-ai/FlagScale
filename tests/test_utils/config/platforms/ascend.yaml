@@ -1,0 +1,31 @@
+# Ascend NPU Platform Configuration
+# Flexible test selection mechanism for Huawei Ascend NPU environments
+#
+# This platform configuration supports Ascend 910B devices.
+# Users can modify the following:
+# - functional: Add/remove test case names in the support lists
+#   Example: qwen3: ["4b_tp2_ascend"] -> add or remove items
+# - unit: Add/remove paths in include and exclude lists
+
+# Define device types available for this platform
+device_types:
+  - ascend910
+
+# Device-specific test configurations
+ascend910:
+  name: "ascend910"
+  tests:
+    functional:
+      # Add or remove test cases per model
+      train: {}
+      hetero_train: {}
+      benchmark: {}
+      inference:
+        qwen3: ["4b_tp2_ascend"]
+      serve:
+        qwen3: ["4b_tp2_ascend"]
+    unit:
+      # Include patterns: "*" for all, or list specific paths
+      include: "*"
+      # Exclude patterns: empty list or list paths to exclude
+      exclude: []

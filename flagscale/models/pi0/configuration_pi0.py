@@ -18,33 +18,23 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import draccus
-from huggingface_hub.constants import CONFIG_NAME
 
-# from lerobot.configs.policies import PreTrainedConfig
 from flagscale.models.configs.types import FeatureType, NormalizationMode, PolicyFeature
-
-# from lerobot.optim.optimizers import AdamWConfig
-# from lerobot.optim.schedulers import CosineDecayWithWarmupSchedulerConfig
-# from lerobot.policies.rtc.configuration_rtc import RTCConfig
-from flagscale.models.utils.constants import ACTION, OBS_IMAGES, OBS_STATE
-from flagscale.train.utils.hub import HubMixin
+from flagscale.models.utils.constants import OBS_IMAGES
+from flagscale.models.vla.pretrained_config import PreTrainedConfig
 
 DEFAULT_IMAGE_SIZE = 224
 
 
 # @PreTrainedConfig.register_subclass("pi0")
 @dataclass
-class PI0Config(HubMixin):
+class PI0Config(PreTrainedConfig):
     paligemma_variant: str = "gemma_2b"
     action_expert_variant: str = "gemma_300m"
     dtype: str = "float32"  # Options: "bfloat16", "float32"
-
-    input_features: dict[str, PolicyFeature] = field(default_factory=dict)
-    output_features: dict[str, PolicyFeature] = field(default_factory=dict)
 
     # `use_amp` determines whether to use Automatic Mixed Precision (AMP) for training and evaluation. With AMP,
     # automatic gradient scaling is used.
@@ -183,6 +173,17 @@ class PI0Config(HubMixin):
         return None
 
     @classmethod
+    def _from_dict(cls, data: dict[str, Any]) -> "PI0Config":
+        if "normalization_mapping" in data and isinstance(data["normalization_mapping"], dict):
+            data["normalization_mapping"] = {
+                k: NormalizationMode(v) for k, v in data["normalization_mapping"].items()
+            }
+        for key in ("image_resolution", "optimizer_betas"):
+            if key in data and isinstance(data[key], list):
+                data[key] = tuple(data[key])
+        return cls(**data)
+
+    @classmethod
     def from_pretrained(cls, config_dir: str, **kwargs: Any) -> "PI0Config":
         config_path = os.path.join(config_dir, "config.json")
         if not os.path.exists(config_path):
@@ -191,7 +192,10 @@ class PI0Config(HubMixin):
         with open(config_path, "r") as f:
             config = json.load(f)
 
-        _UNUSED_KEYS = ["type", "repo_id", "push_to_hub", "private", "tags", "license"]
+        if "type" in config:
+            return PreTrainedConfig.from_pretrained(config_dir)
+
+        _UNUSED_KEYS = ["repo_id", "push_to_hub", "private", "tags", "license"]
         for key in _UNUSED_KEYS:
             config.pop(key, None)
 
@@ -202,33 +206,3 @@ class PI0Config(HubMixin):
         cli_overrides = kwargs.pop("cli_overrides", [])
         with draccus.config_type("json"):
             return draccus.parse(cls, config_file, args=cli_overrides)
-
-    # TODO(yupu): Copied from class PreTrainedConfig
-    @property
-    def robot_state_feature(self) -> PolicyFeature | None:
-        for ft_name, ft in self.input_features.items():
-            if ft.type is FeatureType.STATE and ft_name == OBS_STATE:
-                return ft
-        return None
-
-    @property
-    def env_state_feature(self) -> PolicyFeature | None:
-        for _, ft in self.input_features.items():
-            if ft.type is FeatureType.ENV:
-                return ft
-        return None
-
-    @property
-    def image_features(self) -> dict[str, PolicyFeature]:
-        return {key: ft for key, ft in self.input_features.items() if ft.type is FeatureType.VISUAL}
-
-    @property
-    def action_feature(self) -> PolicyFeature | None:
-        for ft_name, ft in self.output_features.items():
-            if ft.type is FeatureType.ACTION and ft_name == ACTION:
-                return ft
-        return None
-
-    def _save_pretrained(self, save_directory: Path) -> None:
-        with open(save_directory / CONFIG_NAME, "w") as f, draccus.config_type("json"):
-            draccus.dump(self, f, indent=4)

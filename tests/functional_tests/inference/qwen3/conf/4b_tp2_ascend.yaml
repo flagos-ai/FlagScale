@@ -1,0 +1,33 @@
+defaults:
+  - _self_
+  - inference: 4b_tp2_ascend
+
+experiment:
+  exp_name: qwen3
+  exp_dir: tests/functional_tests/inference/qwen3/test_results/4b_tp2_ascend
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/inference_llm.py
+  runner:
+    hostfile: null
+
+  envs:
+    HYDRA_FULL_ERROR: 1
+    ASCEND_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+    HCCL_WHITELIST_DISABLE: 1
+    HCCL_CONNECT_TIMEOUT: 600
+    ASCEND_LAUNCH_BLOCKING: 1
+    SEED: 1234
+    PYTHONHASHSEED: 0
+    MKL_NUM_THREADS: 1
+    OMP_NUM_THREADS: 1
+    NUMEXPR_NUM_THREADS: 1
+    VLLM_TARGET_DEVICE: "npu"
+    VLLM_PLATFORM_PLUGINS: "ascend"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

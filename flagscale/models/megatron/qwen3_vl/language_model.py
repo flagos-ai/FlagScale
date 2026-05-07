@@ -6,6 +6,10 @@ from typing import Dict, Literal, Optional, List
 import torch
 from torch import Tensor
 
+from megatron.plugin.platform import get_platform
+
+cur_platform = get_platform()
+
 
 from megatron.core import tensor_parallel
 from megatron.core.config_logger import has_config_logger_enabled, log_config_to_disk
@@ -67,7 +71,7 @@ class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
         inv_freq = 1.0 / (
             rotary_base
             ** (
-                torch.arange(0, dim, 2, dtype=torch.float32, device=torch.cuda.current_device())
+                torch.arange(0, dim, 2, dtype=torch.float32, device=cur_platform.current_device())
                 / dim
             )
         )

@@ -14,6 +14,8 @@ from megatron.legacy.model.language_model import get_language_model
 from megatron.legacy.model.utils import scaled_init_method_normal
 from megatron.legacy.model.bert_model import bert_extended_attention_mask, bert_position_ids
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 def general_ict_model_provider(only_query_model=False, only_block_model=False):
     """Build the model."""
@@ -73,7 +75,7 @@ class ICTBertModel(MegatronModule):
     def embed_query(self, query_tokens, query_attention_mask):
         """Embed a batch of tokens using the query model"""
         if self.use_query_model:
-            query_types = torch.cuda.LongTensor(*query_tokens.shape).fill_(0)
+            query_types = cur_platform.LongTensor(*query_tokens.shape).fill_(0)
             query_ict_logits, _ = self.query_model.forward(query_tokens, query_attention_mask, query_types)
             return query_ict_logits
         else:
@@ -82,7 +84,7 @@ class ICTBertModel(MegatronModule):
     def embed_block(self, block_tokens, block_attention_mask):
         """Embed a batch of tokens using the block model"""
         if self.use_block_model:
-            block_types = torch.cuda.LongTensor(*block_tokens.shape).fill_(0)
+            block_types = cur_platform.LongTensor(*block_tokens.shape).fill_(0)
             block_ict_logits, _ = self.block_model.forward(block_tokens, block_attention_mask, block_types)
             return block_ict_logits
         else:

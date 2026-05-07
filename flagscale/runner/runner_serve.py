@@ -22,12 +22,18 @@ from flagscale.runner.utils import (
     get_addr,
     get_free_port,
     get_ip_addr,
+    get_node0_log_file,
     get_nproc_per_node,
+    get_pkg_dir,
     is_ip_addr,
     is_master_node,
     logger,
     parse_hostfile,
+    resolve_path,
     run_local_command,
+    setup_exp_dir,
+    setup_logging_dirs,
+    start_tail_log,
     wait_for_ray_master,
 )
 
@@ -174,10 +180,7 @@ def _update_auto_engine_args(config, backend="vllm", new_engine_args={}):
 def _update_config_serve(config: DictConfig):
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
 
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
 
@@ -205,13 +208,7 @@ def _update_config_serve(config: DictConfig):
         # set auto tp and pp size
         _update_auto_engine_args(config, new_engine_args=cli_engine_args)
 
-    log_dir = os.path.join(exp_dir, "serve_logs")
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-
-    config.logging.log_dir = log_dir
-    config.logging.scripts_dir = scripts_dir
-    config.logging.pids_dir = pids_dir
+    setup_logging_dirs(config.logging, exp_dir, log_subdir="serve_logs")
 
     os.makedirs(config.logging.scripts_dir, exist_ok=True)
     OmegaConf.set_struct(config, True)
@@ -260,7 +257,7 @@ def parse_cloud_hostfile(hostfile_path):
     return resources
 
 
-def _generate_run_script_serve(config, host, node_rank, cmd, background=True, with_test=False):
+def _generate_run_script_serve(config, host, node_rank, cmd, background=False):
     nodes = config.get("nodes", None)
     logging_config = config.logging
 
@@ -276,7 +273,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
 
     os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    pkg_dir = get_pkg_dir()
     cmds_config = config.experiment.get("cmds", None)
     ssh_port = config.experiment.runner.get("ssh_port", 22)
     docker_name = config.experiment.runner.get("docker", None)
@@ -290,7 +287,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
 
         vllm_path = os.path.dirname(vllm.__path__[0])
     except Exception:
-        vllm_path = f"{root_dir}/vllm"
+        vllm_path = f"{pkg_dir}/vllm"
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
     envs = config.experiment.get("envs", {})
     with open(host_run_script_file, "w") as f:
@@ -301,9 +298,9 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
         f.write("\n")
 
         f.write('if [ -z "$PYTHONPATH" ]; then\n')
-        f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
+        f.write(f"    export PYTHONPATH={vllm_path}:{pkg_dir}\n")
         f.write("else\n")
-        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
+        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{pkg_dir}"\n')
         f.write("fi\n")
         f.write("\n")
         envs_str = " && ".join(
@@ -712,7 +709,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
         f.write(f"mkdir -p {logging_config.log_dir}\n")
         f.write(f"mkdir -p {logging_config.pids_dir}\n")
         f.write("\n")
-        f.write(f"cd {root_dir}\n")
+        f.write(f"cd {pkg_dir}\n")
         f.write("\n")
         f.write(f'cmd="{cmd}"\n')
         f.write("\n")
@@ -724,7 +721,8 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
                 f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
             )
         else:
-            f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+            f.write("set -o pipefail\n")
+            f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
@@ -733,9 +731,7 @@ def _generate_run_script_serve(config, host, node_rank, cmd, background=True, wi
     return host_run_script_file
 
 
-def _generate_cloud_run_script_serve(
-    config, host, node_rank, cmd, background=True, with_test=False
-):
+def _generate_cloud_run_script_serve(config, host, node_rank, cmd, background=False):
     logging_config = config.logging
     node_id = get_addr()
     no_shared_fs = config.experiment.runner.get("no_shared_fs", False)
@@ -752,7 +748,7 @@ def _generate_cloud_run_script_serve(
     if node_id:
         os.makedirs(os.path.join(logging_config.scripts_dir, node_id), exist_ok=True)
 
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    pkg_dir = get_pkg_dir()
     cmds_config = config.experiment.get("cmds", None)
     if cmds_config:
         before_start_cmd = cmds_config.get("before_start", "")
@@ -764,7 +760,7 @@ def _generate_cloud_run_script_serve(
 
         vllm_path = os.path.dirname(vllm.__path__[0])
     except Exception:
-        vllm_path = f"{root_dir}/vllm"
+        vllm_path = f"{pkg_dir}/vllm"
     deploy_config = config.experiment.get("runner", {}).get("deploy", {})
     envs = config.experiment.get("envs", {})
     with open(host_run_script_file, "w") as f:
@@ -775,9 +771,9 @@ def _generate_cloud_run_script_serve(
         f.write("\n")
 
         f.write('if [ -z "$PYTHONPATH" ]; then\n')
-        f.write(f"    export PYTHONPATH={vllm_path}:{root_dir}\n")
+        f.write(f"    export PYTHONPATH={vllm_path}:{pkg_dir}\n")
         f.write("else\n")
-        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{root_dir}"\n')
+        f.write(f'    export PYTHONPATH="$PYTHONPATH:{vllm_path}:{pkg_dir}"\n')
         f.write("fi\n")
         f.write("\n")
         envs_str = " && ".join(f"export {key}={value}" for key, value in envs.items())
@@ -892,7 +888,7 @@ def _generate_cloud_run_script_serve(
             f.write(f"mkdir -p {logging_config.log_dir}\n")
             f.write(f"mkdir -p {logging_config.pids_dir}\n")
             f.write("\n")
-            f.write(f"cd {root_dir}\n")
+            f.write(f"cd {pkg_dir}\n")
             f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
@@ -904,7 +900,8 @@ def _generate_cloud_run_script_serve(
                     f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
-                f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
@@ -1074,15 +1071,11 @@ class SSHServeRunner(RunnerBase):
                 f"Invalid config entrypoint: {entrypoint}, must be a python file path or null."
             )
         hostfile_path = self.config.experiment.runner.get("hostfile", None)
-        if hostfile_path:
-            if os.path.isabs(hostfile_path):
-                hostfile_path = hostfile_path
-            else:
-                hostfile_path = os.path.join(os.getcwd(), hostfile_path)
-            if not os.path.exists(hostfile_path):
-                raise ValueError(f"The hostfile {hostfile_path} does not exist")
         self.resources = None
         if hostfile_path:
+            hostfile_path = resolve_path(
+                hostfile_path, "experiment.runner.hostfile", raise_missing=True
+            )
             self.resources = parse_hostfile(hostfile_path)
             for key, value in self.resources.items():
                 if not value.get("type", None):
@@ -1106,7 +1099,7 @@ class SSHServeRunner(RunnerBase):
         nnodes,
         node_rank,
         nproc_per_node,
-        with_test=False,
+        background=True,
         dryrun=False,
     ):
         export_cmd = []
@@ -1117,12 +1110,12 @@ class SSHServeRunner(RunnerBase):
         cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         host_run_script_file = _generate_run_script_serve(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=background
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)
 
-    def run(self, with_test=False, dryrun=False):
+    def run(self, background=True, dryrun=False):
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
         if visible_devices is not None and isinstance(visible_devices, str):
@@ -1131,22 +1124,35 @@ class SSHServeRunner(RunnerBase):
 
         runner_config = self.config.experiment.runner
 
-        # If hostfile is not provided, run the job on localhost
-        nproc_from_args = runner_config.get("nproc_per_node", None)
-        nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
-        available_addr = runner_config.get("master_addr", "localhost")
-        available_port = runner_config.get("master_port", get_free_port())
-        self._run_each(
-            "localhost",
-            available_addr,
-            available_port,
-            1,
-            0,
-            nproc_per_node,
-            with_test=with_test,
-            dryrun=dryrun,
-        )
-        self.host = available_addr
+        # In background mode, tail node 0's log file on the login node console.
+        # In foreground mode, tee already streams stdout directly.
+        _tail_stop = None
+        if not dryrun and background:
+            logging_config = self.config.logging
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            log_file = get_node0_log_file(logging_config, no_shared_fs)
+            _, _tail_stop = start_tail_log(log_file)
+
+        try:
+            # If hostfile is not provided, run the job on localhost
+            nproc_from_args = runner_config.get("nproc_per_node", None)
+            nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
+            available_addr = runner_config.get("master_addr", "localhost")
+            available_port = runner_config.get("master_port", get_free_port())
+            self._run_each(
+                "localhost",
+                available_addr,
+                available_port,
+                1,
+                0,
+                nproc_per_node,
+                background=background,
+                dryrun=dryrun,
+            )
+            self.host = available_addr
+        finally:
+            if _tail_stop:
+                _tail_stop.set()
 
     def _stop_each(self, host, node_rank):
         logging_config = self.config.logging
@@ -1317,14 +1323,9 @@ class CloudServeRunner(RunnerBase):
         self.resources = None
         hostfile_path = self.config.experiment.runner.get("hostfile", None)
         if hostfile_path:
-            if os.path.isabs(hostfile_path):
-                hostfile_path = hostfile_path
-            else:
-                hostfile_path = os.path.join(os.getcwd(), hostfile_path)
-            if not os.path.exists(hostfile_path):
-                raise ValueError(f"The hostfile {hostfile_path} does not exist")
-
-        if hostfile_path:
+            hostfile_path = resolve_path(
+                hostfile_path, "experiment.runner.hostfile", raise_missing=True
+            )
             self.resources = parse_cloud_hostfile(hostfile_path)
             for key, value in self.resources.items():
                 if not value.get("type", None):
@@ -1371,7 +1372,7 @@ class CloudServeRunner(RunnerBase):
         nnodes,
         node_rank,
         nproc_per_node,
-        with_test=False,
+        background=True,
         dryrun=False,
     ):
         export_cmd = []
@@ -1381,12 +1382,12 @@ class CloudServeRunner(RunnerBase):
         cmd = shlex.join([*export_cmd, "python", self.user_script, *self.user_args])
 
         host_run_script_file = _generate_cloud_run_script_serve(
-            self.config, host, node_rank, cmd, background=True, with_test=with_test
+            self.config, host, node_rank, cmd, background=background
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)
 
-    def run(self, with_test=False, dryrun=False):
+    def run(self, background=True, dryrun=False):
         num_visible_devices = None
         visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
         if visible_devices is not None and isinstance(visible_devices, str):
@@ -1395,19 +1396,32 @@ class CloudServeRunner(RunnerBase):
 
         runner_config = self.config.experiment.runner
 
-        # If hostfile is not provided, run the job on localhost
-        nproc_from_args = runner_config.get("nproc_per_node", None)
-        nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
-        available_addr = runner_config.get("master_addr", "localhost")
-        available_port = runner_config.get("master_port", get_free_port())
-        self._run_each(
-            "localhost",
-            available_addr,
-            available_port,
-            1,
-            0,
-            nproc_per_node,
-            with_test=with_test,
-            dryrun=dryrun,
-        )
-        self.host = available_addr
+        # In background mode, tail node 0's log file on the login node console.
+        # In foreground mode, tee already streams stdout directly.
+        _tail_stop = None
+        if not dryrun and background:
+            logging_config = self.config.logging
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
+            log_file = get_node0_log_file(logging_config, no_shared_fs)
+            _, _tail_stop = start_tail_log(log_file)
+
+        try:
+            # If hostfile is not provided, run the job on localhost
+            nproc_from_args = runner_config.get("nproc_per_node", None)
+            nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
+            available_addr = runner_config.get("master_addr", "localhost")
+            available_port = runner_config.get("master_port", get_free_port())
+            self._run_each(
+                "localhost",
+                available_addr,
+                available_port,
+                1,
+                0,
+                nproc_per_node,
+                background=background,
+                dryrun=dryrun,
+            )
+            self.host = available_addr
+        finally:
+            if _tail_stop:
+                _tail_stop.set()

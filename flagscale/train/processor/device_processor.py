@@ -26,16 +26,20 @@ from typing import Any
 
 import torch
 
+from megatron.plugin.platform import get_platform
+
 from .core import EnvTransition, PolicyAction, TransitionKey
 from .pipeline import ProcessorStep, ProcessorStepRegistry
 from flagscale.models.configs.types import PipelineFeatureType, PolicyFeature
+
+cur_platform = get_platform()
 
 
 def get_safe_torch_device(try_device: str) -> torch.device:
     """Given a string, return a torch.device with checks on whether the device is available."""
     try_device = str(try_device)
     if try_device.startswith("cuda"):
-        assert torch.cuda.is_available()
+        assert cur_platform.is_available()
         device = torch.device(try_device)
     elif try_device == "mps":
         assert torch.backends.mps.is_available()

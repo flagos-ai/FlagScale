@@ -1,4 +1,4 @@
-# Copied from https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/policies/pi0/modeling_pi0.py
+# Copied from https://github.com/huggingface/lerobot/blob/f0d2b37b/src/lerobot/policies/pi0/modeling_pi0.py
 
 #!/usr/bin/env python
 
@@ -17,6 +17,7 @@
 # limitations under the License.
 
 import builtins
+import copy
 import logging
 import math
 from collections import deque
@@ -27,20 +28,21 @@ from typing import Literal, TypedDict, TypeVar
 
 import torch
 import torch.nn.functional as F
-from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
-from safetensors.torch import (
-    save_model as save_model_as_safetensor,
-)
 from torch import Tensor, nn
 from transformers.models.auto import CONFIG_MAPPING
 from transformers.models.gemma import modeling_gemma
-from transformers.models.gemma.modeling_gemma import GemmaForCausalLM
-from transformers.models.paligemma.modeling_paligemma import PaliGemmaForConditionalGeneration
 from typing_extensions import Unpack
 
 # from lerobot.configs.policies import PreTrainedConfig
 from flagscale.models.pi0.configuration_pi0 import DEFAULT_IMAGE_SIZE, PI0Config
-from flagscale.train.utils.hub import HubMixin
+from flagscale.models.pi05.pi_gemma import (
+    PaliGemmaForConditionalGenerationWithPiGemma,
+    PiGemmaForCausalLM,
+    _gated_residual,
+    layernorm_forward,
+)
+from flagscale.models.vla.base_policy import TrainablePolicy
+from flagscale.platforms import get_platform
 
 T = TypeVar("T", bound="PI0Policy")
 
@@ -96,10 +98,11 @@ def create_sinusoidal_pos_embedding(  # see openpi `create_sinusoidal_pos_embedd
 
 
 def sample_beta(alpha, beta, bsize, device):  # see openpi `sample_beta` (exact copy)
-    alpha_t = torch.as_tensor(alpha, dtype=torch.float32, device=device)
-    beta_t = torch.as_tensor(beta, dtype=torch.float32, device=device)
+    sample_device = "cpu" if not get_platform().supports_distributions_on_device() else device
+    alpha_t = torch.as_tensor(alpha, dtype=torch.float32, device=sample_device)
+    beta_t = torch.as_tensor(beta, dtype=torch.float32, device=sample_device)
     dist = torch.distributions.Beta(alpha_t, beta_t)
-    return dist.sample((bsize,))
+    return dist.sample((bsize,)).to(device)
 
 
 def make_att_2d_masks(pad_masks, att_masks):  # see openpi `make_att_2d_masks` (exact copy)
@@ -190,7 +193,7 @@ def resize_with_pad_torch(  # see openpi `resize_with_pad_torch` (exact copy)
     if images.dtype == torch.uint8:
         resized_images = torch.round(resized_images).clamp(0, 255).to(torch.uint8)
     elif images.dtype == torch.float32:
-        resized_images = resized_images.clamp(-1.0, 1.0)
+        resized_images = resized_images.clamp(0.0, 1.0)
     else:
         raise ValueError(f"Unsupported image dtype: {images.dtype}")
 
@@ -201,7 +204,7 @@ def resize_with_pad_torch(  # see openpi `resize_with_pad_torch` (exact copy)
     pad_w1 = pad_w0 + remainder_w
 
     # Pad
-    constant_value = 0 if images.dtype == torch.uint8 else -1.0
+    constant_value = 0 if images.dtype == torch.uint8 else 0.0
     padded_images = F.pad(
         resized_images,
         (pad_w0, pad_w1, pad_h0, pad_h1),  # left, right, top, bottom
@@ -220,14 +223,16 @@ def resize_with_pad_torch(  # see openpi `resize_with_pad_torch` (exact copy)
 def compute_layer_complete(
     layer_idx, inputs_embeds, attention_mask, position_ids, adarms_cond, paligemma, gemma_expert
 ):
-    models = [paligemma.language_model, gemma_expert.model]
+    models = [paligemma.model.language_model, gemma_expert.model]
     query_states = []
     key_states = []
     value_states = []
     gates = []
     for i, hidden_states in enumerate(inputs_embeds):
         layer = models[i].layers[layer_idx]
-        hidden_states, gate = layer.input_layernorm(hidden_states, cond=adarms_cond[i])
+        hidden_states, gate = layernorm_forward(
+            layer.input_layernorm, hidden_states, adarms_cond[i]
+        )
         gates.append(gate)
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, layer.self_attn.head_dim)
@@ -253,10 +258,10 @@ def compute_layer_complete(
         query_states, key_states, cos, sin, unsqueeze_dim=1
     )
     batch_size = query_states.shape[0]
-    scaling = paligemma.language_model.layers[layer_idx].self_attn.scaling
+    scaling = paligemma.model.language_model.layers[layer_idx].self_attn.scaling
     # Attention computation
     att_output, _ = modeling_gemma.eager_attention_forward(
-        paligemma.language_model.layers[layer_idx].self_attn,
+        paligemma.model.language_model.layers[layer_idx].self_attn,
         query_states,
         key_states,
         value_states,
@@ -264,7 +269,7 @@ def compute_layer_complete(
         scaling,
     )
     # Get head_dim from the current layer, not from the model
-    head_dim = paligemma.language_model.layers[layer_idx].self_attn.head_dim
+    head_dim = paligemma.model.language_model.layers[layer_idx].self_attn.head_dim
     att_output = att_output.reshape(batch_size, -1, 1 * 8 * head_dim)
     # Process layer outputs
     outputs_embeds = []
@@ -276,15 +281,15 @@ def compute_layer_complete(
             att_output = att_output.to(layer.self_attn.o_proj.weight.dtype)
         out_emb = layer.self_attn.o_proj(att_output[:, start_pos:end_pos])
         # first residual
-        out_emb = modeling_gemma._gated_residual(hidden_states, out_emb, gates[i])
+        out_emb = _gated_residual(hidden_states, out_emb, gates[i])
         after_first_residual = out_emb.clone()
-        out_emb, gate = layer.post_attention_layernorm(out_emb, cond=adarms_cond[i])
+        out_emb, gate = layernorm_forward(layer.post_attention_layernorm, out_emb, adarms_cond[i])
         # Convert to bfloat16 if the next layer (mlp) uses bfloat16
         if layer.mlp.up_proj.weight.dtype == torch.bfloat16:
             out_emb = out_emb.to(dtype=torch.bfloat16)
         out_emb = layer.mlp(out_emb)
         # second residual
-        out_emb = modeling_gemma._gated_residual(after_first_residual, out_emb, gate)
+        out_emb = _gated_residual(after_first_residual, out_emb, gate)
         outputs_embeds.append(out_emb)
         start_pos = end_pos
     return outputs_embeds
@@ -343,7 +348,7 @@ class PaliGemmaWithExpertModel(
         vlm_config_hf.text_config.num_hidden_layers = vlm_config.depth
         vlm_config_hf.text_config.num_key_value_heads = vlm_config.num_kv_heads
         vlm_config_hf.text_config.hidden_activation = "gelu_pytorch_tanh"
-        vlm_config_hf.text_config.torch_dtype = "float32"
+        vlm_config_hf.text_config.dtype = "float32"
         vlm_config_hf.text_config.vocab_size = 257152
         vlm_config_hf.text_config.use_adarms = use_adarms[0]
         vlm_config_hf.text_config.adarms_cond_dim = vlm_config.width if use_adarms[0] else None
@@ -351,7 +356,7 @@ class PaliGemmaWithExpertModel(
         vlm_config_hf.vision_config.intermediate_size = 4304
         vlm_config_hf.vision_config.projection_dim = 2048
         vlm_config_hf.vision_config.projector_hidden_act = "gelu_fast"
-        vlm_config_hf.vision_config.torch_dtype = "float32"
+        vlm_config_hf.vision_config.dtype = "float32"
 
         action_expert_config_hf = CONFIG_MAPPING["gemma"](
             head_dim=action_expert_config.head_dim,
@@ -362,13 +367,13 @@ class PaliGemmaWithExpertModel(
             num_key_value_heads=action_expert_config.num_kv_heads,
             vocab_size=257152,
             hidden_activation="gelu_pytorch_tanh",
-            torch_dtype="float32",
+            dtype="float32",
             use_adarms=use_adarms[1],
             adarms_cond_dim=action_expert_config.width if use_adarms[1] else None,
         )
 
-        self.paligemma = PaliGemmaForConditionalGeneration(config=vlm_config_hf)
-        self.gemma_expert = GemmaForCausalLM(config=action_expert_config_hf)
+        self.paligemma = PaliGemmaForConditionalGenerationWithPiGemma(config=vlm_config_hf)
+        self.gemma_expert = PiGemmaForCausalLM(config=action_expert_config_hf)
         self.gemma_expert.model.embed_tokens = None
 
         self.to_bfloat16_for_selected_params(precision)
@@ -385,9 +390,8 @@ class PaliGemmaWithExpertModel(
             raise ValueError(f"Invalid precision: {precision}")
 
         params_to_keep_float32 = [
-            "vision_tower.vision_model.embeddings.patch_embedding.weight",
-            "vision_tower.vision_model.embeddings.patch_embedding.bias",
-            "vision_tower.vision_model.embeddings.position_embedding.weight",
+            "vision_tower",
+            "multi_modal_projector",
             "input_layernorm",
             "post_attention_layernorm",
             "model.norm",
@@ -398,10 +402,16 @@ class PaliGemmaWithExpertModel(
                 param.data = param.data.to(dtype=torch.float32)
 
     def embed_image(self, image: torch.Tensor):
-        return self.paligemma.model.get_image_features(image)
+        out_dtype = image.dtype
+        if image.dtype != torch.float32:
+            image = image.to(torch.float32)
+        features = self.paligemma.model.get_image_features(image)
+        if features.dtype != out_dtype:
+            features = features.to(out_dtype)
+        return features
 
     def embed_language_tokens(self, tokens: torch.Tensor):
-        return self.paligemma.language_model.embed_tokens(tokens)
+        return self.paligemma.model.language_model.embed_tokens(tokens)
 
     def forward(
         self,
@@ -415,7 +425,7 @@ class PaliGemmaWithExpertModel(
         if adarms_cond is None:
             adarms_cond = [None, None]
         if inputs_embeds[1] is None:
-            prefix_output = self.paligemma.language_model.forward(
+            prefix_output = self.paligemma.model.language_model.forward(
                 inputs_embeds=inputs_embeds[0],
                 attention_mask=attention_mask,
                 position_ids=position_ids,
@@ -439,7 +449,7 @@ class PaliGemmaWithExpertModel(
             prefix_output = None
             prefix_past_key_values = None
         else:
-            models = [self.paligemma.language_model, self.gemma_expert.model]
+            models = [self.paligemma.model.language_model, self.gemma_expert.model]
             num_layers = self.paligemma.config.text_config.num_hidden_layers
 
             # Check if gradient checkpointing is enabled for any of the models
@@ -483,7 +493,7 @@ class PaliGemmaWithExpertModel(
             def compute_final_norms(inputs_embeds, adarms_cond):
                 outputs_embeds = []
                 for i, hidden_states in enumerate(inputs_embeds):
-                    out_emb, _ = models[i].norm(hidden_states, cond=adarms_cond[i])
+                    out_emb, _ = layernorm_forward(models[i].norm, hidden_states, adarms_cond[i])
                     outputs_embeds.append(out_emb)
                 return outputs_embeds
 
@@ -549,29 +559,19 @@ class PI0Pytorch(nn.Module):  # see openpi `PI0Pytorch`
             # Also compile the main forward pass used during training
             self.forward = torch.compile(self.forward, mode=config.compile_mode)
 
-        msg = """An incorrect transformer version is used, please create an issue on https://github.com/huggingface/lerobot/issues"""
-
-        try:
-            from transformers.models.siglip import check
-
-            if not check.check_whether_transformers_replace_is_installed_correctly():
-                raise ValueError(msg)
-        except ImportError:
-            raise ValueError(msg) from None
-
     def gradient_checkpointing_enable(self):
         """Enable gradient checkpointing for memory optimization."""
         self.gradient_checkpointing_enabled = True
-        self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = True
-        self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = True
+        self.paligemma_with_expert.paligemma.model.language_model.gradient_checkpointing = True
+        self.paligemma_with_expert.paligemma.model.vision_tower.gradient_checkpointing = True
         self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = True
         logging.info("Enabled gradient checkpointing for PI0Pytorch model")
 
     def gradient_checkpointing_disable(self):
         """Disable gradient checkpointing."""
         self.gradient_checkpointing_enabled = False
-        self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = False
-        self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = False
+        self.paligemma_with_expert.paligemma.model.language_model.gradient_checkpointing = False
+        self.paligemma_with_expert.paligemma.model.vision_tower.gradient_checkpointing = False
         self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = False
         logging.info("Disabled gradient checkpointing for PI0Pytorch model")
 
@@ -731,7 +731,7 @@ class PI0Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         )
 
         if (
-            self.paligemma_with_expert.paligemma.language_model.layers[
+            self.paligemma_with_expert.paligemma.model.language_model.layers[
                 0
             ].self_attn.q_proj.weight.dtype
             == torch.bfloat16
@@ -807,7 +807,9 @@ class PI0Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
         prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
-        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"
+        self.paligemma_with_expert.paligemma.model.language_model.config._attn_implementation = (
+            "eager"
+        )
 
         _, past_key_values = self.paligemma_with_expert.forward(
             attention_mask=prefix_att_2d_masks_4d,
@@ -878,6 +880,7 @@ class PI0Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         full_att_2d_masks_4d = self._prepare_attention_masks_4d(full_att_2d_masks)
         self.paligemma_with_expert.gemma_expert.model.config._attn_implementation = "eager"
 
+        past_key_values = copy.deepcopy(past_key_values)
         outputs_embeds, _ = self.paligemma_with_expert.forward(
             attention_mask=full_att_2d_masks_4d,
             position_ids=position_ids,
@@ -893,21 +896,12 @@ class PI0Pytorch(nn.Module):  # see openpi `PI0Pytorch`
         return self.action_out_proj(suffix_out)
 
 
-# class PI0Policy(PreTrainedPolicy):
-class PI0Policy(nn.Module, HubMixin):
+class PI0Policy(TrainablePolicy):
     """PI0 OpenPI Policy for LeRobot."""
 
-    config_class = PI0Config
-    name = "pi0"
-
     def __init__(self, config: PI0Config):
-        """
-        Args:
-            config: Policy configuration class instance.
-        """
-        super().__init__()
         config.validate_features()
-        self.config = config
+        super().__init__(config)
 
         # Initialize the core PI0 model
         # self.init_rtc_processor()
@@ -920,6 +914,17 @@ class PI0Policy(nn.Module, HubMixin):
         self.model.to(config.device)
 
         self.reset()
+
+    def fsdp_units(self):
+        pwe = self.model.paligemma_with_expert
+        units = []
+        units.append(pwe.paligemma.model.vision_tower)
+        units.append(pwe.paligemma.model.multi_modal_projector)
+        for layer in pwe.paligemma.model.language_model.layers:
+            units.append(layer)
+        for layer in pwe.gemma_expert.model.layers:
+            units.append(layer)
+        return units
 
     @classmethod
     def from_pretrained(
@@ -1074,6 +1079,14 @@ class PI0Policy(nn.Module, HubMixin):
                 # Some checkpoints might have this, but current model expects different structure
                 logging.warning(f"Vision embedding key might need handling: {key}")
 
+            if (
+                key == "model.paligemma_with_expert.paligemma.lm_head.weight"
+                or key == "paligemma_with_expert.paligemma.lm_head.weight"
+            ):
+                fixed_state_dict[
+                    "model.paligemma_with_expert.paligemma.model.language_model.embed_tokens.weight"
+                ] = value.clone()
+
             fixed_state_dict[new_key] = value
 
         return fixed_state_dict
@@ -1221,6 +1234,10 @@ class PI0Policy(nn.Module, HubMixin):
 
         return actions
 
+    def predict_action(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
+        actions = self.predict_action_chunk(batch)
+        return {ACTION: actions}
+
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         """Run the batch through the model and compute the loss for training."""
 
@@ -1248,8 +1265,3 @@ class PI0Policy(nn.Module, HubMixin):
         }
 
         return loss, loss_dict
-
-    def _save_pretrained(self, save_directory: Path) -> None:
-        # self.config._save_pretrained(save_directory)
-        model_to_save = self.module if hasattr(self, "module") else self
-        save_model_as_safetensor(model_to_save, str(save_directory / SAFETENSORS_SINGLE_FILE))

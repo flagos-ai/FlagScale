@@ -1,0 +1,237 @@
+name: Failure Analysis and Auto-Retry Flaky Tests
+
+# This example demonstrates using structured outputs to detect flaky test failures
+# and automatically retry them, reducing noise from intermittent failures.
+#
+# Use case: When CI fails, automatically determine if it's likely flaky and retry if so.
+
+on:
+  workflow_run:
+    workflows:
+      - ascend_tests
+      - cuda_tests
+      - metax_c500_tests
+      - format_check
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  detect-flaky:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure'}}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Debug gh access to run logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          gh auth status
+          gh run view "$RUN_ID" --json databaseId,status,conclusion,workflowName
+          gh run view "$RUN_ID" --log-failed >/tmp/failed.log
+          echo "Fetched failed log bytes: $(wc -c </tmp/failed.log)"
+
+      - name: Detect flaky test failures
+        id: detect
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL:  ${{ secrets.ANTHROPIC_BASE_URL }}
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          prompt: |
+            The CI workflow "${{ github.event.workflow_run.name }}" failed: ${{ github.event.workflow_run.html_url }}
+
+            IMPORTANT: You are in READ-ONLY analysis mode. Do NOT modify any files, do NOT use gh to push commits, create branches, or make any changes to the repository. Only read logs and analyze.
+
+            Check the logs: gh run view ${{ github.event.workflow_run.id }} --log-failed
+
+            Determine if this looks like a flaky test failure by checking for:
+            - Timeout errors
+            - Race conditions
+            - Network errors
+            - "Expected X but got Y" intermittent failures
+            - Tests that passed in previous commits
+
+            Return:
+            - is_flaky: true if likely flaky, false if real bug
+            - confidence: number 0-1 indicating confidence level
+            - summary: brief one-sentence explanation
+          claude_args: |
+            --json-schema '{"type":"object","properties":{"is_flaky":{"type":"boolean","description":"Whether this appears to be a flaky test failure"},"confidence":{"type":"number","minimum":0,"maximum":1,"description":"Confidence level in the determination"},"summary":{"type":"string","description":"One-sentence explanation of the failure"}},"required":["is_flaky","confidence","summary"]}'
+            --model ${{ vars.CLAUDE_MODEL }}
+            --allowedTools 'Bash(gh *)' 'Read' 'Glob' 'Grep'
+            --max-turns 30
+
+      - name: Debug detect output
+        if: always()
+        run: |
+          cat > /tmp/debug_structured.json <<'EOJSON'
+          ${{ steps.detect.outputs.structured_output }}
+          EOJSON
+          cat > /tmp/debug_result.json <<'EOJSON'
+          ${{ steps.detect.outputs.result }}
+          EOJSON
+          echo "structured_output:"
+          cat /tmp/debug_structured.json
+          echo "result:"
+          cat /tmp/debug_result.json
+
+      # Auto-retry only if flaky AND high confidence (>= 0.7)
+      - name: Retry flaky tests
+        if: |
+          fromJSON(steps.detect.outputs.structured_output).is_flaky == true &&
+          fromJSON(steps.detect.outputs.structured_output).confidence >= 0.7
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          OUTPUT='${{ steps.detect.outputs.structured_output }}'
+          CONFIDENCE=$(echo "$OUTPUT" | jq -r '.confidence')
+          SUMMARY=$(echo "$OUTPUT" | jq -r '.summary')
+
+          echo "Flaky test detected (confidence: $CONFIDENCE)"
+          echo "Summary: $SUMMARY"
+          echo "Re-running original workflow run: $RUN_ID"
+
+          gh run rerun "$RUN_ID"
+
+      # Low confidence flaky detection - skip retry
+      - name: Low confidence detection
+        if: |
+          fromJSON(steps.detect.outputs.structured_output).is_flaky == true &&
+          fromJSON(steps.detect.outputs.structured_output).confidence < 0.7
+        run: |
+          OUTPUT='${{ steps.detect.outputs.structured_output }}'
+          CONFIDENCE=$(echo "$OUTPUT" | jq -r '.confidence')
+
+          echo "Possible flaky test but confidence too low ($CONFIDENCE)"
+          echo "Not retrying automatically - manual review recommended"
+
+      # Deep analysis for real bug failures
+      - name: Analyze failure and suggest fix
+        id: analyze
+        if: |
+          fromJSON(steps.detect.outputs.structured_output).is_flaky == false &&
+          github.event.workflow_run.event == 'pull_request'
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL:  ${{ secrets.ANTHROPIC_BASE_URL }}
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          prompt: |
+            CI workflow failed and this is NOT a flaky test — it's a real bug.
+
+            IMPORTANT: You are in READ-ONLY analysis mode. Do NOT modify any files, do NOT use gh to push commits, create branches, or make any changes to the repository. Only read logs, read code, and analyze.
+
+            Workflow run: ${{ github.event.workflow_run.html_url }}
+
+            Step 1: Get the failed logs:
+            gh run view ${{ github.event.workflow_run.id }} --log-failed
+
+            Step 2: Get the PR diff to understand what changed:
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            PR_NUMBER=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
+            if [ -n "$PR_NUMBER" ]; then
+              gh pr diff "$PR_NUMBER"
+            fi
+
+            Step 3: Analyze the error logs together with the code changes. Focus on:
+            - The exact error messages and stack traces
+            - Which test cases failed and why
+            - How the PR's code changes relate to the failures
+            - Root cause analysis
+
+            Step 4: Provide actionable fix suggestions:
+            - Specific code changes needed (with file paths and line references)
+            - If multiple issues exist, list them separately
+            - Provide code snippets showing the suggested fix
+
+            Return your analysis in this format:
+            - failed_tests: list of failed test names
+            - root_cause: detailed root cause analysis
+            - suggestions: list of actionable fix suggestions, each with file_path, description, and code_snippet
+            - severity: "critical" | "major" | "minor"
+          claude_args: |
+            --json-schema '{"type":"object","properties":{"failed_tests":{"type":"array","items":{"type":"string"},"description":"List of failed test names"},"root_cause":{"type":"string","description":"Detailed root cause analysis"},"suggestions":{"type":"array","items":{"type":"object","properties":{"file_path":{"type":"string"},"description":{"type":"string"},"code_snippet":{"type":"string"}},"required":["description"]},"description":"Actionable fix suggestions"},"severity":{"type":"string","enum":["critical","major","minor"],"description":"Severity level"}},"required":["failed_tests","root_cause","suggestions","severity"]}'
+            --model ${{ vars.CLAUDE_MODEL }}
+            --allowedTools 'Bash(gh *)' 'Read' 'Glob' 'Grep'
+            --max-turns 10
+
+      # Comment on PR with analysis results
+      - name: Comment on PR
+        if: |
+          github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.pull_requests[0].number != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          [ -z "$PR_NUMBER" ] && exit 0
+
+          cat > /tmp/detect_output.json <<'EOJSON'
+          ${{ steps.detect.outputs.structured_output }}
+          EOJSON
+
+          IS_FLAKY=$(jq -r '.is_flaky' /tmp/detect_output.json)
+          CONFIDENCE=$(jq -r '.confidence' /tmp/detect_output.json)
+          SUMMARY=$(jq -r '.summary' /tmp/detect_output.json)
+
+          if [ "$IS_FLAKY" = "true" ]; then
+            gh pr comment "$PR_NUMBER" --body "$(cat <<EOF
+          ## Flaky Test Detected
+
+          **Analysis**: ${SUMMARY}
+          **Confidence**: ${CONFIDENCE}
+
+          Automatically retrying the workflow.
+
+          [View workflow run](${{ github.event.workflow_run.html_url }})
+          EOF
+          )"
+          else
+            cat > /tmp/analyze_output.json <<'EOJSON'
+          ${{ steps.analyze.outputs.structured_output }}
+          EOJSON
+
+            SEVERITY=$(jq -r '.severity' /tmp/analyze_output.json)
+            ROOT_CAUSE=$(jq -r '.root_cause' /tmp/analyze_output.json)
+            FAILED_TESTS=$(jq -r '.failed_tests | map("- `" + . + "`") | join("\n")' /tmp/analyze_output.json)
+            SUGGESTIONS=$(jq -r '.suggestions | to_entries | map(
+              "### " + ((.key + 1) | tostring) + ". " + .value.description +
+              (if .value.file_path then "\n**File**: `" + .value.file_path + "`" else "" end) +
+              (if .value.code_snippet then "\n```suggestion\n" + .value.code_snippet + "\n```" else "" end)
+            ) | join("\n\n")' /tmp/analyze_output.json)
+
+            SEVERITY_ICON="[WARNING]"
+            [ "$SEVERITY" = "critical" ] && SEVERITY_ICON="[CRITICAL]"
+            [ "$SEVERITY" = "minor" ] && SEVERITY_ICON="[MINOR]"
+
+            gh pr comment "$PR_NUMBER" --body "$(cat <<EOF
+          ## Test Failure Analysis
+
+          ${SEVERITY_ICON} **Severity**: ${SEVERITY}
+
+          ### Failed Tests
+          ${FAILED_TESTS}
+
+          ### Root Cause
+          ${ROOT_CAUSE}
+
+          ### Suggested Fixes
+          ${SUGGESTIONS}
+
+          ---
+          **Flaky Detection**: ${SUMMARY} (confidence: ${CONFIDENCE})
+          [View workflow run](${{ github.event.workflow_run.html_url }})
+          EOF
+          )"
+          fi

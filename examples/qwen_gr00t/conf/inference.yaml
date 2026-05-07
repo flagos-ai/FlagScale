@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - inference: qwen_gr00t
+
+experiment:
+  exp_name: qwen_gr00t_inference
+  exp_dir: outputs/${experiment.exp_name}
+  model: /models/qwen_gr00t
+  task:
+    type: inference
+    backend: vllm # TODO: Remove this restriction
+    entrypoint: flagscale/inference/inference_qwen_gr00t.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: null
+  envs:
+    CUDA_VISIBLE_DEVICES: 0
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # Optionally, set HF_HOME and HF_ENDPOINT
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

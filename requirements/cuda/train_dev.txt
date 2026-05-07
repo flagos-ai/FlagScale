@@ -1,7 +1,0 @@
-# Training development dependencies
-# Includes build tools, linting, testing, and training packages
-
--r ../build.txt
--r ../lint.txt
--r ../test.txt
--r ./train.txt

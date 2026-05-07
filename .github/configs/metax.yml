@@ -1,0 +1,54 @@
+# MetaX C500 Hardware Configuration
+# This file defines CI/CD settings for MetaX C500 GPU (MACA) testing
+# Test configurations are defined in tests/test_utils/config/platforms/metax.yaml
+
+hardware_name: metax
+display_name: "MetaX C500 Tests"
+
+# Docker images for MetaX C500 (MACA-based)
+ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+ci_train_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+ci_inference_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+
+# Runner labels for MetaX C500 hardware
+runner_labels: ["flagscale-metax-c550-gpu2-8c-256g"]
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /mnt/op/cicd/baai_datasets:/home/gitlab-runner/data
+  - /mnt/op/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
+
+# Container options for MetaX C500 (MACA runtime)
+container_options: >-
+  --hostname=flagscale-ci
+  --ipc=host
+  --group-add video
+  --shm-size=100g
+  --ulimit memlock=-1
+  --security-opt seccomp=unconfined
+  --security-opt apparmor=unconfined
+  --device=/dev/dri
+  --device=/dev/mxcd
+  --device=/dev/infiniband
+  --user root
+  --ulimit nofile=65535:65535
+  --cap-add SYS_ADMIN
+  --cap-add SYS_PTRACE
+  --cap-add IPC_LOCK
+  --cap-add NET_ADMIN
+  --security-opt seccomp=unconfined
+
+# =============================================================================
+# Package Manager Configuration
+# =============================================================================
+pkg_mgr: "conda"
+
+# Environment path (conda installation path)
+env_path: "/opt/conda"
+
+# Conda environment names
+env_names:
+  train: "base"
+  hetero_train: ""
+  inference: ""
+  rl: ""

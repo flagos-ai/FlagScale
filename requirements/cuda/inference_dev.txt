@@ -1,7 +1,0 @@
-# Inference development dependencies
-# Includes build tools, linting, testing, and inference packages
-
--r ../build.txt
--r ../lint.txt
--r ../test.txt
--r ./inference.txt

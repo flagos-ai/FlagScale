@@ -12,6 +12,9 @@ from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.global_vars import get_tensorboard_writer, get_wandb_writer, get_extra_valid_datasets, set_extra_valid_datasets
 from megatron.training.utils import is_last_rank, print_rank_last
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+
 
 def is_dataset_built_on_rank():
     return (
@@ -153,9 +156,9 @@ def build_extra_valid_data_loaders(build_extra_valid_dataset_provider):
         # Flags to know if we need to do extra_validation.
         is_none = map(lambda _: _ is None, extra_valid_dataloaders)
         do_extra_valid = len(extra_valid_dataloaders) > 0 and not any(is_none)
-        flags = torch.tensor([int(do_extra_valid)], dtype=torch.long, device="cuda")
+        flags = torch.tensor([int(do_extra_valid)], dtype=torch.long, device=cur_platform.device_name())
     else:
-        flags = torch.tensor([0], dtype=torch.long, device="cuda")
+        flags = torch.tensor([0], dtype=torch.long, device=cur_platform.device_name())
 
     torch.distributed.broadcast(flags, 0)
 

@@ -73,6 +73,7 @@ model:
   micro_batch_size: 1
   global_batch_size: 2048
   eval_iters: 0
+  eval_interval: 1000
   train_samples: 244141056 #1T #29297664 #120B tokens
 
   optimizer:

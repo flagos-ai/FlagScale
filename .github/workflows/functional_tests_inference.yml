@@ -30,16 +30,21 @@ on:
         required: true
         type: string
         description: Name of the artifact containing source code
-      conda_env:
+      pkg_mgr:
         required: false
         type: string
-        description: Conda environment name (optional, skips conda if not provided)
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
         default: ""
-      conda_path:
+      env_path:
         required: false
         type: string
-        description: Conda installation path (optional, auto-detects if not provided)
-        default: "/root/miniconda3"
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
 
 jobs:
   functional_test_inference:
@@ -47,7 +52,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /workspace/FlagScale
+      PROJECT_ROOT: /tmp/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     strategy:
       fail-fast: false
@@ -109,26 +114,80 @@ jobs:
         run: |
           git config --global --add safe.directory $PROJECT_ROOT
 
-      - name: Install dependencies for inference
+      - name: Check environment info
+        run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
+
+      - name: Setup environment for inference
+        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
-          # Build install command with optional conda parameters
-          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task inference --retry-count 3"
-          if [ -n "$CONDA_ENV" ]; then
-            INSTALL_CMD="$INSTALL_CMD --conda-env $CONDA_ENV"
-            if [ -n "$CONDA_PATH" ]; then
-              INSTALL_CMD="$INSTALL_CMD --conda-path $CONDA_PATH"
-            fi
-          fi
+          echo "Setting up environment for inference"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
 
-          # Run install script (handles conda activation internally if needed)
-          eval $INSTALL_CMD
-        timeout-minutes: 30
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
+
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
+              fi
+              ;;
+            pip)
+              echo "Using system Python with pip"
+              ;;
+          esac
+
+          echo "Python location: $(which python)"
+          echo "Python version: $(python --version)"
+
+          # Install FlagScale CLI
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
+          echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+
+          # For inference task: all dependencies are pre-installed in the env
+          # No additional installation needed
+          echo "✅ Environment ready for inference tests"
+
+        timeout-minutes: 5
+
+      - name: Install dependencies for inference ascend
+        if: inputs.platform == 'ascend'
+        run: |
+          set -euo pipefail
+
+          # Install vllm-plugin-FL
+          pip install vllm-plugin-fl==0.1.0+vllm0.13.0 \
+            --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
+            || { echo "❌ vllm-plugin-FL install failed"; exit 1; }
+          echo "✅ vllm-plugin-FL installed successfully"
+
+          # Install FlagScale and dependencies
+          cd $PROJECT_ROOT
+          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
+
+          # Verify installation
+          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
+          echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
+          echo "✅ Environment ready for inference tests"
+        timeout-minutes: 15
 
       - name: Run functional tests
         id: functional_test
@@ -141,8 +200,9 @@ jobs:
           TASK='${{ matrix.test_config.task }}'
           MODEL='${{ matrix.test_config.model }}'
           CASE='${{ matrix.test_config.case }}'
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
           echo "Running functional tests for inference"
           echo "Platform: $PLATFORM"
@@ -150,22 +210,30 @@ jobs:
           echo "Task: $TASK"
           echo "Model: $MODEL"
           echo "Case: ${CASE:-all}"
+          echo "Package Manager: $PKG_MGR"
+          echo "Environment Name: $ENV_NAME"
+          echo "Environment Path: $ENV_PATH"
           echo "Project root: $PROJECT_ROOT"
 
-          # Source conda utilities for reusable functions
-          source ./tools/install/utils/conda_utils.sh
+          # Source environment utilities
+          source ./tools/install/utils/pyenv_utils.sh
 
-          # Conditionally activate conda environment if specified
-          if [ -n "$CONDA_ENV" ]; then
-            if activate_conda "$CONDA_ENV" "$CONDA_PATH"; then
-              : # Success message already displayed by activate_conda
-            else
-              echo "⚠️  Conda environment requested but conda not found"
-              echo "Continuing without conda activation..."
-            fi
-          else
-            echo "ℹ️  Running tests with system Python"
-          fi
+          # Activate environment based on package manager
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "⚠️  Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "⚠️  UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "ℹ️  Running tests with pip/system Python"
+              ;;
+          esac
 
           # Display Python environment info
           echo "Python location: $(which python)"
@@ -189,4 +257,13 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 60
+        timeout-minutes: 15
+
+      - name: Upload Functional Test Logs
+        if: always() && steps.functional_test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
+          retention-days: 7
+          if-no-files-found: warn

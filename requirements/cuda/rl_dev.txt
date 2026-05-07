@@ -1,7 +1,0 @@
-# Reinforcement Learning development dependencies
-# Includes build tools, linting, testing, and RL packages
-
--r ../build.txt
--r ../lint.txt
--r ../test.txt
--r ./rl.txt
