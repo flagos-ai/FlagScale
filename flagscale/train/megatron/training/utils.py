@@ -231,7 +231,7 @@ def calc_params_l2_norm(model, force_create_fp32_copy=False):
         expert_reduce_group = mpu.get_expert_tensor_model_pipeline_parallel_group()
         ranks_in_expert_reduce_group = torch.distributed.get_process_group_ranks(expert_reduce_group)
         # Engram params should sum across engram-embed-parallel GPUs.(Engram embedding and pipeline, for which has no engram module, the engram_module_initialized is False, and the param_norm is set to 0.)
-        engram_mp_group = mpu.get_engram_model_parallel_group()
+        engram_mp_group = mpu.get_engram_embedding_parallel_group()
 
     # If dense and expert reduce groups are the same, sum then reduce.
     if ranks_in_dense_reduce_group == ranks_in_expert_reduce_group:
