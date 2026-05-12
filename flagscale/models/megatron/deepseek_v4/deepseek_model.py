@@ -7,28 +7,69 @@ from megatron.core.models.gpt import GPTModel
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.utils import deprecate_inference_params
 from megatron.core.inference.contexts import BaseInferenceContext
+from megatron.core.transformer.engram import get_or_create_hash_mapping
 
-from .utils import LazyHashInputIds
-from .engram.ngram_hash import get_or_create_hash_mapping
-from .deepseek_transformer_block import DeepSeekTransformerBlock
+
+class LazyHashInputIds:
+    """
+    Lazy wrapper for hash input IDs that computes asynchronously and
+    synchronizes only when accessed. This allows hash computation to overlap
+    with preprocessing and early decoder layers.
+    """
+
+    def __init__(self, hash_mapping, input_ids, hash_stream=None):
+        self.hash_mapping = hash_mapping
+        self.input_ids = input_ids
+        self.hash_stream = hash_stream
+        self._result = None
+        self._is_async_pending = False        
+        # Async
+        if self.hash_stream is not None:
+            # self.hash_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(self.hash_stream):
+                self._result = self.hash_mapping.hash(self.input_ids)
+            self._is_async_pending = True
+            # record result to use across stream
+            self._record_current_stream()
+
+    def _record_current_stream(self):
+        """Helper to record current stream on all result tensors"""
+        if self._result is None:
+            return
+        current_stream = torch.cuda.current_stream()
+        if isinstance(self._result, dict):
+            for t in self._result.values():
+                if isinstance(t, torch.Tensor):
+                    t.record_stream(current_stream)
+        elif isinstance(self._result, torch.Tensor):
+            self._result.record_stream(current_stream)
+
+    def __getitem__(self, key):
+        # Case 1: Async compute -> wait
+        if self._is_async_pending:
+            torch.cuda.current_stream().wait_stream(self.hash_stream)
+            self._is_async_pending = False  # Async finish
+            self._record_current_stream()
+            
+        # Case 2: Sync but no compute -> start compute
+        elif self._result is None:
+            self._result = self.hash_mapping.hash(self.input_ids)
+            
+        # Case 3: Async or sync compute is finished.
+        # print(f"[rank{torch.distributed.get_rank()}]: LazyHashInputIds result = {self._result}")
+        return self._result[key]
+
+    def get(self, key, default=None):
+        """Get hash result with default value."""
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
 
 class DeepSeekModel(GPTModel):
     def __init__(self, *args, **kwargs):
-        # NOTE: We temporarily replace TransformerBlock with DeepSeekTransformerBlock
-        # during super().__init__() to avoid creating decoder twice.
-        # This is necessary because GPTModel.__init__ hardcodes TransformerBlock.
-        # The replacement is scoped to this initialization only.
-        import megatron.core.models.gpt.gpt_model as gpt_module
-
-        original_block = gpt_module.TransformerBlock
-        gpt_module.TransformerBlock = DeepSeekTransformerBlock
-
-        try:
-            super().__init__(*args, **kwargs)
-            # self.decoder is now DeepSeekTransformerBlock, no need to recreate
-        finally:
-            gpt_module.TransformerBlock = original_block
+        super().__init__(*args, **kwargs)
         if self.config.use_engram:
             self.engram_hash = get_or_create_hash_mapping(
                 engram_vocab_size=self.config.engram_vocab_size,
@@ -172,3 +213,13 @@ class DeepSeekModel(GPTModel):
             loss_mask=loss_mask,
             extra_block_kwargs=extra_block_kwargs
         )
+    
+    def sharded_state_dict(
+        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
+    ):
+        # Engram makes the layers non-homogeneous, so force the sharded-state-dict path
+        # to use layer-specific keys.
+        if metadata is None:
+            metadata = {}
+        metadata["non_homogeneous_layers"] = True
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)

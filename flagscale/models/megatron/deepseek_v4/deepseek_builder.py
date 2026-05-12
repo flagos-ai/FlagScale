@@ -39,6 +39,8 @@ from megatron.core.models.gpt.experimental_attention_variant_module_specs import
     _get_moe_module_spec,
     get_moe_layer_pattern
 )
+from megatron.core.transformer.hyper_connection import HyperConnectionModule
+from megatron.core.transformer.engram import EngramMoule
 try:
     import transformer_engine as te  # pylint: disable=unused-import
 
@@ -75,10 +77,7 @@ except ImportError:
     HAVE_APEX = False
 
 from .deepseek_transformer_layer import DeepSeekTransformerLayer, DeepSeekTransformerLayerSubmodules
-from .hyper_connection import HyperConnectionModule
-from .engram.engram import EngramMoule
 from .deepseek_model import DeepSeekModel
-from .deepseek_config import DeepSeekConfig
 
 
 
@@ -110,21 +109,16 @@ def get_deepseek_layer_spec(
         engram_module = EngramMoule 
     else:
         engram_module = IdentityOp
-    if config.enable_hyper_connections:
-        hyper_connection_module = HyperConnectionModule
-    else:
-        hyper_connection_module = IdentityOp
     submodules = DeepSeekTransformerLayerSubmodules(
         input_layernorm=input_layernorm,
         self_attention=hybrid_attn_spec,
         self_attn_bda=get_bias_dropout_add,
+        self_attention_hyper_connection=HyperConnectionModule,
         pre_mlp_layernorm=pre_mlp_layernorm,
         mlp=moe_layer_spec,
         mlp_bda=get_bias_dropout_add,
-        engram=ModuleSpec(module=engram_module),
-        self_attention_hyper_connection=ModuleSpec(module=hyper_connection_module),
-        mlp_hyper_connection=ModuleSpec(module=hyper_connection_module),
-        cross_attention_connection=ModuleSpec(module=IdentityOp),
+        mlp_hyper_connection=HyperConnectionModule,
+        engram=ModuleSpec(module=engram_module)
     )
 
     return ModuleSpec(module=DeepSeekTransformerLayer, submodules=submodules)
@@ -208,7 +202,7 @@ def deepseek_builder(args, pre_process, post_process, vp_stage=None, config=None
         if args.yaml_cfg is not None:
             config = core_transformer_config_from_yaml(args, "language_model")
         else:
-            config = core_transformer_config_from_args(args, DeepSeekConfig)
+            config = core_transformer_config_from_args(args)
 
 
     if args.use_legacy_models:

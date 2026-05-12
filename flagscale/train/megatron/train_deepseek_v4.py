@@ -3,7 +3,9 @@
 """Pretrain and SFT GPT."""
 
 import torch
-
+import sys
+if "/workspace/repos/flagscale/flagscale/train" not in sys.path:
+    sys.path.append("/workspace/repos/flagscale/flagscale/train")
 from functools import partial
 from typing import List, Optional, Tuple
 from megatron.core import parallel_state
@@ -37,7 +39,7 @@ from megatron.training.extra_valid import extra_valid_datasets_provider
 from megatron.training.training import pretrain
 from megatron.plugin.hetero.parallel_context import get_parallel_context
 
-# engram
+# deepseek v4
 from flagscale.models.megatron.deepseek_v4.deepseek_builder import deepseek_builder
 
 stimer = StragglerDetector()
