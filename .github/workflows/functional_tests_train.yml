@@ -231,8 +231,6 @@ jobs:
           # Install TransformerEngine-FL and dependencies
           git clone --depth 1 https://github.com/flagos-ai/TransformerEngine-FL.git /workspace/TransformerEngine-FL \
             || { echo "❌ TransformerEngine-FL clone failed"; exit 1; }
-          git -C /workspace/TransformerEngine-FL checkout d092f8df49f7c0b5b4cae42d036b7e4a26b8fc81 \
-            || { echo "❌ TransformerEngine-FL checkout failed"; exit 1; }
           TE_FL_SKIP_CUDA=1 pip install /workspace/TransformerEngine-FL --no-build-isolation \
             || { echo "❌ TransformerEngine-FL install failed"; exit 1; }
           echo "✅ TransformerEngine-FL installed successfully"
