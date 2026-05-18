@@ -258,7 +258,7 @@ jobs:
       - name: Upload coverage report to FlagCICD
         if: steps.unit_test.outcome == 'success'
         continue-on-error: true
-        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2.0.4
         env:
           NO_PROXY: "flagcicd-inner.flagos.net"
         with:
