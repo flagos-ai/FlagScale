@@ -266,3 +266,4 @@ jobs:
           backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
           report_path: '${{ env.PROJECT_ROOT }}/coverage-report/coverage.json'
           fail_on_error: 'false'
+          runner_set_name: ${{ inputs.runs_on }}
