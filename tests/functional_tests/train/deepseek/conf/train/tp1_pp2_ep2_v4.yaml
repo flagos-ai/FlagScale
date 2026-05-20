@@ -5,9 +5,9 @@ system:
   no_shared_fs: false
   num_workers: 16
   tensor_model_parallel_size: 1
-  pipeline_model_parallel_size: 1
-  # pipeline_model_parallel_layout: "Ett|ttL"
-  expert_model_parallel_size: 1
+  pipeline_model_parallel_size: 2
+  pipeline_model_parallel_layout: "Ett|ttmL"
+  expert_model_parallel_size: 2
   expert_tensor_parallel_size: 1
   finetune: false
   no_load_rng: true
@@ -18,28 +18,41 @@ system:
   reset_attention_mask: true
   qk_layernorm: true
   sequence_parallel: true
-  use_distributed_optimizer: true
+  use_distributed_optimizer: false
+  use_padded_layerwise_optimizer: false
+  num_distributed_optimizer_instances: 1
   overlap_grad_reduce: true
   overlap_param_gather: true
   attention_backend: auto
+  check_weight_hash_across_dp_replicas_interval: 1
+  calculate_per_token_loss: true
   recompute_modules:
     - mhc
   precision:
     bf16: true
     attention_softmax_in_fp32: true
     accumulate_allreduce_grads_in_fp32: true
+    # ddp_reduce_scatter_with_fp32_accumulation: true
   logging:
     log_interval: 1
-    no_log_loss_scale_to_tensorboard: true
+    tensorboard_log_interval: 1
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+    log_timers_to_tensorboard: true
+    log_validation_ppl_to_tensorboard: true
+    log_throughput: true
+    # log_params_norm: true
+    log_num_zeros_in_grad: true
+    log_memory_to_tensorboard: true
+    log_memory_interval: 10
   checkpoint:
     no_save_optim: true
     no_save_rng: true
     save_interval: 100000
-    tensorboard_log_interval: 999999
 
 model:
   transformer_impl: transformer_engine
-  num_layers: 3
+  num_layers: 4
   hidden_size: 768
   num_attention_heads: 8
   num_query_groups: 1
@@ -71,9 +84,9 @@ model:
   moe_ffn_hidden_size: 512
   moe_grouped_gemm: true
   moe_shared_expert_intermediate_size: 512
-  num_experts: 4
+  num_experts: 32
   # moe_router_load_balancing_type: "seq_aux_loss"
-  moe_router_score_function: softmax
+  moe_router_score_function: sqrtsoftplus
   moe_router_enable_expert_bias: false
   moe_router_bias_update_rate: 0.001
   # moe_aux_loss_coeff: 0.02
@@ -81,7 +94,7 @@ model:
   # node limited routing
   moe_router_num_groups: 1
   moe_router_group_topk: 1
-  moe_router_topk: 2
+  moe_router_topk: 4
   moe_router_topk_scaling_factor: 2.5
   moe_token_dispatcher_type: "alltoall"
   # moe_permute_fusion: true
@@ -108,20 +121,17 @@ model:
   #   weight_block_size:
   #     - 128
   #     - 128
-  csa_compress_ratios: 
-    - 0
-    - 128
-    - 4
+  csa_compress_ratios: "[128]*2+([128]+[4])*1+[128]"
 
   # mtp_args
-  # mtp_num_layers: 1
+  mtp_num_layers: 1
 
   # training
   seed: 42
   micro_batch_size: 1
   global_batch_size: 16
   eval_iters: 0
-  train_iters: 6
+  train_iters: 3
   eval_interval: 10000
 
   # nsys profile args =================
@@ -134,6 +144,8 @@ model:
   pytorch_profiler_collect_callstack: true
 
   optimizer:
+    optimizer: dist_muon
+    muon_tp_mode: distributed
     clip_grad: 1.0
     weight_decay: 0.1
     adam_beta1: 0.9

@@ -104,6 +104,8 @@ class DeepSeekModel(GPTModel):
         *,
         inference_params: BaseInferenceContext | None = None,
         loss_mask: torch.Tensor | None = None,
+        padding_mask: Optional[torch.Tensor] = None,
+        is_spec_decode: Optional[bool] = None,
     ) -> torch.Tensor:
         assert input_ids is not None, "Input ids can not be None for EngramModel"
         inference_context = deprecate_inference_params(inference_context, inference_params)
@@ -127,13 +129,14 @@ class DeepSeekModel(GPTModel):
             decoder_input=decoder_input,
             inference_context=inference_context,
             packed_seq_params=packed_seq_params,
+            padding_mask=padding_mask,
         )
 
-        (decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset) = (
-            preproc_output[:5]
+        (decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset, padding_mask) = (
+            preproc_output[:6]
         )
 
-        rotary_pos_cos_sin = preproc_output[5] if len(preproc_output) == 6 else None
+        rotary_pos_cos_sin = preproc_output[6] if len(preproc_output) == 7 else None
 
         # Pass input_ids to decoder for hash-based MoE routing
         decoder_extra_block_kwargs = extra_block_kwargs or {}
@@ -143,7 +146,7 @@ class DeepSeekModel(GPTModel):
             decoder_extra_block_kwargs['engram_hash_input_ids'] = engram_hash_input_ids
         
         # Run decoder
-        hidden_states = self.decoder(
+        decoder_output = self.decoder(
             hidden_states=decoder_input,
             attention_mask=attention_mask,
             inference_context=inference_context,
@@ -156,6 +159,13 @@ class DeepSeekModel(GPTModel):
             **decoder_extra_block_kwargs,
         )
         # torch.cuda.nvtx.range_pop()
+        # When mHC + MTP, the decoder returns (contracted, multi-stream).
+        # MTP needs multi-stream; lm_head needs contracted.
+        if isinstance(decoder_output, tuple):
+            hidden_states, mhc_multistream = decoder_output
+        else:
+            hidden_states = decoder_output
+            mhc_multistream = None
 
         return self._postprocess(
             hidden_states=hidden_states,
@@ -175,6 +185,8 @@ class DeepSeekModel(GPTModel):
             runtime_gather_output=runtime_gather_output,
             extra_block_kwargs=extra_block_kwargs,
             inference_context=inference_context,
+            is_spec_decode=is_spec_decode,
+            mhc_multistream=mhc_multistream,
         )
 
     def build_schedule_plan(

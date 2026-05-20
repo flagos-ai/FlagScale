@@ -40,7 +40,7 @@ from megatron.core.models.gpt.experimental_attention_variant_module_specs import
     get_moe_layer_pattern
 )
 from megatron.core.transformer.hyper_connection import HyperConnectionModule
-from megatron.core.transformer.engram import EngramMoule
+from megatron.core.transformer.engram import EngramModule
 try:
     import transformer_engine as te  # pylint: disable=unused-import
 
@@ -106,7 +106,7 @@ def get_deepseek_layer_spec(
         else backend.layer_norm(rms_norm=rms_norm, for_qk=False)
     )
     if build_engram:
-        engram_module = EngramMoule 
+        engram_module = EngramModule 
     else:
         engram_module = IdentityOp
     submodules = DeepSeekTransformerLayerSubmodules(

@@ -243,6 +243,11 @@ class FSTrainArguments:
 
                 accumulated_world_size += temp_world_size
                 current_process_mesh_idx += 1
+        # DeepSeek-V4 Temporary
+        if self.args.enable_hyper_connections:
+            assert not self.args.overlap_moe_expert_parallel_comm, "Hyper-connection is not supported with overlap_moe_expert_parallel_comm yet!"
+        if self.experimental_attention_variant == "dsv4_hyrbid":
+            assert not self.args.context_parallel_size > 1, "Context parallelism is not supported with dsv4_hybrid attention variant yet!"
 
     def post_validate_args(self):
         """Post-validate the arguments after Megatron function `validate_args`."""
@@ -810,6 +815,11 @@ def _add_distributed_args(parser):
         '--no-shared-fs',
         action='store_true',
         help='Indicate whether not running on a shared file system.',
+    )
+    group.add_argument(
+        '--use-padded-layerwise-optimizer',
+        action='store_true',
+        help='Enable pad when use layer-wise optimizer.'
     )
     return parser
 

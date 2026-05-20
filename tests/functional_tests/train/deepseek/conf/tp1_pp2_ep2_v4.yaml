@@ -1,17 +1,17 @@
 defaults:
   - _self_
-  - train: tp2_ep2_v4
+  - train: tp1_pp2_ep2_v4
 
 experiment:
-  exp_name: tp2_ep2_v4
-  exp_dir: tests/functional_tests/train/deepseek/test_results/tp2_ep2_v4
+  exp_name: tp1_pp2_ep2_v4
+  exp_dir: tests/functional_tests/train/deepseek/test_results/tp1_pp2_ep2_v4
   task:
     type: train
     backend: megatron
     entrypoint: flagscale/train/megatron/train_deepseek_v4.py
   runner:
     ssh_port: null
-    nproc_per_node: 1
+    nproc_per_node: 4
     # nsys_bin_path: /usr/local/bin/nsys
     # nsys_rep_file_path: ${experiment.exp_dir}/nsys_report/
   shell_cmds: null
@@ -28,6 +28,9 @@ experiment:
     # Only for debug
     # NVTE_DEBUG: 1
     # NVTE_DEBUG_LEVEL: 2
+    CUDA_LAUNCH_BLOCKING: 1
+    # NCCL_DEBUG: INFO
+    NCCL_NVLS_ENABLE: 0
     # CUDNN_LOGERR_DBG: 1
     # The following parameters passed the local test
     # CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
