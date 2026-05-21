@@ -39,4 +39,4 @@ docker cp "$CONTAINER_ID:/output/." "$OUTPUT_DIR/"
 docker rm "$CONTAINER_ID" > /dev/null
 
 log_info "Build complete. Packages:"
-ls -lh "$OUTPUT_DIR"/*.rpm 2>/dev/null || log_error "No .rpm files found"
+ls -lh "$OUTPUT_DIR"/*.rpm 2>/dev/null || { log_error "No .rpm files found"; exit 1; }
