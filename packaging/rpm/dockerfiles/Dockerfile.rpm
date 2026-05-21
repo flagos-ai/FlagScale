@@ -18,9 +18,10 @@ COPY . /workspace/FlagScale
 # Create source tarball
 RUN SPEC_VERSION=$(grep '^Version:' /workspace/FlagScale/packaging/rpm/specs/flagscale.spec | awk '{print $2}') && \
     tar czf /root/rpmbuild/SOURCES/flagscale-${SPEC_VERSION}.tar.gz \
-        -C /workspace \
-        --transform "s|^FlagScale|flagscale-${SPEC_VERSION}|" \
-        FlagScale
+        -C /workspace/FlagScale \
+        --exclude='./.git' \
+        --transform "s|^\./|flagscale-${SPEC_VERSION}/|" \
+        .
 
 # Build RPM
 RUN rpmbuild -ba /workspace/FlagScale/packaging/rpm/specs/flagscale.spec
