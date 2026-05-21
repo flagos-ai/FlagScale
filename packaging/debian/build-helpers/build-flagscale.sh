@@ -7,7 +7,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
 
-BASE_IMAGE_VERSION="${1:-22.04}"
+# Defaults must match Dockerfile.deb's ARG defaults so that running the
+# script with no args picks the same base as `docker build` would. See
+# packaging/NOTES.md for why FlagScale uses debian:trixie-slim instead of
+# ubuntu:24.04 (setuptools >=77 requirement).
+BASE_IMAGE="${BASE_IMAGE:-debian}"
+BASE_IMAGE_VERSION="${1:-trixie-slim}"
 
 log_info()  { echo "[INFO]  $*"; }
 log_step()  { echo "[STEP]  $*"; }
@@ -18,12 +23,13 @@ IMAGE_TAG="flagscale-deb:${BASE_IMAGE_VERSION}"
 OUTPUT_DIR="${PROJECT_DIR}/debian-packages"
 
 log_info "Building FlagScale Debian packages"
-log_info "Base image: ubuntu:${BASE_IMAGE_VERSION}"
+log_info "Base image: ${BASE_IMAGE}:${BASE_IMAGE_VERSION}"
 
 log_step "Building container image: $IMAGE_TAG"
 if ! docker build \
     --network=host \
     -f "$DOCKERFILE" \
+    --build-arg BASE_IMAGE="$BASE_IMAGE" \
     --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
     -t "$IMAGE_TAG" \
     "$PROJECT_DIR"; then

@@ -32,8 +32,8 @@ WORKDIR /workspace/FlagScale
 RUN cp -r packaging/debian debian
 
 # Build the package
-RUN dpkg-buildpackage -us -uc -b 2>&1 || \
-    { echo "=== Build failed, showing logs ==="; \
+RUN dpkg-buildpackage -us -uc -b || \
+    { echo "=== Build failed, showing logs ===" >&2; \
       find /workspace -name "*.log" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || true; \
       exit 1; }
 

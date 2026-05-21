@@ -10,6 +10,8 @@ Build-Depends: debhelper-compat (= 13),
                pybuild-plugin-pyproject
 Standards-Version: 4.6.2
 Homepage: https://github.com/flagos-ai/FlagScale
+Vcs-Browser: https://github.com/flagos-ai/FlagScale
+Vcs-Git: https://github.com/flagos-ai/FlagScale.git
 
 Package: python3-flagscale
 Architecture: all
