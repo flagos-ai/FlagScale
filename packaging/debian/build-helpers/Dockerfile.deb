@@ -1,8 +1,12 @@
 # Dockerfile to build FlagScale Debian packages
 # No vendor SDK needed - pure Python package
 
-ARG BASE_IMAGE=ubuntu
-ARG BASE_IMAGE_VERSION=22.04
+# Debian trixie ships python3-setuptools >= 75, which meets the
+# pyproject.toml `setuptools>=77.0` build requirement once trixie reaches
+# the matching point release. Earlier distros (Ubuntu 24.04 noble has
+# 68.x) fall short, so we cannot use them as the default base.
+ARG BASE_IMAGE=debian
+ARG BASE_IMAGE_VERSION=trixie-slim
 
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 
@@ -20,10 +24,6 @@ RUN apt-get update && apt-get install -y \
     python3-wheel \
     python3-pip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Upgrade setuptools to meet pyproject.toml requirement (>=77.0)
-RUN pip3 install --break-system-packages "setuptools>=77.0" "wheel>=0.45.1" || \
-    pip3 install "setuptools>=77.0" "wheel>=0.45.1"
 
 COPY . /workspace/FlagScale
 WORKDIR /workspace/FlagScale
