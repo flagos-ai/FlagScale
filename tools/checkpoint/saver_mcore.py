@@ -54,8 +54,7 @@ def save_checkpoint(queue, args):
         from megatron.training.arguments import parse_args, validate_args
         from megatron.training.checkpointing import save_checkpoint, get_checkpoint_name
         from megatron.training.global_vars import set_global_variables, get_args
-        from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
-        from megatron.legacy import fused_kernels
+        from megatron.training.tokenizer.tokenizer import vocab_size_with_padding
         from megatron.core import mpu
         from megatron.core.tensor_parallel.random import (
                 get_cuda_rng_tracker, _DATA_PARALLEL_RNG_TRACKER_NAME,
@@ -169,7 +168,6 @@ def save_checkpoint(queue, args):
         '--no-masked-softmax-fusion',
         '--no-bias-gelu-fusion',
         '--no-bias-dropout-fusion',
-        '--no-async-tensor-model-parallel-allreduce',
         '--use-cpu-initialization',
         '--transformer-impl', 'transformer_engine',
         '--micro-batch-size', '1',
@@ -223,7 +221,7 @@ def save_checkpoint(queue, args):
         args_to_keep = ['tensor_model_parallel_size', 'pipeline_model_parallel_size', 'expert_model_parallel_size', 'world_size', 'params_dtype',
                         'num_layers_per_virtual_pipeline_stage', 'virtual_pipeline_model_parallel_size',
                         'masked_softmax_fusion', 'bias_gelu_fusion', 'bias_dropout_fusion',
-                        'sequence_parallel', 'async_tensor_model_parallel_allreduce',
+                        'sequence_parallel',
                         'no_load_optim', 'no_load_rng', 'no_save_optim', 'no_save_rng',
                         'vocab_file', 'tokenizer_model',
                         'save_interval', 'save', 'load', 'use_mcore_models', 'num_experts',
@@ -292,10 +290,13 @@ def save_checkpoint(queue, args):
     margs.model_type = model_plugin.model_type
 
     if md.true_vocab_size is not None:
-        margs.padded_vocab_size = _vocab_size_with_padding(md.true_vocab_size, margs)
+        margs.padded_vocab_size = vocab_size_with_padding(md.true_vocab_size, margs)
     else:
         # margs.padded_vocab_size will be set in ckpt_plugin.set_embedding_ckpt func
         margs.padded_vocab_size = None
+
+    if getattr(args, "skip_mtp", False):
+        margs.mtp_num_layers = 0
 
     """
     use megatron args build object and init env
@@ -348,10 +349,6 @@ def save_checkpoint(queue, args):
     mpu._DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._INTRA_PARTIAL_DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._LAST_RANK_WHEN_USING_PIPELINE = pp_size - 1
-
-
-    # fused kernel
-    fused_kernels.load(margs)
 
     # random
     CUDA_RNG_STATE_TRACKER = get_cuda_rng_tracker()

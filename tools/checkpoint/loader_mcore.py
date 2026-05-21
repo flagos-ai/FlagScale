@@ -46,7 +46,6 @@ def _load_checkpoint(queue, args):
         from megatron.training.checkpointing import load_args_from_checkpoint, load_checkpoint
         from megatron.legacy.model import module
         from megatron.core import mpu
-        from megatron.legacy import fused_kernels
         from megatron.core.tensor_parallel.random import (
                 get_cuda_rng_tracker, _DATA_PARALLEL_RNG_TRACKER_NAME,
                 _EXPERT_PARALLEL_RNG_TRACKER_NAME, _MODEL_PARALLEL_RNG_TRACKER_NAME
@@ -78,7 +77,6 @@ def _load_checkpoint(queue, args):
         '--no-masked-softmax-fusion',
         '--no-bias-gelu-fusion',
         '--no-bias-dropout-fusion',
-        '--no-async-tensor-model-parallel-allreduce',
         '--use-cpu-initialization',
         '--micro-batch-size', '1',
         '--no-load-optim',
@@ -125,20 +123,27 @@ def _load_checkpoint(queue, args):
     _set_arg("hetero_pipeline_layer_split")
 
     # for engram
-    _set_arg("use_engram")
-    _set_arg("engram_layer_ids")
-    _set_arg("engram_hc_mult")
-    _set_arg("engram_kernel_size")
-    _set_arg("engram_pad_id")
-    _set_arg("engram_seed")
-    _set_arg("engram_vocab_size")
-    _set_arg("engram_tokenizer_name_or_path")
-    _set_arg("max_ngram_size")
-    _set_arg("n_embed_per_ngram")
-    _set_arg("n_head_per_ngram")
-    setattr(margs, "vocab_size", args.true_vocab_size)
-    engram_tokenizer_path_ckpt = getattr(checkpoint_args, "engram_tokenizer_name_or_path", None)
-    setattr(margs, "engram_tokenizer_name_or_path", os.path.join(root_path, engram_tokenizer_path_ckpt))
+    if getattr(checkpoint_args, "use_engram", False):
+        _set_arg("use_engram")
+        _set_arg("engram_layer_ids")
+        _set_arg("engram_hc_mult")
+        _set_arg("engram_kernel_size")
+        _set_arg("engram_pad_id")
+        _set_arg("engram_seed")
+        _set_arg("engram_vocab_size")
+        _set_arg("engram_tokenizer_name_or_path")
+        _set_arg("max_ngram_size")
+        _set_arg("n_embed_per_ngram")
+        _set_arg("n_head_per_ngram")
+        if args.true_vocab_size is not None:
+            setattr(margs, "vocab_size", args.true_vocab_size)
+        engram_tokenizer_path_ckpt = getattr(checkpoint_args, "engram_tokenizer_name_or_path", None)
+        if engram_tokenizer_path_ckpt and not os.path.isabs(engram_tokenizer_path_ckpt):
+            engram_tokenizer_path_ckpt = os.path.join(root_path, engram_tokenizer_path_ckpt)
+        setattr(margs, "engram_tokenizer_name_or_path", engram_tokenizer_path_ckpt)
+    else:
+        setattr(margs, "use_engram", False)
+        setattr(margs, "engram_layer_ids", [])
 
     # for hetero
     if margs.hetero_process_meshes is not None:
@@ -258,9 +263,6 @@ def _load_checkpoint(queue, args):
     mpu._DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._INTRA_PARTIAL_DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._LAST_RANK_WHEN_USING_PIPELINE = pp_size - 1
-
-    # fused kernel
-    fused_kernels.load(margs)
 
     # random
     CUDA_RNG_STATE_TRACKER = get_cuda_rng_tracker()
@@ -387,7 +389,9 @@ def _load_checkpoint(queue, args):
                 margs.total_layer_num = total_layer_num
 
                 engram_layer_id  = total_layer_num # get_global_layer_id
-                if margs.use_engram and engram_layer_id in margs.engram_layer_ids:
+                if getattr(margs, "use_engram", False) and engram_layer_id in getattr(
+                    margs, "engram_layer_ids", []
+                ):
                     ckpt_plugin.get_engram_ckpt(message, models, engram_layer_id, margs)
 
                 ckpt_plugin.get_attn_ckpt(message, models, layer_id, margs)
@@ -406,9 +410,11 @@ def _load_checkpoint(queue, args):
         ckpt_plugin.get_output_layer_ckpt(message, models, margs)
         queue_put("output layer", message)
 
-    message = dict()
-    if margs.mtp_num_layers:
-        for mtp_layer_id in range(margs.mtp_num_layers):
+    mtp_num_layers = getattr(margs, "mtp_num_layers", 0)
+    if getattr(args, "skip_mtp", False):
+        mtp_num_layers = 0
+    if mtp_num_layers:
+        for mtp_layer_id in range(mtp_num_layers):
             message = dict()
             ckpt_plugin.get_mtp_ckpt(message, models, mtp_layer_id, margs)
             queue_put(f"mtp module {mtp_layer_id}", message)
