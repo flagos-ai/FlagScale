@@ -246,8 +246,8 @@ class FSTrainArguments:
         # DeepSeek-V4 Temporary
         if self.args.enable_hyper_connections:
             assert not self.args.overlap_moe_expert_parallel_comm, "Hyper-connection is not supported with overlap_moe_expert_parallel_comm yet!"
-        if self.experimental_attention_variant == "dsv4_hyrbid":
-            assert not self.args.context_parallel_size > 1, "Context parallelism is not supported with dsv4_hybrid attention variant yet!"
+        if self.args.experimental_attention_variant == "dsv4_hybrid":
+            assert self.args.context_parallel_size == 1, "Context parallelism is not supported with dsv4_hybrid attention variant yet!"
 
     def post_validate_args(self):
         """Post-validate the arguments after Megatron function `validate_args`."""

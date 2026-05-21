@@ -135,13 +135,13 @@ model:
   eval_interval: 10000
 
   # nsys profile args =================
-  profile: true
-  profile_step_start: 4
-  profile_step_end: 5
-  profile_ranks: [0,1,2,3]
-  use_pytorch_profiler: true
-  tensorboard_dir: ${experiment.exp_dir}/tensorboard
-  pytorch_profiler_collect_callstack: true
+  # profile: true
+  # profile_step_start: 4
+  # profile_step_end: 5
+  # profile_ranks: [0,1,2,3]
+  # use_pytorch_profiler: true
+  # tensorboard_dir: ${experiment.exp_dir}/tensorboard
+  # pytorch_profiler_collect_callstack: true
 
   optimizer:
     optimizer: dist_muon

@@ -3,9 +3,6 @@
 """Pretrain and SFT GPT."""
 
 import torch
-import sys
-if "/workspace/repos/flagscale/flagscale/train" not in sys.path:
-    sys.path.append("/workspace/repos/flagscale/flagscale/train")
 from functools import partial
 from typing import List, Optional, Tuple
 from megatron.core import parallel_state
