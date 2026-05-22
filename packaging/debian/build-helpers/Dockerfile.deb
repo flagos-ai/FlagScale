@@ -13,6 +13,7 @@ FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     debhelper \
     devscripts \
     dpkg-dev \
@@ -23,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-setuptools \
     python3-wheel \
     python3-pip \
+    lintian \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY . /workspace/FlagScale
@@ -38,6 +40,11 @@ RUN dpkg-buildpackage -us -uc -b || \
       exit 1; }
 
 # Collect built .deb files
+# Run lintian against the produced .deb — surface packaging warnings
+# (unused-license-paragraph, no-manual-page, missing-build-dependency, etc.)
+# in the build log without failing the build.
+RUN lintian --info --display-info /workspace/python3-flagscale_*.deb || true
+
 RUN mkdir -p /output && \
     find /workspace -maxdepth 1 -name "*.deb" -exec cp {} /output/ \; && \
     ls -lh /output/

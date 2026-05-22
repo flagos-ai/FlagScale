@@ -4,8 +4,7 @@
 # Reason: hydra-core not in any distro; users install via pip.
 # See packaging/INSTALL.md (or future flagos-packaging install docs) for the
 # user-side pip install incantation.
-%global __requires_exclude ^python3.*dist.*(hydra-core)
-
+%global __requires_exclude ^python3(\.[0-9]+)?dist\((hydra-core)\)$
 Name:           python3-flagscale
 Version:        1.0.0
 Release:        1%{?dist}
@@ -42,9 +41,11 @@ installed via pip extras: pip install "flagscale[cuda-train]"
 
 %files -f %{pyproject_files}
 %license LICENSE
-# Note: %{_bindir}/flagscale is already included by %pyproject_save_files
-# (it scans console_scripts from the wheel entry_points); listing it
-# explicitly here would trigger "file listed twice".
+# Verified empirically: %%pyproject_save_files does NOT include the
+# %%{_bindir}/flagscale console script entry, despite the wheel
+# declaring [project.scripts]. List it explicitly to avoid the
+# "Installed (but unpackaged) file(s) found" error.
+%{_bindir}/flagscale
 
 %changelog
 * Mon Apr 13 2026 FlagOS Contributors <contact@flagos.io> - 1.0.0-1
