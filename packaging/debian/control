@@ -12,6 +12,7 @@ Standards-Version: 4.6.2
 Homepage: https://github.com/flagos-ai/FlagScale
 Vcs-Browser: https://github.com/flagos-ai/FlagScale
 Vcs-Git: https://github.com/flagos-ai/FlagScale.git
+Rules-Requires-Root: no
 
 Package: python3-flagscale
 Architecture: all
