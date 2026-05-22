@@ -15,7 +15,7 @@ Vcs-Git: https://github.com/flagos-ai/FlagScale.git
 
 Package: python3-flagscale
 Architecture: all
-Depends: ${python3:Depends}, ${misc:Depends}, python3-typer, python3-hydra-core
+Depends: python3:any, ${misc:Depends}, python3-typer
 Description: FlagScale large model training toolkit
  FlagScale is a comprehensive toolkit designed to support the entire
  lifecycle of large models, including training, serving, inference,

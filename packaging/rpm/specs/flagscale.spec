@@ -1,5 +1,12 @@
 %global debug_package %{nil}
 
+# Filter out auto-generated Requires for ML/non-distro runtime deps
+# (torch GPU build, triton, hydra-core...): the distro has no GPU-capable
+# python3-torch, no current triton, no hydra-core; users install matching
+# versions via pip per packaging/INSTALL.md. Match python3dist and
+# python3.X.Ydist forms (Fedora >= 39 uses the latter).
+%global __requires_exclude ^python3.*dist.*(hydra-core)
+
 Name:           python3-flagscale
 Version:        1.0.0
 Release:        1%{?dist}
