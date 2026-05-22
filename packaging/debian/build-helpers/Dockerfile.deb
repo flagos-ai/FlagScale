@@ -1,12 +1,12 @@
 # Dockerfile to build FlagScale Debian packages
 # No vendor SDK needed - pure Python package
 
-# Debian trixie ships python3-setuptools >= 75, which meets the
-# pyproject.toml `setuptools>=77.0` build requirement once trixie reaches
-# the matching point release. Earlier distros (Ubuntu 24.04 noble has
-# 68.x) fall short, so we cannot use them as the default base.
-ARG BASE_IMAGE=debian
-ARG BASE_IMAGE_VERSION=trixie-slim
+# Unified to ubuntu:24.04 like the other Flag* packaging PRs after the
+# pyproject's setuptools requirement was relaxed from >=77 to >=64 (noble
+# ships setuptools 68 which now satisfies it). BASE_IMAGE / BASE_IMAGE_VERSION
+# stay overridable for ad-hoc rebuilds against a different base.
+ARG BASE_IMAGE=ubuntu
+ARG BASE_IMAGE_VERSION=24.04
 
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 

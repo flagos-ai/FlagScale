@@ -8,11 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
 
 # Defaults must match Dockerfile.deb's ARG defaults so that running the
-# script with no args picks the same base as `docker build` would. See
-# packaging/NOTES.md for why FlagScale uses debian:trixie-slim instead of
-# ubuntu:24.04 (setuptools >=77 requirement).
-BASE_IMAGE="${BASE_IMAGE:-debian}"
-BASE_IMAGE_VERSION="${1:-trixie-slim}"
+# script with no args picks the same base as `docker build` would.
+BASE_IMAGE="${BASE_IMAGE:-ubuntu}"
+BASE_IMAGE_VERSION="${1:-24.04}"
 
 log_info()  { echo "[INFO]  $*"; }
 log_step()  { echo "[STEP]  $*"; }
