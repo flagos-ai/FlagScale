@@ -42,7 +42,9 @@ installed via pip extras: pip install "flagscale[cuda-train]"
 
 %files -f %{pyproject_files}
 %license LICENSE
-%{_bindir}/flagscale
+# Note: %{_bindir}/flagscale is already included by %pyproject_save_files
+# (it scans console_scripts from the wheel entry_points); listing it
+# explicitly here would trigger "file listed twice".
 
 %changelog
 * Mon Apr 13 2026 FlagOS Contributors <contact@flagos.io> - 1.0.0-1

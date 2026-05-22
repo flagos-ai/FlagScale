@@ -12,7 +12,7 @@ FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     debhelper \
     devscripts \
     dpkg-dev \

@@ -8,6 +8,9 @@ on:
     branches: [main]
     paths:
       - 'packaging/rpm/**'
+      - 'flagscale/**'
+      - 'pyproject.toml'
+      - 'setup.py'
       - '.github/workflows/build-rpm.yml'
   workflow_dispatch:
 
