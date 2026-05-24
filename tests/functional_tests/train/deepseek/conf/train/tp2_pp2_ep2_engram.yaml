@@ -99,7 +99,6 @@ model:
   engram_pad_id: 0
   engram_seed: 0
   engram_kernel_size: 4
-  engram_hc_mult: 1
   engram_embedding_parallel_method: "alltoall"
 
   # training
