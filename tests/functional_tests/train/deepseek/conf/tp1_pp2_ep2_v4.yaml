@@ -30,7 +30,7 @@ experiment:
     # NVTE_DEBUG_LEVEL: 2
     # CUDA_LAUNCH_BLOCKING: 1
     # NCCL_DEBUG: INFO
-    # NCCL_NVLS_ENABLE: 0
+    # NCCL_NVLS_ENABLE: 0    # Some CUDA and NCCL versions maybe cause Cuda failure 401 'the operation cannot be performed in the present state'. Set it for debug is ok. But this will cause performance drop, please check your CUDA and NCCL versions.
     # CUDNN_LOGERR_DBG: 1
     # The following parameters passed the local test
     # CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
