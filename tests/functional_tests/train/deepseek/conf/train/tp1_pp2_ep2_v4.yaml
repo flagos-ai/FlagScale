@@ -113,14 +113,6 @@ model:
   o_groups: 2
   o_lora_rank: 128
   q_lora_rank: 128
-  # quantization_config:
-  #   activation_scheme: dynamic
-  #   fmt: e4m3
-  #   quant_method: fp8
-  #   scale_fmt: ue8m0
-  #   weight_block_size:
-  #     - 128
-  #     - 128
   csa_compress_ratios: "[128]*2+([128]+[4])*1+[128]"
 
   # mtp_args
