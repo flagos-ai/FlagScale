@@ -7,7 +7,7 @@ ARG BASE_IMAGE_VERSION=43
 FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
 
 RUN dnf install -y \
-    rpm-build rpmdevtools \
+    rpm-build rpmdevtools pyproject-rpm-macros \
     python3-devel python3-setuptools python3-wheel python3-pip \
     && dnf clean all
 
@@ -24,7 +24,10 @@ RUN SPEC_VERSION=$(grep '^Version:' /workspace/FlagScale/packaging/rpm/specs/fla
         .
 
 # Build RPM
-RUN rpmbuild -ba /workspace/FlagScale/packaging/rpm/specs/flagscale.spec
+RUN rpmbuild -ba /workspace/FlagScale/packaging/rpm/specs/flagscale.spec 2>&1 || \
+    { echo "=== build failed ==="; \
+      find /root/rpmbuild -name "*.log" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || true; \
+      exit 1; }
 
 # Collect output
 RUN mkdir -p /output && \

@@ -39,6 +39,18 @@ installed via pip extras: pip install "flagscale[cuda-train]"
 %pyproject_install
 %pyproject_save_files flagscale
 
+%check
+# Smoke find_spec test (no actual import) — verifies the built module
+# lands at the expected sitelib path. Doesn't import flagscale because
+# module-level deps (torch, megatron, vllm, ...) are install-time
+# concerns, not packaging concerns, and aren't in the build container.
+# PYTHONSAFEPATH=1 keeps the cwd (the unpacked source tree, which also
+# contains flagscale/) off sys.path, so find_spec resolves against the
+# installed copy under PYTHONPATH, not the source tree.
+PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1 \
+    PYTHONPATH=%{buildroot}%{python3_sitelib} \
+    python3 -c "import importlib.util; s = importlib.util.find_spec('flagscale'); assert s and s.origin, 'flagscale not findable'; print('OK: flagscale at', s.origin)"
+
 %files -f %{pyproject_files}
 %license LICENSE
 # Verified empirically: %%pyproject_save_files does NOT include the
