@@ -108,7 +108,9 @@ setup_cuda_training_env() {
         websocket==0.2.1 \
         websockets==15.0.1 \
         msgpack==1.1.0 \
-        datasets==4.5.0
+        datasets==4.5.0 \
+        fast-hadamard-transform==1.1.0 \
+        emerging-optimizers==0.2.0
 }
 
 setup_metax_training_env() {
