@@ -111,6 +111,7 @@ setup_cuda_training_env() {
         datasets==4.5.0 \
         fast-hadamard-transform==1.1.0 \
         git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.2.0
+}
 
 setup_metax_training_env() {
     local megatron_dir="/tmp/Megatron-LM-FL"
