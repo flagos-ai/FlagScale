@@ -109,8 +109,7 @@ setup_cuda_training_env() {
         websockets==15.0.1 \
         msgpack==1.1.0 \
         datasets==4.5.0 \
-        fast-hadamard-transform==1.1.0 \
-        git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.2.0
+        fast-hadamard-transform==1.1.0
 }
 
 setup_metax_training_env() {

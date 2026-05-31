@@ -18,8 +18,7 @@ system:
   reset_attention_mask: true
   qk_layernorm: true
   sequence_parallel: true
-  use_distributed_optimizer: false
-  use_padded_layerwise_optimizer: false
+  use_distributed_optimizer: true
   num_distributed_optimizer_instances: 1
   overlap_grad_reduce: true
   overlap_param_gather: true
@@ -136,8 +135,6 @@ model:
   # pytorch_profiler_collect_callstack: true
 
   optimizer:
-    optimizer: dist_muon
-    muon_tp_mode: distributed
     clip_grad: 1.0
     weight_decay: 0.1
     adam_beta1: 0.9
