@@ -83,7 +83,7 @@ model:
   moe_ffn_hidden_size: 512
   moe_grouped_gemm: true
   moe_shared_expert_intermediate_size: 512
-  num_experts: 32
+  num_experts: 8
   # moe_router_load_balancing_type: "seq_aux_loss"
   moe_router_score_function: sqrtsoftplus
   moe_router_enable_expert_bias: false
