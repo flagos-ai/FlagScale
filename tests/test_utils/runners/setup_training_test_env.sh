@@ -109,8 +109,7 @@ setup_cuda_training_env() {
         websockets==15.0.1 \
         msgpack==1.1.0 \
         datasets==4.5.0 \
-        https://github.com/Dao-AILab/fast-hadamard-transform/releases/download/v1.1.0.post2/fast_hadamard_transform-1.1.0+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
-}
+        https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/whl/fast_hadamard_transform-1.1.0%2Bcu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 
 setup_metax_training_env() {
     local megatron_dir="/tmp/Megatron-LM-FL"
