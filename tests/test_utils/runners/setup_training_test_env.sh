@@ -110,6 +110,7 @@ setup_cuda_training_env() {
         msgpack==1.1.0 \
         datasets==4.5.0 \
         https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/whl/fast_hadamard_transform-1.1.0%2Bcu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+}
 
 setup_metax_training_env() {
     local megatron_dir="/tmp/Megatron-LM-FL"
