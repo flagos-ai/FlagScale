@@ -22,11 +22,15 @@ system:
   num_distributed_optimizer_instances: 1
   overlap_grad_reduce: true
   overlap_param_gather: true
-  attention_backend: auto
+  attention_backend: unfused
   check_weight_hash_across_dp_replicas_interval: 1
   calculate_per_token_loss: true
-  recompute_modules:
-    - mhc
+  moe_router_dtype: fp32
+  deterministic_mode: true
+  # overlap_moe_expert_parallel_comm: true
+  # recompute_granularity: selective
+  # recompute_modules:
+  #   - mhc
   precision:
     bf16: true
     attention_softmax_in_fp32: true

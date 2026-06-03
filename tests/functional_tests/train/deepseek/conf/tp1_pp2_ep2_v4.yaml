@@ -23,12 +23,15 @@ experiment:
     NCCL_ALGO: "Ring"
     NVTE_APPLY_QK_LAYER_SCALING: 0
     NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
-    CUDNN_BENCHMARK: "false"
-    CUDNN_DETERMINISTIC: "true"
+    # deterministic settings
+    CUDNN_BENCHMARK: 0
+    NVIDIA_TF32_OVERRIDE: 0
+    TORCHINDUCTOR_FAST_MATH: 0
+    CUDNN_DETERMINISTIC: 1
     # Only for debug
-    # NVTE_DEBUG: 1
-    # NVTE_DEBUG_LEVEL: 2
-    # CUDA_LAUNCH_BLOCKING: 1
+    NVTE_DEBUG: 1
+    NVTE_DEBUG_LEVEL: 2
+    CUDA_LAUNCH_BLOCKING: 1
     # NCCL_DEBUG: INFO
     # NCCL_NVLS_ENABLE: 0    # Some CUDA and NCCL versions maybe cause Cuda failure 401 'the operation cannot be performed in the present state'. Set it for debug is ok. But this will cause performance drop, please check your CUDA and NCCL versions.
     # CUDNN_LOGERR_DBG: 1
