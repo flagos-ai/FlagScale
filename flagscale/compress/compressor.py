@@ -49,8 +49,8 @@ def compress(cfg):
     save_dir = cfg.system.save_dir
 
     tokenizer = None
-    if cfg.data.get("tokenzier_args"):
-        tokenizer_args = cfg.data.tokenzier_args
+    if cfg.data.get("tokenizer_args"):
+        tokenizer_args = cfg.data.tokenizer_args
         t_path = tokenizer_args.get("tokenizer_path", model_path)
         tokenizer = AutoTokenizer.from_pretrained(
             t_path,
