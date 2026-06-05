@@ -17,5 +17,3 @@ data:
     #tokenizer_path: ${model.model_path}
     use_fast: true
     trust_remote_code: true
-
-

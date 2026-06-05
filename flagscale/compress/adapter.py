@@ -90,7 +90,6 @@ class LLMCompressorAdapter:
         self.save_artifacts()
 
     def save_artifacts(self):
-
         if self.tokenizer:
             self.tokenizer.save_pretrained(self.output_dir)
         logger.info(f"Artifacts saved to {self.output_dir}")
