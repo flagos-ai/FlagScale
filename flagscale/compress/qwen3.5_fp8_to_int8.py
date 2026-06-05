@@ -1,16 +1,13 @@
-import os
 import json
 import math
+import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import torch
-from safetensors.torch import load_file, save_file
-
 from llmcompressor import model_free_ptq
-
+from safetensors.torch import load_file, save_file
 
 MODEL_ID = os.environ.get("MODEL_ID", "./models")
 SAVE_DIR = os.environ.get("SAVE_DIR", "./output")
@@ -31,14 +28,14 @@ def ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
 
-def load_json(path: str) -> Dict:
+def load_json(path: str) -> dict:
     if not os.path.exists(path):
         raise FileNotFoundError(f"JSON file not found: {path}")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def save_json(obj: Dict, path: str):
+def save_json(obj: dict, path: str):
     dir_path = os.path.dirname(path)
     if dir_path:
         ensure_dir(dir_path)
@@ -46,29 +43,29 @@ def save_json(obj: Dict, path: str):
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
-def list_safetensor_files(model_dir: str) -> List[str]:
+def list_safetensor_files(model_dir: str) -> list[str]:
     files = sorted(str(p) for p in Path(model_dir).glob("*.safetensors"))
     if not files:
         raise FileNotFoundError(f"No .safetensors files found under: {model_dir}")
     return files
 
 
-def get_quant_config(cfg: Dict) -> Dict:
+def get_quant_config(cfg: dict) -> dict:
     return cfg.get("quantization_config", {})
 
 
-def is_fp8_model(cfg: Dict) -> bool:
+def is_fp8_model(cfg: dict) -> bool:
     return get_quant_config(cfg).get("quant_method", "").lower() == "fp8"
 
 
-def get_weight_block_size(cfg: Dict) -> Tuple[int, int]:
+def get_weight_block_size(cfg: dict) -> tuple[int, int]:
     block = get_quant_config(cfg).get("weight_block_size", [128, 128])
     if not isinstance(block, list) or len(block) != 2:
         raise ValueError(f"Unexpected weight_block_size: {block}")
     return int(block[0]), int(block[1])
 
 
-def get_skip_modules(cfg: Dict) -> List[str]:
+def get_skip_modules(cfg: dict) -> list[str]:
     return list(get_quant_config(cfg).get("modules_to_not_convert", []))
 
 
@@ -76,15 +73,15 @@ def is_candidate_weight(name: str) -> bool:
     return name.endswith(".weight")
 
 
-def should_skip_weight(weight_name: str, skip_modules: List[str]) -> bool:
+def should_skip_weight(weight_name: str, skip_modules: list[str]) -> bool:
     for mod in skip_modules:
         if weight_name == mod or weight_name.startswith(mod + "."):
             return True
     return False
 
 
-def candidate_scale_names(weight_name: str) -> List[str]:
-    base = weight_name[:-len(".weight")] if weight_name.endswith(".weight") else weight_name
+def candidate_scale_names(weight_name: str) -> list[str]:
+    base = weight_name[: -len(".weight")] if weight_name.endswith(".weight") else weight_name
     return [
         f"{base}.weight_scale",
         f"{base}.weight_scales",
@@ -96,9 +93,7 @@ def candidate_scale_names(weight_name: str) -> List[str]:
     ]
 
 
-def find_scale_tensor_name(
-    state: Dict[str, torch.Tensor], weight_name: str
-) -> Optional[str]:
+def find_scale_tensor_name(state: dict[str, torch.Tensor], weight_name: str) -> str | None:
     for cand in candidate_scale_names(weight_name):
         if cand in state:
             return cand
@@ -107,8 +102,12 @@ def find_scale_tensor_name(
 
 def is_auxiliary_scale_tensor(name: str) -> bool:
     keywords = [
-        ".weight_scale", ".weight_scales", ".scale", ".scales",
-        "_scale", "_scales",
+        ".weight_scale",
+        ".weight_scales",
+        ".scale",
+        ".scales",
+        "_scale",
+        "_scales",
     ]
     return any(k in name for k in keywords)
 
@@ -160,9 +159,9 @@ def build_temp_bf16_from_fp8(fp8_model_dir: str) -> str:
             "Single-file models are not supported by this multi-shard path."
         )
     index = load_json(index_path)
-    orig_weight_map: Dict[str, str] = index["weight_map"]
+    orig_weight_map: dict[str, str] = index["weight_map"]
 
-    shard_to_tensors: Dict[str, List[str]] = {}
+    shard_to_tensors: dict[str, list[str]] = {}
     for tensor_name, shard_file in orig_weight_map.items():
         shard_to_tensors.setdefault(shard_file, []).append(tensor_name)
 
@@ -173,11 +172,20 @@ def build_temp_bf16_from_fp8(fp8_model_dir: str) -> str:
     print(f"[INFO] temporary bf16 dir: {tmp_dir}")
 
     copy_names = [
-        "config.json", "configuration.json", "generation_config.json",
-        "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
-        "preprocessor_config.json", "processor_config.json",
-        "video_preprocessor_config.json", "merges.txt", "vocab.json",
-        "chat_template.jinja", "README.md", "LICENSE",
+        "config.json",
+        "configuration.json",
+        "generation_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "preprocessor_config.json",
+        "processor_config.json",
+        "video_preprocessor_config.json",
+        "merges.txt",
+        "vocab.json",
+        "chat_template.jinja",
+        "README.md",
+        "LICENSE",
     ]
     for name in copy_names:
         src = os.path.join(fp8_model_dir, name)
@@ -189,25 +197,26 @@ def build_temp_bf16_from_fp8(fp8_model_dir: str) -> str:
     save_json(tmp_cfg, os.path.join(tmp_dir, "config.json"))
 
     restored = kept_original = skipped_scale_tensors = failed = 0
-    new_weight_map: Dict[str, str] = {}
+    new_weight_map: dict[str, str] = {}
     total_size = 0
 
     for shard_file in shard_files:
         shard_path = os.path.join(fp8_model_dir, shard_file)
-        fp8_shard: Dict[str, torch.Tensor] = load_file(shard_path, device="cpu")
-        out_shard: Dict[str, torch.Tensor] = {}
+        fp8_shard: dict[str, torch.Tensor] = load_file(shard_path, device="cpu")
+        out_shard: dict[str, torch.Tensor] = {}
 
         for name, tensor in fp8_shard.items():
             if is_auxiliary_scale_tensor(name):
                 skipped_scale_tensors += 1
                 continue
 
-            if (not is_candidate_weight(name)
-                    or should_skip_weight(name, skip_modules)
-                    or tensor.ndim != 2):
+            if (
+                not is_candidate_weight(name)
+                or should_skip_weight(name, skip_modules)
+                or tensor.ndim != 2
+            ):
                 out_shard[name] = (
-                    tensor.to(torch.bfloat16)
-                    if tensor.dtype.is_floating_point else tensor
+                    tensor.to(torch.bfloat16) if tensor.dtype.is_floating_point else tensor
                 )
                 kept_original += 1
                 continue
@@ -215,8 +224,7 @@ def build_temp_bf16_from_fp8(fp8_model_dir: str) -> str:
             scale_name = find_scale_tensor_name(fp8_shard, name)
             if scale_name is None:
                 out_shard[name] = (
-                    tensor.to(torch.bfloat16)
-                    if tensor.dtype.is_floating_point else tensor
+                    tensor.to(torch.bfloat16) if tensor.dtype.is_floating_point else tensor
                 )
                 kept_original += 1
                 continue
@@ -233,8 +241,7 @@ def build_temp_bf16_from_fp8(fp8_model_dir: str) -> str:
             except Exception as e:
                 print(f"[WARN] dequant failed for {name}: {e}")
                 out_shard[name] = (
-                    tensor.to(torch.bfloat16)
-                    if tensor.dtype.is_floating_point else tensor
+                    tensor.to(torch.bfloat16) if tensor.dtype.is_floating_point else tensor
                 )
                 kept_original += 1
                 failed += 1
@@ -281,5 +288,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

@@ -1,11 +1,8 @@
 import argparse
-import os
-import sys
-import yaml
+
 import torch
 from omegaconf import OmegaConf
-from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, AutoModelForVision2Seq
-from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # 1. 先导入 adapter 模块
 import flagscale.compress.adapter
@@ -29,17 +26,22 @@ if hasattr(flagscale.compress.adapter, "oneshot"):
     # 将 adapter 模块里的 oneshot 替换为我们的版本
     flagscale.compress.adapter.oneshot = _patched_oneshot
 else:
-    print(">> [Warning] Could not find 'oneshot' in flagscale.compress.adapter. Patch may not work.")
+    print(
+        ">> [Warning] Could not find 'oneshot' in flagscale.compress.adapter. Patch may not work."
+    )
 # --- Monkey Patch End ---
+
 
 def load_calibration_dataset(cfg, tokenizer):
     if not cfg.data.get("path"):
         return None
     return None
 
+
 def prepare_config(config_path):
     config = OmegaConf.load(config_path)
     return config
+
 
 def compress(cfg):
     if "compress" in cfg:
@@ -55,7 +57,7 @@ def compress(cfg):
         tokenizer = AutoTokenizer.from_pretrained(
             t_path,
             use_fast=tokenizer_args.get("use_fast", True),
-            trust_remote_code=tokenizer_args.get("trust_remote_code", True)
+            trust_remote_code=tokenizer_args.get("trust_remote_code", True),
         )
 
     model_cls_str = cfg.model.get("model_cls", "AutoModelForCausalLM")
@@ -78,7 +80,7 @@ def compress(cfg):
         model_path,
         torch_dtype=torch_dtype,
         trust_remote_code=True,
-        device_map=cfg.model.get("device_map", "auto")
+        device_map=cfg.model.get("device_map", "auto"),
     )
 
     dataset = load_calibration_dataset(cfg, tokenizer)
@@ -95,10 +97,11 @@ def compress(cfg):
         dataset=dataset,
         output_dir=save_dir,
         num_calibration_steps=cfg.data.get("num_calibration_steps", 128),
-        **compress_args
+        **compress_args,
     )
 
     adapter.run()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -106,6 +109,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     cfg = prepare_config(args.config_path)
     compress(cfg)
-
-
-
