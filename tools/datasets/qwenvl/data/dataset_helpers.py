@@ -144,6 +144,16 @@ class TaskEncoder(
         # NOTE: Qwen3-VL don't use system prompt by default
         self.use_system_prompt = getattr(self.args, "use_system_prompt", True)
 
+        # Probe if chat template supports single-turn apply (some templates
+        # like Qwen3.5 require a user message and will fail on assistant-only)
+        self._single_turn_template = True
+        try:
+            self.tokenizer.apply_chat_template(
+                [{"role": "assistant", "content": "test"}], tokenize=True
+            )
+        except Exception:
+            self._single_turn_template = False
+
     def encode_sample(self, sample: VQASample | ChatMLSample):
         if isinstance(sample, VQASample):
             is_llava_training = (
@@ -389,16 +399,26 @@ class TaskEncoder(
         pad_token_id = IGNORE_IDX
         target[0:system_prompt_prefix] = pad_token_id
         offset = system_prompt_prefix
+        prev_prefix_len = system_prompt_prefix
         for turn_idx, turn in enumerate(conversation[conversation_start_idx:]):
-            turn_tokens = self.tokenizer.apply_chat_template(
-                [turn], tokenize=True, return_tensors="np"
-            )[0]
-            turn_content = turn_tokens[system_prompt_prefix:]
-            n_tokens = len(turn_content)
-            if (target[offset : offset + n_tokens] != turn_content).any():
-                raise InternalWarning(
-                    f"Encode Error: sample id [{sample.__key__}], converd conversation: {conversation}, turn idx: {turn_idx}, turn: {turn}"
-                )
+            if self._single_turn_template:
+                turn_tokens = self.tokenizer.apply_chat_template(
+                    [turn], tokenize=True, return_tensors="np"
+                )[0]
+                turn_content = turn_tokens[system_prompt_prefix:]
+                n_tokens = len(turn_content)
+                if (target[offset : offset + n_tokens] != turn_content).any():
+                    raise InternalWarning(
+                        f"Encode Error: sample id [{sample.__key__}], converd conversation: {conversation}, turn idx: {turn_idx}, turn: {turn}"
+                    )
+            else:
+                prefix = conversation[: conversation_start_idx + turn_idx + 1]
+                prefix_tokens = self.tokenizer.apply_chat_template(
+                    prefix, tokenize=True, return_tensors="np"
+                )[0]
+                n_tokens = len(prefix_tokens) - prev_prefix_len
+
+            prev_prefix_len = offset + n_tokens
 
             if turn["role"] == "user":
                 target[offset : offset + n_tokens] = pad_token_id

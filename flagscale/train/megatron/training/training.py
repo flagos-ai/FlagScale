@@ -62,11 +62,9 @@ import torch
 
 try:
     from megatron.rl import rl_utils
-    from megatron.rl.parallel_utils import build_inference_pg_collection
     has_rl_utils = True
 except ImportError:
     has_rl_utils = False
-    build_inference_pg_collection = None
 
 # Canonical list of RL timer names to include in timers_to_log.
 # When the profiling branch is merged, this will be imported from rl_profiling
@@ -117,7 +115,6 @@ RL_LOGGABLE_TIMER_NAMES = [
     'rl/wait-for-decode-only',
 ]
 
-
 try:
     from modelopt.torch.distill.plugins.megatron import (
         get_tensor_shapes_adjust_fn_for_distillation,
@@ -144,7 +141,6 @@ from megatron.core.utils import (
     get_pg_size,
     get_pg_rank,
     StragglerDetector,
-    is_te_min_version,
 )
 from megatron.core.fp8_utils import correct_amax_history_if_needed
 from megatron.core.process_groups_config import ProcessGroupCollection
@@ -247,25 +243,27 @@ from megatron.training.global_vars import (
     get_tensorboard_writer,
     get_wandb_writer,
     get_one_logger,
+    get_tokenizer,
     get_energy_monitor,
 )
 from . import one_logger_utils
 from .dgrad_logging import enable_dgrad_logging, disable_dgrad_logging, save_dgrads
 
 from megatron.training import ft_integration
+
+########## FlagScale Begin ##########
 from megatron.training.global_vars import get_spiky_loss_detector
-from megatron.training.fs_theoretical_memory_usage import report_theoretical_memory as fs_report_theoretical_memory
+from megatron.training.peft import PEFT # Import PEFT from peft module
 from megatron.plugin.hetero.parallel_context import get_parallel_context
+
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+########## FlagScale End ##########
 
 stimer = StragglerDetector()
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 
-# Import PEFT from peft module
-from megatron.training.peft import PEFT
-
-from megatron.plugin.platform import get_platform
-cur_platform = get_platform()
 
 def destroy_global_state():
     destroy_global_vars()
@@ -724,205 +722,6 @@ def num_floating_point_operations(args, batch_size):
         return transformer_flops()
 
 
-def num_floating_point_operations_fs(args, batch_size):
-    def transformer_flops():
-
-        # Part 1: Attention ======================================================================
-        if args.multi_latent_attention:
-            # qkv proj
-            q_head_dim = args.qk_head_dim + args.qk_pos_emb_head_dim
-            # q lora + rope + q norm
-            if args.q_lora_rank is None:
-                num_flops_attn = (
-                    2
-                    * batch_size
-                    * args.seq_length
-                    * args.hidden_size
-                    * args.num_attention_heads
-                    * q_head_dim
-                )
-            else:
-                num_flops_attn = (
-                    2
-                    * batch_size
-                    * args.seq_length
-                    * (
-                        args.hidden_size * args.q_lora_rank
-                        + args.q_lora_rank * args.num_attention_heads * q_head_dim
-                        + args.q_lora_rank
-                    )
-                )
-            # kv lora + rope + kv norm
-            num_flops_attn += (
-                2
-                * batch_size
-                * args.seq_length
-                * (
-                    args.hidden_size * (args.kv_lora_rank + args.qk_pos_emb_head_dim)
-                    + args.kv_lora_rank * args.num_attention_heads * (args.qk_head_dim + args.v_head_dim)
-                    + args.kv_lora_rank
-                )
-            )
-            # core attn (QK^T)V
-            num_flops_attn += (
-                2 * batch_size * args.seq_length**2 * args.num_attention_heads * q_head_dim
-                + 2 * batch_size * args.seq_length**2 * args.num_attention_heads * args.v_head_dim
-            ) / 2
-            # out proj
-            query_projection_size = args.v_head_dim * args.num_attention_heads
-            num_flops_attn += (
-                2
-                * batch_size
-                * args.seq_length
-                * query_projection_size
-                * args.hidden_size
-            )
-        else:
-            # Group Query Attention.
-            if not args.group_query_attention:
-                args.num_query_groups = args.num_attention_heads
-            # Attention projection size.
-            query_projection_size = args.kv_channels * args.num_attention_heads
-            kv_projection_size = args.kv_channels * args.num_query_groups
-            # qkv proj
-            num_flops_attn = (
-                2
-                * batch_size
-                * args.seq_length
-                * args.hidden_size
-                * (query_projection_size + 2 * kv_projection_size)
-            )
-            # core attn (QK^T)V
-            num_flops_attn += (
-                2 * batch_size * args.seq_length**2 * query_projection_size
-                + 2 * batch_size * args.seq_length**2 * kv_projection_size
-            ) / 2
-            # out proj
-            num_flops_attn += (
-                2
-                * batch_size
-                * args.seq_length
-                * query_projection_size
-                * args.hidden_size
-            )
-
-        # Part 2: MLP or MoE =====================================================================
-        moe_ffn_hidden_size = (
-            args.moe_ffn_hidden_size
-            if args.moe_ffn_hidden_size is not None
-            else args.ffn_hidden_size
-        )
-        shared_expert_ffn_hidden_size = (
-            0
-            if args.moe_shared_expert_intermediate_size is None
-            else args.moe_shared_expert_intermediate_size
-        )
-        # SwiGLU.
-        gated_linear_multiplier = 3 / 2 if args.swiglu else 1
-
-        # MoE.
-        if args.num_experts is None:
-            # Every Transformer MLP is dense.
-            num_dense_layers = args.num_layers
-            num_moe_layers = 0
-            num_experts_routed_to = 0
-            num_experts = 0
-        else:
-            # Calculate number of dense and MoE Transformer MLPs.
-            if isinstance(args.moe_layer_freq, int):
-                moe_layer_pattern = [
-                    1 if (i % args.moe_layer_freq == 0) else 0 for i in range(args.num_layers)
-                ]
-            elif isinstance(args.moe_layer_freq, list):
-                moe_layer_pattern = args.moe_layer_freq
-            else:
-                raise RuntimeError("Illegal --moe-layer-freq argument provided!")
-            assert len(moe_layer_pattern) == args.num_layers, (
-                f"Invalid length of moe_layer_pattern: {len(moe_layer_pattern)}, "
-                f"expected {args.num_layers}, "
-                f"current moe layer pattern: {args.moe_layer_freq}"
-            )
-            num_moe_layers = sum(moe_layer_pattern)  # Number of 1s in `moe_layer_pattern`.
-            num_dense_layers = args.num_layers - num_moe_layers
-            num_experts_routed_to = args.moe_router_topk
-            num_experts = args.num_experts
-            last_layer_is_moe = moe_layer_pattern[-1]
-
-        num_flops_dense_mlp = (
-            4 # mlp (two linear)
-            * batch_size
-            * args.seq_length
-            * args.hidden_size
-            * args.ffn_hidden_size
-            * gated_linear_multiplier
-        )
-
-        num_flops_sparse_mlp = (
-            4 # routed experts (two linear)
-            * batch_size
-            * args.seq_length
-            * args.hidden_size
-            * moe_ffn_hidden_size
-            * gated_linear_multiplier
-            * num_experts_routed_to
-            + 4 # shared experts (two linear)
-            * batch_size
-            * args.seq_length
-            * args.hidden_size
-            * shared_expert_ffn_hidden_size
-            * gated_linear_multiplier
-            + 2 # gate (one linear)
-            * batch_size
-            * args.seq_length
-            * args.hidden_size
-            * num_experts
-        )
-
-        num_flops_logits = (
-            2
-            * batch_size
-            * args.seq_length
-            * args.padded_vocab_size
-            * args.hidden_size
-        )
-
-        # Part3: MTP =============================================================================
-        if args.mtp_num_layers is not None:
-            mtp_num_layers = args.mtp_num_layers
-            num_moe_layers += last_layer_is_moe * mtp_num_layers
-            num_dense_layers += (1 - last_layer_is_moe) * mtp_num_layers
-            num_layers = args.num_layers + mtp_num_layers
-        else:
-            mtp_num_layers = 0
-            num_layers = args.num_layers
-
-        num_flops_mtp = 0
-        if mtp_num_layers > 0:
-            num_flops_mtp = (
-                # MTP eh norm + final nrom
-                2 * 3 * args.hidden_size
-                + 2
-                * batch_size
-                * args.seq_length
-                * args.hidden_size
-                * args.hidden_size * 2
-                + num_flops_attn
-                + num_flops_sparse_mlp
-                + num_flops_logits
-            )
-
-        return (
-            num_dense_layers * (num_flops_attn + num_flops_dense_mlp)
-            + num_moe_layers * (num_flops_attn + num_flops_sparse_mlp)
-            + num_flops_logits
-            + mtp_num_layers * num_flops_mtp
-        )
-
-    # Compute standard Transformer model FLOPs.
-    flops_fwd = transformer_flops()
-    return flops_fwd * 3
-
-
 def get_start_time_from_progress_log():
     """
     Gets start time of earliest job with same world size. Also returns the number
@@ -1117,7 +916,8 @@ def pretrain(
             set_ideal_affinity_for_current_gpu
         )
         set_ideal_affinity_for_current_gpu()
-    ###### FlagScale Begin ######
+
+    ########## FlagScale Begin ##########
     args = get_args()
     if args.mg_fl_prefer:
         os.environ['MG_FL_PREFER'] = args.mg_fl_prefer
@@ -1130,7 +930,7 @@ def pretrain(
         os.environ['TE_FL_ALLOW_VENDORS'] = args.te_fl_allow_vendors
     if args.te_fl_deny_vendors:
         os.environ['TE_FL_DENY_VENDORS'] = args.te_fl_deny_vendors
-    
+
     # enable flag gems to replace torch ops for distributed training
     # TODO(lixianduo): fix flag gems re-register error
     if args.enable_flag_gems:
@@ -1143,7 +943,7 @@ def pretrain(
             flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
         except Exception as e:
             raise RuntimeError(f"Failed to enable 'flag_gems': {e}.")
-    ###### FlagScale End   ######
+    ########## FlagScale End ##########
 
     if args.log_progress:
         append_to_progress_log("Starting job")
@@ -1262,11 +1062,6 @@ def pretrain(
         }
     else:
         checkpointing_context = {}
-
-    ########## FlagScale Begin ##########
-    num_microbatches = get_num_microbatches()
-    fs_report_theoretical_memory(args, num_microbatches=num_microbatches, verbose=True)
-    ########## FlagScale End ##########
 
     # Model, optimizer, and learning rate.
     timers('model-and-optimizer-setup', log_level=0).start(barrier=True)
@@ -1508,7 +1303,7 @@ def pretrain(
             non_loss_data_func=non_loss_data_func,
         )
 
-    ######### FlagScale Begin ##########
+    ########## FlagScale Begin ##########
     if extra_valid_dataset_provider is not None:
         from megatron.training.extra_valid import extra_evaluate_and_print_results, build_extra_valid_data_iterators
         # NOTE(zhaoyinglia): Must rebuild the dataloaders for extra validation here,
@@ -1546,7 +1341,7 @@ def pretrain(
                     write_to_tensorboard=not args.skip_train,
                     non_loss_data_func=non_loss_data_func
                 )
-        ######### FlagScale End ##########
+        ########## FlagScale End ##########
 
     wandb_writer = get_wandb_writer()
     if wandb_writer:
@@ -1688,7 +1483,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
     if not isinstance(model, list):
         model = [model]
 
-    ######## FLAGSCALE BEGIN ########
+    ########## FlagScale Begin ##########
     # 1) init
     config = get_model_config(model[0])
     if config.peft_type is not None:
@@ -1705,7 +1500,7 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
             # 4) load state dict
             peft.load_state_dict_pre_hooks(model_module)
             peft.load_state_dict_post_hooks(model_module)
-    ######## FLAGSCALE END   ########
+    ########## FlagScale End ##########
 
     # Set tensor model parallel attributes if not set.
     # Only parameters that are already tensor model parallel have these
@@ -1876,6 +1671,7 @@ def get_optimizer_param_scheduler(optimizer):
             lr_warmup_steps = args.lr_warmup_samples
     else:
         raise Exception('either train-iters or train-samples should be provided.')
+
     ########## FlagScale Begin ##########
     stablelm2_scheduler_config = None
     if args.lr_decay_style == 'stablelm2-scheduler':
@@ -1890,6 +1686,7 @@ def get_optimizer_param_scheduler(optimizer):
           cosine_period_samples=args.lr_decay_stablelm2_cosine_period_samples,
           decay_samples=args.lr_decay_stablelm2_decay_samples)
     ########## FlagScale End ##########
+
     opt_param_scheduler = OptimizerParamScheduler(
         optimizer,
         init_lr=args.lr_warmup_init,
@@ -1933,18 +1730,9 @@ def get_megatron_optimizer_config(args: Any) -> OptimizerConfig:
     else:
         raise ValueError("Invalid optimizer type!")
 
-    # Construct the appropriate config_overrides object.
-    # Use old-style OptimizerConfig overrides (not ParamGroupOverride) for compatibility
-    # with _get_param_groups which expects OptimizerConfig dataclass instances.
-    if args.decoupled_lr is not None:
-        decoupled_param_key = ParamKey(attr="is_embedding_or_output_parameter")
-        decoupled_optimizer_config = copy.deepcopy(config)
-        decoupled_optimizer_config.lr = args.decoupled_lr
-        if args.decoupled_min_lr is not None:
-            decoupled_optimizer_config.min_lr = args.decoupled_min_lr
-        config_overrides = {decoupled_param_key: decoupled_optimizer_config}
-    else:
-        config_overrides = None
+    # Construct the appropriate config_overrides object. This default handles many cases, but
+    #  can be added to as needed by the user, or replaced entirely with a custom override.
+    config_overrides = get_standard_config_overrides(config=config)
 
     return config, config_overrides
 
@@ -2422,26 +2210,19 @@ def training_log(
     # learning rate will be None on ranks without trainable params, so we must gather across mp ranks
     learning_rate: float | None = reduce_max_stat_across_model_parallel_group(learning_rate)
     # Tensorboard values.
-    # Timer requires all the ranks to call.
-    if args.log_timers_to_tensorboard and (iteration % args.tensorboard_log_interval == 0):
-        timers.write(timers_to_log, writer, iteration, normalizer=total_iterations)
     if is_last_rank() and (iteration % args.tensorboard_log_interval == 0):
         if wandb_writer:
             wandb_writer.log({'samples vs steps': args.consumed_train_samples}, iteration)
         if learning_rate is not None:
-            writer.add_scalar('learning-rate', learning_rate, iteration)
-            writer.add_scalar('learning-rate vs samples', learning_rate, args.consumed_train_samples)
+            if writer:
+                writer.add_scalar('learning-rate', learning_rate, iteration)
+                writer.add_scalar('learning-rate vs samples', learning_rate, args.consumed_train_samples)
             if wandb_writer:
                 wandb_writer.log({'learning-rate': learning_rate}, iteration)
-            wandb_writer.log({'consumed-tokens': args.consumed_train_samples * args.seq_length / 1000. / 1000 / 1000}, iteration)
-        if writer:
-            writer.add_scalar('learning-rate', learning_rate, iteration)
-            writer.add_scalar('learning-rate vs samples', learning_rate, args.consumed_train_samples)
-        if wandb_writer:
-            wandb_writer.log({'learning-rate': learning_rate}, iteration)
+                wandb_writer.log({'consumed-tokens': args.consumed_train_samples * args.seq_length / 1000. / 1000 / 1000}, iteration)
         if args.decoupled_lr is not None:
             if writer:
-                writer.add_scalar('decoupled-learning-rate', decoupled_learning_rate, iteration)
+                writer.add_scalar('decoupled-learning-rate', args.decoupled_learning_rate, iteration)
         if args.skipped_train_samples > 0:
             if writer:
                 writer.add_scalar('skipped-train-samples', args.skipped_train_samples, iteration)
@@ -2455,8 +2236,9 @@ def training_log(
         # Log bins for packed mode
         if has_rl_utils and args.rl_use_sequence_packing:
             packing_metrics = rl_utils.get_sequence_packing_tensorboard_metrics(args)
-            for metric_name, metric_value in packing_metrics.items():
-                writer.add_scalar(metric_name, metric_value, iteration)
+            if writer:
+                for metric_name, metric_value in packing_metrics.items():
+                    writer.add_scalar(metric_name, metric_value, iteration)
             if wandb_writer and packing_metrics:
                 wandb_writer.log(packing_metrics, iteration)
         for key in loss_dict:
@@ -2526,7 +2308,13 @@ def training_log(
                 wandb_writer.log(
                     {"mem-allocated-count": mem_stats["allocation.all.current"]}, iteration
                 )
+        if args.log_max_attention_logit:
+            if writer:
+                writer.add_scalar('max_attention_logit', max_attention_logit, iteration)
+            if wandb_writer:
+                wandb_writer.log({'max_attention_logit': max_attention_logit}, iteration)
 
+    # Log MoE metrics.
     if args.num_experts is not None:
         moe_loss_scale = 1 / get_num_microbatches()
         track_names = []
@@ -2686,7 +2474,8 @@ def training_log(
             timers.write(timers_to_log, wandb_writer, iteration, normalizer=args.log_interval, reset=False)
         # Log timers to stdout
         timers.log(timers_to_log, normalizer=args.log_interval, reset=should_reset)
-        if not args.auto_tune: ########## FlagScale Add ##########
+        ########## FlagScale Begin ##########
+        if not args.auto_tune:
             if report_memory_flag:
                 # Report memory after optimizer state has been initialized.
                 if torch.distributed.get_rank() == 0:
@@ -2696,10 +2485,9 @@ def training_log(
                 report_memory_flag = False
         else:
             num_microbatches = get_num_microbatches()
-            fs_report_theoretical_memory(args, num_microbatches=num_microbatches, verbose=True)
             report_memory(f'(after {iteration} iterations)')
             report_memory_flag = False
-        timers.log(timers_to_log, normalizer=args.log_interval)
+        ########## FlagScale End ##########
 
     return report_memory_flag
 
@@ -3012,7 +2800,6 @@ def checkpoint_and_decide_exit(
                 checkpointing_context,
                 train_data_iterator=train_data_iterator,
             )
-        torch.distributed.barrier()
         print_datetime(f'exiting program at iteration {iteration}')
 
         return True
@@ -3032,7 +2819,7 @@ def train(
     checkpointing_context,
     non_loss_data_func,
     inference_model=None,
-    extra_valid_dataset_provider=None,
+    extra_valid_dataset_provider=None, ####### FlagScale Add #######
 ):
     """Training function: run train_step desired number of times, run validation, checkpoint."""
     args = get_args()
@@ -3216,16 +3003,20 @@ def train(
 
     num_microbatches = get_num_microbatches()
 
+    ########## FlagScale Begin ##########
     wandb_writer = get_wandb_writer()
     if wandb_writer and args.wandb_log_model:
         # wandb.watch's log_freg needs to take the accumulated number of microbatches into account
         log_freq = args.wandb_log_model_interval * num_microbatches
         wandb_writer.watch(unwrap_model(model), log="all", log_freq=log_freq)
+    ########## FlagScale End ##########
 
     eval_duration = 0.0
     eval_iterations = 0
+    ########## FlagScale Begin ##########
     extra_eval_duration = 0.0
     extra_eval_iterations = 0
+    ########## FlagScale End ##########
     # Wrap forward_backward_func for Full iteration CUDA graph
     forward_backward_func = get_forward_backward_func()
     if args.cuda_graph_impl == "local" and CudaGraphScope.full_iteration in args.cuda_graph_scope:
@@ -3248,8 +3039,10 @@ def train(
             'consumed_train_samples': args.consumed_train_samples,
             'world_size': args.world_size,
             'seq_length': args.seq_length,
+            ########## FlagScale Begin ##########
             'extra_eval_duration': extra_eval_duration,
             'extra_eval_iterations': extra_eval_iterations,
+            ########## FlagScale End ##########
         }
 
     # Cache into one-logger for callback.
@@ -3317,17 +3110,6 @@ def train(
             micro_batch_size=args.micro_batch_size,
             optimizers=[optimizer],
         )
-
-    # Capture CUDA Graphs.
-    if args.external_cuda_graph:
-        cuda_graph_helper = TECudaGraphHelper(
-            model=model,
-            config=config,
-            seq_length=args.seq_length,
-            micro_batch_size=args.micro_batch_size,
-            optimizers=[optimizer],
-        )
-        cuda_graph_helper.create_cudagraphs()
 
     # Run training iterations till done.
     buffered_rollouts = None
@@ -3405,6 +3187,8 @@ def train(
         if (iteration + 1) in args.iterations_to_skip:
             # Dummy train_step to fast forward train_data_iterator.
             dummy_train_step(train_data_iterator)
+            if iteration == start_iteration:
+                start_iteration = iteration + 1
             iteration += 1
             batch_size = (
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
@@ -3531,8 +3315,6 @@ def train(
                         assert (
                             cuda_graph_helper.capture_finished()
                         ), "CUDA Graph capture should have been finished."
-                    # Set the manual hooks when CUDA Graphs are used.
-                    if args.external_cuda_graph:
                         cuda_graph_helper.cuda_graph_set_manual_hooks()
 
         iteration += 1
@@ -3813,8 +3595,8 @@ def evaluate(
     config,
     verbose=False,
     non_loss_data_func=None,
-    extra_valid_index=None,
     eval_iters=None,
+    extra_valid_index=None, ####### FlagScale Add #######
 ):
     """Evaluation."""
     args = get_args()
@@ -3864,6 +3646,7 @@ def evaluate(
     elif eval_iters is None:
         eval_iters = args.eval_iters
     ######## FlagScale End ########
+
     with torch.no_grad():
         iteration = 0
         if verbose:

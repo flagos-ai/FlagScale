@@ -6,6 +6,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from packaging import version
+
 from megatron.core.models.common.vision_module.vision_module import VisionModule
 from megatron.core.transformer.enums import ModelType
 from megatron.core.transformer.spec_utils import ModuleSpec
@@ -41,14 +43,39 @@ class PatchEmbed(nn.Module):
         self.temporal_patch_size = temporal_patch_size
         self.in_channels = in_channels
         self.embed_dim = embed_dim
-
-        kernel_size = [temporal_patch_size, patch_size, patch_size]
-        self.proj = nn.Conv3d(in_channels, embed_dim, kernel_size=kernel_size, stride=kernel_size, bias=bias)
+        self.kernel_size = [temporal_patch_size, patch_size, patch_size]
+        self.stride = self.kernel_size
+        if self.enable_linear():
+            flat_dim = in_channels * temporal_patch_size * patch_size * patch_size
+            self.proj = nn.Linear(flat_dim, embed_dim, bias=bias)
+        else:
+            self.proj = nn.Conv3d(in_channels, embed_dim, kernel_size=self.kernel_size, stride=self.stride, bias=bias)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """
         hidden_states: [tiles, in_chanels] --> (num_patches, embed_dim)
         """
+        assert hidden_states.dim() == 2
+        if self.enable_linear():
+            return self._forward_matmul(hidden_states)
+        return self._forward_conv(hidden_states)
+
+    def enable_linear(self):
+        # PyTorch 2.9.0+ disabled CUDNN's Conv3D, which caused a
+        # significant performance regression.
+        # See: https://github.com/vllm-project/vllm/issues/27406
+        # and https://github.com/pytorch/pytorch/issues/166122
+        # and https://github.com/huggingface/transformers/pull/45041
+        # By default, we use CUDNN's convolution ops with optimization.
+        return self.kernel_size == self.stride and \
+                version.parse(torch.__version__) > version.parse('2.9.0')
+
+    def _forward_matmul(self, hidden_states):
+        target_dtype = self.proj.weight.dtype
+        hidden_states = self.proj(hidden_states.to(dtype=target_dtype))
+        return hidden_states
+
+    def _forward_conv(self, hidden_states):
         target_dtype = self.proj.weight.dtype
         hidden_states = hidden_states.view(
             -1, self.in_channels, self.temporal_patch_size, self.patch_size, self.patch_size

@@ -23,10 +23,6 @@ on:
       container_options:
         required: true
         type: string
-      source_artifact:
-        required: true
-        type: string
-        description: Name of the artifact containing source code
       pkg_mgr:
         required: false
         type: string
@@ -49,7 +45,8 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /tmp/FlagScale
+      PROJECT_ROOT: ${{ github.workspace }}/FlagScale
+      COVERAGE_REPORT_DIR: /tmp/coverage-report
     runs-on: ${{ fromJson(inputs.runs_on) }}
     name: unit-${{ inputs.device }}
     container:
@@ -59,49 +56,63 @@ jobs:
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: ${{ inputs.container_options }}
     steps:
-      - name: Download source code artifact (attempt 1)
-        uses: actions/download-artifact@v4
+      - name: Checkout code (attempt 1)
+        id: checkout_attempt_1
+        uses: actions/checkout@v4
         continue-on-error: true
-        id: download_attempt_1
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Download source code artifact (attempt 2)
-        if: steps.download_attempt_1.outcome == 'failure'
-        uses: actions/download-artifact@v4
+      - name: Checkout code (attempt 2)
+        if: steps.checkout_attempt_1.outcome == 'failure'
+        id: checkout_attempt_2
+        uses: actions/checkout@v4
         continue-on-error: true
-        id: download_attempt_2
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Download source code artifact (attempt 3)
-        if: steps.download_attempt_2.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        id: download_attempt_3
+      - name: Checkout code (attempt 3)
+        if: steps.checkout_attempt_2.outcome == 'failure'
+        id: checkout_attempt_3
+        uses: actions/checkout@v4
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
-
-      - name: Verify artifact download
-        run: |
-          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 1"
-          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
-          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
-          else
-            echo "❌ Error: All 3 download attempts failed"
-            echo "Artifact name: ${{ inputs.source_artifact }}"
-            exit 1
-          fi
-
-      - name: Extract source code
-        run: |
-          mkdir -p $PROJECT_ROOT
-          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
       - name: Set safe directory
         run: |
@@ -110,137 +121,67 @@ jobs:
       - name: Check environment info
         run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
 
-      - name: Install dependencies for unit tests
-        if: inputs.platform == 'cuda'
+      - name: Setup unit test environment
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          PKG_MGR='${{ inputs.pkg_mgr }}'
-          ENV_NAME='${{ inputs.env_name }}'
-          ENV_PATH='${{ inputs.env_path }}'
-
-          echo "Installing dependencies for unit tests"
-          echo "Package Manager: $PKG_MGR"
-          echo "Environment Name: $ENV_NAME"
-          echo "Environment Path: $ENV_PATH"
-
-          # Source environment utilities
-          source ./tools/install/utils/pyenv_utils.sh
-
-          # Activate environment based on package manager
-          case "$PKG_MGR" in
-            conda)
-              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
-                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "❌ Conda activation failed"; exit 1; }
-              fi
-              ;;
-            uv)
-              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
-                activate_uv_env "$ENV_PATH" || { echo "❌ UV activation failed"; exit 1; }
-              fi
-              ;;
-            pip)
-              echo "Using system Python with pip"
-              ;;
-          esac
-
-          echo "Python location: $(which python)"
-          echo "Python version: $(python --version)"
-
-          # Install task source dependencies (pip deps are pre-installed in the env)
-          echo "Installing task source dependencies..."
-
-          # Derive install-dir from env_path (e.g., /root/miniconda3 -> /root)
-          INSTALL_DIR=""
-          if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
-            INSTALL_DIR=$(dirname "$ENV_PATH")
-          fi
-
-          # Only install Megatron-LM source dep (pip deps are pre-installed in Docker image)
-          # Use --force-build to ensure Megatron-LM-FL replaces any pre-installed megatron-core
-          ./tools/install/install.sh \
-            --platform ${{ inputs.platform }} \
-            --task train \
-            --pkg-mgr "$PKG_MGR" \
-            ${ENV_NAME:+--env-name "$ENV_NAME"} \
-            ${INSTALL_DIR:+--install-dir "$INSTALL_DIR"} \
-            --no-system --no-dev --no-base --no-task \
-            --src-deps megatron-lm \
-            --pip-deps typer \
-            --force-build \
-            --retry-count 3
-
-          # TODO: temp solution to install newly added deps, remove once the new image is built
-          pip install qwen_vl_utils==0.0.14 diffusers==0.36.0 websocket-client==1.8.0 websocket==0.2.1 websockets==15.0.1 msgpack==1.1.0 datasets==4.5.0
-
-          # Copy test data (keep existing logic)
-          mkdir -p /opt/data
-          cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
-          cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
+          bash ./tests/test_utils/runners/setup_training_test_env.sh \
+            --platform '${{ inputs.platform }}' \
+            --pkg-mgr '${{ inputs.pkg_mgr }}' \
+            --env-name '${{ inputs.env_name }}' \
+            --env-path '${{ inputs.env_path }}' \
+            --install-common-deps \
+            --copy-data
         timeout-minutes: 30
 
       - name: Run unit tests
         id: unit_test
-        if: inputs.platform == 'cuda'
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          PLATFORM='${{ inputs.platform }}'
-          DEVICE='${{ inputs.device }}'
           PKG_MGR='${{ inputs.pkg_mgr }}'
           ENV_NAME='${{ inputs.env_name }}'
           ENV_PATH='${{ inputs.env_path }}'
 
-          echo "Running unit tests"
-          echo "Platform: $PLATFORM"
-          echo "Device: $DEVICE"
-          echo "Package Manager: $PKG_MGR"
-          echo "Environment Name: $ENV_NAME"
-          echo "Environment Path: $ENV_PATH"
-          echo "Project root: $PROJECT_ROOT"
-
-          # Source environment utilities
           source ./tools/install/utils/pyenv_utils.sh
-
-          # Activate environment based on package manager
           case "$PKG_MGR" in
             conda)
               if [ -n "$ENV_NAME" ]; then
-                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "⚠️  Conda activation failed"
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "Conda activation failed"
               fi
               ;;
             uv)
               if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
-                activate_uv_env "$ENV_PATH" || echo "⚠️  UV activation failed"
+                activate_uv_env "$ENV_PATH" || echo "UV activation failed"
               fi
               ;;
             pip)
-              echo "ℹ️  Running tests with pip/system Python"
+              echo "Running tests with pip/system Python"
+              ;;
+            *)
+              echo "Unsupported package manager: $PKG_MGR"
+              exit 1
               ;;
           esac
 
-          # Display Python environment info
-          echo "Python location: $(which python)"
+          echo "Python location: $(command -v python)"
           echo "Python version: $(python --version)"
 
-          # Install coverage if not already present
-          pip install coverage --quiet
-
-          # Export COVERAGE_DIR so run_unit_tests.sh can pick it up
-          export COVERAGE_DIR="$PROJECT_ROOT/coverage-report"
-
-          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
-            --platform "$PLATFORM" \
-            --device "$DEVICE" \
-            --type unit
+          set +e
+          export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT/flagscale/train"
+          bash ./tests/test_utils/runners/run_unit_tests.sh \
+            --platform '${{ inputs.platform }}' \
+            --device '${{ inputs.device }}' \
+            --coverage-dir "$COVERAGE_REPORT_DIR"
           exit_code=$?
+          set -e
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Unit tests passed for $PLATFORM/$DEVICE"
+            echo "Unit tests passed for ${{ inputs.platform }}/${{ inputs.device }}"
           else
-            echo "❌ Unit tests failed for $PLATFORM/$DEVICE (exit code: $exit_code)"
+            echo "Unit tests failed for ${{ inputs.platform }}/${{ inputs.device }} (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
@@ -252,17 +193,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ inputs.platform }}-${{ inputs.device }}
-          path: ${{ env.PROJECT_ROOT }}/coverage-report/coverage.json
+          path: ${{ env.COVERAGE_REPORT_DIR }}/coverage.json
           retention-days: 7
 
       - name: Upload coverage report to FlagCICD
         if: steps.unit_test.outcome == 'success'
         continue-on-error: true
-        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2.0.4
         env:
-          NO_PROXY: "flagcicd-inner.flagos.net"
+          NO_PROXY: "flagcicd.flagos.net"
         with:
           user_id: '000000000000000000'
           backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
-          report_path: '${{ env.PROJECT_ROOT }}/coverage-report/coverage.json'
+          report_path: '${{ env.COVERAGE_REPORT_DIR }}/coverage.json'
           fail_on_error: 'false'
+          runner_set_name: ${{ fromJson(inputs.runs_on)[0] }}

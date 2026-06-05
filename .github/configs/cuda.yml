@@ -11,7 +11,7 @@ ci_train_image: harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-202
 ci_inference_image: harbor.baai.ac.cn/flagscale/flagscale-inference:dev-cu128-py3.12-20260302102033
 
 # Directory to store image tar files (shared between build and push workflows)
-tar_dir: /data/image_tar
+tar_dir: /mnt/airs-business/cicd/image_tar
 
 # Runner labels for this hardware
 runner_labels: ['flagscale-nvidia-a100-gpu2-32c-128g']

@@ -243,6 +243,11 @@ class FSTrainArguments:
 
                 accumulated_world_size += temp_world_size
                 current_process_mesh_idx += 1
+        # DeepSeek-V4 Temporary
+        if self.args.enable_hyper_connections:
+            assert not self.args.overlap_moe_expert_parallel_comm, "Hyper-connection is not supported with overlap_moe_expert_parallel_comm yet!"
+        if self.args.experimental_attention_variant == "dsv4_hybrid":
+            assert self.args.context_parallel_size == 1, "Context parallelism is not supported with dsv4_hybrid attention variant yet!"
 
     def post_validate_args(self):
         """Post-validate the arguments after Megatron function `validate_args`."""
@@ -422,13 +427,13 @@ class FSTrainArguments:
                         f"[rank0]: We do not recommend using allreduce for engram embedding, this is deprecated and will be removed in a later version.",
                         DeprecationWarning,
                     )
-                    if self.args.engram_embedding_parallel_size is not None:
-                        warnings.warn(
-                            "[rank0]: If set the embedding_parallel_method to allreduce, "
-                            "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel."
-                            "So the embedding_parallel_size is useless and set to None."
-                        )
-                        self.args.engram_embedding_parallel_size = None
+                if self.args.engram_embedding_parallel_size is not None:
+                    warnings.warn(
+                        "[rank0]: If set the embedding_parallel_method to allreduce, "
+                        "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel."
+                        "So the embedding_parallel_size is useless and set to None."
+                    )
+                    self.args.engram_embedding_parallel_size = None
             elif self.args.engram_embedding_parallel_method == "alltoall":
                 assert (
                     self.args.engram_embedding_parallel_size is not None
@@ -811,6 +816,11 @@ def _add_distributed_args(parser):
         action='store_true',
         help='Indicate whether not running on a shared file system.',
     )
+    group.add_argument(
+        '--use-padded-layerwise-optimizer',
+        action='store_true',
+        help='Enable pad when use layer-wise optimizer.'
+    )
     return parser
 
 
@@ -931,81 +941,6 @@ def _add_flagos_args(parser):
     return parser
 
 
-def _add_engram_args(parser):
-    group = parser.add_argument_group(title="flagscale engram")
-    group.add_argument('--use-engram', action='store_true', help='Use Engram module.')
-    group.add_argument(
-        '--engram-tokenizer-name-or-path',
-        type=str,
-        default=None,
-        help='Tokenizer name or path used by Engram',
-    )
-    group.add_argument(
-        '--engram-vocab-size',
-        nargs='*',
-        type=int,
-        default=None,
-        help='Engram vocab size per layer (list of ints)',
-    )
-    group.add_argument(
-        '--max-ngram-size', type=int, default=1, help='Maximum n-gram size for Engram'
-    )
-    group.add_argument(
-        '--n-embed-per-ngram',
-        type=int,
-        default=None,
-        help='Embedding dimension per n-gram',
-    )
-    group.add_argument(
-        '--n-head-per-ngram', type=int, default=1, help='Number of heads per n-gram'
-    )
-    group.add_argument(
-        '--engram-layer-ids',
-        nargs='*',
-        type=int,
-        default=None,
-        help='Layer ids where Engram is applied',
-    )
-    group.add_argument(
-        '--engram-pad-id', type=int, default=0, help='Pad token id for Engram hashing'
-    )
-    group.add_argument(
-        '--engram-seed', type=int, default=0, help='Random seed for Engram hashing'
-    )
-    group.add_argument(
-        '--engram-kernel-size',
-        type=int,
-        default=1,
-        help='Kernel size for Engram short convolution',
-    )
-    group.add_argument(
-        '--engram-hc-mult',
-        type=int,
-        default=1,
-        help='Hyper-connection multiplicity for Engram',
-    )
-    group.add_argument(
-        '--engram-embedding-parallel-size',
-        type=int,
-        default=1,
-        help='Parallel size for Engram embedding',
-    )
-    group.add_argument(
-        '--engram-embedding-parallel-method',
-        type=str,
-        default="alltoall",
-        choices=["alltoall", "allreduce"],
-        help='Parallel method for Engram embedding across embedding parallel(alltoall) / tensor parallel(allreduce) groups',
-    )
-    group.add_argument(
-        "--engram-offload-embedding-optimizer-states",
-        action="store_true",
-        help="Whether to offload Engram embedding optimizer states to CPU when using alltoall for Engram embedding parallelism. "
-        "This is typically used to save GPU memory when Engram embedding is large while accelerators are limited.",
-    )
-    return parser
-
-
 def _add_flagscale_specific_args(parser):
     """Add FlagScale-specific arguments that don't fit in other categories."""
     group = parser.add_argument_group(title='flagscale specific')
@@ -1044,6 +979,5 @@ def add_flagscale_arguments(parser):
     parser = _add_auto_skip_spiky_loss(parser)
     parser = _add_peft_args(parser)
     parser = _add_flagos_args(parser)
-    parser = _add_engram_args(parser)
     parser = _add_flagscale_specific_args(parser)
     return parser

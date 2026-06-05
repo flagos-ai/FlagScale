@@ -20,11 +20,17 @@ def extract_test_patterns(json_str: str) -> tuple[str, str]:
     """
     try:
         data = json.loads(json_str)
-        include = data.get("include", "*")
+        include_value = data.get("include", "*")
+        include = " ".join(include_value) if isinstance(include_value, list) else include_value
         exclude_list = data.get("exclude", [])
 
-        # Convert exclude list to pytest --ignore arguments
-        exclude_args = " ".join([f"--ignore={e}" for e in exclude_list]) if exclude_list else ""
+        # Paths are ignored before collection; nodeids are deselected after collection.
+        # This allows configs to exclude either whole files/directories or individual tests.
+        exclude_args = (
+            " ".join(f"--deselect={e}" if "::" in e else f"--ignore={e}" for e in exclude_list)
+            if exclude_list
+            else ""
+        )
 
         return include, exclude_args
     except (json.JSONDecodeError, KeyError) as e:

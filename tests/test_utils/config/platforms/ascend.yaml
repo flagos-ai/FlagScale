@@ -6,6 +6,7 @@
 # - functional: Add/remove test case names in the support lists
 #   Example: qwen3: ["4b_tp2_ascend"] -> add or remove items
 # - unit: Add/remove paths in include and exclude lists
+#   Example: exclude: [] or ["tests/unit_tests/test_spiky_loss_detector.py"]
 
 # Define device types available for this platform
 device_types:
@@ -27,5 +28,11 @@ ascend910:
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Exclude patterns: empty list or list paths to exclude
-      exclude: []
+      # Exclude paths use pytest --ignore.
+      exclude:
+        # Ascend CI: skip unit tests that directly depend on Megatron runtime.
+        - tests/unit_tests/test_spiky_loss_detector.py
+        - tests/unit_tests/test_parallel_context.py
+        - tests/unit_tests/test_utilities.py
+        - tests/unit_tests/serve/processor/test_image_resize_processor.py
+        - tests/unit_tests/train

@@ -198,7 +198,6 @@ cmd="torchrun ${DISTRIBUTED_ARGS} hf2mcore_qwen2.5_vl.py \
     --num-attention-heads ${NUM_ATTN_HEADS} \
     --max-position-embeddings ${MAX_POSITION_EMBEDDINGS} \
     --seq-length 1 \
-    --no-async-tensor-model-parallel-allreduce \
     --tokenizer-type Qwen2VLTokenizer \
     --extra-vocab-size ${EXTRA_VOCAB_SIZE} \
     --no-bias-swiglu-fusion \

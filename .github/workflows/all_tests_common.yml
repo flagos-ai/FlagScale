@@ -55,11 +55,13 @@ jobs:
       env_name_serve: ${{ steps.config.outputs.env_name_serve }}
       env_name_rl: ${{ steps.config.outputs.env_name_rl }}
     steps:
-      - name: Checkout code
+      - name: Checkout code (attempt 1)
+        id: checkout_attempt_1
         uses: actions/checkout@v4
+        continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -71,28 +73,42 @@ jobs:
           submodules: false
           set-safe-directory: true
 
-      - name: Cache source code
-        id: cache-source
-        uses: actions/cache@v4
+      - name: Checkout code (attempt 2)
+        if: steps.checkout_attempt_1.outcome == 'failure'
+        id: checkout_attempt_2
+        uses: actions/checkout@v4
+        continue-on-error: true
         with:
-          path: .
-          key: source-code-${{ github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Create source code tarball for distribution
-        run: |
-          tar -czf /tmp/flagscale-source.tar.gz \
-            --exclude='.git' \
-            --exclude='*.pyc' \
-            --exclude='__pycache__' \
-            .
-
-      - name: Upload source code artifact
-        uses: actions/upload-artifact@v4
+      - name: Checkout code (attempt 3)
+        if: steps.checkout_attempt_2.outcome == 'failure'
+        id: checkout_attempt_3
+        uses: actions/checkout@v4
         with:
-          name: flagscale-source-${{ github.sha }}
-          path: /tmp/flagscale-source.tar.gz
-          retention-days: 1
-          compression-level: 0
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
       - name: Load platform configuration
         id: config
@@ -149,7 +165,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -172,7 +187,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -191,7 +205,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -210,7 +223,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -229,7 +241,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -248,7 +259,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -267,7 +277,6 @@ jobs:
   #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
   #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
   #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-  #     source_artifact: flagscale-source-${{ github.sha }}
   #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
   #     env_name: ${{ needs.checkout_and_config.outputs.env_name_rl }}
   #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -286,7 +295,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}

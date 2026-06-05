@@ -26,10 +26,6 @@ on:
       container_options:
         required: true
         type: string
-      source_artifact:
-        required: true
-        type: string
-        description: Name of the artifact containing source code
       pkg_mgr:
         required: false
         type: string
@@ -52,7 +48,7 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /tmp/FlagScale
+      PROJECT_ROOT: ${{ github.workspace }}/FlagScale
     runs-on: ${{ fromJson(inputs.runs_on) }}
     strategy:
       fail-fast: false
@@ -66,49 +62,63 @@ jobs:
       options: ${{ inputs.container_options }}
 
     steps:
-      - name: Download source code artifact (attempt 1)
-        uses: actions/download-artifact@v4
+      - name: Checkout code (attempt 1)
+        id: checkout_attempt_1
+        uses: actions/checkout@v4
         continue-on-error: true
-        id: download_attempt_1
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Download source code artifact (attempt 2)
-        if: steps.download_attempt_1.outcome == 'failure'
-        uses: actions/download-artifact@v4
+      - name: Checkout code (attempt 2)
+        if: steps.checkout_attempt_1.outcome == 'failure'
+        id: checkout_attempt_2
+        uses: actions/checkout@v4
         continue-on-error: true
-        id: download_attempt_2
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Download source code artifact (attempt 3)
-        if: steps.download_attempt_2.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        id: download_attempt_3
+      - name: Checkout code (attempt 3)
+        if: steps.checkout_attempt_2.outcome == 'failure'
+        id: checkout_attempt_3
+        uses: actions/checkout@v4
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
-
-      - name: Verify artifact download
-        run: |
-          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 1"
-          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
-          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
-          else
-            echo "❌ Error: All 3 download attempts failed"
-            echo "Artifact name: ${{ inputs.source_artifact }}"
-            exit 1
-          fi
-
-      - name: Extract source code
-        run: |
-          mkdir -p $PROJECT_ROOT
-          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
       - name: Set safe directory
         run: |
@@ -240,7 +250,7 @@ jobs:
         if: always() && steps.functional_test.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: functional_tests-logs-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
+          name: functional_tests-logs-${{ inputs.platform }}-${{ github.run_id }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}
           path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
           retention-days: 7
           if-no-files-found: warn

@@ -284,6 +284,30 @@ def la_freq_type(x):
         # it's a single int but in str
         return int(x)
 
+
+def dsv4_hybrid_attn_type(x):
+    """Frequency between HCA (Heavy compress attention) layers and CSA (Compress sparse attention) layers.
+
+    Accepts either:
+    - A list of integers: Represents the compress ratios for each layer, where 0 indicates SDPA, 128 indicates HCA, 4 indicate CSA with the given compress ratio. Now only support such values.
+    - A string containing a Python list expression that defines a custom pattern, e.g.:
+      "([128]*3+[4]*1)*3" evaluates to [128,128,128,4,128,128,128,4,128,128,128,4]
+      where 128 indicates an HCA layer and 4 indicates a CSA layer.
+      This allows defining arbitrary patterns of HCA and CSA layers.
+      The pattern length must match the total number of transformer layers.
+      Examples:
+          "([128]+[4]*23)": 1 HCA layer followed by 23 CSA layers
+          "([128]*3+[4]*2)*2": Three HCA layers followed by two CSA layers, repeated twice.
+    """
+    if x is None or isinstance(x, list):
+        return x
+    assert isinstance(x, str)
+    if '[' in x:
+        # it's a custom pattern
+        return _eval_pattern(x)
+    else:
+        raise ValueError(f"Invalid dsv4_hybrid_attn_type: {x}. Must be a list of integers or a string containing a Python list expression.")
+
 def tuple_type(x):
     """
     Convert a string to a tuple of integers.
@@ -743,9 +767,9 @@ def validate_args(args, defaults={}):
     # MTP validation
     if args.mtp_num_layers:
         assert not args.use_legacy_models, "The legacy Megatron models does not support Multi-Token Prediction (MTP)."
-        assert args.position_embedding_type == "rope" or args.position_embedding_type == "none", (
+        assert args.position_embedding_type in ("rope", "none", "mrope"), (
             f"Multi-Token Prediction (MTP) is not supported with {args.position_embedding_type} position embedding type."
-            + f"The supported position embedding types are rope and none."
+            + f"The supported position embedding types are rope, none, and mrope."
         )
 
     # Validate MTP args for hybrid vs non-hybrid models
@@ -1678,15 +1702,14 @@ def core_transformer_config_from_args(args, config_class=None):
     config_class = config_class or TransformerConfig
 
     if args.multi_latent_attention:
-        config_class = MLATransformerConfig
-
+        if config_class == TransformerConfig:
+            config_class = MLATransformerConfig
+        else:
+            assert issubclass(config_class, MLATransformerConfig), "config_class should be a subclass of MLATransformerConfig when using multi_latent_attention."
+    
     if args.heterogeneous_layers_config_path is not None:
         assert not args.multi_latent_attention, "Multi latent attention with heterogeneous layers is not supported."
         config_class = HeterogeneousTransformerConfig
-
-    if args.use_engram:
-        from flagscale.models.megatron.engram.engram_config import EngramConfig
-        config_class = EngramConfig
 
     # Translate args to core transformer configuration
     kw_args = {}
@@ -1698,6 +1721,7 @@ def core_transformer_config_from_args(args, config_class=None):
     kw_args['pipeline_dtype'] = args.params_dtype
     kw_args['batch_p2p_comm'] = not args.overlap_p2p_comm
     kw_args['num_moe_experts'] = args.num_experts
+    kw_args['actual_vocab_size'] = args.padded_vocab_size
     kw_args['rotary_interleaved'] = args.rotary_interleaved
     kw_args['num_layers_in_first_pipeline_stage']= args.decoder_first_pipeline_num_layers
     kw_args['num_layers_in_last_pipeline_stage']= args.decoder_last_pipeline_num_layers
@@ -1984,6 +2008,7 @@ def _add_network_size_args(parser):
         "no_rope_freq",
         "moe_layer_freq",
         "linear_attention_freq",
+        "csa_compress_ratios",
         "moe_router_load_balancing_type",
         "moe_aux_loss_coeff",
         "cp_comm_type",
@@ -3199,6 +3224,18 @@ def _add_mla_args(parser):
     group.add_argument('--cache-mla-latents', action='store_true', default=False,
                        help="If set caches the mla down projected latents with mla flash decode.")
     group.add_argument(
+        '--o-groups',
+        type=int,
+        default=8,
+        help="Number of groups for grouped output (wo_a). 0 = single linear."
+    )
+    group.add_argument(
+        '--o-lora-rank',
+        type=int,
+        default=1024,
+        help="Low-rank dimension per group for grouped output (wo_a). Used when o-groups > 0."
+    )
+    group.add_argument(
         '--mla-down-proj-fusion',
         action='store_true',
         default=False,
@@ -3220,6 +3257,20 @@ def _add_experimental_attention_variant_args(parser):
                             'where 1 indicates an LA layer and 0 indicates a SDPA layer. '
                             'Examples: "([0]+[1]*23)": 1 SDPA layer followed by 23 LA layers, '
                             '"([1]*3+[0]*2)*2": Three LA layers followed by two SDPA layers, repeated twice.')
+    # DeepSeek V4 hybrid attention
+    group.add_argument('--csa-compress-ratios', type=dsv4_hybrid_attn_type, default=None,
+                       help="""Frequency between HCA (Heavy compress attention) layers and CSA (Compress sparse attention) layers.
+                        Accepts either:
+                        - A list of integers: Represents the compress ratios for each layer, where 0 indicates SDPA, 128 indicates HCA, 4 indicate CSA with the given compress ratio. Now only support such values.
+                        - A string containing a Python list expression that defines a custom pattern, e.g.:
+                        "([128]*3+[4]*1)*3" evaluates to [128,128,128,4,128,128,128,4,128,128,128,4]
+                        where 128 indicates an HCA layer and 4 indicates a CSA layer.
+                        This allows defining arbitrary patterns of HCA and CSA layers.
+                        The pattern length must match the total number of transformer layers.
+                        Examples:
+                            "([128]+[4]*23)": 1 HCA layer followed by 23 CSA layers
+                            "([128]*3+[4]*2)*2": Three HCA layers followed by two CSA layers, repeated twice.
+                        """)
     return parser
 
 def _add_heterogeneous_args(parser):

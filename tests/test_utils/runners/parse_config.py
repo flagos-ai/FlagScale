@@ -48,7 +48,7 @@ def get_platform_config(platform, device=None):
         "ascend": "ascend.yaml",
         "ascend910": "ascend.yaml",
         "metax": "metax.yaml",
-        "c500": "metax.yaml",
+        "c550": "metax.yaml",
     }
 
     # If platform is a device type (a100, a800, h100) and no device specified

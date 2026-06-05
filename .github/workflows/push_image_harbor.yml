@@ -10,6 +10,7 @@ on:
       - 'tools/install/**'
       - 'requirements/**'
       - '.github/workflows/build_image_cuda.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +25,14 @@ jobs:
   # ---------------------------------------------------------------------------
   prepare:
     name: Detect tar files for ${{ github.sha }}
-    runs-on: [self-hosted, Linux, X64, nvidia-0, gpus-8]
+    runs-on: [flagscale-nvidia-a100-gpu2-32c-128g]
+    timeout-minutes: 15
+    container:
+      image: harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-20260228210721
+      volumes:
+        - /mnt/airs-business/cicd/image_tar:/mnt/airs-business/cicd/image_tar
+      options: >-
+        --user root
     outputs:
       needs_promotion: ${{ steps.detect.outputs.needs_promotion }}
       train_tar: ${{ steps.detect.outputs.train_tar }}
@@ -42,7 +50,14 @@ jobs:
         id: config
         run: |
           TAR_DIR=$(grep '^tar_dir:' .github/configs/cuda.yml | awk '{print $2}')
-          echo "tar_dir=${TAR_DIR}" >> $GITHUB_OUTPUT
+          echo "tar_dir=${TAR_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Install gh CLI
+        run: |
+          if ! command -v gh &>/dev/null; then
+            apt-get update && apt-get install -y gh
+          fi
+          gh --version
 
       - name: Resolve PR number from merge commit
         id: resolve_pr
@@ -61,14 +76,16 @@ jobs:
 
           if [ -n "$PR_NUMBER" ]; then
             echo "Found PR #${PR_NUMBER} for merge commit ${MERGE_SHA}"
-            echo "suffix=pr${PR_NUMBER}" >> $GITHUB_OUTPUT
+            echo "suffix=pr${PR_NUMBER}" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::Could not find PR for merge commit ${MERGE_SHA}, falling back to short SHA"
-            echo "suffix=${MERGE_SHA:0:7}" >> $GITHUB_OUTPUT
+            SHORT_SHA=$(echo "$MERGE_SHA" | cut -c1-7)
+            echo "suffix=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Find tar files by PR number
         id: detect
+        shell: bash
         run: |
           set -euo pipefail
           TAR_DIR="${{ steps.config.outputs.tar_dir }}"
@@ -78,29 +95,30 @@ jobs:
           INFERENCE_TAR=$(find "$TAR_DIR" -maxdepth 1 -name "*flagscale-inference*-${SUFFIX}.tar" 2>/dev/null | sort -r | head -1)
           ALL_TAR=$(find "$TAR_DIR" -maxdepth 1 -name "*flagscale-all*-${SUFFIX}.tar" 2>/dev/null | sort -r | head -1)
 
-          echo "train_tar=${TRAIN_TAR}" >> $GITHUB_OUTPUT
-          echo "inference_tar=${INFERENCE_TAR}" >> $GITHUB_OUTPUT
-          echo "all_tar=${ALL_TAR}" >> $GITHUB_OUTPUT
+          echo "train_tar=${TRAIN_TAR}" >> "$GITHUB_OUTPUT"
+          echo "inference_tar=${INFERENCE_TAR}" >> "$GITHUB_OUTPUT"
+          echo "all_tar=${ALL_TAR}" >> "$GITHUB_OUTPUT"
 
           if [ -n "$TRAIN_TAR" ] || [ -n "$INFERENCE_TAR" ] || [ -n "$ALL_TAR" ]; then
-            echo "needs_promotion=true" >> $GITHUB_OUTPUT
+            echo "needs_promotion=true" >> "$GITHUB_OUTPUT"
             echo "Detected tars for ${SUFFIX}:"
             if [ -n "$TRAIN_TAR" ];     then echo "  train:     $TRAIN_TAR"; fi
             if [ -n "$INFERENCE_TAR" ]; then echo "  inference: $INFERENCE_TAR"; fi
             if [ -n "$ALL_TAR" ];       then echo "  all:       $ALL_TAR"; fi
           else
-            echo "needs_promotion=false" >> $GITHUB_OUTPUT
+            echo "needs_promotion=false" >> "$GITHUB_OUTPUT"
             echo "::warning::No tar files found for ${SUFFIX} in $TAR_DIR, skipping promotion"
           fi
 
   # ---------------------------------------------------------------------------
-  # Promote: load tar → retag → push to Harbor → delete tar
+  # Promote: load tar → retag → push to Harbor
   # ---------------------------------------------------------------------------
   promote:
     name: Push validated images to Harbor
     needs: prepare
     if: needs.prepare.outputs.needs_promotion == 'true'
-    runs-on: [self-hosted, Linux, X64, nvidia-0, gpus-8]
+    runs-on: [flagscale-nvidia-a100-gpu2-32c-128g]
+    timeout-minutes: 60
     outputs:
       remote_train_tag: ${{ steps.promote_train.outputs.remote_tag }}
       remote_inference_tag: ${{ steps.promote_inference.outputs.remote_tag }}
@@ -121,16 +139,19 @@ jobs:
           TAR_PATH="${{ needs.prepare.outputs.train_tar }}"
 
           echo "Loading tar: $TAR_PATH"
-          LOCAL_TAG=$(sudo docker load -i "$TAR_PATH" | grep 'Loaded image:' | awk '{print $NF}')
+          LOCAL_TAG=$(sudo docker load -i "$TAR_PATH" | grep -oP '(?<=Loaded image: ).+' | tail -1)
+          if [ -z "$LOCAL_TAG" ]; then
+            echo "::error::Failed to parse image tag from docker load output"
+            exit 1
+          fi
           echo "Loaded image tag: $LOCAL_TAG"
 
-          # Strip local registry prefix (e.g. localhost:5000/) to get image:tag
           IMAGE_AND_TAG="${LOCAL_TAG#*/}"
           REMOTE_TAG="${{ env.REMOTE_REGISTRY }}/${{ env.REMOTE_IMAGE_PREFIX }}/${IMAGE_AND_TAG}"
 
           sudo docker tag "${LOCAL_TAG}" "${REMOTE_TAG}"
           sudo docker push "${REMOTE_TAG}"
-          echo "remote_tag=${REMOTE_TAG}" >> $GITHUB_OUTPUT
+          echo "remote_tag=${REMOTE_TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed: ${REMOTE_TAG}"
 
       - name: Promote inference image to Harbor
@@ -141,7 +162,11 @@ jobs:
           TAR_PATH="${{ needs.prepare.outputs.inference_tar }}"
 
           echo "Loading tar: $TAR_PATH"
-          LOCAL_TAG=$(sudo docker load -i "$TAR_PATH" | grep 'Loaded image:' | awk '{print $NF}')
+          LOCAL_TAG=$(sudo docker load -i "$TAR_PATH" | grep -oP '(?<=Loaded image: ).+' | tail -1)
+          if [ -z "$LOCAL_TAG" ]; then
+            echo "::error::Failed to parse image tag from docker load output"
+            exit 1
+          fi
           echo "Loaded image tag: $LOCAL_TAG"
 
           IMAGE_AND_TAG="${LOCAL_TAG#*/}"
@@ -149,7 +174,7 @@ jobs:
 
           sudo docker tag "${LOCAL_TAG}" "${REMOTE_TAG}"
           sudo docker push "${REMOTE_TAG}"
-          echo "remote_tag=${REMOTE_TAG}" >> $GITHUB_OUTPUT
+          echo "remote_tag=${REMOTE_TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed: ${REMOTE_TAG}"
 
       - name: Promote all image to Harbor
@@ -160,7 +185,11 @@ jobs:
           TAR_PATH="${{ needs.prepare.outputs.all_tar }}"
 
           echo "Loading tar: $TAR_PATH"
-          LOCAL_TAG=$(sudo docker load -i "$TAR_PATH" | grep 'Loaded image:' | awk '{print $NF}')
+          LOCAL_TAG=$(sudo docker load -i "$TAR_PATH" | grep -oP '(?<=Loaded image: ).+' | tail -1)
+          if [ -z "$LOCAL_TAG" ]; then
+            echo "::error::Failed to parse image tag from docker load output"
+            exit 1
+          fi
           echo "Loaded image tag: $LOCAL_TAG"
 
           IMAGE_AND_TAG="${LOCAL_TAG#*/}"
@@ -168,7 +197,7 @@ jobs:
 
           sudo docker tag "${LOCAL_TAG}" "${REMOTE_TAG}"
           sudo docker push "${REMOTE_TAG}"
-          echo "remote_tag=${REMOTE_TAG}" >> $GITHUB_OUTPUT
+          echo "remote_tag=${REMOTE_TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed: ${REMOTE_TAG}"
 
   # ---------------------------------------------------------------------------
@@ -178,6 +207,7 @@ jobs:
     name: Update cuda.yml with Harbor image tags
     needs: promote
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -185,6 +215,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
 
       - name: Update image tags in cuda.yml
         run: |
@@ -228,8 +259,9 @@ jobs:
   cleanup:
     name: Clean up build cache
     needs: ['prepare', 'promote']
-    runs-on: [self-hosted, Linux, X64, nvidia-0, gpus-8]
-    if: always()
+    runs-on: [flagscale-nvidia-a100-gpu2-32c-128g]
+    timeout-minutes: 10
+    if: always() && needs.prepare.result == 'success'
     steps:
       - name: Remove stale tar files for this PR
         run: |
@@ -241,20 +273,20 @@ jobs:
           fi
 
       - name: Remove dangling images
-        run: docker image prune -f 2>/dev/null || true
+        run: sudo docker image prune -f 2>/dev/null || true
 
       - name: Remove build cache older than 7 days
-        run: docker builder prune -f --filter "until=168h" 2>/dev/null || true
+        run: sudo docker builder prune -f --filter "until=168h" 2>/dev/null || true
 
       - name: Remove old localhost registry images
         run: |
-          docker images --format '{{.Repository}}:{{.Tag}} {{.CreatedSince}}' \
+          sudo docker images --format '{{.Repository}}:{{.Tag}} {{.CreatedSince}}' \
             | grep 'localhost:5000' \
             | grep -E '(weeks|months)' \
             | awk '{print $1}' \
-            | xargs -r docker rmi 2>/dev/null || true
+            | xargs -r sudo docker rmi 2>/dev/null || true
 
       - name: Report disk usage
         run: |
           echo "Docker disk usage:"
-          docker system df
+          sudo docker system df

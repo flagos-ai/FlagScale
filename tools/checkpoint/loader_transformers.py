@@ -73,7 +73,6 @@ def _load_checkpoint(queue, args):
         '--no-masked-softmax-fusion',
         '--no-bias-gelu-fusion',
         '--no-bias-dropout-fusion',
-        '--no-async-tensor-model-parallel-allreduce',
         '--use-cpu-initialization',
         '--micro-batch-size', '1',
         '--no-load-optim',
@@ -192,9 +191,11 @@ def _load_checkpoint(queue, args):
         message = {"weight": hf_model.lm_head.weight.data}
         queue_put("output layer", message)
 
-    message = dict()
-    if margs.mtp_num_layers:
-        for mtp_layer_id in range(margs.mtp_num_layers):
+    mtp_num_layers = getattr(margs, "mtp_num_layers", 0)
+    if getattr(args, "skip_mtp", False):
+        mtp_num_layers = 0
+    if mtp_num_layers:
+        for mtp_layer_id in range(mtp_num_layers):
             message = dict()
             ckpt_plugin.get_hf_mtp_ckpt(message, hf_model, mtp_layer_id, margs)
             queue_put(f"mtp module {mtp_layer_id}", message)

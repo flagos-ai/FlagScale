@@ -1,24 +1,24 @@
-# MetaX C500 Hardware Configuration
-# This file defines CI/CD settings for MetaX C500 GPU (MACA) testing
+# MetaX C550 Hardware Configuration
+# This file defines CI/CD settings for MetaX C550 GPU (MACA) testing
 # Test configurations are defined in tests/test_utils/config/platforms/metax.yaml
 
 hardware_name: metax
-display_name: "MetaX C500 Tests"
+display_name: "MetaX C550 Tests"
 
-# Docker images for MetaX C500 (MACA-based)
+# Docker images for MetaX C550 (MACA-based)
 ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 ci_train_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 ci_inference_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 
-# Runner labels for MetaX C500 hardware
+# Runner labels for MetaX C550 hardware
 runner_labels: ["flagscale-metax-c550-gpu2-8c-256g"]
 
 # Container volumes (hardware-specific paths)
 container_volumes:
-  - /mnt/op/cicd/baai_datasets:/home/gitlab-runner/data
-  - /mnt/op/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data
+  - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
 
-# Container options for MetaX C500 (MACA runtime)
+# Container options for MetaX C550 (MACA runtime)
 container_options: >-
   --hostname=flagscale-ci
   --ipc=host

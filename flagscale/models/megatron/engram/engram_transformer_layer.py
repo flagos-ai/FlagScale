@@ -23,21 +23,17 @@ from megatron.core.utils import (
     deprecate_inference_params,
     make_viewless_tensor,
 )
-
-# engram
-from .engram import Engram
-from .engram_config import EngramConfig
+from megatron.core.transformer.engram import EngramModule 
 
 
 class EngramTransformerLayer(TransformerLayer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        assert isinstance(self.config, EngramConfig), "config must be a EngramConfig"
         self.engram_hash_layer_id = (
             self.layer_number - 1
         )  # global layer_number starts at 1 in MCore
-        self.engram = Engram(
-            engram_cfg=self.config,
+        self.engram = EngramModule(
+            config=self.config,
             layer_id=self.engram_hash_layer_id,
         )
 
@@ -348,7 +344,7 @@ class EngramTransformerBlock(TransformerBlock):
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
-        # Engram let the layers be non-homogeneous, so we need to set the flag in metadata to let the sharded state dict logic know.
+        # EngramModule let the layers be non-homogeneous, so we need to set the flag in metadata to let the sharded state dict logic know.
         # This is useful when all layer are same, the TransformerBlock will be homogeneous, it generate sharded_state_dict will same keys for all layer and need all layers have the same structure.
         # The layer has engram module does not fit this assumption.
         # If the flag is set to True, the sharded_state_dict will use layer_number to generate different keys for different layer, which is same to models has dense layer leading and moe layer following.

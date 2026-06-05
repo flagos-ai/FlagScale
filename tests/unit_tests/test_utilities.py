@@ -7,6 +7,29 @@ from torch.distributed import rendezvous
 
 import megatron.core.parallel_state as ps
 
+PLATFORM_RUNTIME_MAP = {
+    "cuda": {
+        "dist_backend": "nccl",
+        "torch_device_type": "cuda",
+        "torch_accelerator_attr": "cuda",
+        "optional_runtime_module": None,
+    },
+    "ascend": {
+        "dist_backend": "hccl",
+        "torch_device_type": "npu",
+        "torch_accelerator_attr": "npu",
+        "optional_runtime_module": "torch_npu",
+    },
+    "metax": {
+        "dist_backend": "nccl",
+        "torch_device_type": "cuda",
+        "torch_accelerator_attr": "cuda",
+        "optional_runtime_module": None,
+    },
+}
+
+DEFAULT_PLATFORM_RUNTIME = PLATFORM_RUNTIME_MAP["cuda"]
+
 
 class TestModel(torch.nn.Module):
     def __init__(
@@ -32,6 +55,65 @@ class Utils:
     store = None
 
     @staticmethod
+    def platform():
+        return os.getenv("FLAGSCALE_TEST_PLATFORM", "cuda")
+
+    @staticmethod
+    def platform_runtime():
+        return PLATFORM_RUNTIME_MAP.get(Utils.platform(), DEFAULT_PLATFORM_RUNTIME)
+
+    @staticmethod
+    def dist_backend():
+        return os.getenv(
+            "FLAGSCALE_TEST_DIST_BACKEND",
+            Utils.platform_runtime()["dist_backend"],
+        )
+
+    @staticmethod
+    def torch_device_type():
+        return os.getenv(
+            "FLAGSCALE_TEST_TORCH_DEVICE_TYPE",
+            Utils.platform_runtime()["torch_device_type"],
+        )
+
+    @staticmethod
+    def accelerator():
+        runtime = Utils.platform_runtime()
+        optional_runtime_module = runtime.get("optional_runtime_module")
+        if optional_runtime_module:
+            try:
+                __import__(optional_runtime_module)
+            except Exception:
+                pass
+
+        accelerator_attr = os.getenv(
+            "FLAGSCALE_TEST_TORCH_ACCELERATOR_ATTR",
+            runtime["torch_accelerator_attr"],
+        )
+        return getattr(torch, accelerator_attr, torch.cuda)
+
+    @staticmethod
+    def accelerator_device_count():
+        accelerator = Utils.accelerator()
+        device_count = getattr(accelerator, "device_count", None)
+        if callable(device_count):
+            count = device_count()
+            return count if count > 0 else 1
+        return 1
+
+    @staticmethod
+    def has_accelerator():
+        accelerator = Utils.accelerator()
+        device_count = getattr(accelerator, "device_count", None)
+        return callable(device_count) and device_count() > 0
+
+    @staticmethod
+    def accelerator_device(rank=None):
+        rank = Utils.rank if rank is None else rank
+        index = rank % Utils.accelerator_device_count()
+        return torch.device(f"{Utils.torch_device_type()}:{index}")
+
+    @staticmethod
     def initialize_distributed():
         os.environ.pop("NVTE_FLASH_ATTN", None)
         os.environ.pop("NVTE_FUSED_ATTN", None)
@@ -42,7 +124,10 @@ class Utils:
                 f"Initializing torch.distributed with rank: {Utils.rank}, "
                 f"world_size: {Utils.world_size}"
             )
-            torch.cuda.set_device(Utils.rank % torch.cuda.device_count())
+            accelerator = Utils.accelerator()
+            set_device = getattr(accelerator, "set_device", None)
+            if callable(set_device):
+                set_device(Utils.rank % Utils.accelerator_device_count())
             init_method = "tcp://"
             master_ip = os.getenv("MASTER_ADDR", "localhost")
             master_port = os.getenv("MASTER_PORT", "6000")
@@ -59,7 +144,10 @@ class Utils:
             Utils.store = store
 
             torch.distributed.init_process_group(
-                backend="nccl", world_size=Utils.world_size, rank=Utils.rank, store=store
+                backend=Utils.dist_backend(),
+                world_size=Utils.world_size,
+                rank=Utils.rank,
+                store=store,
             )
 
             torch.distributed.barrier()
@@ -67,7 +155,7 @@ class Utils:
 
     @staticmethod
     def set_world_size(world_size=None, rank=None):
-        Utils.world_size = torch.cuda.device_count() if world_size is None else world_size
+        Utils.world_size = Utils.accelerator_device_count() if world_size is None else world_size
         if (
             torch.distributed.is_initialized()
             and Utils.world_size != torch.distributed.get_world_size()

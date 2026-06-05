@@ -23,7 +23,7 @@ def load_args_hf2mg(args):
     args.swiglu = True if hidden_act == "silu" else False
     args.max_position_embeddings = deepseek_v3_args["max_position_embeddings"]
     args.init_method_std = deepseek_v3_args["initializer_range"]
-    args.norm_epsilon = deepseek_v3_args["rms_norm_eps"]
+    args.layernorm_epsilon = deepseek_v3_args["rms_norm_eps"]
     args.untie_embeddings_and_output_weights = not deepseek_v3_args["tie_word_embeddings"]
     args.rotary_base = deepseek_v3_args["rope_theta"]
     args.disable_bias_linear = not deepseek_v3_args["attention_bias"]
@@ -93,13 +93,14 @@ def load_args_hf2mg(args):
 def save_args_mg2hf(args):
     first_k_dense_replace = args.moe_layer_freq.index(1)
     seq_aux = True if args.moe_router_load_balancing_type == "seq_aux_loss" else False
+    mtp_num_layers = getattr(args, "mtp_num_layers", 0) or 0
     config = DeepseekV3Config(
         vocab_size=args.vocab_size,
         hidden_size=args.hidden_size,
         intermediate_size=args.ffn_hidden_size,
         moe_intermediate_size=args.moe_ffn_hidden_size,
         num_hidden_layers=args.num_layers,
-        num_nextn_predict_layers=args.mtp_num_layers,
+        num_nextn_predict_layers=mtp_num_layers,
         num_attention_heads=args.num_attention_heads,
         num_key_value_heads=args.num_query_groups,
         n_shared_experts=args.moe_shared_expert_intermediate_size // args.moe_ffn_hidden_size,
@@ -118,7 +119,7 @@ def save_args_mg2hf(args):
         seq_aux=seq_aux,
         max_position_embeddings=args.max_position_embeddings,
         initializer_range=args.init_method_std,
-        rms_norm_eps=args.norm_epsilon,
+        rms_norm_eps=args.layernorm_epsilon,
         tie_word_embeddings=not args.untie_embeddings_and_output_weights,
         rope_theta=args.rotary_base,
         attention_dropout=args.attention_dropout,

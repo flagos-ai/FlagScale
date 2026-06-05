@@ -10,7 +10,7 @@ on:
     workflows:
       - ascend_tests
       - cuda_tests
-      - metax_c500_tests
+      - metax_c550_tests
       - format_check
     types: [completed]
 

@@ -138,3 +138,61 @@ wait_for_gpu() {
     [ -z "$gpu_count" ] || [ "$gpu_count" -eq 0 ] && return 0
     _gpu_poll_loop "$gpu_count" "$fetch_fn"
 }
+
+default_dist_backend() {
+    local platform="${1:-}"
+    case "$platform" in
+        ascend) echo "hccl" ;;
+        metax) echo "${FLAGSCALE_TEST_METAX_BACKEND:-nccl}" ;;
+        *) echo "nccl" ;;
+    esac
+}
+
+default_torch_device_type() {
+    local platform="${1:-}"
+    case "$platform" in
+        ascend) echo "npu" ;;
+        *) echo "cuda" ;;
+    esac
+}
+
+detect_accelerator_count() {
+    local platform="${1:-}"
+
+    case "$platform" in
+        ascend)
+            {
+                python - <<'PY' 2>/dev/null || true
+import torch
+try:
+    import torch_npu  # noqa: F401
+except Exception:
+    pass
+device_count = getattr(getattr(torch, "npu", None), "device_count", None)
+print(device_count() if callable(device_count) else 1)
+PY
+            } | awk '/^[0-9]+$/ { value=$1 } END { print value ? value : 1 }'
+            ;;
+        metax)
+            {
+                python - <<'PY' 2>/dev/null || mx-smi --show-hwinfo 2>/dev/null | awk '/Attached GPUs/{print $NF}' || true
+import torch
+if hasattr(torch, "maca") and hasattr(torch.maca, "device_count"):
+    print(torch.maca.device_count())
+elif hasattr(torch, "cuda") and hasattr(torch.cuda, "device_count"):
+    print(torch.cuda.device_count())
+else:
+    print(1)
+PY
+            } | awk '/^[0-9]+$/ { value=$1 } END { print value ? value : 1 }'
+            ;;
+        *)
+            {
+                python - <<'PY' 2>/dev/null || true
+import torch
+print(torch.cuda.device_count() if hasattr(torch, "cuda") else 1)
+PY
+            } | awk '/^[0-9]+$/ { value=$1 } END { print value ? value : 1 }'
+            ;;
+    esac
+}

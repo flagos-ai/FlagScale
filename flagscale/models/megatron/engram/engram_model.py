@@ -13,10 +13,10 @@ from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.models.gpt import GPTModel
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.utils import deprecate_inference_params
+from megatron.core.transformer.engram import get_or_create_hash_mapping
 
 ## engram
 from .engram_transformer_layer import EngramTransformerBlock
-from .ngram_hash import get_or_create_hash_mapping
 
 cur_platform = get_platform()
 

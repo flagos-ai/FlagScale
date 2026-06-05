@@ -3,7 +3,14 @@ import sys
 import torch
 
 sys.path.append("..")
-from utils import padding_vocab_size
+from utils import (
+    get_expert_tensor_parallel_model_groups,
+    get_expert_tensor_parallel_models,
+    get_expert_tensor_parallel_size,
+    get_tensor_model_parallel_rank,
+    get_tensor_parallel_models,
+    padding_vocab_size,
+)
 
 
 def get_hf_attn_ckpt(message, model, layer_id, args):
@@ -209,12 +216,7 @@ def get_embedding_ckpt(message, models, args):
     tp_size, _, _, _ = _get_parallel_size(args)
 
     word_embeddings = []
-    complete_tp_ranks = []
-    for tp_ep_rank, model in enumerate(models):
-        tp_rank = tp_ep_rank % tp_size
-        if tp_rank in complete_tp_ranks:
-            continue
-        complete_tp_ranks.append(tp_rank)
+    for model in get_tensor_parallel_models(models, args):
         word_embeddings.append(model.embedding.word_embeddings.weight.data)
     message["word embeddings"] = torch.cat(word_embeddings, dim=0)
     if args.position_embedding_type == "learned_absolute":
@@ -237,13 +239,7 @@ def get_attn_ckpt(message, models, layer_id, args):
     post_norm_weight = None
     post_norm_bias = None
 
-    complete_tp_ranks = []
-    for tp_ep_rank, model in enumerate(models):
-        tp_rank = tp_ep_rank % tp_size
-        if tp_rank in complete_tp_ranks:
-            continue
-        complete_tp_ranks.append(tp_rank)
-
+    for model in get_tensor_parallel_models(models, args):
         tf_layer = model.decoder.layers[layer_id]
         # weight
         qkv_weight.append(tf_layer.self_attention.linear_qkv.weight.data)
@@ -278,10 +274,16 @@ def get_attn_ckpt(message, models, layer_id, args):
 
 
 def get_mlp_ckpt(message, models, layer_id, args):
-    tp_size, _, ep_size, _ = _get_parallel_size(args)
+    _, _, ep_size, _ = _get_parallel_size(args)
+    etp_size = get_expert_tensor_parallel_size(args)
 
     assert args.num_experts is not None and args.num_experts % ep_size == 0
     num_local_experts = args.num_experts // ep_size
+    router_weight = (
+        get_tensor_parallel_models(models, args)[0].decoder.layers[layer_id].mlp.router.weight.data
+    )
+    message["router weight"] = router_weight
+
     for expert_id in range(num_local_experts):
         for ep_rank in range(ep_size):
             global_expert_id = num_local_experts * ep_rank + expert_id
@@ -292,26 +294,22 @@ def get_mlp_ckpt(message, models, layer_id, args):
             l1_weight = []
             # non-parallel tensor
             l1_bias = None
-            router_weight = None
-            for tp_rank in range(tp_size):
-                tp_ep_rank = ep_rank * tp_size + tp_rank
-                tf_layer = models[tp_ep_rank].decoder.layers[layer_id]
+            for model in get_expert_tensor_parallel_models(models, args, ep_rank):
+                tf_layer = model.decoder.layers[layer_id]
                 expert = tf_layer.mlp.experts.local_experts[expert_id]
                 # weight
                 l0_weight.append(expert.linear_fc1.weight.data)
                 l1_weight.append(expert.linear_fc2.weight.data)
-                router_weight = tf_layer.mlp.router.weight.data
                 # bias
                 if args.add_bias_linear:
                     l0_bias.append(expert.linear_fc1.bias.data)
                     l1_bias = expert.linear_fc2.bias.data
 
             # weight
-            message["router weight"] = router_weight
             message[f"expert{global_expert_id} l1 weight"] = torch.cat(l1_weight, dim=1)
             if args.swiglu:
-                for tp_rank in range(tp_size):
-                    l0_weight[tp_rank] = torch.chunk(l0_weight[tp_rank], 2, dim=0)
+                for etp_rank in range(etp_size):
+                    l0_weight[etp_rank] = torch.chunk(l0_weight[etp_rank], 2, dim=0)
                 message[f"expert{global_expert_id} l0 weight W"] = torch.cat(
                     [w[0] for w in l0_weight], dim=0
                 )
@@ -324,8 +322,8 @@ def get_mlp_ckpt(message, models, layer_id, args):
             if args.add_bias_linear:
                 message[f"expert{global_expert_id} l1 bias"] = l1_bias
                 if args.swiglu:
-                    for tp_rank in range(tp_size):
-                        l0_bias[tp_rank] = torch.chunk(l0_bias[tp_rank], 2, dim=0)
+                    for etp_rank in range(etp_size):
+                        l0_bias[etp_rank] = torch.chunk(l0_bias[etp_rank], 2, dim=0)
                     message[f"expert{global_expert_id} l0 bias W"] = torch.cat(
                         [b[0] for b in l0_bias], dim=0
                     )
@@ -345,12 +343,7 @@ def get_final_norm_ckpt(message, models, args):
 def get_output_layer_ckpt(message, models, args):
     tp_size, _, _, _ = _get_parallel_size(args)
     output_layer_weight = []
-    complete_tp_ranks = []
-    for tp_ep_rank, model in enumerate(models):
-        tp_rank = tp_ep_rank % tp_size
-        if tp_rank in complete_tp_ranks:
-            continue
-        complete_tp_ranks.append(tp_rank)
+    for model in get_tensor_parallel_models(models, args):
         output_layer_weight.append(model.output_layer.weight.data)
     message["weight"] = torch.cat(output_layer_weight, dim=0)
 
@@ -367,7 +360,7 @@ def set_embedding_ckpt(message, models, md, args):
     # process world embedding in first pp stage
     out_word_embed = torch.chunk(full_word_embed, tp_size, dim=0)
     for tp_ep_rank, model in enumerate(models):
-        tp_rank = tp_ep_rank % tp_size
+        tp_rank = get_tensor_model_parallel_rank(tp_ep_rank, args)
         model.embedding.word_embeddings.weight.data.copy_(out_word_embed[tp_rank])
         if pos_embed is not None:
             model.embedding.position_embeddings.weight.data.copy_(pos_embed)
@@ -397,7 +390,7 @@ def set_attn_ckpt(message, models, layer_id, md, args):
 
     # set data to transformer layer's self-attention
     for tp_ep_rank, model in enumerate(models):
-        tp_rank = tp_ep_rank % tp_size
+        tp_rank = get_tensor_model_parallel_rank(tp_ep_rank, args)
         tf_layer = model.decoder.layers[layer_id]
         tf_layer.self_attention.linear_qkv.weight.data.copy_(qkv_weight[tp_rank])
         tf_layer.self_attention.linear_proj.weight.data.copy_(proj_weight[tp_rank])
@@ -417,60 +410,64 @@ def set_attn_ckpt(message, models, layer_id, md, args):
 
 def set_mlp_ckpt(message, models, layer_id, md, args):
     tp_size, _, ep_size, _ = _get_parallel_size(args)
+    etp_size = get_expert_tensor_parallel_size(args)
 
     assert args.num_experts is not None, "mixtral's num_experts cannot be None"
 
     if md.previous_num_experts is not None:
         router_weight = message.pop("router weight")
+        for model in models:
+            model.decoder.layers[layer_id].mlp.router.weight.data.copy_(router_weight)
+
         num_local_experts = md.previous_num_experts // ep_size
         for expert_id in range(num_local_experts):
             for ep_rank in range(ep_size):
                 global_expert_id = ep_rank * num_local_experts + expert_id
                 # weight
                 l1_weight = torch.chunk(
-                    message.pop(f"expert{global_expert_id} l1 weight"), tp_size, dim=1
+                    message.pop(f"expert{global_expert_id} l1 weight"), etp_size, dim=1
                 )
                 if md.swiglu:
                     l0_weight_W = torch.chunk(
-                        message.pop(f"expert{global_expert_id} l0 weight W"), tp_size, dim=0
+                        message.pop(f"expert{global_expert_id} l0 weight W"), etp_size, dim=0
                     )
                     l0_weight_V = torch.chunk(
-                        message.pop(f"expert{global_expert_id} l0 weight V"), tp_size, dim=0
+                        message.pop(f"expert{global_expert_id} l0 weight V"), etp_size, dim=0
                     )
                     l0_weight = [
                         torch.cat(weights, dim=0) for weights in zip(l0_weight_W, l0_weight_V)
                     ]
                 else:
                     l0_weight = torch.chunk(
-                        message.pop(f"expert{global_expert_id} l0 weight"), tp_size, dim=0
+                        message.pop(f"expert{global_expert_id} l0 weight"), etp_size, dim=0
                     )
                 # bias
                 if md.add_bias_linear:
                     l1_bias = message.pop(f"expert{global_expert_id} l1 bias")
                     if md.swiglu:
                         l0_bias_W = torch.chunk(
-                            message.pop(f"expert{global_expert_id} l0 bias W"), tp_size, dim=0
+                            message.pop(f"expert{global_expert_id} l0 bias W"), etp_size, dim=0
                         )
                         l0_bias_V = torch.chunk(
-                            message.pop(f"expert{global_expert_id} l0 bias V"), tp_size, dim=0
+                            message.pop(f"expert{global_expert_id} l0 bias V"), etp_size, dim=0
                         )
                         l0_bias = [torch.cat(bias, dim=0) for bias in zip(l0_bias_W, l0_bias_V)]
                     else:
                         l0_bias = torch.chunk(
-                            message.pop(f"expert{global_expert_id} l0 bias"), tp_size, dim=0
+                            message.pop(f"expert{global_expert_id} l0 bias"), etp_size, dim=0
                         )
 
                 # set data to transformer layer's self-attention
-                for tp_rank in range(tp_size):
-                    tp_ep_rank = ep_rank * tp_size + tp_rank
-                    tf_layer = models[tp_ep_rank].decoder.layers[layer_id]
-                    expert = tf_layer.mlp.experts.local_experts[expert_id]
-                    tf_layer.mlp.router.weight.data.copy_(router_weight)
-                    expert.linear_fc1.weight.data.copy_(l0_weight[tp_rank])
-                    expert.linear_fc2.weight.data.copy_(l1_weight[tp_rank])
-                    if md.add_bias_linear:
-                        expert.linear_fc1.bias.data.copy_(l0_bias[tp_rank])
-                        expert.linear_fc2.bias.data.copy_(l1_bias)
+                etp_model_groups = get_expert_tensor_parallel_model_groups(models, args, ep_rank)
+                for etp_rank, model_group in enumerate(etp_model_groups):
+                    for model in model_group:
+                        tf_layer = model.decoder.layers[layer_id]
+                        expert = tf_layer.mlp.experts.local_experts[expert_id]
+                        expert.linear_fc1.weight.data.copy_(l0_weight[etp_rank])
+                        expert.linear_fc2.weight.data.copy_(l1_weight[etp_rank])
+                        if md.add_bias_linear:
+                            expert.linear_fc1.bias.data.copy_(l0_bias[etp_rank])
+                            expert.linear_fc2.bias.data.copy_(l1_bias)
     else:
         # weight
         l1_weight = torch.chunk(message.pop("mlp l1 weight"), tp_size, dim=1)
@@ -494,7 +491,7 @@ def set_mlp_ckpt(message, models, layer_id, md, args):
         num_local_experts = args.num_experts // ep_size
         for expert_id in range(num_local_experts):
             for tp_ep_rank, model in enumerate(models):
-                tp_rank = tp_ep_rank % tp_size
+                tp_rank = get_tensor_model_parallel_rank(tp_ep_rank, args)
                 tf_layer = model.decoder.layers[layer_id]
                 expert = tf_layer.mlp.experts.local_experts[expert_id]
 
@@ -522,5 +519,5 @@ def set_output_layer_ckpt(message, models, md, args):
     full_output_layer_weight = padding_vocab_size(orig_output_layer_weight, md, args)
     output_layer_weight = torch.chunk(full_output_layer_weight, tp_size, dim=0)
     for tp_ep_rank, model in enumerate(models):
-        tp_rank = tp_ep_rank % tp_size
+        tp_rank = get_tensor_model_parallel_rank(tp_ep_rank, args)
         model.output_layer.weight.data.copy_(output_layer_weight[tp_rank])
