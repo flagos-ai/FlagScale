@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 FlagScale mix-precision compress entrypoint (llm-compressor aligned)
@@ -17,10 +16,9 @@ Key behaviors:
 import argparse
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from omegaconf import OmegaConf
-
 
 # ---- Ensure your custom CalibrationPipeline is registered ----
 # Adjust this import path to wherever your pipeline module lives.
@@ -75,11 +73,18 @@ def _as_abs_output_dir(cfg_root: Any) -> str:
 
 def _resolve_model_id_or_path(cfg_root: Any) -> str:
     # common patterns: model.model_path, model.path, model.name_or_path
-    for cand in [("model", "model_path"), ("model", "path"), ("model", "name_or_path"), ("model_path",)]:
+    for cand in [
+        ("model", "model_path"),
+        ("model", "path"),
+        ("model", "name_or_path"),
+        ("model_path",),
+    ]:
         val = _pick(cfg_root, *cand, default=None)
         if val:
             return str(val)
-    raise ValueError("Missing model path in config. Expected one of: model.model_path / model.path / model.name_or_path")
+    raise ValueError(
+        "Missing model path in config. Expected one of: model.model_path / model.path / model.name_or_path"
+    )
 
 
 def _load_cfg(config_path: str) -> Any:
@@ -113,7 +118,9 @@ def main():
 
     scheme = _pick(cfg, "compress_args", "scheme", default=None)
     if not scheme:
-        raise ValueError("Missing config field: compress_args.scheme (e.g., 'mix_precision_search')")
+        raise ValueError(
+            "Missing config field: compress_args.scheme (e.g., 'mix_precision_search')"
+        )
 
     # Targets default: ["Linear"]
     targets = _pick(cfg, "compress_args", "targets", default=["Linear"])
@@ -129,9 +136,9 @@ def main():
         num_calibration_samples = steps * max(batch_size, 1)
     num_calibration_samples = int(num_calibration_samples)
 
-    max_seq_length = int(_pick(cfg, "data", "max_seq_length", default=384))
-    text_column = str(_pick(cfg, "data", "text_column", default="text"))
-    pad_to_max_length = bool(_pick(cfg, "data", "pad_to_max_length", default=True))
+    int(_pick(cfg, "data", "max_seq_length", default=384))
+    str(_pick(cfg, "data", "text_column", default="text"))
+    bool(_pick(cfg, "data", "pad_to_max_length", default=True))
 
     tokenizer_args = _pick(cfg, "data", "tokenizer_args", default={}) or {}
     trust_remote_code = bool(tokenizer_args.get("trust_remote_code", True))
@@ -141,19 +148,21 @@ def main():
     try:
         from llmcompressor.modifiers.quantization import QuantizationModifier
     except Exception:
-        from llmcompressor.modifiers.quantization.quantization import QuantizationModifier  # type: ignore
+        from llmcompressor.modifiers.quantization.quantization import (
+            QuantizationModifier,  # type: ignore
+        )
 
     try:
-        from llmcompressor.modifiers.quantization.quip import QuIPModifier
+        pass
     except Exception:
         # some versions may expose it elsewhere
         try:
-            from llmcompressor.modifiers.quantization.quip.quip import QuIPModifier  # type: ignore
+            pass  # type: ignore
         except Exception:
-            from llmcompressor.modifiers.transform import QuIPModifier
+            pass
 
     # Keep ignore minimal; customize if your project passes ignore patterns in config.
-    #ignore = _pick(cfg, "compress_args", "ignore", default=None)
+    # ignore = _pick(cfg, "compress_args", "ignore", default=None)
     ignore = getattr(cfg.compress.compress_args, "ignore", None) or ["lm_head"]
 
     recipe = [
@@ -162,7 +171,7 @@ def main():
             targets=targets,
             scheme="W8A16",
             ignore=ignore,
-            #ignore=cfg.compress.compress_args.get("ignore", None),
+            # ignore=cfg.compress.compress_args.get("ignore", None),
         ),
     ]
 
@@ -173,14 +182,13 @@ def main():
     # (oneshot signature confirms dataset is used for that purpose in your integration)
     compressed_model = oneshot(
         model=model_id_or_path,
-        tokenizer=model_id_or_path,   # safe default; can be overridden by cfg if you expose tokenizer_path
-        #processor=model_id_or_path,   # for VLMs; if not applicable, llmcompressor usually ignores safely
+        tokenizer=model_id_or_path,  # safe default; can be overridden by cfg if you expose tokenizer_path
+        # processor=model_id_or_path,   # for VLMs; if not applicable, llmcompressor usually ignores safely
         trust_remote_code_model=trust_remote_code,
         recipe=recipe,
         pipeline="mix_precision_search",
         output_dir=output_dir,
-        save_compressed=True,         # crucial: let llmcompressor write compressed artifacts
-        
+        save_compressed=True,  # crucial: let llmcompressor write compressed artifacts
     )
 
     # ---- avoid overwriting compressed artifacts ----
@@ -191,7 +199,7 @@ def main():
     # Best-effort: if it’s a HF model, we can load tokenizer/processor and save them.
     # We intentionally do NOT call compressed_model.save_pretrained(output_dir).
     try:
-        from transformers import AutoTokenizer, AutoProcessor
+        from transformers import AutoProcessor, AutoTokenizer
 
         # Tokenizer
         try:
@@ -224,5 +232,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

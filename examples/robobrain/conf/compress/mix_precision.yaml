@@ -1,6 +1,6 @@
 defaults:
-  - model 
-  - _self_  
+  - model
+  - _self_
 
 system:
   save_dir: Qwen3_30B_MixPrecision_Search
@@ -12,9 +12,10 @@ compress_args:
 data:
   num_calibration_samples: 128
   batch_size: 1
-  
+
   tokenizer_args:
     #tokenizer_path: ${model.model_path}
     use_fast: true
     trust_remote_code: true
+
 
