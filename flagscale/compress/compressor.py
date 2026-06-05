@@ -17,7 +17,7 @@ from flagscale.compress.adapter import LLMCompressorAdapter
 if hasattr(flagscale.compress.adapter, "oneshot"):
     print(">> [Patch] Found 'oneshot' in adapter, applying fix...")
     _real_oneshot = flagscale.compress.adapter.oneshot
-    
+
     def _patched_oneshot(**kwargs):
         # 拦截并删除导致报错的参数
         if "num_calibration_batches" in kwargs:
@@ -25,7 +25,7 @@ if hasattr(flagscale.compress.adapter, "oneshot"):
             del kwargs["num_calibration_batches"]
         # 调用原始函数
         return _real_oneshot(**kwargs)
-    
+
     # 将 adapter 模块里的 oneshot 替换为我们的版本
     flagscale.compress.adapter.oneshot = _patched_oneshot
 else:
@@ -49,8 +49,8 @@ def compress(cfg):
     save_dir = cfg.system.save_dir
 
     tokenizer = None
-    if cfg.data.get("tokenzier_args"):
-        tokenizer_args = cfg.data.tokenzier_args
+    if cfg.data.get("tokenizer_args"):
+        tokenizer_args = cfg.data.tokenizer_args
         t_path = tokenizer_args.get("tokenizer_path", model_path)
         tokenizer = AutoTokenizer.from_pretrained(
             t_path,
@@ -106,5 +106,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     cfg = prepare_config(args.config_path)
     compress(cfg)
+
 
 
