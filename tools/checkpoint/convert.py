@@ -38,7 +38,7 @@ def main():
         default=[],
         nargs="+",
         required=True,
-        choices=["aquila", "mistral", "mixtral", "llama", "deepseek_v3", "qwen3"],
+        choices=["aquila", "mistral", "mixtral", "llama", "deepseek_v3", "qwen3", "qwen3_engram"],
         help="Type of the model.",
     )
     parser.add_argument(
@@ -63,6 +63,14 @@ def main():
     )
     parser.add_argument(
         "--max-queue-size", type=int, default=50, help="Maximum number of tensors in the queue"
+    )
+    parser.add_argument(
+        "--skip-mtp",
+        action="store_true",
+        help=(
+            "Skip Multi-Token Prediction (MTP) modules during conversion. "
+            "Use this when the target implementation only contains the main LM layers."
+        ),
     )
 
     extend_cases = [["mistral", "mixtral"]]

@@ -1,0 +1,124 @@
+system:
+  vision_ration: 0.1
+  num_workers: 1
+  calculate_per_token_loss: true
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 2
+  context_parallel_size: 1
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  sequence_parallel: True
+  tp_comm_overlap: False
+  overlap_grad_reduce: False
+  overlap_param_gather: False
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  use_te: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+  logging:
+    log_interval: 1
+  checkpoint:
+    save_interval: 10000
+    ckpt_format: torch
+
+model:
+  # Qwen3.5-4B architecture parameters
+  kv_channels: 256
+  qk_layernorm: True
+  attention_backend: flash
+  disable_bias_linear: True
+  num_layers: 32
+  hidden_size: 2560
+  ffn_hidden_size: 9216
+  num_attention_heads: 16
+  num_query_groups: 4
+  seq_length: 2048
+  max_padding_length: 2048
+  enable_variable_seq_lengths: True
+  max_position_embeddings: 262144
+  swiglu: True
+  normalization: RMSNorm
+  norm_epsilon: 1e-6
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_iters: 5000
+  eval_iters: 0
+  eval_interval: 1000
+  micro_batch_size: 1
+  global_batch_size: 4
+  allow_missing_vision_projection_checkpoint: False
+  apply_layernorm_1p: False
+  group_query_attention: True
+  no_masked_softmax_fusion: True
+  untie_embeddings_and_output_weights: False
+
+  # Position embedding: Qwen3.5 uses mRoPE with partial rotary
+  position_embedding_type: mrope
+  rotary_percent: 0.25
+  rotary_base: 10000000
+  rotary_seq_len_interpolation_factor: 1
+  no_rope_fusion: False
+  mrope_section: [11, 11, 10]
+  eod_mask_loss: False
+
+  # Vision model
+  patch_size: 16
+  freeze_LM: False
+  freeze_ViT: False
+  disable_vision_class_token: True
+
+  # mtp
+  mtp_num_layers: 1
+
+  # Recompute
+  vision_recompute_activations: True
+  recompute:
+    recompute_granularity: 'full'
+    recompute_method: 'uniform'
+    recompute_num_layers: 1
+
+  seed: 42
+
+  # Gated DeltaNet (GDN) parameters
+  experimental_attention_variant: gated_delta_net
+  linear_attention_freq: 4
+  linear_conv_kernel_dim: 4
+  linear_key_head_dim: 128
+  linear_value_head_dim: 128
+  linear_num_key_heads: 16
+  linear_num_value_heads: 32
+  layernorm_zero_centered_gamma: True
+  attention_output_gate: True
+
+  # Vision encoder parameters
+  vision_num_layers: 24
+  vision_hidden_size: 1024
+  vision_ffn_hidden_size: 4096
+  vision_num_attention_heads: 16
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    lr_scheduler:
+      lr: 1.0e-5
+      min_lr: 1.0e-6
+      lr_warmup_fraction: .03
+      lr_decay_style: cosine
+
+data:
+  no_use_system_prompt: True
+  vocab_size: 248320
+  data_path: /workspace/data/qwen/qwen_wds/wds-1
+  vision_root: /
+  dataloader_type: external
+  split: 100,0,0
+  tokenizer:
+    tokenizer_type: Qwen2VLTokenizer
+    tokenizer_path: /workspace/data/qwen/qwen2vl_tokenizer
+    extra_vocab_size: 0
+    make_vocab_size_divisible_by: 64

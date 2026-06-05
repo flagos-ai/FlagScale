@@ -3,7 +3,14 @@ import os
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
-from flagscale.runner.utils import flatten_dict_to_args_verl, logger, parse_hostfile
+from flagscale.runner.utils import (
+    flatten_dict_to_args_verl,
+    get_pkg_dir,
+    logger,
+    parse_hostfile,
+    setup_exp_dir,
+    setup_logging_dirs,
+)
 
 
 def _get_args_verl(config: DictConfig):
@@ -23,10 +30,7 @@ def _get_args_verl(config: DictConfig):
 
 
 def _update_config_rl(config: DictConfig):
-    exp_dir = os.path.abspath(config.experiment.exp_dir)
-    if not os.path.isdir(exp_dir):
-        os.makedirs(exp_dir)
-    assert os.path.isdir(exp_dir), f"Directory {exp_dir} does not exist."
+    exp_dir = setup_exp_dir(config)
 
     OmegaConf.set_struct(config, False)
     if config.get("system", None) is None:
@@ -35,17 +39,7 @@ def _update_config_rl(config: DictConfig):
     if config.system.get("logging", None) is None:
         config.system.logging = DictConfig({})
 
-    log_dir = (
-        os.path.abspath(config.system.logging.log_dir)
-        if config.system.logging.get("log_dir", None)
-        else os.path.join(exp_dir, "logs")
-    )
-    scripts_dir = os.path.join(log_dir, "scripts")
-    pids_dir = os.path.join(log_dir, "pids")
-
-    config.system.logging.log_dir = log_dir
-    config.system.logging.scripts_dir = scripts_dir
-    config.system.logging.pids_dir = pids_dir
+    setup_logging_dirs(config.system.logging, exp_dir)
 
     OmegaConf.set_struct(config, True)
 
@@ -66,9 +60,7 @@ class VerlBackend(BackendBase):
         logger.info("\n************** configuration **************")
         logger.info(f"\n{OmegaConf.to_yaml(self.config)}")
 
-    def generate_run_script(
-        self, config, host, node_rank, cmd, background=True, with_test=False, resources=None
-    ):
+    def generate_run_script(self, config, host, node_rank, cmd, background=False, resources=None):
         system_config = config.system
         logging_config = config.system.logging
 
@@ -86,9 +78,7 @@ class VerlBackend(BackendBase):
 
         os.makedirs(logging_config.scripts_dir, exist_ok=True)
 
-        root_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
+        pkg_dir = get_pkg_dir()
         cmds_config = config.experiment.get("cmds", None)
         if cmds_config:
             before_start = cmds_config.get("before_start", "")
@@ -114,23 +104,19 @@ class VerlBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.log_dir}\n")
             f.write(f"mkdir -p {system_config.logging.pids_dir}\n")
             f.write("\n")
-            f.write(f"cd {root_dir}\n")
+            f.write(f"cd {pkg_dir}\n")
             f.write("\n")
             f.write("export PYTHONPATH=${PYTHONPATH}\n")
             f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
-            if with_test:
-                f.write(f'bash -c "$cmd; sync"  >> {host_output_file} \n')
+            if background:
+                f.write(
+                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                )
             else:
-                # TODO: need a option to control whether to append or overwrite the output file
-                # Now, it always appends to the output file
-                if background:
-                    f.write(
-                        f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
-                    )
-                else:
-                    f.write(f'bash -c "$cmd; sync" >> {host_output_file} 2>&1\n')
+                f.write("set -o pipefail\n")
+                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())

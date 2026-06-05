@@ -44,6 +44,7 @@ model:
   clip_grad: 1.0
   train_iters: 625
   eval_iters: 0
+  eval_interval: 1000
   micro_batch_size: 1
   global_batch_size: 320
   allow_missing_vision_projection_checkpoint: True

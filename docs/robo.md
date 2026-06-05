@@ -13,7 +13,7 @@ of intelligent agents.
 
 ## Feature Highlights
 
-- [FlagScale](https://github.com/flagos-ai/FlagScale/tree/main) as users' entrypoint supports robot related AI model training and inference, including Pi-0, Pi-0.5, RoboBrain2, , RoboBrainX0. RoboBrain2.5 and RoboBrainX0.5 will be released soon.
+- [FlagScale](https://github.com/flagos-ai/FlagScale/tree/main) as users' entrypoint supports robot related AI model training and inference, including Pi-0, Pi-0.5, GR00T N1.5, RoboBrain2, RoboBrainX0. RoboBrain2.5 and RoboBrainX0.5 will be released soon.
 - FlagOS-Robo supports [RoboOS](https://github.com/FlagOpen/RoboOS)-based cross-embodiment collaboration,
   ensuring compatibility with different data formats, efficient edge-cloud coordination,
   and real-machine evaluation.
@@ -23,7 +23,9 @@ of intelligent agents.
 | Models | Type | Checkpoint | Train | Inference | Serve | Evaluate |
 |--------------|--------|--------|--------|-------------------|----------------------|---------------------------|
 | PI0 | VLA | [Huggingface](https://huggingface.co/lerobot/pi0_base) | ✅︎  [Guide](../examples/pi0/README.md#training) | ✅︎  [Guide](../examples/pi0/README.md#inference) | ✅ [Guide](../examples/pi0/README.md#serving) | ❌ |
-| PI0.5 | VLA | [Huggingface](https://huggingface.co/lerobot/pi05_libero_base) | ✅︎  [Guide](../examples/pi0_5/README.md#training) | ✅ [Guide](../examples/pi0_5/README.md#inference) | ✅   [Guide](../examples/pi0_5/README.md#serving)|  ❌ |
+| PI0.5 | VLA | [Huggingface](https://huggingface.co/lerobot/pi05_libero_base) | ✅︎  [Guide](../examples/pi0_5/README.md#training) | ✅ [Guide](../examples/pi0_5/README.md#inference) | ✅   [Guide](../examples/pi0_5/README.md#serving)| ✅   [Guide](../examples/pi0_5/README.md#evaluation) |
+| Qwen-GR00T | VLA | - | ✅︎  [Guide](../examples/qwen_gr00t/README.md#training) | ✅ [Guide](../examples/qwen_gr00t/README.md#inference) | ✅   [Guide](../examples/qwen_gr00t/README.md#serving)| ✅   [Guide](../examples/qwen_gr00t/README.md#evaluation) |
+| GR00T N1.5 | VLA | [Huggingface](https://huggingface.co/nvidia/GR00T-N1.5-3B) | ✅︎  [Guide](../examples/gr00t_n1_5/README.md#training) | ❌ | ✅   [Guide](../examples/gr00t_n1_5/README.md#serving)| ❌ |
 | RoboBrain-2.0 | VLM | [Huggingface](https://huggingface.co/BAAI/RoboBrain2.0-7B) | ✅︎  [Guide](../examples/qwen2_5_vl/README.md) | ✅[Guide](../examples/robobrain2/README.md#inference) | ✅[Guide](../examples/robobrain2/README.md#serving) | ✅   [Guide](../examples/qwen2_5_vl/README.md#evaluation) |
 | RoboBrain-2.5 | VLM | [Huggingface](https://huggingface.co/collections/BAAI/robobrain25) | ✅︎  [Guide](../examples/qwen3_vl/README.md) | ✅[Guide](../examples/robobrain2_5/README.md#inference) | ✅[Guide](../examples/robobrain2_5/README.md#serving) | ✅   [Guide](../examples/qwen2_5_vl/README.md#evaluation) |
 | RoboBrain-X0 | VLA | [Huggingface](https://huggingface.co/BAAI/RoboBrain-X0-Preview) | ✅︎  [Guide](../examples/robobrain_x0/README.md#training) | ❌ | ✅   [Guide](../examples/robobrain_x0/README.md#serving)| ❌ |

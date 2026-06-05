@@ -115,7 +115,7 @@ def compute_activated_weight_number(args, verbose=False):
 
     # Part3: MTP ============================================================================
     if args.mtp_num_layers is not None:
-        mtp_layer_is_moe = moe_layer_pattern[-1]
+        mtp_layer_is_moe = moe_layer_pattern[-1] if args.num_experts is not None else 0
         mtp_num_moe_layers = mtp_layer_is_moe * args.mtp_num_layers
         mtp_num_dense_layers = (1 - mtp_layer_is_moe) * args.mtp_num_layers
     else:
@@ -280,7 +280,7 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
 
     # Part3: MTP ============================================================================
     if args.mtp_num_layers is not None:
-        mtp_layer_is_moe = moe_layer_pattern[-1]
+        mtp_layer_is_moe = moe_layer_pattern[-1] if args.num_experts is not None else 0
         mtp_num_moe_layers = mtp_layer_is_moe * args.mtp_num_layers
         mtp_num_dense_layers = (1 - mtp_layer_is_moe) * args.mtp_num_layers
     else:

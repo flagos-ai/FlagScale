@@ -89,6 +89,7 @@ model:
   micro_batch_size: 1
   global_batch_size: 128 #2048
   eval_iters: 0
+  eval_interval: 1000
   train_iters: 102400
 
   optimizer:

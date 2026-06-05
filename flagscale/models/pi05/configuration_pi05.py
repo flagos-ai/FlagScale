@@ -25,20 +25,17 @@ from typing import Any
 import draccus
 
 from flagscale.models.configs.types import FeatureType, NormalizationMode, PolicyFeature
-from flagscale.models.utils.constants import ACTION, OBS_STATE
+from flagscale.models.vla.pretrained_config import PreTrainedConfig
 
 DEFAULT_IMAGE_SIZE = 224
 
 
 # @PreTrainedConfig.register_subclass("pi05")
 @dataclass
-class PI05Config:
+class PI05Config(PreTrainedConfig):
     paligemma_variant: str = "gemma_2b"
     action_expert_variant: str = "gemma_300m"
     dtype: str = "float32"  # Options: "bfloat16", "float32"
-
-    input_features: dict[str, PolicyFeature] = field(default_factory=dict)
-    output_features: dict[str, PolicyFeature] = field(default_factory=dict)
 
     # `use_amp` determines whether to use Automatic Mixed Precision (AMP) for training and evaluation. With AMP,
     # automatic gradient scaling is used.
@@ -83,6 +80,8 @@ class PI05Config:
     )
 
     # Training settings
+    freeze_vision_encoder: bool = False
+    train_expert_only: bool = False
     gradient_checkpointing: bool = False  # Enable gradient checkpointing for memory optimization
     compile_model: bool = False  # Whether to use torch.compile for model optimization
     compile_mode: str = "max-autotune"  # Torch compile mode
@@ -146,23 +145,6 @@ class PI05Config:
             )
             self.output_features["action"] = action_feature
 
-    # def get_optimizer_preset(self) -> AdamWConfig:
-    #     return AdamWConfig(
-    #         lr=self.optimizer_lr,
-    #         betas=self.optimizer_betas,
-    #         eps=self.optimizer_eps,
-    #         weight_decay=self.optimizer_weight_decay,
-    #         grad_clip_norm=self.optimizer_grad_clip_norm,
-    #     )
-
-    # def get_scheduler_preset(self):
-    #     return CosineDecayWithWarmupSchedulerConfig(
-    #         peak_lr=self.optimizer_lr,
-    #         decay_lr=self.scheduler_decay_lr,
-    #         num_warmup_steps=self.scheduler_warmup_steps,
-    #         num_decay_steps=self.scheduler_decay_steps,
-    #     )
-
     @property
     def observation_delta_indices(self) -> None:
         return None
@@ -176,6 +158,17 @@ class PI05Config:
         return None
 
     @classmethod
+    def _from_dict(cls, data: dict[str, Any]) -> "PI05Config":
+        if "normalization_mapping" in data and isinstance(data["normalization_mapping"], dict):
+            data["normalization_mapping"] = {
+                k: NormalizationMode(v) for k, v in data["normalization_mapping"].items()
+            }
+        for key in ("image_resolution", "optimizer_betas"):
+            if key in data and isinstance(data[key], list):
+                data[key] = tuple(data[key])
+        return cls(**data)
+
+    @classmethod
     def from_pretrained(cls, config_dir: str, **kwargs: Any) -> "PI05Config":
         config_path = os.path.join(config_dir, "config.json")
         if not os.path.exists(config_path):
@@ -184,7 +177,10 @@ class PI05Config:
         with open(config_path, "r") as f:
             config = json.load(f)
 
-        _UNUSED_KEYS = ["type", "repo_id", "push_to_hub", "private", "tags", "license"]
+        if "type" in config:
+            return PreTrainedConfig.from_pretrained(config_dir)
+
+        _UNUSED_KEYS = ["repo_id", "push_to_hub", "private", "tags", "license"]
         for key in _UNUSED_KEYS:
             config.pop(key, None)
 
@@ -195,29 +191,3 @@ class PI05Config:
         cli_overrides = kwargs.pop("cli_overrides", [])
         with draccus.config_type("json"):
             return draccus.parse(cls, config_file, args=cli_overrides)
-
-    # TODO(yupu): Copied from class PreTrainedConfig
-    @property
-    def robot_state_feature(self) -> PolicyFeature | None:
-        for ft_name, ft in self.input_features.items():
-            if ft.type is FeatureType.STATE and ft_name == OBS_STATE:
-                return ft
-        return None
-
-    @property
-    def env_state_feature(self) -> PolicyFeature | None:
-        for _, ft in self.input_features.items():
-            if ft.type is FeatureType.ENV:
-                return ft
-        return None
-
-    @property
-    def image_features(self) -> dict[str, PolicyFeature]:
-        return {key: ft for key, ft in self.input_features.items() if ft.type is FeatureType.VISUAL}
-
-    @property
-    def action_feature(self) -> PolicyFeature | None:
-        for ft_name, ft in self.output_features.items():
-            if ft.type is FeatureType.ACTION and ft_name == ACTION:
-                return ft
-        return None

@@ -23,20 +23,21 @@ on:
       container_options:
         required: true
         type: string
-      source_artifact:
-        required: true
-        type: string
-        description: Name of the artifact containing source code
-      conda_env:
+      pkg_mgr:
         required: false
         type: string
-        description: Conda environment name (optional, skips conda if not provided)
+        description: Package manager (pip, uv, conda). Default uv.
+        default: "uv"
+      env_name:
+        required: false
+        type: string
+        description: Conda environment name (for conda only)
         default: ""
-      conda_path:
+      env_path:
         required: false
         type: string
-        description: Conda installation path (optional, auto-detects if not provided)
-        default: "/root/miniconda3"
+        description: Environment path (venv path for uv, conda installation path for conda)
+        default: "/opt/venv"
 
 jobs:
   unit_test:
@@ -44,7 +45,8 @@ jobs:
       run:
         shell: bash
     env:
-      PROJECT_ROOT: /workspace/FlagScale
+      PROJECT_ROOT: ${{ github.workspace }}/FlagScale
+      COVERAGE_REPORT_DIR: /tmp/coverage-report
     runs-on: ${{ fromJson(inputs.runs_on) }}
     name: unit-${{ inputs.device }}
     container:
@@ -54,78 +56,83 @@ jobs:
       volumes: ${{ fromJson(inputs.container_volumes) }}
       options: ${{ inputs.container_options }}
     steps:
-      - name: Download source code artifact (attempt 1)
-        uses: actions/download-artifact@v4
+      - name: Checkout code (attempt 1)
+        id: checkout_attempt_1
+        uses: actions/checkout@v4
         continue-on-error: true
-        id: download_attempt_1
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Download source code artifact (attempt 2)
-        if: steps.download_attempt_1.outcome == 'failure'
-        uses: actions/download-artifact@v4
+      - name: Checkout code (attempt 2)
+        if: steps.checkout_attempt_1.outcome == 'failure'
+        id: checkout_attempt_2
+        uses: actions/checkout@v4
         continue-on-error: true
-        id: download_attempt_2
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Download source code artifact (attempt 3)
-        if: steps.download_attempt_2.outcome == 'failure'
-        uses: actions/download-artifact@v4
-        id: download_attempt_3
+      - name: Checkout code (attempt 3)
+        if: steps.checkout_attempt_2.outcome == 'failure'
+        id: checkout_attempt_3
+        uses: actions/checkout@v4
         with:
-          name: ${{ inputs.source_artifact }}
-          path: /tmp
-
-      - name: Verify artifact download
-        run: |
-          if [ "${{ steps.download_attempt_1.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 1"
-          elif [ "${{ steps.download_attempt_2.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 2 (retried once)"
-          elif [ "${{ steps.download_attempt_3.outcome }}" == "success" ]; then
-            echo "✅ Artifact downloaded successfully on attempt 3 (retried twice)"
-          else
-            echo "❌ Error: All 3 download attempts failed"
-            echo "Artifact name: ${{ inputs.source_artifact }}"
-            exit 1
-          fi
-
-      - name: Extract source code
-        run: |
-          mkdir -p $PROJECT_ROOT
-          tar -xzf /tmp/flagscale-source.tar.gz -C $PROJECT_ROOT
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          path: FlagScale
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
       - name: Set safe directory
         run: |
           git config --global --add safe.directory $PROJECT_ROOT
 
-      - name: Install dependencies for unit tests
+      - name: Check environment info
+        run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
+
+      - name: Setup unit test environment
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
-
-          # Build install command with optional conda parameters
-          INSTALL_CMD="./tools/install/install.sh --platform ${{ inputs.platform }} --task train --retry-count 3"
-          if [ -n "$CONDA_ENV" ]; then
-            INSTALL_CMD="$INSTALL_CMD --conda-env $CONDA_ENV"
-            if [ -n "$CONDA_PATH" ]; then
-              INSTALL_CMD="$INSTALL_CMD --conda-path $CONDA_PATH"
-            fi
-          fi
-
-          # Run install script (handles conda activation internally if needed)
-          eval $INSTALL_CMD
-
-          # Copy test data (keep existing logic)
-          mkdir -p /opt/data
-          cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ || true
-          cp -r /home/gitlab-runner/tokenizers/Megatron-LM/* /opt/data/ || true
+          bash ./tests/test_utils/runners/setup_training_test_env.sh \
+            --platform '${{ inputs.platform }}' \
+            --pkg-mgr '${{ inputs.pkg_mgr }}' \
+            --env-name '${{ inputs.env_name }}' \
+            --env-path '${{ inputs.env_path }}' \
+            --install-common-deps \
+            --copy-data
         timeout-minutes: 30
 
       - name: Run unit tests
@@ -134,48 +141,70 @@ jobs:
           set -euo pipefail
           cd $PROJECT_ROOT
 
-          PLATFORM='${{ inputs.platform }}'
-          DEVICE='${{ inputs.device }}'
-          CONDA_ENV='${{ inputs.conda_env }}'
-          CONDA_PATH='${{ inputs.conda_path }}'
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
 
-          echo "Running unit tests"
-          echo "Platform: $PLATFORM"
-          echo "Device: $DEVICE"
-          echo "Project root: $PROJECT_ROOT"
+          source ./tools/install/utils/pyenv_utils.sh
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH" || echo "Conda activation failed"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH" || echo "UV activation failed"
+              fi
+              ;;
+            pip)
+              echo "Running tests with pip/system Python"
+              ;;
+            *)
+              echo "Unsupported package manager: $PKG_MGR"
+              exit 1
+              ;;
+          esac
 
-          # Source conda utilities for reusable functions
-          source ./tools/install/utils/conda_utils.sh
-
-          # Conditionally activate conda environment if specified
-          if [ -n "$CONDA_ENV" ]; then
-            if activate_conda "$CONDA_ENV" "$CONDA_PATH"; then
-              : # Success message already displayed by activate_conda
-            else
-              echo "⚠️  Conda environment requested but conda not found"
-              echo "Continuing without conda activation..."
-            fi
-          else
-            echo "ℹ️  Running tests with system Python"
-          fi
-
-          # Display Python environment info
-          echo "Python location: $(which python)"
+          echo "Python location: $(command -v python)"
           echo "Python version: $(python --version)"
 
-          # Run unit tests using run_tests.sh
-          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
-            --platform "$PLATFORM" \
-            --device "$DEVICE" \
-            --type unit
+          set +e
+          export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT/flagscale/train"
+          bash ./tests/test_utils/runners/run_unit_tests.sh \
+            --platform '${{ inputs.platform }}' \
+            --device '${{ inputs.device }}' \
+            --coverage-dir "$COVERAGE_REPORT_DIR"
           exit_code=$?
+          set -e
 
           if [ $exit_code -eq 0 ]; then
-            echo "✅ Unit tests passed for $PLATFORM/$DEVICE"
+            echo "Unit tests passed for ${{ inputs.platform }}/${{ inputs.device }}"
           else
-            echo "❌ Unit tests failed for $PLATFORM/$DEVICE (exit code: $exit_code)"
+            echo "Unit tests failed for ${{ inputs.platform }}/${{ inputs.device }} (exit code: $exit_code)"
           fi
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 90
+        timeout-minutes: 15
+
+      - name: Upload coverage report
+        if: steps.unit_test.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ inputs.platform }}-${{ inputs.device }}
+          path: ${{ env.COVERAGE_REPORT_DIR }}/coverage.json
+          retention-days: 7
+
+      - name: Upload coverage report to FlagCICD
+        if: steps.unit_test.outcome == 'success'
+        continue-on-error: true
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2.0.4
+        env:
+          NO_PROXY: "flagcicd.flagos.net"
+        with:
+          user_id: '000000000000000000'
+          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          report_path: '${{ env.COVERAGE_REPORT_DIR }}/coverage.json'
+          fail_on_error: 'false'
+          runner_set_name: ${{ fromJson(inputs.runs_on)[0] }}

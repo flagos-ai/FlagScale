@@ -16,14 +16,19 @@ from flagscale.runner.utils import (
     add_decive_extra_config,
     benchmark,
     dummy_random_input,
+    find_latest_stdout_log,
     get_free_port,
     get_nnodes,
+    get_node0_log_file,
     get_nproc_per_node,
+    get_pkg_dir,
     logger,
     parse_hostfile,
+    resolve_path,
     run_local_command,
     run_scp_command,
     run_ssh_command,
+    start_tail_log,
     update_cmd_with_node_specific_config,
     update_nodes_envs,
 )
@@ -73,7 +78,7 @@ def _get_runner_cmd_train(
 
     rdzv_id = runner_config.get("rdzv_id", "default")
     log_dir = runner_config.get("log_dir", logging_config.details_dir)
-    log_dir = os.path.abspath(log_dir)
+    log_dir = resolve_path(log_dir, "runner.log_dir")
     no_shared_fs = runner_config.get("no_shared_fs", False)
     if no_shared_fs:
         log_dir = os.path.join(log_dir, "host")
@@ -104,6 +109,13 @@ def _get_runner_cmd_train(
         del runner_args["enable_monitoring"]
     if "enable_gpu_health_check" in runner_args:
         del runner_args["enable_gpu_health_check"]
+    # Profiling options are consumed by launcher; torchrun doesn't accept them.
+    if "nsys_bin_path" in runner_args:
+        del runner_args["nsys_bin_path"]
+    if "nsys_rep_file_path" in runner_args:
+        del runner_args["nsys_rep_file_path"]
+    if "deploy" in runner_args:
+        del runner_args["deploy"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port
@@ -137,7 +149,7 @@ def run_node(
     nnodes,
     available_ip,
     available_port,
-    with_test,
+    background,
     dryrun,
     cur_envs,
     enable_monitoring,
@@ -162,7 +174,7 @@ def run_node(
         node_rank,
         nproc_per_node,
         device_type=resource_info["type"],
-        with_test=with_test,
+        background=background,
         dryrun=dryrun,
         cur_envs=cur_envs,
         enable_monitoring=enable_monitoring,
@@ -180,10 +192,7 @@ class SshLauncher(LauncherBase):
         self.user_envs = self.backend.user_envs
         self.user_script = self.backend.user_script
         self.gpu_health_check_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "runner",
-            "elastic",
-            "gpu_health_check.py",
+            get_pkg_dir(), "flagscale", "runner", "elastic", "gpu_health_check.py"
         )
 
     def _run_each(
@@ -195,7 +204,7 @@ class SshLauncher(LauncherBase):
         node_rank,
         nproc_per_node,
         device_type=None,
-        with_test=False,
+        background=True,
         dryrun=False,
         cur_envs=None,
         enable_monitoring=False,
@@ -209,6 +218,41 @@ class SshLauncher(LauncherBase):
             runner_cmd = _get_runner_cmd_train(
                 host, master_addr, master_port, nnodes, node_rank, nproc_per_node, self.config
             )
+
+            # Optional Nsight Systems profiling (nsys)
+            runner_cfg = self.config.experiment.runner
+            nsys_bin_path = runner_cfg.get("nsys_bin_path", None)
+            nsys_rep_file_path = runner_cfg.get("nsys_rep_file_path", None)
+            if nsys_bin_path and nsys_rep_file_path:
+                # Allow passing either a full path to `nsys` or a directory containing it.
+                nsys_exe = (
+                    nsys_bin_path
+                    if os.path.basename(str(nsys_bin_path)) == "nsys"
+                    else os.path.join(str(nsys_bin_path), "nsys")
+                )
+                # If a directory is provided, write a per-host report file under it.
+                # Keep `$HOSTNAME` unexpanded so the remote shell expands it.
+                rep_path = str(nsys_rep_file_path)
+                if rep_path.endswith("/") or (
+                    ".nsys-rep" not in rep_path and "$HOSTNAME" not in rep_path
+                ):
+                    rep_path = rep_path.rstrip("/") + "/$HOSTNAME.nsys-rep"
+                nsys_cmd = [
+                    nsys_exe,
+                    "profile",
+                    "-s",
+                    "none",
+                    "-t",
+                    "nvtx,cuda,osrt",
+                    "-o",
+                    rep_path,
+                    "--force-overwrite",
+                    "true",
+                    "--capture-range=cudaProfilerApi",
+                    "--capture-range-end=stop",
+                ]
+                runner_cmd = nsys_cmd + runner_cmd
+
             # update hetero-current-device-type according to the device_type in hostfile
             if device_type is not None:
                 if "--hetero-current-device-type" in self.user_args:
@@ -232,9 +276,7 @@ class SshLauncher(LauncherBase):
         elif self.task_type == "rl":
             ray_cmd = []
             if self.resources is not None:
-                runtime_env = self.config.experiment.runner.get(
-                    "runtime_env", "third_party/verl/verl/trainer/runtime_env.yaml"
-                )
+                runtime_env = self.config.experiment.runner.get("runtime_env", None)
                 ray_dashboard_port = self.config.experiment.runner.get("ray_dashboard_port", 8265)
                 ray_cmd = [
                     "ray",
@@ -268,9 +310,8 @@ class SshLauncher(LauncherBase):
                 host,
                 node_rank,
                 cmd,
-                background=True,
-                with_test=with_test,
-                root_dir=node_specific_config.get("build_dir", None),
+                background=background,
+                pkg_dir=node_specific_config.get("build_dir", None),
                 enable_monitoring=enable_monitoring,
             )
         elif self.task_type == "rl":
@@ -279,13 +320,12 @@ class SshLauncher(LauncherBase):
                 host,
                 node_rank,
                 cmd,
-                background=True,
-                with_test=with_test,
+                background=background,
                 resources=self.resources,
             )
         else:
             host_run_script_file = self.backend.generate_run_script(
-                self.config, host, node_rank, cmd, background=True, with_test=with_test
+                self.config, host, node_rank, cmd, background=background
             )
 
         if self.task_type == "serve":
@@ -304,13 +344,25 @@ class SshLauncher(LauncherBase):
                     )
 
                 # Step 3: run the host_run_script_file on the remote host
-                run_ssh_command(host, f"bash {host_run_script_file}", ssh_port, dryrun)
+                # For foreground + node 0, stream stdout through SSH to the
+                # login node console so logs are visible without shared FS.
+                run_ssh_command(
+                    host,
+                    f"bash {host_run_script_file}",
+                    ssh_port,
+                    dryrun,
+                    stream_output=(not background and node_rank == 0),
+                )
             else:
-                run_local_command(f"bash {host_run_script_file}", dryrun)
+                run_local_command(
+                    f"bash {host_run_script_file}",
+                    dryrun,
+                    stream_output=(not background and node_rank == 0),
+                )
 
     def run(
         self,
-        with_test=False,
+        background=True,
         dryrun=False,
         monitor=False,
         interval=10,
@@ -333,111 +385,137 @@ class SshLauncher(LauncherBase):
         if enable_monitoring is None:
             enable_monitoring = self.config.experiment.runner.get("enable_monitoring", False)
         num_visible_devices = None
-        visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+        # visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+        visible_devices = next(
+            (v for k, v in self.user_envs.items() if k.endswith("_VISIBLE_DEVICES")), None
+        )
         if visible_devices is not None and isinstance(visible_devices, str):
             visible_devices = visible_devices.split(",")
             num_visible_devices = len(visible_devices)
 
         runner_config = self.config.experiment.runner
-        # If hostfile is provided, use the resources from the hostfile
-        if self.resources is not None and self.task_type != "serve":
-            nnodes_from_hostfile = len(self.resources.keys())
-            nnodes_from_args = runner_config.get("nnodes", None)
-            nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
-            available_ip = next(iter(self.resources.keys()))
-            if self.task_type == "rl":
-                available_port = 6379
-                self._run_each(
-                    "localhost",
-                    available_ip,
-                    available_port,
-                    1,
-                    0,
-                    0,
-                    with_test=with_test,
-                    dryrun=dryrun,
-                    cur_envs=self.user_envs,
-                )
-                return None
-            available_port = get_free_port()
+
+        # In background mode, tail node 0's log file on the login node console.
+        # In foreground mode, tee already streams stdout directly.
+        _tail_stop = None
+        if not dryrun and background:
+            no_shared_fs = self.config.experiment.runner.get("no_shared_fs", False)
             if self.task_type == "train":
-                num_processes = min(nnodes, _MAX_CPU_COUNT)
-                with multiprocessing.Pool(processes=num_processes) as pool:
-                    tasks = []
-                    for node_rank, (host, resource_info) in enumerate(self.resources.items()):
-                        if node_rank >= nnodes:
-                            break
-                        args = (
-                            self._run_each,
-                            node_rank,
-                            host,
-                            resource_info,
-                            self.user_envs,
-                            runner_config,
-                            nnodes,
-                            available_ip,
-                            available_port,
-                            with_test,
-                            dryrun,
-                            None,
-                            enable_monitoring,
-                        )
-                        tasks.append(args)
-                    pool.starmap(run_node, tasks)
-            else:
-                for node_rank, (host, resource_info) in enumerate(self.resources.items()):
-                    if node_rank >= nnodes:
-                        break
-                    nproc_from_hostfile = resource_info["slots"]
-                    nproc_from_args = runner_config.get("nproc_per_node", None)
-                    nproc_per_node = get_nproc_per_node(
-                        nproc_from_hostfile, nproc_from_args, num_visible_devices
-                    )
-                    master_addr = runner_config.get("master_addr", available_ip)
-                    master_port = runner_config.get("master_port", available_port)
+                details_dir = self.config.train.system.logging.details_dir
+                _, _tail_stop = start_tail_log(lambda: find_latest_stdout_log(details_dir))
+            elif self.task_type == "serve":
+                log_file = get_node0_log_file(self.config.logging, no_shared_fs, self.resources)
+                _, _tail_stop = start_tail_log(log_file)
+            elif self.task_type == "inference":
+                log_file = get_node0_log_file(
+                    self.config.inference.logging, no_shared_fs, self.resources
+                )
+                _, _tail_stop = start_tail_log(log_file)
+
+        try:
+            # If hostfile is provided, use the resources from the hostfile
+            if self.resources is not None and self.task_type != "serve":
+                nnodes_from_hostfile = len(self.resources.keys())
+                nnodes_from_args = runner_config.get("nnodes", None)
+                nnodes = get_nnodes(nnodes_from_hostfile, nnodes_from_args)
+                available_ip = next(iter(self.resources.keys()))
+                if self.task_type == "rl":
+                    available_port = 6379
                     self._run_each(
-                        host,
-                        master_addr,
-                        master_port,
-                        nnodes,
-                        node_rank,
-                        nproc_per_node,
-                        with_test=with_test,
+                        "localhost",
+                        available_ip,
+                        available_port,
+                        1,
+                        0,
+                        0,
+                        background=background,
                         dryrun=dryrun,
                         cur_envs=self.user_envs,
                     )
-        else:
-            # If hostfile is not provided, run the job on localhost
-            nproc_from_args = runner_config.get("nproc_per_node", None)
-            nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
-            available_addr = runner_config.get("master_addr", "localhost")
-            available_port = runner_config.get("master_port", get_free_port())
-            self._run_each(
-                "localhost",
-                available_addr,
-                available_port,
-                1,
-                0,
-                nproc_per_node,
-                with_test=with_test,
-                dryrun=dryrun,
-                cur_envs=self.user_envs,
-                enable_monitoring=enable_monitoring,
-            )
-        # If need monitor, query status continually
-        if monitor:
-            # sleep to wait task already started
-            time.sleep(interval)
-            try:
-                while True:
-                    status = self._query_status()
-                    logger.info(f"Job Status: {status.name}")
-                    if status == JobStatus.COMPLETED_OR_IDLE:
-                        break
-                    time.sleep(interval)
-                logger.info("Job Ended.")
-            except Exception as e:
-                logger.info(e)
+                    return None
+                available_port = get_free_port()
+                if self.task_type == "train":
+                    num_processes = min(nnodes, _MAX_CPU_COUNT)
+                    with multiprocessing.Pool(processes=num_processes) as pool:
+                        tasks = []
+                        for node_rank, (host, resource_info) in enumerate(self.resources.items()):
+                            if node_rank >= nnodes:
+                                break
+                            args = (
+                                self._run_each,
+                                node_rank,
+                                host,
+                                resource_info,
+                                self.user_envs,
+                                runner_config,
+                                nnodes,
+                                available_ip,
+                                available_port,
+                                background,
+                                dryrun,
+                                None,
+                                enable_monitoring,
+                            )
+                            tasks.append(args)
+                        pool.starmap(run_node, tasks)
+                else:
+                    for node_rank, (host, resource_info) in enumerate(self.resources.items()):
+                        if node_rank >= nnodes:
+                            break
+                        nproc_from_hostfile = resource_info["slots"]
+                        nproc_from_args = runner_config.get("nproc_per_node", None)
+                        nproc_per_node = get_nproc_per_node(
+                            nproc_from_hostfile, nproc_from_args, num_visible_devices
+                        )
+                        master_addr = runner_config.get("master_addr", available_ip)
+                        master_port = runner_config.get("master_port", available_port)
+                        self._run_each(
+                            host,
+                            master_addr,
+                            master_port,
+                            nnodes,
+                            node_rank,
+                            nproc_per_node,
+                            background=background,
+                            dryrun=dryrun,
+                            cur_envs=self.user_envs,
+                        )
+            else:
+                # If hostfile is not provided, run the job on localhost
+                nproc_from_args = runner_config.get("nproc_per_node", None)
+                nproc_per_node = get_nproc_per_node(None, nproc_from_args, num_visible_devices)
+                available_addr = runner_config.get("master_addr", "localhost")
+                available_port = runner_config.get("master_port", get_free_port())
+                self._run_each(
+                    "localhost",
+                    available_addr,
+                    available_port,
+                    1,
+                    0,
+                    nproc_per_node,
+                    background=background,
+                    dryrun=dryrun,
+                    cur_envs=self.user_envs,
+                    enable_monitoring=enable_monitoring,
+                )
+
+            # If need monitor, query status continually
+            if monitor:
+                # sleep to wait task already started
+                time.sleep(interval)
+                try:
+                    while True:
+                        status = self._query_status()
+                        logger.info(f"Job Status: {status.name}")
+                        if status == JobStatus.COMPLETED_OR_IDLE:
+                            break
+                        time.sleep(interval)
+                    logger.info("Job Ended.")
+                except Exception as e:
+                    logger.info(e)
+        finally:
+            if _tail_stop:
+                _tail_stop.set()
 
         return None
 
@@ -948,7 +1026,10 @@ class SshLauncher(LauncherBase):
 
                 # Get CUDA_VISIBLE_DEVICES if set
                 cur_envs = add_decive_extra_config(self.user_envs, resource_info["type"])
-                visible_devices = cur_envs.get("CUDA_VISIBLE_DEVICES", None)
+                # visible_devices = cur_envs.get("CUDA_VISIBLE_DEVICES", None)
+                visible_devices = next(
+                    (v for k, v in cur_envs.items() if k.endswith("_VISIBLE_DEVICES")), None
+                )
                 num_visible_devices = None
                 if visible_devices is not None and isinstance(visible_devices, str):
                     visible_devices = visible_devices.split(",")
@@ -1015,7 +1096,10 @@ class SshLauncher(LauncherBase):
             node_rank = 0
             host = "localhost"
 
-            visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+            # visible_devices = self.user_envs.get("CUDA_VISIBLE_DEVICES", None)
+            visible_devices = next(
+                (v for k, v in self.user_envs.items() if k.endswith("_VISIBLE_DEVICES")), None
+            )
             num_visible_devices = None
             if visible_devices is not None and isinstance(visible_devices, str):
                 visible_devices = visible_devices.split(",")

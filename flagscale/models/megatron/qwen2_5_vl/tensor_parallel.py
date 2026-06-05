@@ -3,6 +3,10 @@
 # NOTE: we slightly modify this file to support zero-size tensor, such as [0, 128] when we don't have video data
 import torch
 
+from megatron.plugin.platform import get_platform
+
+cur_platform = get_platform()
+
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
     get_tensor_model_parallel_rank,
@@ -89,7 +93,7 @@ def broadcast_data(keys, data, datatype):
         # Flatten the data associated with the keys
         flatten_data = torch.cat([data[key].contiguous().view(-1) for key in keys], dim=0).cuda()
     else:
-        flatten_data = torch.empty(total_numel, device=torch.cuda.current_device(), dtype=datatype)
+        flatten_data = torch.empty(total_numel, device=cur_platform.current_device(), dtype=datatype)
 
     # Broadcast
     torch.distributed.broadcast(

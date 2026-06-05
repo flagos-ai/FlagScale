@@ -64,6 +64,10 @@ run_test() {
 
     [ -d "$conf_dir" ] || { log_error "Config dir not found: $conf_dir"; return 1; }
 
+    # Convert to absolute path — Hydra treats relative --config-path as a
+    # Python package path relative to the decorated function's module.
+    conf_dir="$(cd "$conf_dir" && pwd)"
+
     # Check config file exists
     local config_file=""
     if [ -f "$conf_dir/$config.yaml" ]; then
@@ -80,24 +84,118 @@ run_test() {
 
     # Clean old results
     # Extract exp_dir from config file and clean it
-    local exp_dir=$(grep -E '^\s*exp_dir:' "$config_file" | head -1 | sed 's/.*exp_dir:\s*//' | tr -d '"' | tr -d "'")
+    local exp_dir=$(grep -oP '^\s*exp_dir:\s*\K\S+' "$config_file" | head -1 | tr -d "\"'")
     if [ -n "$exp_dir" ]; then
         log_info "Cleaning old results in: $exp_dir"
         rm -rf "$exp_dir"/* 2>/dev/null || true
     fi
 
-    # Run test
-    python run.py --config-path "$conf_dir" --config-name "$config" action=test || return 1
+    # Map task name to flagscale CLI subcommand
+    # e.g. hetero_train -> train, train -> train, benchmark -> train, others unchanged
+    local cli_task="$task"
+    case "$task" in
+        benchmark) cli_task="train" ;;
+        *train*) cli_task="train" ;;
+    esac
 
-    # Validate results if validator exists
-    if [ -f "$PROJECT_ROOT/tests/test_utils/runners/check_results.py" ]; then
-        local validator_cmd="python -m pytest \"$PROJECT_ROOT/tests/test_utils/runners/check_results.py::test_train_equal\" \
-            --path=tests/functional_tests --task=\"$task\" --model=\"$model\" \
-            --case=\"$config\" --platform=\"$PLATFORM\""
-        [ -n "$CURRENT_DEVICE" ] && validator_cmd="$validator_cmd --device=\"$CURRENT_DEVICE\""
-        if ! eval "$validator_cmd"; then
+    # Run test via flagscale CLI
+    # --config expects the full YAML path
+    log_info "Running: flagscale $cli_task $model --config $config_file --test"
+    flagscale "$cli_task" "$model" --config "$config_file" --test || return 1
+
+    # Match the corresponding comparison function according to task type
+    # Matching rules:
+    #   - *train*: Tasks containing "train" (e.g., train, hetero_train), use training result comparison function
+    #   - inference: Exact match for inference tasks, use inference result comparison function
+    #   - *: Unsupported task type, throw error and exit execution
+    local compare_function
+    case "$task" in
+        benchmark)
+            compare_function="test_benchmark_equal"
+            ;;
+        *train*)
+            compare_function="test_train_equal"
+            ;;
+        inference)
+            compare_function="test_inference_equal"
+            ;;
+        serve)
+            compare_function="test_serve_equal"
+            ;;
+        rl)
+            compare_function="test_rl_equal"
+            ;;
+        *)
+            log_error "Unsupported task type: $task, no corresponding comparison function for standard vs test values"
+            return 1
+            ;;
+    esac
+
+    # Validate results using pytest-based checker (check_results.py)
+    # Build command as an array to avoid eval and ensure safe quoting.
+    local check_results="$PROJECT_ROOT/tests/test_utils/runners/check_results.py"
+    if [ -f "$check_results" ]; then
+        local validator_cmd=(
+            python -m pytest "${check_results}::${compare_function}"
+            --path=tests/functional_tests
+            "--task=$task" "--model=$model"
+            "--case=$config" "--platform=$PLATFORM"
+        )
+        [ -n "$CURRENT_DEVICE" ] && validator_cmd+=("--device=$CURRENT_DEVICE")
+
+        # For serve tasks, wait for the service to be fully ready before validation
+        if [ "$task" = "serve" ]; then
+            local serve_port
+            serve_port=$(grep -oP 'port:\s*\K[0-9]+' "$config_file" | head -1)
+
+            local max_wait=600   # ascend: 10 min
+            [ "$PLATFORM" != "ascend" ] && max_wait=180   # others: 1 min
+            local interval=10
+            local elapsed=0
+            local ready=0
+
+            if [ -z "$serve_port" ]; then
+                log_info "Could not extract serve port from config, skipping health check"
+                ready=1
+            else
+                log_info "Waiting for service on port $serve_port (timeout: ${max_wait}s)..."
+                while [ $elapsed -lt $max_wait ]; do
+                    local http_code
+                    http_code=$(curl --silent --max-time 5 --output /dev/null \
+                        --write-out "%{http_code}" \
+                        "http://localhost:${serve_port}/health" 2>/dev/null)
+                    if [ "$http_code" = "200" ]; then
+                        log_info "Service is ready on port $serve_port (${elapsed}s elapsed)"
+                        ready=1
+                        break
+                    fi
+                    # Fall back: any non-zero HTTP response means the server is up
+                    if [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
+                        log_info "Service responded (HTTP $http_code) on port $serve_port (${elapsed}s elapsed)"
+                        ready=1
+                        break
+                    fi
+                    sleep $interval
+                    elapsed=$((elapsed + interval))
+                    log_info "Still waiting for service on port $serve_port... (${elapsed}s / ${max_wait}s)"
+                done
+            fi
+
+            if [ $ready -eq 0 ]; then
+                log_error "Service did not become ready within ${max_wait}s on port $serve_port"
+                return 1
+            fi
+        fi
+
+        if ! "${validator_cmd[@]}"; then
             log_error "Validation failed for $task/$model/$config"
             return 1
+        fi
+
+        # Stop the serve process after validation completes
+        if [ "$task" = "serve" ]; then
+            log_info "Stopping serve: flagscale serve $model --config $config_file --stop"
+            flagscale serve "$model" --config "$config_file" --stop
         fi
     fi
 
@@ -105,16 +203,22 @@ run_test() {
 }
 
 # Get tests from platform configuration
+# Returns JSON describing which test cases to run for the given device/task/model.
+# Uses an array instead of eval to safely handle paths with special characters.
 get_test_configs() {
     local device="$1"
     local task="$2"
     local model="$3"
     local list="$4"
 
-    local cmd="python \"$SCRIPT_DIR/parse_config.py\" --platform \"$PLATFORM\" --device \"$device\" --type functional --task \"$task\""
-    [ -n "$model" ] && cmd="$cmd --model \"$model\""
-    [ -n "$list" ] && cmd="$cmd --list \"$list\""
-    eval "$cmd" 2>/dev/null || echo ""
+    local cmd=(
+        python "$SCRIPT_DIR/parse_config.py"
+        --platform "$PLATFORM" --device "$device"
+        --type functional --task "$task"
+    )
+    [ -n "$model" ] && cmd+=(--model "$model")
+    [ -n "$list" ] && cmd+=(--list "$list")
+    "${cmd[@]}" 2>/dev/null || echo ""
 }
 
 # Parse and run tests using helper module

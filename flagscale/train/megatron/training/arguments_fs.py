@@ -2,7 +2,6 @@ import ast
 import itertools
 import types
 import warnings
-
 from datetime import timedelta
 
 import torch
@@ -11,9 +10,14 @@ try:
     import flagcx
 except:
     warnings.warn(
-        "flagcx is not installed, you can't use flagcx backend for communication.", ImportWarning
+        "flagcx is not installed, you can't use flagcx backend for communication.",
+        ImportWarning,
     )
 from megatron.plugin.hetero.parallel_context import RankMapper
+from megatron.plugin.platform import get_platform
+
+cur_platform = get_platform()
+
 
 class FSTrainArguments:
     """Extend the Megatron arguments with FlagScale specific arguments."""
@@ -31,12 +35,13 @@ class FSTrainArguments:
         """Initialize torch.distributed and core model parallel."""
         args = self.args
 
-        device_count = torch.cuda.device_count()
+        device_count = cur_platform.device_count()
         if torch.distributed.is_initialized():
 
             if args.rank == 0:
                 print(
-                    "torch distributed is already initialized, " "skipping initialization ...",
+                    "torch distributed is already initialized, "
+                    "skipping initialization ...",
                     flush=True,
                 )
             args.rank = torch.distributed.get_rank()
@@ -48,8 +53,8 @@ class FSTrainArguments:
                 print("> initializing torch distributed ...", flush=True)
             # Manually set the device ids.
             if device_count > 0:
-                torch.cuda.set_device(args.local_rank)
-                device_id = torch.device(f"cuda:{args.local_rank}")
+                cur_platform.set_device(args.local_rank)
+                device_id = cur_platform.device(args.local_rank)
             else:
                 device_id = None
 
@@ -105,13 +110,15 @@ class FSTrainArguments:
             # NOTE: Use the first data parallel size as the global data parallel size to loader data
             self.args.data_parallel_size = hetero_process_meshes_dp[0]
             assert all(
-                self.args.data_parallel_size * self.args.micro_batch_size % hetero_dp == 0
+                self.args.data_parallel_size * self.args.micro_batch_size % hetero_dp
+                == 0
                 for hetero_dp in hetero_process_meshes_dp
             ), f"data_parallel_size * micro_batch_size {self.args.data_parallel_size * self.args.micro_batch_size} should be divisible by all hetero_process_meshes_dp {hetero_process_meshes_dp}!"
 
             # NOTE: Only support cp and ep size to be the same
             assert all(
-                hetero_cp == hetero_process_meshes_cp[0] for hetero_cp in hetero_process_meshes_cp
+                hetero_cp == hetero_process_meshes_cp[0]
+                for hetero_cp in hetero_process_meshes_cp
             ), f"all hetero_process_meshes_cp {hetero_process_meshes_cp} should be the same!"
 
             # Note: Ep size should all be 1 or all be not 1
@@ -126,10 +133,15 @@ class FSTrainArguments:
             assert (
                 self.args.standalone_embedding_stage == False
             ), "standalone not supported with process_meshes set!"
-            self.args.transformer_pipeline_model_parallel_size = self.args.pipeline_model_parallel_size
+            self.args.transformer_pipeline_model_parallel_size = (
+                self.args.pipeline_model_parallel_size
+            )
 
             # if untie_embeddings_and_output_weights is False, the first and last stage should have the same tp degree
-            if self.args.untie_embeddings_and_output_weights == False or self.args.mtp_num_layers:
+            if (
+                self.args.untie_embeddings_and_output_weights == False
+                or self.args.mtp_num_layers
+            ):
                 assert (
                     hetero_process_meshes_tp[0] == hetero_process_meshes_tp[-1]
                 ), f"if untie_embeddings_and_output_weights is False or mtp_num_layers is not 0, the first and last stage should have the same tp degree!"
@@ -140,7 +152,8 @@ class FSTrainArguments:
                 ):
                     assert (
                         hetero_process_meshes_dp[0] % hetero_process_meshes_dp[-1] == 0
-                        or hetero_process_meshes_dp[-1] % hetero_process_meshes_dp[0] == 0
+                        or hetero_process_meshes_dp[-1] % hetero_process_meshes_dp[0]
+                        == 0
                     ), (
                         f"if untie_embeddings_and_output_weights is False and  hetero_process_meshes_dp[0] and hetero_process_meshes_dp[-1] are different, "
                         "the hetero_process_meshes_dp[0] should be divisible by hetero_process_meshes_dp[-1] or hetero_process_meshes_dp[-1] should be divisible by hetero_process_meshes_dp[0] currently!"
@@ -159,7 +172,8 @@ class FSTrainArguments:
             # Model layer splits
             if self.args.hetero_pipeline_layer_split is None:
                 num_layers_per_pipeline_stage = (
-                    self.args.num_layers // self.args.transformer_pipeline_model_parallel_size
+                    self.args.num_layers
+                    // self.args.transformer_pipeline_model_parallel_size
                 )
                 self.args.hetero_pipeline_layer_split = [
                     num_layers_per_pipeline_stage
@@ -172,7 +186,9 @@ class FSTrainArguments:
                     self.args.hetero_pipeline_layer_split
                 ), f"pipeline_model_parallel_size {self.args.pipeline_model_parallel_size} should be equal to the length of hetero_pipeline_layer_split {self.args.hetero_pipeline_layer_split}"
             setattr(
-                self.args, "all_pipeline_model_parallel_size", self.args.pipeline_model_parallel_size
+                self.args,
+                "all_pipeline_model_parallel_size",
+                self.args.pipeline_model_parallel_size,
             )
 
             hetero_process_meshes = []
@@ -209,7 +225,10 @@ class FSTrainArguments:
                     self.args.expert_model_parallel_size = ep
                     self.args.data_parallel_size = dp
                     self.args.pipeline_model_parallel_size = pp
-                    if self.args.expert_tensor_parallel_size_per_process_mesh is not None:
+                    if (
+                        self.args.expert_tensor_parallel_size_per_process_mesh
+                        is not None
+                    ):
                         self.args.expert_tensor_parallel_size = (
                             self.args.expert_tensor_parallel_size_per_process_mesh[
                                 current_process_mesh_idx
@@ -224,8 +243,11 @@ class FSTrainArguments:
 
                 accumulated_world_size += temp_world_size
                 current_process_mesh_idx += 1
-
-            
+        # DeepSeek-V4 Temporary
+        if self.args.enable_hyper_connections:
+            assert not self.args.overlap_moe_expert_parallel_comm, "Hyper-connection is not supported with overlap_moe_expert_parallel_comm yet!"
+        if self.args.experimental_attention_variant == "dsv4_hybrid":
+            assert self.args.context_parallel_size == 1, "Context parallelism is not supported with dsv4_hybrid attention variant yet!"
 
     def post_validate_args(self):
         """Post-validate the arguments after Megatron function `validate_args`."""
@@ -260,7 +282,10 @@ class FSTrainArguments:
                             f"for [{recom_config_name}] refined recompute "
                             f"configuration, the sum [{len(cur_pp_stage_per_mc)}] of n0, n1, ... of sub-list should be equal to nums_micro_batch [{args.global_batch_size // (args.micro_batch_size * args.data_parallel_size)}]."
                         )
-                        if "method" in recom_config_name or "granularity" in recom_config_name:
+                        if (
+                            "method" in recom_config_name
+                            or "granularity" in recom_config_name
+                        ):
                             assert all(
                                 val == 0 or val == 1 for val in cur_pp_stage_per_mc
                             ), f"the config-flag of {recom_config_name} must be 0 or 1"
@@ -287,40 +312,51 @@ class FSTrainArguments:
                     "need to use a recompute method "
                 )
 
-            args.recompute_granularity_per_stage_micro_batch = _parse_recompute_refined_config(
-                args.recompute_granularity_per_stage_micro_batch,
-                "recompute_granularity_per_stage_micro_batch",
+            args.recompute_granularity_per_stage_micro_batch = (
+                _parse_recompute_refined_config(
+                    args.recompute_granularity_per_stage_micro_batch,
+                    "recompute_granularity_per_stage_micro_batch",
+                )
             )
-            args.recompute_method_per_stage_micro_batch = _parse_recompute_refined_config(
-                args.recompute_method_per_stage_micro_batch, "recompute_method_per_stage_micro_batch"
+            args.recompute_method_per_stage_micro_batch = (
+                _parse_recompute_refined_config(
+                    args.recompute_method_per_stage_micro_batch,
+                    "recompute_method_per_stage_micro_batch",
+                )
             )
-            args.recompute_num_layers_per_stage_micro_batch = _parse_recompute_refined_config(
-                args.recompute_num_layers_per_stage_micro_batch,
-                "recompute_num_layers_per_stage_micro_batch",
+            args.recompute_num_layers_per_stage_micro_batch = (
+                _parse_recompute_refined_config(
+                    args.recompute_num_layers_per_stage_micro_batch,
+                    "recompute_num_layers_per_stage_micro_batch",
+                )
             )
 
         # DualPipeV related
         if args.use_dualpipev:
             assert args.pipeline_model_parallel_size > 1, (
                 "DualPipeV can only be used for pipeline scheduling in MoE models, "
-            "thus requiring both pipeline parallelism and expert parallelism."
+                "thus requiring both pipeline parallelism and expert parallelism."
             )
             assert args.expert_model_parallel_size > 1, (
                 "DualPipeV can only be used for pipeline scheduling in MoE models, "
-            "thus requiring both pipeline parallelism and expert parallelism."
+                "thus requiring both pipeline parallelism and expert parallelism."
             )
 
             middle_stage_layers = args.num_layers
             num_middle_stages = args.pipeline_model_parallel_size
             if args.decoder_first_pipeline_num_layers is not None:
-                middle_stage_layers = middle_stage_layers - args.decoder_first_pipeline_num_layers
+                middle_stage_layers = (
+                    middle_stage_layers - args.decoder_first_pipeline_num_layers
+                )
                 num_middle_stages = num_middle_stages - 1
                 assert args.decoder_first_pipeline_num_layers % 2 == 0, (
                     "The first pipeline stage must contain an even number of Transformer layers, "
                     "so that DualPipeV can split it into two model chunks."
                 )
             if args.decoder_last_pipeline_num_layers is not None:
-                middle_stage_layers = middle_stage_layers - args.decoder_last_pipeline_num_layers
+                middle_stage_layers = (
+                    middle_stage_layers - args.decoder_last_pipeline_num_layers
+                )
                 num_middle_stages = num_middle_stages - 1
                 assert args.decoder_last_pipeline_num_layers % 2 == 0, (
                     "The last pipeline stage must contain an even number of Transformer layers, "
@@ -328,111 +364,110 @@ class FSTrainArguments:
                 )
             if num_middle_stages > 0:
                 assert middle_stage_layers > 0, "Layers can not be empty"
-                assert middle_stage_layers % num_middle_stages == 0, "Layers must be even split"
+                assert (
+                    middle_stage_layers % num_middle_stages == 0
+                ), "Layers must be even split"
                 num_layers_in_middle_stages = middle_stage_layers // num_middle_stages
                 assert num_layers_in_middle_stages % 2 == 0, (
                     "The middle pipeline stage must contain an even number of Transformer layers, "
                     "so that DualPipeV can split it into two model chunks."
                 )
 
-            assert args.moe_shared_expert_overlap is False, (
-                    " DualPipeV does not support simultaneous use with moe_shared_expert_overlap currently."
-            )
+            assert (
+                args.moe_shared_expert_overlap is False
+            ), " DualPipeV does not support simultaneous use with moe_shared_expert_overlap currently."
 
             if args.moe_fb_overlap:
-                assert args.overlap_grad_reduce is False and args.overlap_param_gather is False, (
+                assert (
+                    args.overlap_grad_reduce is False
+                    and args.overlap_param_gather is False
+                ), (
                     " DualPipeV configured with moe_fb_overlap is incompatible with either overlap_grad_reduce or overlap_param_gather. "
                     " When moe_fb_overlap is enabled, DualPipeV activates the DW-split mechanism provided by Transformer Engine, "
                     " which causes all param.grad attributes to be None during the backward-for-inputs phase. "
                     " This absence of gradient tensors violates the assumptions of both overlap_grad_reduce and overlap_param_gather, precipitating an assertion failure within DDP."
                 )
-                assert not args.moe_use_legacy_grouped_gemm, \
-                    'delay_wgrad_compute is not supported with legacy groupedgemm implementation'
-                assert args.transformer_impl == 'transformer_engine', \
-                    'delay_wgrad_compute is only supported with transformer_engine implementation'
+                assert (
+                    args.transformer_impl == 'transformer_engine'
+                ), 'delay_wgrad_compute is only supported with transformer_engine implementation'
 
-            assert args.untie_embeddings_and_output_weights is True, (
-                " DualPipeV is not supported with shared embedding and lm head"
-            )
-            assert args.mtp_num_layers is None, (
-                "DualPipeV is not supported with multi-token-predictor currently"
-            )
+            assert (
+                args.untie_embeddings_and_output_weights is True
+            ), " DualPipeV is not supported with shared embedding and lm head"
+            assert (
+                args.mtp_num_layers is None
+            ), "DualPipeV is not supported with multi-token-predictor currently"
 
         if args.peft_type is not None:
-            assert args.transformer_impl == 'transformer_engine', \
-                'PEFT is only supported with transformer_engine implementation'
-            if args.num_experts is not None and args.moe_shared_expert_intermediate_size is not None:
-                assert not args.moe_shared_expert_overlap, \
-                    'PEFT is incompatible with moe_shared_expert_overlap'
+            assert (
+                args.transformer_impl == 'transformer_engine'
+            ), 'PEFT is only supported with transformer_engine implementation'
+            if (
+                args.num_experts is not None
+                and args.moe_shared_expert_intermediate_size is not None
+            ):
+                assert (
+                    not args.moe_shared_expert_overlap
+                ), 'PEFT is incompatible with moe_shared_expert_overlap'
             assert args.num_experts is None, "PEFT is not tested with MoE currently"
-            assert args.recompute_method is None and args.recompute_granularity is None and args.recompute_num_layers is None, "PEFT will raise comfilcts with recompute currently"
-            assert args.ckpt_format == 'torch', "PEFT is only tested with torch format checkpoint"
+            assert (
+                args.recompute_method is None
+                and args.recompute_granularity is None
+                and args.recompute_num_layers is None
+            ), "PEFT will raise comfilcts with recompute currently"
+            assert (
+                args.ckpt_format == 'torch'
+            ), "PEFT is only tested with torch format checkpoint"
 
-        # DualPipeV related
-        if args.use_dualpipev:
-            assert args.pipeline_model_parallel_size > 1, (
-                "DualPipeV can only be used for pipeline scheduling in MoE models, "
-            "thus requiring both pipeline parallelism and expert parallelism."
-            )
-            assert args.expert_model_parallel_size > 1, (
-                "DualPipeV can only be used for pipeline scheduling in MoE models, "
-            "thus requiring both pipeline parallelism and expert parallelism."
-            )
-
-            middle_stage_layers = args.num_layers
-            num_middle_stages = args.pipeline_model_parallel_size
-            if args.decoder_first_pipeline_num_layers is not None:
-                middle_stage_layers = middle_stage_layers - args.decoder_first_pipeline_num_layers
-                num_middle_stages = num_middle_stages - 1
-                assert args.decoder_first_pipeline_num_layers % 2 == 0, (
-                    "The first pipeline stage must contain an even number of Transformer layers, "
-                    "so that DualPipeV can split it into two model chunks."
+        # Engram related.
+        if self.args.use_engram:
+            if self.args.engram_embedding_parallel_method == "allreduce":
+                if self.args.rank == 0:
+                    warnings.warn(
+                        f"[rank0]: We do not recommend using allreduce for engram embedding, this is deprecated and will be removed in a later version.",
+                        DeprecationWarning,
+                    )
+                if self.args.engram_embedding_parallel_size is not None:
+                    warnings.warn(
+                        "[rank0]: If set the embedding_parallel_method to allreduce, "
+                        "the embedding module will be the tensor_parallel.layers.VocabParallelEmbedding with tensor_parallel."
+                        "So the embedding_parallel_size is useless and set to None."
+                    )
+                    self.args.engram_embedding_parallel_size = None
+            elif self.args.engram_embedding_parallel_method == "alltoall":
+                assert (
+                    self.args.engram_embedding_parallel_size is not None
+                ), "embedding parallel size should be specified when using alltoall"
+            else:
+                raise ValueError(
+                    f"Invalid embedding parallel method: {self.args.engram_embedding_parallel_method}"
                 )
-            if args.decoder_last_pipeline_num_layers is not None:
-                middle_stage_layers = middle_stage_layers - args.decoder_last_pipeline_num_layers
-                num_middle_stages = num_middle_stages - 1
-                assert args.decoder_last_pipeline_num_layers % 2 == 0, (
-                    "The last pipeline stage must contain an even number of Transformer layers, "
-                    "so that DualPipeV can split it into two model chunks."
+            if self.args.engram_offload_embedding_optimizer_states:
+                assert (
+                    self.args.engram_embedding_parallel_method == "alltoall"
+                ), f"Offloading embedding optimizer states is only supported when using alltoall for engram embedding parallelism, now is {self.args.engram_embedding_parallel_method}."
+                assert (
+                    self.args.optimizer_cpu_offload
+                ), "Offloading embedding optimizer states requires optimizer_cpu_offload to be enabled."
+                warnings.warn(
+                    "Offloading embedding optimizer states will offload all embedding optimizer states to CPU, which may cause slowdown. "
+                    "Please make sure this is what you want. This is typically used to save GPU memory when Engram embedding is large while accelerators are limited."
+                    "If you do not want to offload all embedding optimizer states to CPU, please disable this and set the --optimizer-offload-fraction to a value less than 1 to offload part of the optimizer states to CPU."
+                    "Of course you can set the --optimizer-offload-fraction to offload other params meanwhile enable this to offload all embedding optimizer states to CPU."
                 )
-            if num_middle_stages > 0:
-                assert middle_stage_layers > 0, "Layers can not be empty"
-                assert middle_stage_layers % num_middle_stages == 0, "Layers must be even split"
-                num_layers_in_middle_stages = middle_stage_layers // num_middle_stages
-                assert num_layers_in_middle_stages % 2 == 0, (
-                    "The middle pipeline stage must contain an even number of Transformer layers, "
-                    "so that DualPipeV can split it into two model chunks."
-                )
-
-            assert args.moe_shared_expert_overlap is False, (
-                    " DualPipeV does not support simultaneous use with moe_shared_expert_overlap currently."
-            )
-
-            if args.moe_fb_overlap:
-                assert args.overlap_grad_reduce is False and args.overlap_param_gather is False, (
-                    " DualPipeV configured with moe_fb_overlap is incompatible with either overlap_grad_reduce or overlap_param_gather. "
-                    " When moe_fb_overlap is enabled, DualPipeV activates the DW-split mechanism provided by Transformer Engine, "
-                    " which causes all param.grad attributes to be None during the backward-for-inputs phase. "
-                    " This absence of gradient tensors violates the assumptions of both overlap_grad_reduce and overlap_param_gather, precipitating an assertion failure within DDP."
-                )
-                assert not args.moe_use_legacy_grouped_gemm, \
-                    'delay_wgrad_compute is not supported with legacy groupedgemm implementation'
-                assert args.transformer_impl == 'transformer_engine', \
-                    'delay_wgrad_compute is only supported with transformer_engine implementation'
-
-            assert args.untie_embeddings_and_output_weights is True, (
-                " DualPipeV is not supported with shared embedding and lm head"
-            )
-            assert args.mtp_num_layers is None, (
-                "DualPipeV is not supported with multi-token-predictor currently"
-            )
-
-        if args.peft_type is not None:
-                assert args.transformer_impl == 'transformer_engine', \
-                    'PEFT is only supported with transformer_engine implementation'
-                assert args.num_experts is None, "PEFT is not tested with MoE currently"
-                assert args.recompute_method is None and args.recompute_granularity is None and args.recompute_num_layers is None, "PEFT will raise comfilcts with recompute currently"
-                assert args.ckpt_format == 'torch', "PEFT is only tested with torch format checkpoint"
+            assert (
+                not self.args.use_megatron_fsdp
+            ), "Megatron FSDP is not supported yet; support is planned for a later version."
+            assert (
+                not self.args.init_model_with_meta_device
+            ), "Init_model_with_meta_device is not supported yet; support is planned for a later version."
+            assert (
+                self.args.use_distributed_optimizer
+            ), "When use engram, distributed_optimizer must be enabled, because there is a bug caused by allreduce grad norm in model parallel group when do not use distributed_optimizer. We have not found a pretty solution yet, so disable it temporarily."
+        assert not (
+            args.pipeline_model_parallel_size == 1
+            and args.overlap_moe_expert_parallel_comm
+        ), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
 
 
 def _add_hetero_args(parser):
@@ -442,7 +477,18 @@ def _add_hetero_args(parser):
     group.add_argument(
         "--enable-hetero",
         action="store_true",
-        help="the mode of heterogeneous training",
+        help="Enable the mode of heterogeneous training.",
+    )
+    group.add_argument(
+        "--hetero-pipeline-layer-split",
+        nargs="*",
+        type=int,
+        default=None,
+        help=(
+            "Incompatible with --num-layers-per-virtual-pipeline-stage for now. "
+            "hetero-pipeline-layer-split must be in the form: layers_0 layers_1 ... layers_n. "
+            "The number of the list should be equal to pipeline-model-parallel-size."
+        ),
     )
     group.add_argument(
         "--hetero-device-types",
@@ -456,17 +502,6 @@ def _add_hetero_args(parser):
         type=str,
         default=None,
         help="the current device type",
-    )
-    group.add_argument(
-        "--hetero-pipeline-layer-split",
-        nargs="*",
-        type=int,
-        default=None,
-        help=(
-            "Incompatible with --num-layers-per-virtual-pipeline-stage for now. "
-            "hetero-pipeline-layer-split must be in the form: layers_0 layers_1 ... layers_n. "
-            "The number of the list should be equal to pipeline-model-parallel-size."
-        ),
     )
     group.add_argument(
         "--hetero-process-meshes",
@@ -501,11 +536,7 @@ def _add_hetero_args(parser):
 def _add_auto_tuner_args(parser):
     """Add auto tuner arguments (FlagScale specific)."""
     group = parser.add_argument_group(title="flagscale auto tuner")
-    group.add_argument(
-        "--auto-tune",
-        action="store_true",
-        help="use auto tuner",
-    )
+    group.add_argument("--auto-tune", action="store_true", help="use auto tuner")
     return parser
 
 
@@ -530,12 +561,7 @@ def _add_peft_args(parser):
     """Add PEFT / LoRA arguments (FlagScale specific)."""
     group = parser.add_argument_group(title="flagscale peft")
 
-    group.add_argument(
-        "--peft-type",
-        type=str,
-        default=None,
-        help="PEFT type",
-    )
+    group.add_argument("--peft-type", type=str, default=None, help="PEFT type")
     group.add_argument(
         "--lora-target-modules",
         nargs="*",
@@ -557,21 +583,10 @@ def _add_peft_args(parser):
             "linear_fc1, linear_fc2. Default selects all."
         ),
     )
+    group.add_argument("--lora-dim", type=int, default=8)
+    group.add_argument("--lora-alpha", type=int, default=16)
     group.add_argument(
-        "--lora-dim",
-        type=int,
-        default=8,
-    )
-    group.add_argument(
-        "--lora-alpha",
-        type=int,
-        default=16,
-    )
-    group.add_argument(
-        "--lora-dropout",
-        type=float,
-        default=0.0,
-        help="Dropout prob of lora linear",
+        "--lora-dropout", type=float, default=0.0, help="Dropout prob of lora linear"
     )
     group.add_argument(
         "--lora-dropout-position",
@@ -600,59 +615,116 @@ def _add_peft_args(parser):
 def _add_network_size_args(parser):
     group = parser.add_argument_group(title='flagscale network size')
 
-    group.add_argument('--norm-init-weight', type=float, default=None,
-                       help="Norm weight initialization.")
-    group.add_argument('--multiple-of', type=int, default=None,
-                       help='Multiplier for setting Feed-Forward Network hidden size when swiglu.')
-    group.add_argument('--hidden-dim-multiplier', type=float, default=None,
-                       help='Custom Multiplier for setting Feed-Forward Network hidden dim when swiglu.')
+    group.add_argument(
+        '--norm-init-weight',
+        type=float,
+        default=None,
+        help="Norm weight initialization.",
+    )
+    group.add_argument(
+        '--multiple-of',
+        type=int,
+        default=None,
+        help='Multiplier for setting Feed-Forward Network hidden size when swiglu.',
+    )
+    group.add_argument(
+        '--hidden-dim-multiplier',
+        type=float,
+        default=None,
+        help='Custom Multiplier for setting Feed-Forward Network hidden dim when swiglu.',
+    )
     return parser
 
 
 def _add_logging_args(parser):
     group = parser.add_argument_group(title='flagscale logging')
 
-    group.add_argument('--wandb-mode', type=str, choices=['online', 'offline', 'disabled'], default='offline',
-                       help='Can be "online", "offline" or "disabled". Defaults to "offline".')
-    group.add_argument('--wandb-api-key', type=str, default='',
-                       help='The wandb API keys and must be provided if using online mode.')
-    group.add_argument('--wandb-log-model', action='store_true',
-                       help='If set, write model to wandb.')
-    group.add_argument('--wandb-log-model-interval', type=int, default=1000,
-                       help='The interval to save the model to wandb.')
+    group.add_argument(
+        '--wandb-mode',
+        type=str,
+        choices=['online', 'offline', 'disabled'],
+        default='offline',
+        help='Can be "online", "offline" or "disabled". Defaults to "offline".',
+    )
+    group.add_argument(
+        '--wandb-api-key',
+        type=str,
+        default='',
+        help='The wandb API keys and must be provided if using online mode.',
+    )
+    group.add_argument(
+        '--wandb-log-model', action='store_true', help='If set, write model to wandb.'
+    )
+    group.add_argument(
+        '--wandb-log-model-interval',
+        type=int,
+        default=1000,
+        help='The interval to save the model to wandb.',
+    )
     return parser
 
 
 def _add_training_args(parser):
     group = parser.add_argument_group(title='flagscale training')
 
-    group.add_argument('--recompute-granularity-per-stage-micro-batch', nargs='*', type=str, default=None,
-                       help='used with recompute-granularity=full, setting recompute granularity'
-                       'of each stage and each micro-batch. This argument must be a two-dimension list, '
-                       'the sum of the first item of all the sub-lists should be equal to pipeline-model-parallel-size.'
-                       'Every sub-list is in the form: n0, flag0, n1, flag1,... except the first item, which is the stage number.'
-                       'The sum of n0, n1, ... should be equal to nums-micro-batch.'
-                       'granularity flag: 0 means turning off full recompute, 1 means turning on')
-    group.add_argument('--recompute-method-per-stage-micro-batch', nargs='*', type=str, default=None,
-                       help='used with recompute-granularity=full, setting recompute method '
-                       'of each stage and each micro-batch. This argument must be a two-dimension list, '
-                       'the sum of the first item of all the sub-lists should be equal to pipeline-model-parallel-size.'
-                       'Every sub-list is in the form: n0, flag0, n1, flag1,... except the first item, which is the stage number.'
-                       'The sum of n0, n1, ... should be equal to nums-micro-batch.'
-                       'method: 0 means uniform, 1 means block')
-    group.add_argument('--recompute-num-layers-per-stage-micro-batch', nargs='*', type=str, default=None,
-                       help='used with recompute-granularity=full, setting recompute num layers '
-                       'of each stage and each micro-batch. This argument must be a two-dimension list, '
-                       'Every sub-list is in the form: n0, num_laryers0, n1, num_laryers1,... except the first item, which is the stage number.'
-                       'The sum of n0, n1, ... should be equal to nums-micro-batch. ')
-    group.add_argument('--skip-samples-range', nargs='+', type=int, default=None,
-                       help='Range of samples to skip during training.')
-    group.add_argument('--skip-iters-range', nargs='+', type=int, default=None,
-                       help='Range of iterations to skip during training.')
-    group.add_argument('--use-dualpipev', action='store_true',
-                       help='Use DualPipeV pipeline schedule method')
-    group.add_argument('--moe-fb-overlap', action='store_true',
-                       help='DualPipeV overlapping of moe a2a communication and forward/backward computation')
+    group.add_argument(
+        '--recompute-granularity-per-stage-micro-batch',
+        nargs='*',
+        type=str,
+        default=None,
+        help='used with recompute-granularity=full, setting recompute granularity'
+        'of each stage and each micro-batch. This argument must be a two-dimension list, '
+        'the sum of the first item of all the sub-lists should be equal to pipeline-model-parallel-size.'
+        'Every sub-list is in the form: n0, flag0, n1, flag1,... except the first item, which is the stage number.'
+        'The sum of n0, n1, ... should be equal to nums-micro-batch.'
+        'granularity flag: 0 means turning off full recompute, 1 means turning on',
+    )
+    group.add_argument(
+        '--recompute-method-per-stage-micro-batch',
+        nargs='*',
+        type=str,
+        default=None,
+        help='used with recompute-granularity=full, setting recompute method '
+        'of each stage and each micro-batch. This argument must be a two-dimension list, '
+        'the sum of the first item of all the sub-lists should be equal to pipeline-model-parallel-size.'
+        'Every sub-list is in the form: n0, flag0, n1, flag1,... except the first item, which is the stage number.'
+        'The sum of n0, n1, ... should be equal to nums-micro-batch.'
+        'method: 0 means uniform, 1 means block',
+    )
+    group.add_argument(
+        '--recompute-num-layers-per-stage-micro-batch',
+        nargs='*',
+        type=str,
+        default=None,
+        help='used with recompute-granularity=full, setting recompute num layers '
+        'of each stage and each micro-batch. This argument must be a two-dimension list, '
+        'Every sub-list is in the form: n0, num_laryers0, n1, num_laryers1,... except the first item, which is the stage number.'
+        'The sum of n0, n1, ... should be equal to nums-micro-batch. ',
+    )
+    group.add_argument(
+        '--skip-samples-range',
+        nargs='+',
+        type=int,
+        default=None,
+        help='Range of samples to skip during training.',
+    )
+    group.add_argument(
+        '--skip-iters-range',
+        nargs='+',
+        type=int,
+        default=None,
+        help='Range of iterations to skip during training.',
+    )
+    group.add_argument(
+        '--use-dualpipev',
+        action='store_true',
+        help='Use DualPipeV pipeline schedule method',
+    )
+    group.add_argument(
+        '--moe-fb-overlap',
+        action='store_true',
+        help='DualPipeV overlapping of moe a2a communication and forward/backward computation',
+    )
     return parser
 
 
@@ -660,127 +732,228 @@ def _add_learning_rate_args(parser):
     group = parser.add_argument_group(title='flagscale learning rate')
 
     ## stablelm2-scheduler consists of multiple stages
-    group.add_argument('--lr-decay-stablelm2-cosine-samples', type=int, default=0,
-                       help='Samples number of cosine scheduler including warmup samples, used in stablelm2 scheduler.')
-    group.add_argument('--lr-decay-stablelm2-cosine-max-lr', type=float, default=None,
-                       help='Maximum lr of cosine scheduler, used in stablelm2 scheduler.')
-    group.add_argument('--lr-decay-stablelm2-cosine-period-samples', type=int, default=0,
-                       help='Period of cosine scheduler, used in stablelm2 scheduler.')
-    group.add_argument('--lr-decay-stablelm2-rsqrt-samples', type=int, default=0,
-                       help='Samples number of rsqrt scheduler used in stablelm2 scheduler.')
-    group.add_argument('--lr-decay-stablelm2-decay-samples', type=int, default=0,
-                       help='Samples number of decay scheduler used in stablelm2 scheduler.')
-    group.add_argument('--lr-decay-stablelm2-alpha', type=float, default=1.0,
-                       help='Numerator used in stablelm2 scheduler.')
-    group.add_argument('--lr-decay-stablelm2-beta', type=float, default=0.0,
-                       help='Denominator used in stablelm2 scheduler.')
+    group.add_argument(
+        '--lr-decay-stablelm2-cosine-samples',
+        type=int,
+        default=0,
+        help='Samples number of cosine scheduler including warmup samples, used in stablelm2 scheduler.',
+    )
+    group.add_argument(
+        '--lr-decay-stablelm2-cosine-max-lr',
+        type=float,
+        default=None,
+        help='Maximum lr of cosine scheduler, used in stablelm2 scheduler.',
+    )
+    group.add_argument(
+        '--lr-decay-stablelm2-cosine-period-samples',
+        type=int,
+        default=0,
+        help='Period of cosine scheduler, used in stablelm2 scheduler.',
+    )
+    group.add_argument(
+        '--lr-decay-stablelm2-rsqrt-samples',
+        type=int,
+        default=0,
+        help='Samples number of rsqrt scheduler used in stablelm2 scheduler.',
+    )
+    group.add_argument(
+        '--lr-decay-stablelm2-decay-samples',
+        type=int,
+        default=0,
+        help='Samples number of decay scheduler used in stablelm2 scheduler.',
+    )
+    group.add_argument(
+        '--lr-decay-stablelm2-alpha',
+        type=float,
+        default=1.0,
+        help='Numerator used in stablelm2 scheduler.',
+    )
+    group.add_argument(
+        '--lr-decay-stablelm2-beta',
+        type=float,
+        default=0.0,
+        help='Denominator used in stablelm2 scheduler.',
+    )
     return parser
 
 
 def _add_checkpointing_args(parser):
     group = parser.add_argument_group(title='flagscale checkpointing')
-    
-    group.add_argument('--rampup-save-interval', type=int, default=None,
-                       help='Number of iterations between checkpoint saves.in the ramup phase.')
-    group.add_argument('--save-when-num-microbatches-change', action='store_true',
-                       help='Save param name to index maps only')
+
+    group.add_argument(
+        '--rampup-save-interval',
+        type=int,
+        default=None,
+        help='Number of iterations between checkpoint saves.in the ramup phase.',
+    )
+    group.add_argument(
+        '--save-when-num-microbatches-change',
+        action='store_true',
+        help='Save param name to index maps only',
+    )
     return parser
 
 
 def _add_distributed_args(parser):
     group = parser.add_argument_group(title='flagscale distributed')
-    
-    group.add_argument('--standalone-embedding-stage', action='store_true',
-                       default=False, help='If set, *input* embedding layer '
-                       'is placed on its own pipeline stage, without any '
-                       'transformer layers. (For T5, this flag currently only '
-                       'affects the encoder embedding.)')
-    group.add_argument('--use-partial-reduce-for-shared-embedding', action='store_true',
-                       help='Use partial reduce for shared word embedding.')
-    group.add_argument('--no-shared-fs', action='store_true', 
-                       help='Indicate whether not running on a shared file system.')
+
+    group.add_argument(
+        '--standalone-embedding-stage',
+        action='store_true',
+        default=False,
+        help='If set, *input* embedding layer '
+        'is placed on its own pipeline stage, without any '
+        'transformer layers. (For T5, this flag currently only '
+        'affects the encoder embedding.)',
+    )
+    group.add_argument(
+        '--use-partial-reduce-for-shared-embedding',
+        action='store_true',
+        help='Use partial reduce for shared word embedding.',
+    )
+    group.add_argument(
+        '--no-shared-fs',
+        action='store_true',
+        help='Indicate whether not running on a shared file system.',
+    )
+    group.add_argument(
+        '--use-padded-layerwise-optimizer',
+        action='store_true',
+        help='Enable pad when use layer-wise optimizer.'
+    )
     return parser
 
 
 def _add_validation_args(parser):
     group = parser.add_argument_group(title='flagscale validation')
 
-    group.add_argument('--extra-eval-interval', type=int, default=None,
-                       help='Interval between running evaluation on '
-                       'extra validation sets.')
+    group.add_argument(
+        '--extra-eval-interval',
+        type=int,
+        default=None,
+        help='Interval between running evaluation on ' 'extra validation sets.',
+    )
     return parser
 
 
 def _add_tokenizer_args(parser):
     group = parser.add_argument_group(title='flagscale tokenizer')
-    
-    group.add_argument('--special-tokens-file', type=str, default=None,
-                       help='Path to the BPE special tokens file.')
-    group.add_argument('--tokenizer-path', type=str, default=None,
-                       help='Path to the huggingface tokenizer.')
+
+    group.add_argument(
+        '--special-tokens-file',
+        type=str,
+        default=None,
+        help='Path to the BPE special tokens file.',
+    )
+    group.add_argument(
+        '--tokenizer-path',
+        type=str,
+        default=None,
+        help='Path to the huggingface tokenizer.',
+    )
     return parser
 
 
 def _add_data_args(parser):
     group = parser.add_argument_group(title='flagscale data')
-    
-    group.add_argument('--extra-valid-data-path', nargs='*', default=None,
-                       help='The weight, prefix list for an independent extra validation dataset. '
-                       'The accepted format is a list of weight, prefix and tag, '
-                       'e.g. weight1 prefix1 tag1 weight2 prefix2 tag2. '
-                       'The weight1 means the number of tokens in the prefix1 dataset. ')
-    group.add_argument('--finetune-dataset-type', type=str, default=None,
-                       choices=['CPT', None],
-                       help='datasets type during finetunning.')
-    group.add_argument('--apply-sft-dataset-separated-loss-mask-if-existed', action='store_true',
-                       help='If set, use sft dataset with separated loss mask files, '
-                       'if _loss_mask_document.bin and _loss_mask_document.idx existed.')
+
+    group.add_argument(
+        '--extra-valid-data-path',
+        nargs='*',
+        default=None,
+        help='The weight, prefix list for an independent extra validation dataset. '
+        'The accepted format is a list of weight, prefix and tag, '
+        'e.g. weight1 prefix1 tag1 weight2 prefix2 tag2. '
+        'The weight1 means the number of tokens in the prefix1 dataset. ',
+    )
+    group.add_argument(
+        '--finetune-dataset-type',
+        type=str,
+        default=None,
+        choices=['CPT', None],
+        help='datasets type during finetunning.',
+    )
+    group.add_argument(
+        '--apply-sft-dataset-separated-loss-mask-if-existed',
+        action='store_true',
+        help='If set, use sft dataset with separated loss mask files, '
+        'if _loss_mask_document.bin and _loss_mask_document.idx existed.',
+    )
     return parser
 
 
 def _add_vision_args(parser):
     group = parser.add_argument_group(title='flagscale vision')
-    
-    group.add_argument('--qk-layernorm-hidden-dim', action='store_true',
-                       help='Whether to layer normalize the q and k attention embeddings on hidden dimension rather than head dimension')
-    return parser
 
-
-def _add_regularization_args(parser):
-    group = parser.add_argument_group(title='flagscale regularization')
-
-    group.add_argument('--muon-matched-adamw-rms', type=float, default=0.2,
-                       help="The RMS of the matched AdamW's, typically 0.2 ~ 0.4")
-    group.add_argument('--muon-momentum', type=float, default=0.95,
-                       help='Momentum beta for muon')
-    group.add_argument('--muon-ns-steps', type=int, default=5,
-                       help='Number of Newton-Schultz iteartion steps for muon')
-    group.add_argument('--no-muon-nesterov', action='store_false',
-                       dest='muon_nesterov', default=True,
-                       help='If set, disable Nesterov momentum for muon')
+    group.add_argument(
+        '--qk-layernorm-hidden-dim',
+        action='store_true',
+        help='Whether to layer normalize the q and k attention embeddings on hidden dimension rather than head dimension',
+    )
     return parser
 
 
 def _add_flagos_args(parser):
-    group = parser.add_argument_group(title="flagscale transformer engine fl")
-    group.add_argument('--te-fl-prefer', type=str, choices=['flagos', 'vendor', 'reference'], default='vendor',
-                       help='Backend selection for transformer engine fl.')
-    group.add_argument('--te-fl-per-op', type=str, default=None,
-                       help='Backend selection for custom ops.')
-    group.add_argument('--te-fl-allow-vendors', type=str, default=None,
-                       help='Allow vendors for transformer engine fl.')
-    group.add_argument('--te-fl-deny-vendors', type=str, default=None,
-                       help='Deny vendors for transformer engine fl.')
-    group.add_argument('--enable-flag-gems', action='store_true',
-                       help='Enable flag gems to replace torch ops for distributed training.')
-    group.add_argument('--flag-gems-log-path', type=str, default=None,
-                        help='Path of flag gems logging')
+    group = parser.add_argument_group(title="flagscale fl")
     group.add_argument(
-        '--flag-gems-unused',
-        nargs='*',
-        default=None,
-        help='Flag Gems unused ops list'
+        '--mg-fl-prefer',
+        type=str,
+        choices=['cuda', 'musa', 'txda'],
+        default='',
+        help='Backend selection for megatron fl.',
     )
+    group.add_argument(
+        '--te-fl-prefer',
+        type=str,
+        choices=['flagos', 'vendor', 'reference'],
+        default='vendor',
+        help='Backend selection for transformer engine fl.',
+    )
+    group.add_argument(
+        '--te-fl-per-op',
+        type=str,
+        default=None,
+        help='Backend selection for custom ops.',
+    )
+    group.add_argument(
+        '--te-fl-allow-vendors',
+        type=str,
+        default=None,
+        help='Allow vendors for transformer engine fl.',
+    )
+    group.add_argument(
+        '--te-fl-deny-vendors',
+        type=str,
+        default=None,
+        help='Deny vendors for transformer engine fl.',
+    )
+    group.add_argument(
+        '--enable-flag-gems',
+        action='store_true',
+        help='Enable flag gems to replace torch ops for distributed training.',
+    )
+    group.add_argument(
+        '--flag-gems-log-path', type=str, default=None, help='Path of flag gems logging'
+    )
+    group.add_argument(
+        '--flag-gems-unused', nargs='*', default=None, help='Flag Gems unused ops list'
+    )
+    return parser
+
+
+def _add_flagscale_specific_args(parser):
+    """Add FlagScale-specific arguments that don't fit in other categories."""
+    group = parser.add_argument_group(title='flagscale specific')
+
+    # Inference args (not in any upstream dataclass config)
+    group.add_argument(
+        '--inference-wandb-logging-step-interval',
+        type=int,
+        default=0,
+        help='Step interval for logging inference metrics to wandb. '
+        'Default to 0 to disable inference wandb logging.',
+    )
+
     return parser
 
 
@@ -805,6 +978,6 @@ def add_flagscale_arguments(parser):
     parser = _add_auto_tuner_args(parser)
     parser = _add_auto_skip_spiky_loss(parser)
     parser = _add_peft_args(parser)
-    parser = _add_regularization_args(parser)
     parser = _add_flagos_args(parser)
+    parser = _add_flagscale_specific_args(parser)
     return parser

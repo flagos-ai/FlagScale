@@ -26,4 +26,9 @@ container_volumes:
   # Add hardware-specific volumes here if needed (e.g., cache locations)
 
 # Container options (hardware-specific settings - update as needed)
-container_options: "--gpus all --shm-size=500g --hostname flagscale_cicd --user root --ulimit nofile=65535:65535"
+container_options: >-
+  --gpus all
+  --shm-size=500g
+  --hostname flagscale_cicd
+  --user root
+  --ulimit nofile=65535:65535

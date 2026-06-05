@@ -1,0 +1,151 @@
+defaults:
+  - data
+
+system:
+  no_shared_fs: false
+  num_workers: 16
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 2
+  pipeline_model_parallel_layout: "Ett|ttmL"
+  expert_model_parallel_size: 2
+  expert_tensor_parallel_size: 1
+  finetune: false
+  no_load_rng: true
+  no_load_optim: true
+  context_parallel_size: 1
+  disable_bias_linear: true
+  reset_position_ids: true
+  reset_attention_mask: true
+  qk_layernorm: true
+  sequence_parallel: true
+  use_distributed_optimizer: false
+  use_padded_layerwise_optimizer: false
+  num_distributed_optimizer_instances: 1
+  overlap_grad_reduce: true
+  overlap_param_gather: true
+  attention_backend: auto
+  check_weight_hash_across_dp_replicas_interval: 1
+  calculate_per_token_loss: true
+  recompute_modules:
+    - mhc
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+    # ddp_reduce_scatter_with_fp32_accumulation: true
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: ${experiment.exp_name}
+    wandb_exp_name: ${experiment.exp_name}
+    log_timers_to_tensorboard: true
+    log_validation_ppl_to_tensorboard: true
+    log_throughput: true
+    # log_params_norm: true
+    log_num_zeros_in_grad: true
+    log_memory_to_tensorboard: true
+    log_memory_interval: 10
+  checkpoint:
+    no_save_optim: true
+    no_save_rng: true
+    save_interval: 100000
+
+model:
+  transformer_impl: transformer_engine
+  num_layers: 4
+  hidden_size: 768
+  num_attention_heads: 8
+  num_query_groups: 1
+  seq_length: 4096
+  max_position_embeddings: 4096
+  norm_epsilon: 1e-06
+  use_rotary_position_embeddings: true
+  rotary_base: 10000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  position_embedding_type: rope
+  untie_embeddings_and_output_weights: true
+  no_position_embedding: true
+  no_rope_fusion: true
+
+  # mla args ==================
+  multi_latent_attention: true
+  kv_lora_rank: 128
+  qk_head_dim: 128
+  qk_pos_emb_head_dim: 64
+  v_head_dim: 128
+
+  # moe args ===================
+  ffn_hidden_size: 1024
+  moe_ffn_hidden_size: 512
+  moe_grouped_gemm: true
+  moe_shared_expert_intermediate_size: 512
+  num_experts: 32
+  # moe_router_load_balancing_type: "seq_aux_loss"
+  moe_router_score_function: sqrtsoftplus
+  moe_router_enable_expert_bias: false
+  moe_router_bias_update_rate: 0.001
+  # moe_aux_loss_coeff: 0.02
+  moe_layer_freq: 1
+  # node limited routing
+  moe_router_num_groups: 1
+  moe_router_group_topk: 1
+  moe_router_topk: 4
+  moe_router_topk_scaling_factor: 2.5
+  moe_token_dispatcher_type: "alltoall"
+  # moe_permute_fusion: true
+  # v4 args
+  experimental_attention_variant: "dsv4_hybrid"
+  attention_bias: false
+  enable_hyper_connections: true
+  mhc_init_gating_factor: 1e-06
+  num_residual_streams: 4
+  mhc_sinkhorn_iterations: 20
+  dsa_indexer_head_dim: 128
+  dsa_indexer_n_heads: 64
+  dsa_indexer_topk: 2
+  dsa_indexer_loss_coeff: 0.0
+  moe_n_hash_layers: 1
+  o_groups: 2
+  o_lora_rank: 128
+  q_lora_rank: 128
+  csa_compress_ratios: "[128]*2+([128]+[4])*1+[128]"
+
+  # mtp_args
+  mtp_num_layers: 1
+
+  # training
+  seed: 42
+  micro_batch_size: 1
+  global_batch_size: 16
+  eval_iters: 0
+  train_iters: 3
+  eval_interval: 10000
+
+  # nsys profile args =================
+  # profile: true
+  # profile_step_start: 4
+  # profile_step_end: 5
+  # profile_ranks: [0,1,2,3]
+  # use_pytorch_profiler: true
+  # tensorboard_dir: ${experiment.exp_dir}/tensorboard
+  # pytorch_profiler_collect_callstack: true
+
+  optimizer:
+    optimizer: dist_muon
+    muon_tp_mode: distributed
+    clip_grad: 1.0
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 3.0e-3
+      min_lr: 3.0e-4
+      lr_warmup_fraction: 0.01
+      lr_decay_style: WSD
+      lr_wsd_decay_style: cosine
+      lr_wsd_decay_iters: 10

@@ -63,6 +63,7 @@ model:
   clip_grad: 1.0
   train_iters: 5000
   eval_iters: 0 # no valid
+  eval_interval: 1000
   micro_batch_size: 1
   global_batch_size: 4
   allow_missing_vision_projection_checkpoint: False

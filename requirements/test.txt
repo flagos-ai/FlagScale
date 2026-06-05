@@ -1,9 +1,0 @@
-# Testing dependencies
-# Includes pytest framework, coverage tools, and testing utilities
-
-coverage
-pytest
-pytest_asyncio
-pytest-cov
-pytest_mock
-pytest-random-order

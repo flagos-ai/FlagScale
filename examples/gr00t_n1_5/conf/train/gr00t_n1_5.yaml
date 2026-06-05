@@ -1,0 +1,123 @@
+system:
+  batch_size: 32
+  train_steps: 10000
+  log_freq: 10
+  grad_clip_norm: 10.0
+  use_amp: true
+  shuffle: true
+  num_workers: 8
+
+  checkpoint:
+    output_directory: ${experiment.exp_dir}
+    save_checkpoint: true
+    save_freq: 1000
+    # Path to a checkpoint directory to resume training from (e.g. outputs/gr00t_n1_5_train/checkpoints/001000)
+    # resume_from:
+
+model:
+  model_name: gr00t_n1_5
+  # Path or HuggingFace model ID for the pretrained GR00T N1.5 model
+  checkpoint_dir: /workspace/models/nvidia/GR00T-N1.5-3B
+
+  # Fine-tuning control
+  tune_llm: true
+  tune_visual: true
+  tune_projector: true
+  tune_diffusion_model: true
+  compute_dtype: bfloat16
+
+  # Embodiment tag to use for training (e.g. 'new_embodiment', 'gr1')
+  embodiment_tag: new_embodiment
+
+  # Number of future action steps predicted per forward pass.
+  # Determines action_delta_indices = [0, 1, ..., chunk_size - 1].
+  chunk_size: 16
+
+  # Padding dimensions — shorter state/action sequences are zero-padded to these sizes
+  max_state_dim: 64
+  max_action_dim: 32
+
+  normalization_mapping:
+    VISUAL: IDENTITY
+    STATE: MIN_MAX
+    ACTION: MIN_MAX
+
+  # LoRA fine-tuning (lora_rank: 0 disables LoRA)
+  # lora_rank: 0
+  # lora_alpha: 16
+  # lora_dropout: 0.1
+  # lora_full_model: false
+
+  # ============================================================
+  # Module Freezing Configuration
+  # ============================================================
+  # Freezing logic: freeze_patterns are applied first, then keep_patterns override.
+  # Patterns are regex matched against full parameter names.
+  #
+  # Common patterns for GR00T N1.5:
+  #   - "_groot_model\\.backbone\\..*"         # Entire backbone (VLM + vision)
+  #   - "_groot_model\\.action_head\\..*"       # Action diffusion head
+  #
+  # freeze:
+  #   freeze_patterns:
+  #     - "_groot_model\\.backbone\\..*"
+
+  optimizer:
+    name: AdamW
+    lr: 1.0e-4
+    betas: [0.95, 0.999]
+    eps: 1.0e-08
+    weight_decay: 1.0e-05
+    scheduler:
+      name: cosine_decay_with_warmup
+      warmup_steps: 500
+      decay_steps: 10000
+      peak_lr: 1.0e-4
+      decay_lr: 1.0e-5
+
+data:
+  dataset_type: lerobot
+  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  tolerance_s: 0.0001
+  preprocessor:
+    name: policy_preprocessor
+    steps:
+      # 1. Rename keys if needed (e.g., dataset-specific camera names)
+      - registry_name: rename_observations_processor
+        config:
+          rename_map: {}
+      # 2. Add batch dimension for single samples
+      - registry_name: to_batch_processor
+        config: {}
+      # 3. Pack video/state/action/language/embodiment; apply optional min-max normalization before padding
+      - registry_name: groot_pack_inputs
+        config:
+          state_horizon: 1
+          action_horizon: 16
+          max_state_dim: 64
+          max_action_dim: 32
+          language_key: task
+          embodiment_tag: new_embodiment
+          normalize_min_max: true
+      # 4. Eagle encode (creates eagle_content)
+      - registry_name: groot_eagle_encode
+        config: {}
+      # 5. Collate eagle_content -> eagle_* tensors
+      - registry_name: groot_eagle_collate
+        config: {}
+      # 6. Move to device
+      - registry_name: device_processor
+        config:
+          device: cuda
+          float_dtype: null
+  postprocessor:
+    name: policy_postprocessor
+    steps:
+      - registry_name: groot_action_unpack_unnormalize
+        config:
+          env_action_dim: 7
+          normalize_min_max: true
+      - registry_name: device_processor
+        config:
+          device: cpu
+          float_dtype: null

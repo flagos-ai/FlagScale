@@ -12,6 +12,7 @@ from flagscale.models.pi0.modeling_pi0 import PI0Policy
 from flagscale.models.pi05.configuration_pi05 import PI05Config
 from flagscale.models.pi05.modeling_pi05 import PI05Policy
 from flagscale.models.utils.constants import ACTION, OBS_STATE
+from flagscale.platforms import get_platform  # noqa: F401 must be before model imports
 from flagscale.runner.utils import logger
 from flagscale.train.train_pi import make_pre_post_processors
 

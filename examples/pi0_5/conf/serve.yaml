@@ -7,11 +7,11 @@ experiment:
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: serve
-    entrypoint: flagscale/serve/run_serve_pi.py
+    entrypoint: flagscale/serve/run_serve_qwen_gr00t.py
   runner:
     hostfile: null
     deploy:
-      use_fs_serve: false
+      use_fs_serve: true
   envs:
     CUDA_VISIBLE_DEVICES: 0
     CUDA_DEVICE_MAX_CONNECTIONS: 1

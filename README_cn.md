@@ -1,38 +1,69 @@
-[English](./README.md)
+[<img width="2182" height="602" alt="github+banner-20260130" src=".github/assets/banner-20260130.png" />](https://flagos.io/)
 
-<!--TODO(Qiming): replace this banner-->
-[<img width="4750" height="958" alt="github+banner__2025-11-11+13_27_10" src="https://github.com/user-attachments/assets/e63014d8-ac72-4b82-98f7-aeed9833672a" />](https://www.flagopen.ac.cn/)
+[中文版|[English](./README.md)]
 
-<!--Begin  announcements.-->
+<div align="right">
+  <a href="https://www.linkedin.com/company/flagos-community" target="_blank">
+    <img src="./docs/assets/Linkedin.png" alt="LinkIn" width="32" height="32" />
+  </a>
+
+  <a href="https://www.youtube.com/@FlagOS_Official" target="_blank">
+    <img src="./docs/assets/youtube.png" alt="YouTube" width="32" height="32" />
+  </a>
+
+  <a href="https://x.com/FlagOS_Official" target="_blank">
+    <img src="./docs/assets/x.png" alt="X" width="32" height="32" />
+  </a>
+
+  <a href="https://www.facebook.com/flagosglobalcommunity" target="_blank">
+    <img src="./docs/assets/Facebook.png" alt="Facebook" width="32" height="32" />
+  </a>
+
+  <a href="https://discord.com/invite/ubqGuFMTNE" target="_blank">
+    <img src="./docs/assets/discord.png" alt="Discord" width="32" height="32" />
+  </a>
+</div>
+
+<!--Begin Announcements.-->
+
 > [!IMPORTANT]
 >
-> **2026/01 重要更新**
+> **2026/03 更新**
 >
-> 与之前的 [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0)
-> 版本相比，FlagScale 代码仓库完成重大重构。与硬件（多芯片支持）相关的代码已经被迁移到
+> [v1.0.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0) 现已正式发布，这是首个稳定版本。
+> 自 [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0) 起，代码库已进行重大重构。
+> 针对特定硬件的多芯片支持已迁移至插件仓库，例如
 > [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) 和
-> [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL) 这类插件仓库（Plugin Repository）中。
-> 这些插件基于统一、开源的 AI 系统软件堆栈 [FlagOS](https://flagos.io/) 构建。
-> 如果你在使用或迁移到比 *v1.0.0-alpha.0* 更早的版本，请使用代码仓库的
+> [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL)。
+> 这些插件基于 [FlagOS](https://flagos.io/)（统一的开源 AI 系统软件栈）构建。
+> 如果您正在使用或从早于 *v1.0.0-alpha.0* 的版本升级，请使用
 > [`main-legacy`](https://github.com/flagos-ai/FlagScale/tree/main-legacy) 分支。
-> 此分支将在一定时间内继续接受重大缺陷修复以及一些小的更新。
-<!--End announcements.-->
+> 该分支将在一段时间内继续接收关键错误修复和小版本更新。
+
+<!--End Announcements.-->
+
 
 ## 介绍
 
-FlagScale 是 [FlagOS](https://flagos.io/) 的一部分，而 FlagOS 是一个统一的开源 AI 系统软件堆栈，
-通过无缝集成各种模型、系统和芯片技术，打造一个开放的技术生态系统。
-通过实现“一次开发、跨多种芯片迁移”，FlagOS 力图充分释放硬件的计算潜能，
-破除不同芯片软件堆栈之间的壁垒，进而有效降低解决方案的迁移开销。
+FlagScale 是 [FlagOS](https://flagos.io/) 的核心组件。FlagOS 是一个统一的开源 AI 系统软件栈，通过无缝集成各类模型、系统与芯片，构建开放的技术生态。秉承"一次开发，多芯迁移"的理念，FlagOS 旨在充分释放硬件算力潜能，打破不同芯片软件栈之间的壁垒，有效降低迁移成本。
 
-FlagScale 是一个综合而全面的软件工具包，设计用来支持大模型的整个生命周期。
-构建于若干主流开源项目（例如
-[Megatron-LM](https://github.com/NVIDIA/Megatron-LM) 和 [vLLM](https://github.com/vllm-project/vllm) 等）
-之上，FlagScale 为大模型的管理和规模扩展提供一套稳定而强大的端到端解决方案。
+作为该生态的核心工具包，FlagScale 提供统一的接口，覆盖大语言模型、多模态模型及具身智能模型的完整生命周期。它在统一的配置项和命令行界面下集成了多个开源后端引擎，支持模型训练、强化学习和推理等关键工作流，并在多种芯片厂商间保持一致的运行体验。快速上手请参阅 [快速入门指南](./docs/getting-started.md)。
 
-FlagScale 的核心目标是跨多种硬件体系结构实现平滑的规模扩缩，同时完成对计算资源极致利用，
-提升模型的性能表现。通过为模型开发、训练和部署提供至关重要的组件，
-FlagScale 力图将自身打磨成为优化大模型工作流的速度与效能时不可或缺的工具套件。
+在 FlagOS 生态中，FlagScale 与以下组件协同工作：
+- **FlagOS 插件** — 对上游 AI 框架进行硬件适配的集成组件
+- [**FlagCX**](https://docs.flagos.io/projects/FlagCX/en/latest/) — 可扩展的自适应跨芯片通信库
+- [**FlagOS-Robo**](https://github.com/flagos-ai/FlagOS-Robo) — 具身智能工作负载的基础设施
+
+FlagOS 插件项目基于广泛使用的上游开源框架构建，并对其进行扩展以支持多种 AI 芯片，为训练、强化学习和推理提供硬件兼容性和运行时集成。
+
+下表列出了 FlagOS 插件与对应上游项目的映射关系：
+
+| 任务 | FlagOS 插件项目 | 上游项目 |
+|------|----------------|---------|
+| 训练 | [Megatron-LM-FL](https://github.com/flagos-ai/Megatron-LM-FL) <br> [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) | [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) <br> [TransformerEngine](https://github.com/NVIDIA/TransformerEngine) |
+| 强化学习 | [VeRL-FL](https://github.com/flagos-ai/verl-FL) | [veRL](https://github.com/verl-project/verl) |
+| 推理 / 服务 | [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL) | [vllm](https://github.com/vllm-project/vllm) |
+
 
 ## 资源
 
@@ -58,7 +89,7 @@ FlagScale 力图将自身打磨成为优化大模型工作流的速度与效能�
 | [Aquila](https://huggingface.co/BAAI)                  | [7b.yaml](examples/aquila/conf/train/7b.yaml)                 |
 | ... | ... |
 
-### 伺服、推理
+### 服务、推理
 
 | 模型                                                     | 示例配置文件                                                          |
 | -------------------------------------------------------- | --------------------------------------------------------------------- |

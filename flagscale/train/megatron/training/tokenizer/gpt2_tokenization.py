@@ -34,9 +34,104 @@ except ImportError:
     def lru_cache():
         return lambda func: func
 
-from megatron.training.tokenizer.tokenization_utils import Trie
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
+
+
+class Trie:
+    """
+    Trie in Python. Creates a Trie out of a list of words. The trie is used to split on `added_tokens` in one pass.
+    Loose reference https://en.wikipedia.org/wiki/Trie
+    """
+
+    def __init__(self):
+        self.data = {}
+
+    def add(self, word: str):
+        if not word:
+            return
+        ref = self.data
+        for char in word:
+            ref[char] = char in ref and ref[char] or {}
+            ref = ref[char]
+        ref[""] = 1
+
+    def split(self, text: str):
+        states = OrderedDict()
+        offsets = [0]
+        skip = 0
+        for current, current_char in enumerate(text):
+            if skip and current < skip:
+                continue
+            to_remove = set()
+            reset = False
+            for start, trie_pointer in states.items():
+                if "" in trie_pointer:
+                    for lookstart, looktrie_pointer in states.items():
+                        if lookstart > start:
+                            break
+                        elif lookstart < start:
+                            lookahead_index = current + 1
+                            end = current + 1
+                        else:
+                            lookahead_index = current
+                            end = current
+                        next_char = text[lookahead_index] if lookahead_index < len(text) else None
+                        if "" in looktrie_pointer:
+                            start = lookstart
+                            end = lookahead_index
+                            skip = lookahead_index
+                        while next_char in looktrie_pointer:
+                            looktrie_pointer = looktrie_pointer[next_char]
+                            lookahead_index += 1
+                            if "" in looktrie_pointer:
+                                start = lookstart
+                                end = lookahead_index
+                                skip = lookahead_index
+                            if lookahead_index == len(text):
+                                break
+                            next_char = text[lookahead_index]
+                    offsets.append(start)
+                    offsets.append(end)
+                    reset = True
+                    break
+                elif current_char in trie_pointer:
+                    trie_pointer = trie_pointer[current_char]
+                    states[start] = trie_pointer
+                else:
+                    to_remove.add(start)
+            if reset:
+                states = {}
+            else:
+                for start in to_remove:
+                    del states[start]
+            if current >= skip and current_char in self.data:
+                states[current] = self.data[current_char]
+        for start, trie_pointer in states.items():
+            if "" in trie_pointer:
+                end = len(text)
+                offsets.append(start)
+                offsets.append(end)
+                break
+        return self._cut_text(text, offsets)
+
+    def _cut_text(self, text, offsets):
+        offsets.append(len(text))
+        tokens = []
+        start = 0
+        for end in offsets:
+            if start > end:
+                logger.error(
+                    "There was a bug in Trie algorithm in tokenization. "
+                    "Attempting to recover. Please report it anyway."
+                )
+                continue
+            elif start == end:
+                continue
+            tokens.append(text[start:end])
+            start = end
+        return tokens
 
 PRETRAINED_VOCAB_ARCHIVE_MAP = {
     'gpt2': "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json",

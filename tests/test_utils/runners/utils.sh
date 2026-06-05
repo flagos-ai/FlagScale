@@ -3,15 +3,15 @@
 
 # Logging
 log_info() {
-    echo "[INFO] $*" >&2
+    echo "[INFO] $(date +'%Y-%m-%d %H:%M:%S') - $*" >&2
 }
 
 log_error() {
-    echo "[ERROR] $*" >&2
+    echo -e "\033[0;31m[ERROR] $(date +'%Y-%m-%d %H:%M:%S') - $*\033[0m" >&2
 }
 
 log_success() {
-    echo "[SUCCESS] $*" >&2
+    echo -e "\033[0;32m[SUCCESS] $(date +'%Y-%m-%d %H:%M:%S') - $*\033[0m" >&2
 }
 
 # Validation
@@ -71,26 +71,128 @@ get_device_types() {
 }
 
 # GPU Management
-wait_for_gpu() {
-    command -v nvidia-smi &>/dev/null || return 0
 
-    local gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
-    [ "$gpu_count" -eq 0 ] && return 0
+# Fetch mem_used[] and mem_total[] arrays for nvidia
+_gpu_fetch_nvidia() {
+    mapfile -t mem_used  < <(nvidia-smi --query-gpu=memory.used  --format=csv,noheader,nounits 2>/dev/null)
+    mapfile -t mem_total < <(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null)
+}
+
+# Fetch mem_used[] and mem_total[] arrays for metax
+_gpu_fetch_metax() {
+    local mem_output
+    mem_output=$(mx-smi --show-memory 2>/dev/null)
+    mapfile -t mem_used  < <(echo "$mem_output" | awk '$1=="vram" && $2=="used"  {print $(NF-1)}')
+    mapfile -t mem_total < <(echo "$mem_output" | awk '$1=="vram" && $2=="total" {print $(NF-1)}')
+}
+
+# Fetch mem_used[] and mem_total[] arrays for ascend
+_gpu_fetch_ascend() {
+    local info pci_awk
+    info=$(npu-smi info 2>/dev/null)
+    # Match Chip rows by PCI bus ID; find last "X / Y" pattern (HBM column)
+    pci_awk='/[0-9a-fA-F]+:[0-9a-fA-F]+:[0-9a-fA-F]+\.[0-9]/ {
+        s=$0
+        while (match(s, /[0-9]+ *\/ *[0-9]+/)) { last=substr(s,RSTART,RLENGTH); s=substr(s,RSTART+RLENGTH) }
+        split(last, a, / *\/ */)
+        print a[idx]+0
+    }'
+    mapfile -t mem_used  < <(echo "$info" | awk -v idx=1 "$pci_awk")
+    mapfile -t mem_total < <(echo "$info" | awk -v idx=2 "$pci_awk")
+}
+
+# Common polling loop; args: <gpu_count> <fetch_fn>
+_gpu_poll_loop() {
+    local gpu_count=$1 fetch_fn=$2
 
     while true; do
-        mapfile -t mem_used < <(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null)
-        mapfile -t mem_total < <(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null)
-
+        "$fetch_fn"
         local need_wait=false max_pct=0
         for ((i=0; i<gpu_count; i++)); do
+            [ -z "${mem_total[i]}" ] || [ "${mem_total[i]}" -eq 0 ] && continue
             local pct=$(( mem_used[i] * 100 / mem_total[i] ))
             [ $pct -gt $max_pct ] && max_pct=$pct
             [ $pct -gt 50 ] && { need_wait=true; break; }
         done
-
         [ "$need_wait" = false ] && break
         echo "Waiting for GPU memory (current: ${max_pct}%)..."
         sleep 60
     done
     echo "GPU ready (${max_pct}% usage)"
+}
+
+wait_for_gpu() {
+    local gpu_count fetch_fn
+    if command -v nvidia-smi &>/dev/null; then
+        gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
+        fetch_fn=_gpu_fetch_nvidia
+    elif command -v mx-smi &>/dev/null; then
+        gpu_count=$(mx-smi --show-hwinfo 2>/dev/null | awk '/Attached GPUs/{print $NF}')
+        fetch_fn=_gpu_fetch_metax
+    elif command -v npu-smi &>/dev/null; then
+        gpu_count=$(npu-smi info -l 2>/dev/null | awk '/Total Count/{print $NF}')
+        fetch_fn=_gpu_fetch_ascend
+    else
+        return 0
+    fi
+    [ -z "$gpu_count" ] || [ "$gpu_count" -eq 0 ] && return 0
+    _gpu_poll_loop "$gpu_count" "$fetch_fn"
+}
+
+default_dist_backend() {
+    local platform="${1:-}"
+    case "$platform" in
+        ascend) echo "hccl" ;;
+        metax) echo "${FLAGSCALE_TEST_METAX_BACKEND:-nccl}" ;;
+        *) echo "nccl" ;;
+    esac
+}
+
+default_torch_device_type() {
+    local platform="${1:-}"
+    case "$platform" in
+        ascend) echo "npu" ;;
+        *) echo "cuda" ;;
+    esac
+}
+
+detect_accelerator_count() {
+    local platform="${1:-}"
+
+    case "$platform" in
+        ascend)
+            {
+                python - <<'PY' 2>/dev/null || true
+import torch
+try:
+    import torch_npu  # noqa: F401
+except Exception:
+    pass
+device_count = getattr(getattr(torch, "npu", None), "device_count", None)
+print(device_count() if callable(device_count) else 1)
+PY
+            } | awk '/^[0-9]+$/ { value=$1 } END { print value ? value : 1 }'
+            ;;
+        metax)
+            {
+                python - <<'PY' 2>/dev/null || mx-smi --show-hwinfo 2>/dev/null | awk '/Attached GPUs/{print $NF}' || true
+import torch
+if hasattr(torch, "maca") and hasattr(torch.maca, "device_count"):
+    print(torch.maca.device_count())
+elif hasattr(torch, "cuda") and hasattr(torch.cuda, "device_count"):
+    print(torch.cuda.device_count())
+else:
+    print(1)
+PY
+            } | awk '/^[0-9]+$/ { value=$1 } END { print value ? value : 1 }'
+            ;;
+        *)
+            {
+                python - <<'PY' 2>/dev/null || true
+import torch
+print(torch.cuda.device_count() if hasattr(torch, "cuda") else 1)
+PY
+            } | awk '/^[0-9]+$/ { value=$1 } END { print value ? value : 1 }'
+            ;;
+    esac
 }

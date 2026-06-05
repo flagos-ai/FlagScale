@@ -45,7 +45,7 @@ from megatron.training.arguments import core_transformer_config_from_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
 try:
-    from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+    from megatron.post_training.arguments import add_modelopt_args
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
     from megatron.post_training.model_provider import model_provider as model_provider_modelopt
 
@@ -70,7 +70,7 @@ from megatron.energon import (
     get_val_datasets,
 )
 
-from megatron.training.tokenizer.tokenizer import build_tokenizer
+from megatron.training.tokenizer import build_tokenizer
 from megatron.training.global_vars import get_tokenizer
 
 from flagscale.models.megatron.qwen2_5_vl.tensor_parallel import broadcast_data
@@ -85,6 +85,8 @@ from flagscale.models.megatron.qwen3_vl.transformer_config import (
     get_vision_projection_config
 )
 
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 from tools.datasets.qwenvl.data.dataset_helpers import TaskEncoder, print_error_handler
 #### especially for qwen2.5-vl ####
@@ -198,7 +200,7 @@ def get_batch(data_iterator, model: Qwen3VLModel = None) -> Tuple:
     position_ids = None
 
     # Broadcast data.
-    torch.cuda.nvtx.range_push("get_data")
+    cur_platform.range_push("get_data")
     if data_iterator is not None and get_tensor_model_parallel_rank() == 0:
         data = next(data_iterator)
         # pad_token_id = get_tokenizer().pad_token_id
@@ -225,7 +227,7 @@ def get_batch(data_iterator, model: Qwen3VLModel = None) -> Tuple:
 
     args = get_args()
     if data_text.shape[-1] == args.max_padding_length and get_pipeline_model_parallel_rank() == 0:
-        torch.cuda.empty_cache()
+        cur_platform.empty_cache()
     # shape: n_video_samples
     video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
     # shape: n_video_samples
@@ -234,23 +236,23 @@ def get_batch(data_iterator, model: Qwen3VLModel = None) -> Tuple:
 
     image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
     video_input_mask = broadcast_data(["video_input_mask"], data, torch.bool)["video_input_mask"]
-    torch.cuda.nvtx.range_pop()
+    cur_platform.range_pop()
 
-    torch.cuda.nvtx.range_push("index tokens")
+    cur_platform.range_push("index tokens")
     tokenizer = get_tokenizer()
 
     tokens = data_text.long().contiguous()
     labels = target.contiguous()
 
     assert tokens.shape == labels.shape, f"tokens: {tokens.shape} != labels: {labels.shape}"
-    torch.cuda.nvtx.range_pop()
+    cur_platform.range_pop()
 
     # NOTE: no sequence packing in LLM inputs
-    torch.cuda.nvtx.range_push("get_ltor_masks_and_position_ids")
+    cur_platform.range_push("get_ltor_masks_and_position_ids")
     attention_mask, loss_mask, position_ids = get_ltor_masks_and_position_ids(
         tokens, image_thw_grids, video_thw_grids, labels, pad_token=tokenizer.pad_token_id, second_per_grid_ts=second_per_grid_ts, ignore_index=IGNORE_IDX, model=model,
     )
-    torch.cuda.nvtx.range_pop()
+    cur_platform.range_pop()
 
     return (
         tokens,
@@ -288,7 +290,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and modelopt_args_enabled(args):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()

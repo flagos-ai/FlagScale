@@ -1,15 +1,37 @@
-[中文](./README_cn.md)
+[<img width="2182" height="602" alt="github+banner-20260130" src=".github/assets/banner-20260130.png" />](https://flagos.io/)
 
-<!--TODO(Qiming): replace this banner-->
-[<img width="4750" height="958" alt="github+banner__2025-11-11+13_27_10" src="https://github.com/user-attachments/assets/e63014d8-ac72-4b82-98f7-aeed9833672a" />](https://www.flagopen.ac.cn/)
+[[中文版](./README_cn.md)|English]
+
+<div align="right">
+  <a href="https://www.linkedin.com/company/flagos-community" target="_blank">
+    <img src="./docs/assets/Linkedin.png" alt="LinkIn" width="32" height="32" />
+  </a>
+
+  <a href="https://www.youtube.com/@FlagOS_Official" target="_blank">
+    <img src="./docs/assets/youtube.png" alt="YouTube" width="32" height="32" />
+  </a>
+
+  <a href="https://x.com/FlagOS_Official" target="_blank">
+    <img src="./docs/assets/x.png" alt="X" width="32" height="32" />
+  </a>
+
+  <a href="https://www.facebook.com/flagosglobalcommunity" target="_blank">
+    <img src="./docs/assets/Facebook.png" alt="Facebook" width="32" height="32" />
+  </a>
+
+  <a href="https://discord.com/invite/ubqGuFMTNE" target="_blank">
+    <img src="./docs/assets/discord.png" alt="Discord" width="32" height="32" />
+  </a>
+</div>
 
 <!--Begin Announcements.-->
 
 > [!IMPORTANT]
 >
-> **2026/01 UPDATE**
+> **2026/03 UPDATE**
 >
-> The codebase has been refactored since [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0).
+> [v1.0.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0) is now officially released as the first stable version.
+> The codebase has been significantly refactored since [v1.0.0-alpha.0](https://github.com/flagos-ai/FlagScale/releases/tag/v1.0.0-alpha.0).
 > The hardware-specific (multi-chip) support has been moved into plugin repositories such as
 > [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) and
 > [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL).
@@ -19,23 +41,28 @@
 > It will continue to receive critical bug fixes and minor updates for a period of time.
 <!--End Announcements.-->
 
+
 ## Overview
 
-FlagScale is part of [FlagOS](https://flagos.io/), a unified, open-source AI system software stack that
-aims to foster an open technology ecosystem by seamlessly integrating various models, systems and chips.
-By "develop once, migrate across various chips", FlagOS aims to unlock the full computational potential
-of hardware, break down the barriers between different chip software stacks, and effectively reduce
-migration costs.
+FlagScale is a core component of [FlagOS](https://flagos.io/) — a unified, open-source AI system software stack that fosters an open technology ecosystem by seamlessly integrating various models, systems, and chips. Following the principle of "develop once, migrate across various chips", FlagOS aims to unlock the full computational potential of hardware, break down barriers between different chip software stacks, and effectively reduce migration costs.To get started, see the [Getting Started Guide](./docs/getting-started.md).
 
-FlagScale is a comprehensive toolkit designed to support the entire lifecycle of large models.
-It builds on the strengths of several prominent open-source projects, including
-[Megatron-LM](https://github.com/NVIDIA/Megatron-LM) and [vLLM](https://github.com/vllm-project/vllm),
-to provide a robust, end-to-end solution for managing and scaling large models.
+As the central toolkit of this ecosystem, FlagScale provides a unified interface covering the complete lifecycle of large language models, multimodal models, and embodied AI models. It integrates multiple open-source backend engines under a single configuration and CLI interface, supporting key workflows including model training, reinforcement learning, and inference — with consistent operation across diverse chip vendors.
 
-The primary objective of FlagScale is to enable seamless scalability across diverse hardware architectures
-while maximizing computational resource efficiency and enhancing model performance.
-By offering essential components for model development, training, and deployment, FlagScale seeks to
-establish itself as an indispensable toolkit for optimizing both the speed and effectiveness of large model workflows.
+Within the FlagOS ecosystem, FlagScale works together with several other components:
+- FlagOS Plugins – hardware-adapted integrations of upstream AI frameworks
+- [FlagCX](https://docs.flagos.io/projects/FlagCX/en/latest/) – a scalable and adaptive cross-chip communication library
+- [FlagOS-Robo related](https://github.com/flagos-ai/FlagOS-Robo) – infrastructure for embodied AI workloads
+
+FlagOS plugin projects are built on top of widely used upstream open-source frameworks and extend them to support multiple AI chips. These plugins provide hardware compatibility and runtime integration for training, reinforcement learning, and inference.
+
+The following table lists the mapping between FlagOS plugins and their corresponding upstream projects.
+
+| Task | FlagOS Plugin Projects | Upstream Projects |
+|------|----------------------|-------------------|
+| Training | [Megatron-LM-FL](https://github.com/flagos-ai/Megatron-LM-FL) <br> [TransformerEngine-FL](https://github.com/flagos-ai/TransformerEngine-FL) | [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) <br> [TransformerEngine](https://github.com/NVIDIA/TransformerEngine) |
+| Reinforcement Learning | [VeRL-FL](https://github.com/flagos-ai/verl-FL) | [veRL](https://github.com/verl-project/verl) |
+| Serve / Inference | [vllm-plugin-FL](https://github.com/flagos-ai/vllm-plugin-FL) | [vllm](https://github.com/vllm-project/vllm) |
+
 
 ## Resources
 

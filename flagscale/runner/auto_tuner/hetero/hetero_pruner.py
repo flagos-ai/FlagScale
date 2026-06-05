@@ -14,6 +14,7 @@ from flagscale.runner.auto_tuner.prune.history import (
 )
 from flagscale.runner.auto_tuner.prune.pruner import Pruner
 from flagscale.runner.auto_tuner.utils import beside, compare_by_recompute
+from flagscale.runner.utils import resolve_path
 
 
 class HeteroPruner(Pruner):
@@ -35,7 +36,7 @@ class HeteroPruner(Pruner):
         self.pruned_idx_counter = 1
 
         # Robustly determine the path for the pruned history log
-        exp_dir = getattr(config.experiment, "exp_dir", os.getcwd())
+        exp_dir = resolve_path(getattr(config.experiment, "exp_dir", "."), "experiment.exp_dir")
         self.pruned_history_path = os.path.join(exp_dir, "auto_tuner", "pruned_history.csv")
 
         # Ensure the directory exists

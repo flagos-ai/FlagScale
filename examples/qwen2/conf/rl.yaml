@@ -17,6 +17,7 @@ experiment:
     hostfile: null
     ray_port: 6379
     ray_dashboard_port: 8265
+    runtime_env: /path/to/verl-FL/verl/trainer/runtime_env.yaml
   envs:
     CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
     TORCH_DEVICE_BACKEND_AUTOLOAD: 0
