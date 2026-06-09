@@ -244,8 +244,6 @@ class FSTrainArguments:
                 accumulated_world_size += temp_world_size
                 current_process_mesh_idx += 1
         # DeepSeek-V4 Temporary
-        if self.args.enable_hyper_connections:
-            assert not self.args.overlap_moe_expert_parallel_comm, "Hyper-connection is not supported with overlap_moe_expert_parallel_comm yet!"
         if self.args.experimental_attention_variant == "dsv4_hybrid":
             assert self.args.context_parallel_size == 1, "Context parallelism is not supported with dsv4_hybrid attention variant yet!"
 
@@ -461,10 +459,10 @@ class FSTrainArguments:
             assert (
                 self.args.use_distributed_optimizer
             ), "When use engram, distributed_optimizer must be enabled, because there is a bug caused by allreduce grad norm in model parallel group when do not use distributed_optimizer. We have not found a pretty solution yet, so disable it temporarily."
-        assert not (
-            args.pipeline_model_parallel_size == 1
-            and args.overlap_moe_expert_parallel_comm
-        ), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
+        # assert not (
+        #     args.pipeline_model_parallel_size == 1
+        #     and args.overlap_moe_expert_parallel_comm
+        # ), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
 
 
 def _add_hetero_args(parser):
