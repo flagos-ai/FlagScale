@@ -459,10 +459,6 @@ class FSTrainArguments:
             assert (
                 self.args.use_distributed_optimizer
             ), "When use engram, distributed_optimizer must be enabled, because there is a bug caused by allreduce grad norm in model parallel group when do not use distributed_optimizer. We have not found a pretty solution yet, so disable it temporarily."
-        # assert not (
-        #     args.pipeline_model_parallel_size == 1
-        #     and args.overlap_moe_expert_parallel_comm
-        # ), "When no pipeline and enable overlap_moe_expert_parallel_comm, a bug will occur, it will be fixed in a later version."
 
 
 def _add_hetero_args(parser):
