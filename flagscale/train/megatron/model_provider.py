@@ -22,7 +22,7 @@ import megatron.legacy.model  # isort: skip
 
 
 def model_provider(
-    model_builder: Callable, pre_process=True, post_process=True, vp_stage: Optional[int] = None, config=None, pg_collection=None,
+    model_builder: Callable, pre_process=True, post_process=True, vp_stage: Optional[int] = None, config=None, pg_collection=None, dualpipev_stage: Optional[int] = None
 ) -> Union[GPTModel, megatron.legacy.model.GPTModel, MambaModel]:
     """Builds the model.
 
@@ -59,7 +59,10 @@ def model_provider(
     if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):
         # [ModelOpt]: Use custom builder + spec when modelopt is enabled
         model_builder = modelopt_gpt_mamba_builder
+        assert not args.use_dualpipev
 
+    if dualpipev_stage is not None:
+        return model_builder(args, pre_process, post_process, vp_stage, config=config, pg_collection=pg_collection, dualpipev_stage=dualpipev_stage)
     return model_builder(args, pre_process, post_process, vp_stage, config=config, pg_collection=pg_collection)
 
 

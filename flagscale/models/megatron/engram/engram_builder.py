@@ -2,6 +2,7 @@
 # ruff: noqa: F401
 ## built-in
 import logging
+from typing import Optional
 
 from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.models.backends import BackendSpecProvider
@@ -227,7 +228,7 @@ def get_engram_decoder_block_spec(
     qk_l2_norm: bool | None = False,
     vp_stage: int | None = None,
     pp_rank: int | None = None,
-    is_dualpipev_first_chunk: bool | None = False,
+    dualpipev_stage: Optional[int] = None,
     use_moe: bool | None = False,
 ) -> TransformerBlockSubmodules:
     """GPT block spec."""
@@ -317,7 +318,7 @@ def get_engram_decoder_block_spec(
         config,
         vp_stage=vp_stage,
         pp_rank=pp_rank,
-        is_dualpipev_first_chunk=is_dualpipev_first_chunk,
+        dualpipev_stage=dualpipev_stage,
     )
 
     if config.pipeline_model_parallel_layout is not None:
@@ -333,7 +334,7 @@ def get_engram_decoder_block_spec(
             config,
             vp_stage=vp_stage,
             pp_rank=pp_rank,
-            is_dualpipev_first_chunk=is_dualpipev_first_chunk,
+            dualpipev_stage=dualpipev_stage,
         )
         local_layer_specs = layer_specs[offset : offset + num_layers_to_build]
 

@@ -25,7 +25,7 @@ import megatron.legacy.model  # isort: skip
 # NOTE: Loading `megatron.legacy.model` earlier fails due to circular import
 
 
-def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None):
+def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None, dualpipev_stage=None):
     print_rank_0('building GPT model ...')
     if config is None:
         if args.yaml_cfg is not None:
@@ -68,6 +68,7 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
                     normalization=args.normalization,
                     qk_l2_norm=args.qk_l2_norm,
                     vp_stage=vp_stage,
+                    dualpipev_stage=dualpipev_stage,
                 )
             elif args.heterogeneous_layers_config_path is not None:
                 assert not (config.transformer_impl == "inference_optimized")
@@ -97,6 +98,7 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
                 transformer_layer_spec_for_mtp,
                 use_transformer_engine=use_te,
                 vp_stage=vp_stage,
+                dualpipev_stage=dualpipev_stage,
             )
 
         model = GPTModel(
@@ -116,6 +118,7 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
             mtp_block_spec=mtp_block_spec,
             vp_stage=vp_stage,
             pg_collection=pg_collection,
+            dualpipev_stage=dualpipev_stage,
         )
 
     return model

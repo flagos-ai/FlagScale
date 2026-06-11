@@ -528,15 +528,18 @@ def is_hybrid_model(args):
     return args.hybrid_layer_pattern is not None
 
 
-def is_first_or_last_pipeline_stage(vp_stage):
+def is_first_or_last_pipeline_stage(vp_stage, dualpipev_stage=None):
     """Return True if on first or last pipeline stage, taking into account virtual
     pipeline parallelism."""
     ignore_virtual = True
+    ignore_dualpipev = True
     if vp_stage is not None:
         ignore_virtual = False
+    if dualpipev_stage is not None:
+        ignore_dualpipev = False
     return (
-        mpu.is_pipeline_first_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage)
-        or mpu.is_pipeline_last_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage)
+        mpu.is_pipeline_first_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage, ignore_dualpipev=ignore_dualpipev, dualpipev_stage=dualpipev_stage)
+        or mpu.is_pipeline_last_stage(ignore_virtual=ignore_virtual, vp_stage=vp_stage, ignore_dualpipev=ignore_dualpipev, dualpipev_stage=dualpipev_stage)
     )
 
 

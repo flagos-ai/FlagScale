@@ -131,7 +131,7 @@ def get_deepseek_decoder_block_spec(
     qk_l2_norm: Optional[bool] = False,
     vp_stage: Optional[int] = None,
     pp_rank: int | None = None,
-    is_dualpipev_first_chunk: bool | None = False,
+    dualpipev_stage: Optional[int] = None,
     use_moe: bool | None = False,
 ):
     """Build decoder block spec and attach STM/HC placeholders to each local layer."""
@@ -166,7 +166,7 @@ def get_deepseek_decoder_block_spec(
         config,
         vp_stage=vp_stage,
         pp_rank=pp_rank,
-        is_dualpipev_first_chunk=is_dualpipev_first_chunk,
+        dualpipev_stage=dualpipev_stage,
     )
 
     if config.pipeline_model_parallel_layout is not None:
@@ -182,7 +182,7 @@ def get_deepseek_decoder_block_spec(
             config,
             vp_stage=vp_stage,
             pp_rank=pp_rank,
-            is_dualpipev_first_chunk=is_dualpipev_first_chunk,
+            dualpipev_stage=dualpipev_stage,
         )
         local_layer_specs = layer_specs[offset : offset + num_layers_to_build]
 

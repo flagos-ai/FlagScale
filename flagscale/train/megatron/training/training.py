@@ -149,6 +149,8 @@ from megatron.core.pipeline_parallel.utils import (
     is_pp_last_stage,
     is_vp_first_stage,
     is_vp_last_stage,
+    is_dualpipev_first_stage,
+    is_dualpipev_last_stage,
 )
 from megatron.core.optimizer import get_mup_config_overrides, get_standard_config_overrides
 from megatron.training.checkpointing import load_checkpoint
@@ -258,6 +260,8 @@ from megatron.plugin.hetero.parallel_context import get_parallel_context
 
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
+
+import megatron.plugin_flagscale
 ########## FlagScale End ##########
 
 stimer = StragglerDetector()
@@ -1180,6 +1184,17 @@ def pretrain(
             train_data_iterator.append(iterators[0])
             valid_data_iterator.append(iterators[1])
             test_data_iterator.append(iterators[2])
+    elif args.use_dualpipev:
+        train_data_iterator = []
+        valid_data_iterator = []
+        test_data_iterator = []
+        for _ in range(2):
+            iterators = build_train_valid_test_data_iterators(
+                train_valid_test_dataset_provider
+            )
+            train_data_iterator.append(iterators[0])
+            valid_data_iterator.append(iterators[1])
+            test_data_iterator.append(iterators[2])
     else:
         train_data_iterator, valid_data_iterator, test_data_iterator = (
             build_train_valid_test_data_iterators(train_valid_test_dataset_provider)
@@ -1441,26 +1456,23 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
                 model.append(this_model)
         elif args.use_dualpipev:
             model = []
-
-            pre_process, post_process = False, False
-            if mpu.is_pipeline_first_stage():
-                pre_process = True
-
-            first_model = model_provider_func(
-                pre_process=pre_process,
-                post_process=post_process,
-                is_dualpipev_first_chunk=True,
-            )
-            first_model.model_type = model_type
-            model.append(first_model)
-
-            second_model = model_provider_func(
-                pre_process=post_process,
-                post_process=pre_process,
-                is_dualpipev_first_chunk=False,
-            )
-            second_model.model_type = model_type
-            model.append(second_model)
+            for i in range(2):
+                pre_process = is_pp_first_stage(pg_collection.pp) and is_dualpipev_first_stage(
+                    dualpipev_stage=i, dualpipev_size=2
+                )
+                post_process = is_pp_first_stage(pg_collection.pp) and is_dualpipev_last_stage(
+                    dualpipev_stage=i, dualpipev_size=2
+                )
+                this_model = model_provider_func(
+                    pre_process=pre_process,
+                    post_process=post_process,
+                    config=config,
+                    pg_collection=pg_collection,
+                    dualpipev_stage=i,
+                )
+                this_model.model_type = model_type
+                this_model.dualpipev_stage = i
+                model.append(this_model)
         else:
             pre_process = is_pp_first_stage(pg_collection.pp)
             post_process = is_pp_last_stage(pg_collection.pp)
@@ -2077,7 +2089,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     if args.empty_unused_memory_level >= 2:
         cur_platform.empty_cache()
 
-    if mpu.is_pipeline_last_stage(ignore_virtual=True):
+    is_last_stage = mpu.is_pipeline_last_stage(ignore_virtual=True)
+    if args.use_dualpipev:
+        is_last_stage = mpu.is_pipeline_first_stage(ignore_virtual=True)
+    if is_last_stage:
         # Average loss across microbatches.
         loss_reduced = {}
 
