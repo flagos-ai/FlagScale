@@ -328,6 +328,7 @@ class PaliGemmaWithExpertModel(
         image_size: int = DEFAULT_IMAGE_SIZE,
         freeze_vision_encoder: bool = False,
         train_expert_only: bool = False,
+        init_weights: bool = True,
     ):
         if use_adarms is None:
             use_adarms = [False, False]
@@ -373,8 +374,9 @@ class PaliGemmaWithExpertModel(
         self.gemma_expert = PiGemmaForCausalLM(config=action_expert_config_hf)
         self.gemma_expert.model.embed_tokens = None
 
-        self.to_bfloat16_for_selected_params(precision)
-        self._set_requires_grad()
+        if init_weights:
+            self.to_bfloat16_for_selected_params(precision)
+            self._set_requires_grad()
 
     def _set_requires_grad(self):
         if self.freeze_vision_encoder:
@@ -534,7 +536,7 @@ class PaliGemmaWithExpertModel(
 class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
     """Core PI05 PyTorch model."""
 
-    def __init__(self, config: PI05Config, rtc_processor: None = None):
+    def __init__(self, config: PI05Config, rtc_processor: None = None, init_weights: bool = True):
         super().__init__()
         self.config = config
         self.rtc_processor = None
@@ -555,6 +557,7 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
             image_size=config.image_resolution[0],
             freeze_vision_encoder=getattr(config, "freeze_vision_encoder", False),
             train_expert_only=getattr(config, "train_expert_only", False),
+            init_weights=init_weights,
         )
 
         self.action_in_proj = nn.Linear(config.max_action_dim, action_expert_config.width)
@@ -891,19 +894,20 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
 class PI05Policy(TrainablePolicy):
     """PI05 Policy for LeRobot."""
 
-    def __init__(self, config: PI05Config):
+    def __init__(self, config: PI05Config, init_weights: bool = True):
         config.validate_features()
         super().__init__(config)
 
         # Initialize the core PI05 model
         # self.init_rtc_processor()
-        self.model = PI05Pytorch(config, rtc_processor=None)
+        self.model = PI05Pytorch(config, rtc_processor=None, init_weights=init_weights)
 
         # Enable gradient checkpointing if requested
         if config.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
 
-        self.model.to(config.device)
+        if init_weights:
+            self.model.to(config.device)
 
         self.reset()
 
@@ -957,9 +961,12 @@ class PI05Policy(TrainablePolicy):
                 **kwargs,
             )
 
-        # Initialize model without loading weights
-        # Check if dataset_stats were provided in kwargs
-        model = cls(config)
+        # Build the module on meta tensors first so model construction does not
+        # allocate a full set of randomly initialized weights in CPU memory.
+        from accelerate import init_empty_weights
+
+        with init_empty_weights():
+            model = cls(config, init_weights=False)
 
         # Now manually load and remap the state dict
         try:
@@ -985,9 +992,9 @@ class PI05Policy(TrainablePolicy):
                 original_state_dict = load_file(resolved_file)
                 print("✓ Loaded state dict from model.safetensors")
             except Exception as e:
-                print(f"Could not load state dict from remote files: {e}")
-                print("Returning model without loading pretrained weights")
-                return model
+                raise RuntimeError(
+                    f"Could not load PI05 checkpoint from {pretrained_name_or_path}"
+                ) from e
 
             # First, fix any key differences # see openpi `model.py, _fix_pytorch_state_dict_keys`
             fixed_state_dict = model._fix_pytorch_state_dict_keys(original_state_dict, model.config)
@@ -1010,9 +1017,36 @@ class PI05Policy(TrainablePolicy):
                 print(f"Remapped {remap_count} state dict keys")
 
             # Load the remapped state dict into the model
-            missing_keys, unexpected_keys = model.load_state_dict(
-                remapped_state_dict, strict=strict
-            )
+            try:
+                missing_keys, unexpected_keys = model.load_state_dict(
+                    remapped_state_dict, strict=strict, assign=True
+                )
+            except TypeError as e:
+                raise RuntimeError(
+                    "load_state_dict(assign=True) is required when loading into a "
+                    "meta-initialized PI05 model. Please use PyTorch >= 2.0."
+                ) from e
+
+            del original_state_dict, fixed_state_dict, remapped_state_dict
+            import gc
+
+            gc.collect()
+
+            meta_params = [name for name, param in model.named_parameters() if param.is_meta]
+            if meta_params:
+                raise RuntimeError(
+                    f"Found {len(meta_params)} meta parameters after loading checkpoint, "
+                    f"examples: {meta_params[:10]}"
+                )
+
+            meta_buffers = [
+                name for name, buf in model.named_buffers() if getattr(buf, "is_meta", False)
+            ]
+            if meta_buffers:
+                raise RuntimeError(
+                    f"Found {len(meta_buffers)} meta buffers after loading checkpoint, "
+                    f"examples: {meta_buffers[:10]}"
+                )
 
             if missing_keys:
                 print(f"Missing keys when loading state dict: {len(missing_keys)} keys")
@@ -1037,8 +1071,14 @@ class PI05Policy(TrainablePolicy):
             if not missing_keys and not unexpected_keys:
                 print("All keys loaded successfully!")
 
+            model.model.paligemma_with_expert.to_bfloat16_for_selected_params(model.config.dtype)
+            model.model.paligemma_with_expert._set_requires_grad()
+            model.to(config.device)
+
         except Exception as e:
-            print(f"Warning: Could not remap state dict keys: {e}")
+            raise RuntimeError(
+                f"Could not load PI05 pretrained weights from {pretrained_name_or_path}"
+            ) from e
 
         return model
 
