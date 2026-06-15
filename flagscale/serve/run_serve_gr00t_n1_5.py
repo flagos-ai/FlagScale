@@ -8,11 +8,13 @@ import time
 import torch
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
-import flagscale.models.vla.gr00t_n1_5.processor_gr00t  # noqa: F401  register GR00T processor steps
+# Register GR00T N1.5 processor steps.
+import flagscale.models.vla.gr00t_n1_5.processor_gr00t  # noqa: F401
 from flagscale.logger import logger
 from flagscale.models.utils.constants import ACTION
 from flagscale.serve.websocket_policy_server import WebsocketPolicyServer
-from flagscale.train.utils.train_utils import load_checkpoint
+from flagscale.train.processor import PolicyProcessorPipeline
+from flagscale.train.processor.pipeline import get_device_override
 
 
 class Policy:
@@ -31,8 +33,18 @@ class Policy:
         t_s = time.perf_counter()
         model_variant = self.config_engine.model_variant
         policy = getattr(importlib.import_module("flagscale.models.vla"), model_variant)
-        self.model, self.preprocessor, self.postprocessor = load_checkpoint(
-            self.config_engine.model, policy, self.config_engine.device
+        pretrained_dir = self.config_engine.model
+        runtime_device = getattr(self.config_engine, "device", None) or "cpu"
+        self.model = policy.from_pretrained(pretrained_dir, device=runtime_device)
+
+        self.preprocessor = PolicyProcessorPipeline.from_pretrained(
+            pretrained_dir,
+            config_filename="policy_preprocessor.json",
+            overrides=get_device_override(runtime_device),
+        )
+        self.postprocessor = PolicyProcessorPipeline.from_pretrained(
+            pretrained_dir,
+            config_filename="policy_postprocessor.json",
         )
         logger.info(f"Policy model loading latency: {time.perf_counter() - t_s:.2f}s")
 

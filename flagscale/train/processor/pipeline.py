@@ -1455,6 +1455,13 @@ RobotProcessorPipeline: TypeAlias = DataProcessorPipeline[TInput, TOutput]
 PolicyProcessorPipeline: TypeAlias = DataProcessorPipeline[TInput, TOutput]
 
 
+def get_device_override(runtime_device: str | None) -> dict[str, Any]:
+    """Return processor overrides to align checkpoint device with runtime device."""
+    if not runtime_device:
+        return {}
+    return {"device_processor": {"device": runtime_device}}
+
+
 class ObservationProcessorStep(ProcessorStep, ABC):
     """An abstract `ProcessorStep` that specifically targets the observation in a transition."""
 

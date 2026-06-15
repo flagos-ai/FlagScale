@@ -18,6 +18,7 @@ from flagscale.models.pi05.configuration_pi05 import PI05Config
 from flagscale.models.pi05.modeling_pi05 import PI05Policy
 from flagscale.models.utils.constants import ACTION, OBS_STATE
 from flagscale.runner.utils import logger
+from flagscale.train.processor.pipeline import get_device_override
 from flagscale.train.train_pi import make_pre_post_processors
 
 app = Flask(__name__)
@@ -127,7 +128,7 @@ class PI0Server:
         # Create preprocessor and postprocessor
         processor_kwargs = {}
         processor_kwargs["preprocessor_overrides"] = {
-            "device_processor": {"device": self.config_engine.device},
+            **get_device_override(getattr(self.config_engine, "device", None)),
             "normalizer_processor": {
                 "stats": dataset_stats,
                 "features": {**policy_config.input_features},
