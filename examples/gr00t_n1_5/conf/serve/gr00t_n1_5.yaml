@@ -3,5 +3,5 @@
     host: 0.0.0.0
     port: 5000
     model_variant: Gr00tN15
-    model: /workspace/models/gr00t_n1_5_train/checkpoints/last
+    model: ./outputs/gr00t_n1_5_train/checkpoints/last/pretrained_model
     device: "cuda"

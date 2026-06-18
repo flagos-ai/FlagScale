@@ -74,7 +74,7 @@ def set_seed(seed: int):
     if get_platform().name() == "cuda":
         torch.backends.cudnn.enabled = True
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = False 
+        torch.backends.cudnn.deterministic = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
 
@@ -644,7 +644,7 @@ def main(config: TrainConfig, seed: int):
     step = 0
 
     train_tracker = MetricsTracker(
-        effective_batch_size,
+        config.system.batch_size,
         dataset.num_frames,
         dataset.num_episodes,
         train_metrics,

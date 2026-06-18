@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_optimizer_state_dict, StateDictOptions
 from torch.optim import Optimizer
 
@@ -71,17 +71,17 @@ def set_seed(seed: int):
     if get_platform().name() == "cuda":
         torch.backends.cudnn.enabled = True
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = False 
+        torch.backends.cudnn.deterministic = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
-def apply_fsdp2(policy, device_mesh):
+def apply_fsdp2(policy: TrainablePolicy, device_mesh: DeviceMesh) -> None:
     """Apply FSDP2 sharding to Gr00tN15.
 
     Uses a MixedPrecisionPolicy that matches DeepSpeed bf16 behavior:
       bf16.enabled=true + ZeRO-2 → param_dtype=bf16, reduce_dtype=bf16, reshard=False
     """
-    # Cast everything to fp32 first so the root param group has uniform dtype.
-    policy = policy.float()
+    # Cast everything to bf16 so the root param group has uniform dtype.
+    policy = policy.bfloat16()
 
     # TODO: (yupu) check `reduce_dtype=torch.float32`
     mp_policy = MixedPrecisionPolicy(
@@ -91,7 +91,7 @@ def apply_fsdp2(policy, device_mesh):
     fsdp_config = {"mesh": device_mesh, "mp_policy": mp_policy}
 
     # reshard_after_forward=False keeps params unsharded during forward+backward
-    reshard = False
+    reshard = True
 
     for unit in policy.fsdp_units():
         fully_shard(unit, **fsdp_config, reshard_after_forward=reshard)
@@ -419,7 +419,7 @@ def main(config: TrainConfig, seed: int):
     set_seed(seed)
 
     policy_config = PreTrainedConfig.from_train_config(config)
-  
+
     local_rank = int(os.environ["LOCAL_RANK"])
     get_platform().set_device(local_rank)
     dist.init_process_group(backend=get_platform().dist_backend())
@@ -540,7 +540,7 @@ def main(config: TrainConfig, seed: int):
     effective_batch_size = config.system.batch_size * world_size
 
     train_tracker = MetricsTracker(
-        effective_batch_size,
+        config.system.batch_size,
         num_frames,
         num_episodes,
         train_metrics,

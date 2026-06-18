@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
+import flagscale.models.vla.gr00t_n1_5.processor_gr00t
 import flagscale.serve.processor  # noqa: F401 — registers serve-specific processor steps
 from flagscale.logger import logger
 from flagscale.models.utils.constants import ACTION, OBS_IMAGES, OBS_STATE
@@ -100,14 +101,6 @@ def validate_batch(batch: dict) -> list[str]:
     return errors
 
 
-def debug_print(batch):
-    for k, v in batch.items():
-        if hasattr(v, "shape"):
-            logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
-        else:
-            logger.info(f"  {k}: type={type(v).__name__} value={repr(v)[:120]}")
-
-
 class Policy:
     """VLA policy server wrapping a TrainablePolicy with pre/post-processing.
 
@@ -191,45 +184,21 @@ class Policy:
         logger.info(f"Raw batch keys: {list(batch.keys())}")
 
         if self.rename_map:
-            batch = {self.rename_map.get(k, k): v for k, v in batch.items()}
             logger.info(f"After rename keys: {list(batch.keys())}")
+            batch = {self.rename_map.get(k, k): v for k, v in batch.items()}
 
         errors = validate_batch(batch)
         if errors:
             for err in errors:
-                # TODO: (yupu) Response with error status?
                 logger.warning(f"Batch validation: {err}")
-
-        debug_print(batch)
-        # for k, v in batch.items():
-        #     if hasattr(v, "shape"):
-        #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
-        #     else:
-        #         logger.info(f"  {k}: type={type(v).__name__} value={repr(v)[:120]}")
 
         if self.serve_preprocessor:
             batch = self.serve_preprocessor(batch)
-            logger.info("After serve_preprocessor:")
-            debug_print(batch)
-            # for k, v in batch.items():
-            #     if hasattr(v, "shape"):
-            #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
 
         batch = self.preprocessor(batch)
-        logger.info("After preprocessor:")
-        debug_print(batch)
-        # for k, v in batch.items():
-        #     if hasattr(v, "shape"):
-        #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype}")
 
         with torch.no_grad():
             action = self.model.predict_action(batch)
-
-        logger.info(f"Raw action keys: {list(action.keys())}")
-        debug_print(action)
-        # for k, v in action.items():
-        #     if hasattr(v, "shape"):
-        #         logger.info(f"  {k}: shape={v.shape} dtype={v.dtype} first_step={v[0,0,:7]}")
 
         action = self.postprocessor(action)
 
@@ -237,7 +206,6 @@ class Policy:
         action[ACTION] = action[ACTION].squeeze(0).detach().cpu().numpy()
         # TODO: (yupu): rename_map for output key
         action["actions"] = action[ACTION]
-        logger.info(f"Final action shape: {action[ACTION].shape}, first_step={action[ACTION][0]}")
 
         return action
 
@@ -258,7 +226,6 @@ def parse_config() -> DictConfig | ListConfig:
 def main(config: DictConfig | ListConfig) -> None:
     """Start the websocket policy server."""
     policy = Policy(config)
-    # start websocket server
     server = WebsocketPolicyServer(
         policy=policy,
         host=policy.host,
@@ -271,7 +238,4 @@ def main(config: DictConfig | ListConfig) -> None:
 
 if __name__ == "__main__":
     parsed_cfg = parse_config()
-    if isinstance(parsed_cfg, ListConfig):
-        main(parsed_cfg[0])
-    else:
-        main(parsed_cfg["serve"][0])
+    main(parsed_cfg["serve"][0])
