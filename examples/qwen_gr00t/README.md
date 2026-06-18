@@ -28,7 +28,7 @@ cd FlagScale/
 pip install ".[cuda-train]" --verbose
 ```
 
-Install additional dependencies for downloading datasets:
+Install additional dependencies for automatic model and dataset downloads:
 
 ```sh
 # For HuggingFace Hub
@@ -40,9 +40,11 @@ pip install modelscope
 
 ## Training
 
-### Prepare Dataset
+### Dataset
 
 FlagScale uses the **LeRobotDataset v3.0** format. For detailed information about the format structure, see the [LeRobotDataset v3.0 documentation](https://huggingface.co/docs/lerobot/en/lerobot-dataset-v3).
+
+By default, `data.data_path` can be either a HuggingFace/ModelScope dataset repo ID or a local dataset root. If a repo ID is provided, FlagScale will automatically download the dataset during training. Set `FLAGSCALE_USE_MODELSCOPE=true` to download from ModelScope instead of HuggingFace Hub.
 
 For example, to download the `libero_goal` dataset:
 
@@ -167,7 +169,7 @@ model:
 ```
 
 **Data settings**:
-- `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot`)
+- `data.data_path` - LeRobot dataset repo ID or local dataset root path (e.g., `IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot` or `/workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot`)
 - `data.vla_data.data_mix` - Dataset mix name (e.g., `"libero_goal_old"`)
 - `data.vla_data.action_type` - Action type (e.g., `"delta_qpos"`)
 - `data.vla_data.default_image_resolution` - Image resolution `[C, H, W]` (default: `[3, 224, 224]`)

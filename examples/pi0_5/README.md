@@ -30,7 +30,7 @@ pip install ".[cuda]" --verbose
 pip install git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
 ```
 
-Install additional dependencies for downloading datasets:
+Install additional dependencies for automatic model and dataset downloads:
 
 ```sh
 # For HuggingFace Hub
@@ -42,9 +42,11 @@ pip install modelscope
 
 ## Training
 
-### Prepare Dataset
+### Dataset
 
 FlagScale uses the **LeRobotDataset v3.0** format. For detailed information about the format structure, see the [LeRobotDataset v3.0 documentation](https://huggingface.co/docs/lerobot/en/lerobot-dataset-v3).
+
+By default, `data.data_path` can be either a HuggingFace/ModelScope dataset repo ID or a local dataset root. If a repo ID is provided, FlagScale will automatically download the dataset during training. Set `FLAGSCALE_USE_MODELSCOPE=true` to download from ModelScope instead of HuggingFace Hub.
 
 For example, to download the `aloha_mobile_cabinet` dataset:
 
@@ -138,7 +140,7 @@ Configure the following fields:
 - `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (for example: `2.5e-6`)
 
 **Data settings**:
-- `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
+- `data.data_path` - LeRobot dataset repo ID or local dataset root path (e.g., `lerobot/aloha_mobile_cabinet` or `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
 - `data.use_imagenet_stats` - Whether to use ImageNet normalization stats (default: `true`)
 - `data.rename_map` - Dictionary mapping dataset keys to policy keys (optional). Check the `features` key in your dataset's `meta/info.json` file to determine the correct mapping:
   ```yaml
