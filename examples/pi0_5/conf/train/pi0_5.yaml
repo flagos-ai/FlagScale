@@ -38,7 +38,7 @@ model:
 
 data:
   # Path to the training data
-  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
+  data_path: IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
   tolerance_s: 0.0001
   use_imagenet_stats: true
   # To match the input features naming from the dataset to the policy config

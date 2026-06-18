@@ -119,7 +119,7 @@ data:
     action_key: eepose
     state_key: eepose
   # Path to the training data
-  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  data_path: IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
   # Path to VLM co-training data (WDS/Energon format). Leave unset to disable co-training.
   # vlm_data_path: /workspace/datasets/vlm_cotrain/
   tolerance_s: 0.0001

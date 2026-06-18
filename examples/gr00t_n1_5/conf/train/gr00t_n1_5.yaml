@@ -77,7 +77,7 @@ model:
 
 data:
   dataset_type: lerobot
-  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  data_path: IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
   tolerance_s: 0.0001
   preprocessor:
     name: policy_preprocessor
