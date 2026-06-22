@@ -38,9 +38,11 @@ from datetime import datetime, timedelta
 import functools
 import gc
 import inspect
+import json
 import logging
 import math
 import os
+import socket
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -257,6 +259,11 @@ from megatron.training import ft_integration
 from megatron.training.global_vars import get_spiky_loss_detector
 from megatron.training.peft import PEFT # Import PEFT from peft module
 from megatron.plugin.hetero.parallel_context import get_parallel_context
+from flagscale.runner.straggler import (
+    OptionalSectionContext,
+    StragglerConfig as FSStragglerConfig,
+    StragglerDetector as FSStragglerDetector,
+)
 from flagscale.train.perf_monitor.hooks import (
     initialize_perf_monitor,
     perf_monitor_end_iteration,
@@ -271,6 +278,71 @@ import megatron.plugin_flagscale
 ########## FlagScale End ##########
 
 stimer = StragglerDetector()
+_fs_straggler_detector = None
+
+
+def get_fs_straggler_detector():
+    """Get the global FlagScale straggler detector."""
+    return _fs_straggler_detector
+
+
+def init_fs_straggler_detector(args):
+    """Initialize the FlagScale straggler detector from parsed args."""
+    global _fs_straggler_detector
+
+    if not getattr(args, "enable_straggler_detection", False):
+        _fs_straggler_detector = None
+        return None
+
+    config = FSStragglerConfig(
+        enabled=True,
+        profiling_interval=getattr(args, "straggler_profiling_interval", 10),
+        report_interval_steps=getattr(args, "straggler_report_interval", 100),
+        straggler_threshold=getattr(args, "straggler_threshold", 1.5),
+        warmup_steps=getattr(args, "straggler_warmup_steps", 10),
+        gather_on_rank0=True,
+        enable_comm_logging=getattr(args, "straggler_enable_comm_logging", True),
+        enable_gpu_profile=getattr(args, "straggler_enable_gpu_profile", True),
+    )
+
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    hostname = os.environ.get("HOSTNAME") or socket.gethostname()
+
+    _fs_straggler_detector = FSStragglerDetector(
+        config=config,
+        rank=rank,
+        world_size=world_size,
+        node_name=f"{hostname}:gpu{local_rank}",
+    )
+    return _fs_straggler_detector
+
+
+def _save_straggler_report(report, log_dir: Optional[str], iteration: int):
+    """Persist a straggler report and print a text summary."""
+    if log_dir is None:
+        return
+
+    os.makedirs(log_dir, exist_ok=True)
+    hostname = os.environ.get("HOSTNAME") or socket.gethostname()
+    report_path = os.path.join(log_dir, f"straggler_report_{hostname}_step_{iteration}.json")
+
+    try:
+        with open(report_path, "w") as file_obj:
+            json.dump(report.to_dict(), file_obj, indent=2)
+    except Exception as exc:
+        print(f"[{hostname}] Warning: Could not save straggler report: {exc}")
+
+    print(f"\n{report.to_text()}")
+
+
+def _is_global_rank_zero() -> bool:
+    """Return True only on global rank 0, or in non-distributed execution."""
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        return torch.distributed.get_rank() == 0
+    return True
+
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 
@@ -953,7 +1025,14 @@ def pretrain(
             flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
         except Exception as e:
             raise RuntimeError(f"Failed to enable 'flag_gems': {e}.")
-    ########## FlagScale End ##########
+
+    fs_straggler = init_fs_straggler_detector(args)
+    if fs_straggler is not None:
+        print_rank_0(
+            "FlagScale straggler detection enabled "
+            f"(threshold={args.straggler_threshold}, log_dir={args.straggler_log_dir})"
+        )
+    ###### FlagScale End   ######
 
     if args.log_progress:
         append_to_progress_log("Starting job")
@@ -1951,6 +2030,17 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     """Single training step."""
     args = get_args()
     timers = get_timers()
+    fs_straggler = get_fs_straggler_detector()
+    straggler_step = iteration
+    if straggler_step is None and fs_straggler is not None:
+        straggler_step = fs_straggler.current_step + 1
+    should_profile_straggler = (
+        fs_straggler is not None
+        and fs_straggler.is_enabled()
+        and straggler_step is not None
+        and fs_straggler.should_profile(straggler_step)
+    )
+    profile_cuda = getattr(args, "straggler_enable_gpu_profile", True)
 
     rerun_state_machine = get_rerun_state_machine()
     save_dgrads_in_this_iteration = (args.save_dgrads_interval is not None and
@@ -1996,18 +2086,24 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         # Forward pass.
         if save_dgrads_in_this_iteration:
             enable_dgrad_logging(model, args.save)
-        losses_reduced = forward_backward_func(
-            forward_step_func=forward_step_func,
-            data_iterator=data_iterator,
-            model=model,
-            num_microbatches=get_num_microbatches(),
-            seq_length=args.seq_length,
-            micro_batch_size=args.micro_batch_size,
-            decoder_seq_length=args.decoder_seq_length,
-            forward_only=False,
-            adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
-            force_all_reduce=save_wgrads_in_this_iteration,
-        )
+        with OptionalSectionContext(
+            fs_straggler,
+            "forward_backward",
+            enabled=should_profile_straggler,
+            profile_cuda=profile_cuda,
+        ):
+            losses_reduced = forward_backward_func(
+                forward_step_func=forward_step_func,
+                data_iterator=data_iterator,
+                model=model,
+                num_microbatches=get_num_microbatches(),
+                seq_length=args.seq_length,
+                micro_batch_size=args.micro_batch_size,
+                decoder_seq_length=args.decoder_seq_length,
+                forward_only=False,
+                adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
+                force_all_reduce=save_wgrads_in_this_iteration,
+            )
         if save_dgrads_in_this_iteration:
             save_dgrads(iteration + 1)
             disable_dgrad_logging()
@@ -2058,16 +2154,21 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
 
     # Update parameters.
 
-    timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
-    update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
-
-    # get max attention logit for logging and run clip_qk()
-    # Part of MuonClip Optimizer step
-    log_max_attention_logit = 0
-    if args.qk_clip or args.log_max_attention_logit:
-        log_max_attention_logit = clip_qk(model, log_max_only=not args.qk_clip)
-
-    timers('optimizer').stop()
+    with OptionalSectionContext(
+        fs_straggler,
+        "optimizer",
+        enabled=should_profile_straggler,
+        profile_cuda=profile_cuda,
+    ):
+        timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
+        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+        # get max attention logit for logging and run clip_qk()
+        # Part of MuonClip Optimizer step
+        log_max_attention_logit = 0
+        if args.qk_clip or args.log_max_attention_logit:
+            log_max_attention_logit = clip_qk(model, log_max_only=not args.qk_clip)
+    
+        timers('optimizer').stop()
 
     # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
     # so we must gather across mp ranks
@@ -3420,6 +3521,14 @@ def train(
             is_first_iteration=is_first_iteration,
         )
         is_first_iteration = False
+
+        fs_straggler = get_fs_straggler_detector()
+        if fs_straggler is not None and fs_straggler.is_enabled():
+            fs_straggler.increment_step()
+            if fs_straggler.should_report(iteration):
+                report = fs_straggler.generate_report(step=iteration)
+                if _is_global_rank_zero():
+                    _save_straggler_report(report, getattr(args, "straggler_log_dir", None), iteration)
 
         # Evaluation.
         if args.eval_interval and iteration % args.eval_interval == 0 and args.do_valid:

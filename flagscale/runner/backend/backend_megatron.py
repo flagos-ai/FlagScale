@@ -107,6 +107,9 @@ class MegatronBackend(BackendBase):
             f.write(f"mkdir -p {system_config.logging.details_dir}\n")
             f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
             f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
+            f.write(f"mkdir -p {system_config.logging.straggler_dir}\n")
+            if system_config.get("straggler_log_dir", None):
+                f.write(f"mkdir -p {system_config.straggler_log_dir}\n")
             if system_config.get("perf_log_dir", None):
                 f.write(f"mkdir -p {system_config.perf_log_dir}\n")
             f.write("\n")
