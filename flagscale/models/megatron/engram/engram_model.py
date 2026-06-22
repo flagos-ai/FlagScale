@@ -1,7 +1,11 @@
 # ruff: noqa: RUF013
 ## built-in
+from typing import Optional
+
 import torch
 from torch import Tensor
+
+from megatron.plugin.platform import get_platform
 
 from megatron.core.inference.contexts import BaseInferenceContext
 
@@ -9,10 +13,12 @@ from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.models.gpt import GPTModel
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.utils import deprecate_inference_params
+from megatron.core.transformer.engram import get_or_create_hash_mapping
 
 ## engram
 from .engram_transformer_layer import EngramTransformerBlock
-from .ngram_hash import get_or_create_hash_mapping
+
+cur_platform = get_platform()
 
 
 class LazyHashInputIds:
@@ -27,26 +33,41 @@ class LazyHashInputIds:
         self.input_ids = input_ids
         self.hash_stream = hash_stream
         self._result = None
-        self._computation_started = False
-
-        # torch.cuda.nvtx.range_push("LazyHashInputIds hash")
-        # Start async computation immediately if stream is available
+        self._is_async_pending = False        
+        # Async
         if self.hash_stream is not None:
-            with torch.cuda.stream(self.hash_stream):
+            # self.hash_stream.wait_stream(cur_platform.current_stream())
+            with cur_platform.stream(self.hash_stream):
                 self._result = self.hash_mapping.hash(self.input_ids)
-            self._computation_started = True
-        # torch.cuda.nvtx.range_pop()
+            self._is_async_pending = True
+            # record result to use across stream
+            self._record_current_stream()
+
+    def _record_current_stream(self):
+        """Helper to record current stream on all result tensors"""
+        if self._result is None:
+            return
+        current_stream = cur_platform.current_stream()
+        if isinstance(self._result, dict):
+            for t in self._result.values():
+                if isinstance(t, torch.Tensor):
+                    t.record_stream(current_stream)
+        elif isinstance(self._result, torch.Tensor):
+            self._result.record_stream(current_stream)
 
     def __getitem__(self, key):
-        """Access hash result, synchronizing if necessary."""
-        if self._result is None:
-            if self.hash_stream is not None and self._computation_started:
-                # Wait for async computation to complete
-                torch.cuda.current_stream().wait_stream(self.hash_stream)
-                self._computation_started = False  # Mark as synchronized
-            else:
-                # Compute synchronously if no stream or computation not started
-                self._result = self.hash_mapping.hash(self.input_ids)
+        # Case 1: Async compute -> wait
+        if self._is_async_pending:
+            cur_platform.current_stream().wait_stream(self.hash_stream)
+            self._is_async_pending = False  # Async finish
+            self._record_current_stream()
+            
+        # Case 2: Sync but no compute -> start compute
+        elif self._result is None:
+            self._result = self.hash_mapping.hash(self.input_ids)
+            
+        # Case 3: Async or sync compute is finished.
+        # print(f"[rank{torch.distributed.get_rank()}]: LazyHashInputIds result = {self._result}")
         return self._result[key]
 
     def get(self, key, default=None):
@@ -88,8 +109,8 @@ class EngramModel(GPTModel):
         # Optional: Create a separate CUDA stream for hash computation
         # This allows overlapping hash computation with preprocessing
         self._hash_stream = None
-        if torch.cuda.is_available():
-            self._hash_stream = torch.cuda.Stream()
+        if cur_platform.is_available():
+            self._hash_stream = cur_platform.Stream()
 
     def forward(
         self,
@@ -171,7 +192,40 @@ class EngramModel(GPTModel):
             inference_context=inference_context,
         )
 
-    def sharded_state_dict(
-        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
+    def build_schedule_plan(
+        self,
+        input_ids: Tensor,
+        position_ids: Tensor,
+        attention_mask: Tensor,
+        decoder_input: Tensor = None,
+        labels: Tensor = None,
+        inference_context: BaseInferenceContext = None,
+        packed_seq_params: PackedSeqParams = None,
+        extra_block_kwargs: dict = None,
+        runtime_gather_output: Optional[bool] = None,
+        inference_params: Optional[BaseInferenceContext] = None,
+        loss_mask: Optional[Tensor] = None,
     ):
-        raise NotImplementedError("Sharded state dict is not supported for EngramModel")
+        """
+        Adaptation of overlap_moe_expert_parallel_comm.
+        """
+        # Precompute the engram_hash_iput_ids, it will be used to create a TransformerChunkSchedulePlan.
+        engram_hash_input_ids = LazyHashInputIds(
+            hash_mapping=self.engram_hash,
+            input_ids=input_ids,
+            hash_stream=self._hash_stream,
+        )
+        if extra_block_kwargs is None:
+            extra_block_kwargs = {
+                "engram_hash_input_ids": engram_hash_input_ids,
+            }
+        return super().build_schedule_plan(
+            input_ids,
+            position_ids,
+            attention_mask,
+            decoder_input,
+            labels=labels,
+            loss_mask=loss_mask,
+            extra_block_kwargs=extra_block_kwargs
+        )
+

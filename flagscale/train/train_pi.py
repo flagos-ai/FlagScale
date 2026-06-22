@@ -97,7 +97,7 @@ def apply_fsdp(policy):
         policy,
         sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
         mixed_precision=mp_policy,
-        device_id=torch.cuda.current_device(),
+        device_id=get_platform().current_device(),
         use_orig_params=True,
     )
     return policy

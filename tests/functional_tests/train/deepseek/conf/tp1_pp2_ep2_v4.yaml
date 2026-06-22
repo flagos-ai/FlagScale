@@ -1,0 +1,45 @@
+defaults:
+  - _self_
+  - train: tp1_pp2_ep2_v4
+
+experiment:
+  exp_name: tp1_pp2_ep2_v4
+  exp_dir: tests/functional_tests/train/deepseek/test_results/tp1_pp2_ep2_v4
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_deepseek_v4.py
+  runner:
+    ssh_port: null
+    nproc_per_node: 8
+    # nsys_bin_path: /usr/local/bin/nsys
+    # nsys_rep_file_path: ${experiment.exp_dir}/nsys_report/
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+    NCCL_ALGO: "Ring"
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    CUDNN_BENCHMARK: "false"
+    CUDNN_DETERMINISTIC: "true"
+    # Only for debug
+    # NVTE_DEBUG: 1
+    # NVTE_DEBUG_LEVEL: 2
+    # CUDA_LAUNCH_BLOCKING: 1
+    # NCCL_DEBUG: INFO
+    # NCCL_NVLS_ENABLE: 0    # Some CUDA and NCCL versions maybe cause Cuda failure 401 'the operation cannot be performed in the present state'. Set it for debug is ok. But this will cause performance drop, please check your CUDA and NCCL versions.
+    # CUDNN_LOGERR_DBG: 1
+    # The following parameters passed the local test
+    # CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    # CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # NVTE_TORCH_COMPILE: 0
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-train
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

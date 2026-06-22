@@ -7,6 +7,26 @@ on:
         required: true
         type: string
         description: Platform name (e.g., cuda, default)
+      ci_train_image:
+        required: false
+        type: string
+        description: Override train image (e.g., newly built image). Falls back to platform config if not set.
+        default: ""
+      ci_inference_image:
+        required: false
+        type: string
+        description: Override inference image. Falls back to platform config if not set.
+        default: ""
+      runs_on:
+        required: false
+        type: string
+        description: Override runs_on. Falls back to platform config if not set.
+        default: ""
+      container_volumes:
+        required: false
+        type: string
+        description: Override container_volumes. Falls back to platform config if not set.
+        default: ""
 
 jobs:
   checkout_and_config:
@@ -35,11 +55,13 @@ jobs:
       env_name_serve: ${{ steps.config.outputs.env_name_serve }}
       env_name_rl: ${{ steps.config.outputs.env_name_rl }}
     steps:
-      - name: Checkout code
+      - name: Checkout code (attempt 1)
+        id: checkout_attempt_1
         uses: actions/checkout@v4
+        continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -51,28 +73,42 @@ jobs:
           submodules: false
           set-safe-directory: true
 
-      - name: Cache source code
-        id: cache-source
-        uses: actions/cache@v4
+      - name: Checkout code (attempt 2)
+        if: steps.checkout_attempt_1.outcome == 'failure'
+        id: checkout_attempt_2
+        uses: actions/checkout@v4
+        continue-on-error: true
         with:
-          path: .
-          key: source-code-${{ github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
-      - name: Create source code tarball for distribution
-        run: |
-          tar -czf /tmp/flagscale-source.tar.gz \
-            --exclude='.git' \
-            --exclude='*.pyc' \
-            --exclude='__pycache__' \
-            .
-
-      - name: Upload source code artifact
-        uses: actions/upload-artifact@v4
+      - name: Checkout code (attempt 3)
+        if: steps.checkout_attempt_2.outcome == 'failure'
+        id: checkout_attempt_3
+        uses: actions/checkout@v4
         with:
-          name: flagscale-source-${{ github.sha }}
-          path: /tmp/flagscale-source.tar.gz
-          retention-days: 1
-          compression-level: 0
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ssh-strict: true
+          ssh-user: git
+          persist-credentials: false
+          clean: true
+          sparse-checkout-cone-mode: true
+          fetch-tags: false
+          show-progress: true
+          lfs: false
+          submodules: false
+          set-safe-directory: true
 
       - name: Load platform configuration
         id: config
@@ -100,6 +136,25 @@ jobs:
           # Load configuration and group tests by task
           load_platform_config "$PLATFORM"
 
+          # Override images if provided as inputs
+          if [ -n "${{ inputs.ci_train_image }}" ]; then
+            echo "ci_train_image=${{ inputs.ci_train_image }}" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "${{ inputs.ci_inference_image }}" ]; then
+            echo "ci_inference_image=${{ inputs.ci_inference_image }}" >> $GITHUB_OUTPUT
+          fi
+          # Use single-quoted assignment so bash treats the JSON value literally
+          # (double quotes inside the JSON would break echo "runs_on=${{ inputs.runs_on }}")
+          RUNS_ON_INPUT='${{ inputs.runs_on }}'
+          if [ -n "$RUNS_ON_INPUT" ]; then
+            { echo 'runs_on<<EOFRUNSON_INPUT'; echo "$RUNS_ON_INPUT"; echo 'EOFRUNSON_INPUT'; } >> $GITHUB_OUTPUT
+          fi
+          # (double quotes inside the JSON would break echo "container_volumes=${{ inputs.container_volumes }}")
+          CONTAINER_VOLUMES_INPUT='${{ inputs.container_volumes }}'
+          if [ -n "$CONTAINER_VOLUMES_INPUT" ]; then
+            { echo 'container_volumes<<EOFRUNSON_INPUT'; echo "$CONTAINER_VOLUMES_INPUT"; echo 'EOFRUNSON_INPUT'; } >> $GITHUB_OUTPUT
+          fi
+
   # CLI validation runs first (outside virtual env) as a gate for all subsequent tests
   cli_validation:
     needs: checkout_and_config
@@ -110,7 +165,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -133,7 +187,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -141,6 +194,7 @@ jobs:
   functional_tests_train:
     needs:
       - checkout_and_config
+      - cli_validation
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.train_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_train.yml
@@ -151,7 +205,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -159,6 +212,7 @@ jobs:
   functional_tests_hetero_train:
     needs:
       - checkout_and_config
+      - cli_validation
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.hetero_train_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_hetero_train.yml
@@ -169,7 +223,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -177,6 +230,7 @@ jobs:
   functional_tests_inference:
     needs:
       - checkout_and_config
+      - cli_validation
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_inference.yml
@@ -187,7 +241,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -195,6 +248,7 @@ jobs:
   functional_tests_serve:
     needs:
       - checkout_and_config
+      - cli_validation
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_serve.yml
@@ -205,7 +259,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -224,7 +277,6 @@ jobs:
   #     runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
   #     container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
   #     container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-  #     source_artifact: flagscale-source-${{ github.sha }}
   #     pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
   #     env_name: ${{ needs.checkout_and_config.outputs.env_name_rl }}
   #     env_path: ${{ needs.checkout_and_config.outputs.env_path }}
@@ -232,6 +284,7 @@ jobs:
   functional_tests_benchmark:
     needs:
       - checkout_and_config
+      - cli_validation
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.benchmark_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_benchmark.yml
@@ -242,7 +295,6 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      source_artifact: flagscale-source-${{ github.sha }}
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}

@@ -50,6 +50,7 @@ model:
   profile_ranks: 7
   use_pytorch_profiler: True
   eval_iters: 0
+  eval_interval: 1000
   micro_batch_size: 2
   global_batch_size: 512
   allow_missing_vision_projection_checkpoint: True

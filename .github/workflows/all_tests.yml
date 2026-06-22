@@ -1,0 +1,129 @@
+name: all_tests
+
+on:
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - 'docs/**'
+      - 'docker/cuda/**'
+      - 'docker/build.sh'
+      - 'tools/install/**'
+      - 'requirements/**'
+      - '.github/workflows/build_image_cuda.yml'
+      - '.github/workflows/push_image_harbor.yml'
+  pull_request:
+    branches: ["main"]
+    paths-ignore:
+      - 'docs/**'
+      - 'docker/cuda/**'
+      - 'docker/build.sh'
+      - 'tools/install/**'
+      - 'requirements/**'
+      - '.github/workflows/build_image_cuda.yml'
+      - '.github/workflows/push_image_harbor.yml'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform test suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - cuda
+          - ascend
+          - metax
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Guard: skip CUDA tests when PR contains docker-related changes, because
+  # build_image_cuda.yml will handle build + test for those PRs.
+  # paths-ignore alone cannot guarantee mutual exclusivity when a PR touches
+  # both docker files and non-docker files, so we need this job-level check.
+  # ---------------------------------------------------------------------------
+  check_docker_changes:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      has_docker_changes: ${{ steps.check.outputs.has_docker_changes }}
+    steps:
+      - name: Check for docker-related file changes
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CHANGED=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files --paginate --jq '.[].filename')
+          if echo "$CHANGED" | grep -qE '^(docker/cuda/|docker/build\.sh$|tools/install/|requirements/|\.github/workflows/build_image_cuda\.yml$)'; then
+            echo "has_docker_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_docker_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+  cuda_tests:
+    name: CUDA tests
+    needs: check_docker_changes
+    if: >-
+      (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'cuda') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || needs.check_docker_changes.outputs.has_docker_changes != 'true')
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: cuda
+
+  # Disable util the new devices ready
+  # ascend_tests:
+  #   name: Ascend tests
+  #   if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ascend'
+  #   uses: ./.github/workflows/all_tests_common.yml
+  #   with:
+  #     platform: ascend
+
+  metax_tests:
+    name: MetaX tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'metax'
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: metax
+
+  all_tests:
+    name: all_tests
+    needs:
+      - check_docker_changes
+      - cuda_tests
+      # - ascend_tests
+      - metax_tests
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify workflow status
+        run: |
+          failed=false
+
+          # if [ "${{ needs.check_docker_changes.outputs.has_docker_changes }}" = "true" ]; then
+          #   echo "⏭️ CUDA tests skipped - docker changes detected, handled by build_image_cuda workflow"
+          # elif [ "${{ needs.cuda_tests.result }}" != "success" ] && \
+          #      [ "${{ needs.cuda_tests.result }}" != "skipped" ]; then
+          #   echo "❌ CUDA tests failed"
+          #   failed=true
+          # fi
+
+          # if [ "${{ needs.ascend_tests.result }}" != "success" ] && \
+          #    [ "${{ needs.ascend_tests.result }}" != "skipped" ]; then
+          #   echo "❌ Ascend tests failed"
+          #   failed=true
+          # fi
+
+          if [ "${{ needs.metax_tests.result }}" != "success" ] && \
+             [ "${{ needs.metax_tests.result }}" != "skipped" ]; then
+            echo "❌ MetaX C550 tests failed"
+            failed=true
+          fi
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
+
+          echo "✅ All requested platform tests passed!"

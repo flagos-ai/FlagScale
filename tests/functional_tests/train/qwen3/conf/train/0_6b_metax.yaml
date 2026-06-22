@@ -17,7 +17,6 @@ system:
     log_interval: 1
     no_log_loss_scale_to_tensorboard: true
   checkpoint:
-    load: /home/gitlab-runner/checkpoints/qwen3-0.6b-mcore
     no_save_optim: true
     no_save_rng: true
     no_load_optim: true
@@ -55,6 +54,7 @@ model:
   clip_grad: 1.0
   train_iters: 10
   eval_iters: 0
+  eval_interval: 1000
   micro_batch_size: 1
   global_batch_size: 2
   seed: 42

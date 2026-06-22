@@ -55,7 +55,7 @@ def save_checkpoint(queue, args):
 
     try:
         from megatron.training.arguments import parse_args, validate_args
-        from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
+        from megatron.training.tokenizer.tokenizer import vocab_size_with_padding
     except ModuleNotFoundError:
         print("Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting.")
         queue.put("exit")
@@ -158,7 +158,6 @@ def save_checkpoint(queue, args):
         '--no-masked-softmax-fusion',
         '--no-bias-gelu-fusion',
         '--no-bias-dropout-fusion',
-        '--no-async-tensor-model-parallel-allreduce',
         '--use-cpu-initialization',
         '--transformer-impl', 'transformer_engine',
         '--micro-batch-size', '1',
@@ -202,10 +201,11 @@ def save_checkpoint(queue, args):
     if hasattr (md, 'checkpoint_args'):
         # These are arguments that we are either changing, or cause problems for validation if they are set
         # Note that some of these deal with T5 so will need to be changed if we support T5.
-        args_to_keep = ['tensor_model_parallel_size', 'pipeline_model_parallel_size', 'expert_model_parallel_size', 'world_size', 'params_dtype',
+        args_to_keep = ['tensor_model_parallel_size', 'pipeline_model_parallel_size', 'expert_model_parallel_size',
+                        'expert_tensor_parallel_size', 'world_size', 'params_dtype',
                         'num_layers_per_virtual_pipeline_stage', 'virtual_pipeline_model_parallel_size',
                         'masked_softmax_fusion', 'bias_gelu_fusion', 'bias_dropout_fusion',
-                        'sequence_parallel', 'async_tensor_model_parallel_allreduce',
+                        'sequence_parallel',
                         'no_load_optim', 'no_load_rng', 'no_save_optim', 'no_save_rng',
                         'vocab_file', 'tokenizer_model',
                         'save_interval', 'save', 'load', 'use_mcore_models', 'num_experts',
@@ -256,10 +256,14 @@ def save_checkpoint(queue, args):
     margs.transformer_impl = "transformer_engine"
 
     if md.true_vocab_size is not None:
-        margs.padded_vocab_size = _vocab_size_with_padding(md.true_vocab_size, margs)
+        margs.padded_vocab_size = vocab_size_with_padding(md.true_vocab_size, margs)
+        margs.vocab_size = md.true_vocab_size
     else:
         # margs.padded_vocab_size will be set in ckpt_plugin.set_embedding_ckpt func
         margs.padded_vocab_size = None
+
+    if getattr(args, "skip_mtp", False):
+        margs.mtp_num_layers = 0
 
     """
     use megatron args build object and init env
@@ -283,7 +287,9 @@ def save_checkpoint(queue, args):
         msg = queue_get(f"transformer layer {layer_id}")
 
         margs.total_layer_num = layer_id
-        if margs.use_engram and layer_id in margs.engram_layer_ids:
+        if getattr(margs, "use_engram", False) and layer_id in getattr(
+            margs, "engram_layer_ids", []
+        ):
             ckpt_plugin.set_hf_engram_ckpt(msg, hf_model, layer_id, md, margs)
         ckpt_plugin.set_hf_attn_ckpt(msg, hf_model, layer_id, md, margs)
         ckpt_plugin.set_hf_mlp_ckpt(msg, hf_model, layer_id, md, margs)

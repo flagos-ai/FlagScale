@@ -82,6 +82,7 @@ model:
   # hf: max_steps: 24000
   train_iters: 102400
   eval_iters: 0
+  eval_interval: 1000
 
 
   optimizer:
@@ -105,7 +106,6 @@ data:
   split: 1
   no_mmap_bin_files: true
   tokenizer:
-    legacy_tokenizer: true
     tokenizer_type: Qwen2TokenizerFS
     tokenizer_path: xxx
     vocab_size: 151936

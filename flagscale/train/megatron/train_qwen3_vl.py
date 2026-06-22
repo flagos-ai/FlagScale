@@ -45,7 +45,7 @@ from megatron.training.arguments import core_transformer_config_from_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
 try:
-    from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+    from megatron.post_training.arguments import add_modelopt_args
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
     from megatron.post_training.model_provider import model_provider as model_provider_modelopt
 
@@ -70,7 +70,7 @@ from megatron.energon import (
     get_val_datasets,
 )
 
-from megatron.training.tokenizer.tokenizer import build_tokenizer
+from megatron.training.tokenizer import build_tokenizer
 from megatron.training.global_vars import get_tokenizer
 
 from flagscale.models.megatron.qwen2_5_vl.tensor_parallel import broadcast_data
@@ -290,7 +290,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and modelopt_args_enabled(args):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()

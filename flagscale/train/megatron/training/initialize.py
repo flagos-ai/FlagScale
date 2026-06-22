@@ -22,19 +22,16 @@ from megatron.core.rerun_state_machine import (
     RerunMode,
     initialize_rerun_state_machine,
 )
+from megatron.core.transformer.custom_layers.batch_invariant_kernels import enable_batch_invariant_mode
 from megatron.core.utils import get_te_version, is_te_min_version, is_torch_min_version
-
-try:
-    from megatron.legacy import fused_kernels
-except ImportError:
-    fused_kernels = None
-
 from megatron.training import get_adlr_autoresume, get_args, get_tensorboard_writer
+from megatron.training.utils import print_rank_0, warn_rank_0
 from megatron.training import inprocess_restart
 from megatron.training.arguments import parse_args, validate_args
 from megatron.training.async_utils import init_persistent_async_worker
 from megatron.training.checkpointing import load_args_from_checkpoint
 from megatron.training.global_vars import set_global_variables, set_global_writers
+from megatron.training.utils import is_rank0
 from megatron.training.yaml_arguments import validate_yaml
 
 from megatron.training.arguments_fs import FSTrainArguments
@@ -82,16 +79,14 @@ def initialize_megatron(
         args.exit_on_missing_checkpoint = True
 
     if args.use_checkpoint_args or args_defaults.get("use_checkpoint_args", False):
-        assert args.load is not None, "--use-checkpoint-args requires --load argument"
+        assert args.load is not None or args.pretrained_checkpoint is not None, "--use-checkpoint-args requires --load or --pretrained-checkpoint argument"
         assert args.non_persistent_ckpt_type != "local", (
             "--use-checkpoint-args is not supported with --non_persistent_ckpt_type=local. "
             "Two-stage checkpoint loading is not implemented, and all arguments must be defined "
             "before initializing LocalCheckpointManager."
         )
+        load_args_from_checkpoint(args, load_arg='pretrained_checkpoint')
         load_args_from_checkpoint(args)
-
-    if args.async_save and args.use_persistent_ckpt_worker:
-        init_persistent_async_worker()
 
     ## FlagScale Begin: Pre Validate Arguments ##
     fs_argument = FSTrainArguments(args)
@@ -116,6 +111,9 @@ def initialize_megatron(
     # set logging level
     setup_logging()
 
+    if args.async_save and args.use_persistent_ckpt_worker:
+        init_persistent_async_worker(args.rank, 'forkserver')
+
     # init rerun state
     def state_save_func():
         return {'rng_tracker_states': tensor_parallel.get_cuda_rng_tracker().get_states()}
@@ -136,6 +134,10 @@ def initialize_megatron(
         result_rejected_tracker_filename=args.result_rejected_tracker_filename,
     )
 
+    if args.batch_invariant_mode:
+        print_rank_0("Enabling batch invariant mode globally")
+        enable_batch_invariant_mode()
+
     if args.auto_skip_spiky_loss:
         set_spiky_loss_detector(args=args)
 
@@ -146,8 +148,7 @@ def initialize_megatron(
         _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, store)
 
         # Random seeds for reproducibility.
-        if args.rank == 0:
-            print("> setting random seeds to {} ...".format(args.seed))
+        print_rank_0("> setting random seeds to {} ...".format(args.seed))
         _set_random_seed(
             args.seed,
             args.data_parallel_random_init,
@@ -155,6 +156,7 @@ def initialize_megatron(
             args.inference_rng_tracker,
             use_cudagraphable_rng=args.cuda_graph_impl != "none",
         )
+
 
         # Setup MoE aux loss scale value.
         if args.num_experts is not None:
@@ -218,59 +220,7 @@ def _compile_dependencies():
             flush=True,
         )
 
-    # ==================
-    # Load fused kernels
-    # ==================
-
-    # Custom kernel constraints check.
-    seq_len = args.seq_length
-    attn_batch_size = (
-        args.num_attention_heads / args.tensor_model_parallel_size
-    ) * args.micro_batch_size
-    # Constraints on sequence length and attn_batch_size to enable warp based
-    # optimization and upper triangular optimization (for causal mask)
-    custom_kernel_constraint = (
-        seq_len > 16 and seq_len <= 16384 and seq_len % 4 == 0 and attn_batch_size % 4 == 0
-    )
-    # Print a warning.
-    if not ((args.fp16 or args.bf16) and custom_kernel_constraint and args.masked_softmax_fusion):
-        if args.rank == 0:
-            print(
-                "WARNING: constraints for invoking optimized"
-                " fused softmax kernel are not met. We default"
-                " back to unfused kernel invocations.",
-                flush=True,
-            )
-
-    # Always build on rank zero first.
-    if torch.distributed.get_rank() == 0:
-        start_time = time.time()
-        print("> compiling and loading fused kernels ...", flush=True)
-        try:
-            if fused_kernels is not None:
-                fused_kernels.load(args)
-        except Exception as e:
-            print("> fused kernels are not available for platform: {cur_platform.device_name()}")
-        torch.distributed.barrier()
-    else:
-        torch.distributed.barrier()
-        try:
-            if fused_kernels is not None:
-                fused_kernels.load(args)
-        except Exception as e:
-            print("> fused kernels are not available for platform: {cur_platform.device_name()}")
-    # Simple barrier to make sure all ranks have passed the
-    # compilation phase successfully before moving on to the
-    # rest of the program. We think this might ensure that
-    # the lock is released.
     torch.distributed.barrier()
-    if torch.distributed.get_rank() == 0:
-        print(
-            ">>> done with compiling and loading fused kernels. "
-            "Compilation time: {:.3f} seconds".format(time.time() - start_time),
-            flush=True,
-        )
-
 
 def _initialize_tp_communicators():
     """initializing the communicators with user buffers for high-performance tensor-model-parallel
@@ -352,18 +302,13 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
     device_count = cur_platform.device_count()
     if torch.distributed.is_initialized():
 
-        if args.rank == 0:
-            print(
-                "torch distributed is already initialized, " "skipping initialization ...",
-                flush=True,
-            )
+        print_rank_0("torch distributed is already initialized, skipping initialization ...")
         args.rank = torch.distributed.get_rank()
         args.world_size = torch.distributed.get_world_size()
 
     else:
 
-        if args.rank == 0:
-            print("> initializing torch distributed ...", flush=True)
+        print_rank_0("> initializing torch distributed ...")
         # Manually set the device ids.
         if device_count > 0:
             cur_platform.set_device(args.local_rank)
@@ -375,6 +320,49 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
         if args.cuda_graph_impl == "transformer_engine":
             cur_platform.set_stream(cur_platform.Stream())
 
+        # Set flight recorder env vars if specified.
+        # Priority: pre-existing environment variable > MLM argument.
+        # All vars follow the same setdefault semantics: if already set in the
+        # environment we warn and keep the user's value; otherwise we apply the
+        # value derived from the MLM argument / flag.
+        # The block is also triggered when either path env var is already set
+        # so that the remaining defaults are applied consistently.
+        _fr_path = (
+            args.flight_recorder_dump_path
+            or os.environ.get('TORCH_FR_DUMP_TEMP_FILE')
+            or os.environ.get('TORCH_NCCL_DEBUG_INFO_TEMP_FILE')
+        )
+        if _fr_path is not None:
+            _fr_dump_prefix = _fr_path
+            if os.path.isdir(_fr_path):
+                _fr_dump_prefix = os.path.join(_fr_path, '_dump_')
+                warn_rank_0(
+                    "Flight recorder: using directory "
+                    f"'{_fr_path}' for dump path, appending per-rank prefix "
+                    f"'{_fr_dump_prefix}'."
+                )
+            _fr_env_defaults = {
+                'TORCH_FR_DUMP_TEMP_FILE': _fr_dump_prefix,
+                'TORCH_NCCL_DEBUG_INFO_TEMP_FILE': _fr_dump_prefix,
+                'TORCH_NCCL_TRACE_BUFFER_SIZE': str(args.flight_recorder_trace_buffer_size),
+                'TORCH_NCCL_DUMP_ON_TIMEOUT': str(int(args.flight_recorder_dump_on_timeout)),
+                'TORCH_INCLUDE_STACK_TRACE': str(int(args.flight_recorder_include_stack_trace)),
+                'TORCH_INCLUDE_ONLY_ACTIVE': str(int(args.flight_recorder_include_only_active)),
+                'TORCH_NCCL_EXTRA_DUMP_ON_EXEC': str(int(args.flight_recorder_extra_dump_on_exec)),
+            }
+            for _var, _default in _fr_env_defaults.items():
+                if _var in os.environ:
+                    warn_rank_0(
+                        f"Flight recorder: environment variable {_var} is already set to "
+                        f"'{os.environ[_var]}'; ignoring config value '{_default}'."
+                    )
+                else:
+                    os.environ[_var] = _default
+            print_rank_0(
+                "Flight recorder env vars:\n"
+                + "\n".join(f"  {k}={os.environ[k]}" for k in _fr_env_defaults)
+            )
+
         # Call the init process
         init_process_group_kwargs = {
             'backend': args.distributed_backend,
@@ -383,12 +371,11 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
             'rank': args.rank,
             'timeout': timedelta(minutes=args.distributed_timeout_minutes),
         }
-        
         if args.enable_hetero and args.hetero_use_cpu_communication:
             # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
             #     init_process_group_kwargs['backend'] = 'gloo'
             init_process_group_kwargs['backend'] = "cpu:gloo"
-        # TODO: @aoyulong the init_process_group will be hanging if the device_id is set 
+        # TODO: @aoyulong the init_process_group will be hanging if the device_id is set
         # if packaging.version.Version(torch.__version__) >= packaging.version.Version("2.3.0"):
         #     init_process_group_kwargs['device_id'] = device_id
 
@@ -421,28 +408,30 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
                 use_sharp=args.use_sharp,
                 context_parallel_size=args.context_parallel_size,
                 hierarchical_context_parallel_sizes=args.hierarchical_context_parallel_sizes,
+                hybrid_context_parallel=args.hybrid_context_parallel,
                 expert_model_parallel_size=args.expert_model_parallel_size,
                 num_distributed_optimizer_instances=args.num_distributed_optimizer_instances,
                 expert_tensor_parallel_size=args.expert_tensor_parallel_size,
+                engram_embedding_parallel_size=args.engram_embedding_parallel_size,
                 distributed_timeout_minutes=args.distributed_timeout_minutes,
                 nccl_communicator_config_path=args.nccl_communicator_config_path,
                 order='tp-cp-ep-dp-pp' if not args.use_tp_pp_dp_mapping else 'tp-cp-ep-pp-dp',
                 get_embedding_ranks=get_embedding_ranks,
                 get_position_embedding_ranks=get_position_embedding_ranks,
-                create_gloo_process_groups=args.enable_gloo_process_groups,
+                create_gloo_process_groups=args.use_gloo_process_groups,
                 high_priority_stream_groups=args.high_priority_stream_groups,
                 sharp_enabled_group=args.sharp_enabled_group,
+                create_all_gather_group=args.create_all_gather_group,
                 create_dualpipev_parallel_size=args.use_dualpipev,
             )
-            if args.rank == 0:
-                print(
-                    f"> initialized tensor model parallel with size "
-                    f"{mpu.get_tensor_model_parallel_world_size()}"
-                )
-                print(
-                    f"> initialized pipeline model parallel with size "
-                    f"{mpu.get_pipeline_model_parallel_world_size()}"
-                )
+            print_rank_0(
+                f"> initialized tensor model parallel with size "
+                f"{mpu.get_tensor_model_parallel_world_size()}"
+            )
+            print_rank_0(
+                f"> initialized pipeline model parallel with size "
+                f"{mpu.get_pipeline_model_parallel_world_size()}"
+            )
 
 
 def _init_autoresume():
@@ -594,5 +583,6 @@ def setup_logging() -> None:
         logging_level = args.logging_level
 
     if logging_level is not None:
-        logger.info(f'Setting logging level to {logging_level}')
+        if is_rank0():
+            logger.info(f'Setting logging level to {logging_level}')
         logging.getLogger().setLevel(logging_level)

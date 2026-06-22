@@ -68,6 +68,7 @@ model:
   clip_grad: 1.0
   train_samples: 244141056 #1TB tokens #29297664 #120B tokens
   eval_iters: 0
+  eval_interval: 1000
   micro_batch_size: 2
   global_batch_size: 2048
   seed: 42

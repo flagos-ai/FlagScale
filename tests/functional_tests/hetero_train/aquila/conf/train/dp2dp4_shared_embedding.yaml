@@ -60,6 +60,7 @@ model:
   clip_grad: 1.0
   train_iters: 10
   eval_iters: 0
+  eval_interval: 1000
   micro_batch_size: 4
   global_batch_size: 1024
   seed: 42

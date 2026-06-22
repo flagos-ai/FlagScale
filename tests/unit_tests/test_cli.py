@@ -1,9 +1,12 @@
+import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from click.exceptions import Exit as ClickExit
+from typer.testing import CliRunner
 
-from flagscale.cli import get_action, resolve_config
+from flagscale.cli import app, get_action, resolve_config
 
 
 class TestGetAction:
@@ -163,3 +166,112 @@ class TestResolveConfigEdgeCases:
 
         assert path == str(tmp_path)
         assert name == "config"
+
+
+runner = CliRunner()
+
+
+class TestEvalRobo:
+    """Tests for flagscale eval robo subcommand"""
+
+    def test_eval_robo_calls_eval_main(self):
+        """eval robo forwards args to eval_online.main"""
+        with patch("flagscale.eval.robo.main") as mock_main:
+            result = runner.invoke(
+                app,
+                [
+                    "eval",
+                    "robo",
+                    "--model-name",
+                    "qwen_gr00t",
+                    "--datasets",
+                    "libero_10",
+                    "--server-host",
+                    "example.com",
+                    "--attach",
+                    "--base-url",
+                    "http://localhost:8080/api/hf",
+                    "--model-id",
+                    "test_model",
+                ],
+            )
+            assert result.exit_code == 0
+            mock_main.assert_called_once()
+            args = sys.argv
+            assert args[0] == "eval_online.py"
+            assert "--model-name" in args
+            assert "qwen_gr00t" in args
+            assert "--datasets" in args
+            assert "libero_10" in args
+            assert "--server-host" in args
+            assert "example.com" in args
+            assert "--attach" in args
+            assert "--base-url" in args
+            assert "http://localhost:8080/api/hf" in args
+            assert "--model-id" in args
+            assert "test_model" in args
+
+    def test_eval_robo_missing_required_args(self):
+        """eval robo fails when required args are missing"""
+        result = runner.invoke(app, ["eval", "robo"])
+        assert result.exit_code != 0
+
+    def test_eval_robo_defaults(self):
+        """eval robo uses default values for optional args"""
+        with patch("flagscale.eval.robo.main") as _:
+            result = runner.invoke(
+                app,
+                [
+                    "eval",
+                    "robo",
+                    "--model-name",
+                    "pi0_5",
+                    "--datasets",
+                    "libero_10",
+                    "--server-host",
+                    "example.com",
+                ],
+            )
+            assert result.exit_code == 0
+            args = sys.argv
+            assert "--poll-interval" in args
+            assert "30" in args
+            assert "--server-timeout" in args
+            assert "300" in args
+            assert "--attach" not in args
+            assert "--detach" not in args
+
+    def test_eval_robo_multiple_datasets(self):
+        """eval robo handles multiple --datasets flags"""
+        with patch("flagscale.eval.robo.main") as _:
+            result = runner.invoke(
+                app,
+                [
+                    "eval",
+                    "robo",
+                    "--model-name",
+                    "qwen_gr00t",
+                    "--datasets",
+                    "libero_10",
+                    "--datasets",
+                    "libero_90",
+                    "--server-host",
+                    "example.com",
+                ],
+            )
+            assert result.exit_code == 0
+            args = sys.argv
+            assert "libero_10" in args
+            assert "libero_90" in args
+
+    def test_eval_help_shows_subcommands(self):
+        """flagscale eval --help lists available eval types"""
+        result = runner.invoke(app, ["eval", "--help"])
+        assert result.exit_code == 0
+        assert "robo" in result.output
+
+    def test_eval_robo_help_shows_args(self):
+        """flagscale eval robo --help shows help text"""
+        result = runner.invoke(app, ["eval", "robo", "--help"])
+        assert result.exit_code == 0
+        assert "FlagEval" in result.output

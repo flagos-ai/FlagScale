@@ -14,9 +14,9 @@ from megatron.core.enums import ModelType
 from megatron.core.models.gpt import GPTModel
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import get_attr_wrapped_model, StragglerDetector
-from megatron.core.tokenizers.text.utils.build_tokenizer import build_tokenizer
+from megatron.training.tokenizer import build_tokenizer
 from megatron.core import mpu
-from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
+from megatron.training import get_args, get_timers, print_rank_0
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
     get_blend_and_blend_per_split,
@@ -26,7 +26,7 @@ from megatron.training.datasets.sft_dataset import SFTDataset
 from model_provider import model_provider
 
 try:
-    from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+    from megatron.post_training.arguments import add_modelopt_args
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
 
     has_nvidia_modelopt = True
@@ -36,6 +36,8 @@ except ImportError:
 from megatron.training.extra_valid import extra_valid_datasets_provider
 from megatron.training.training import pretrain
 from megatron.plugin.hetero.parallel_context import get_parallel_context
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
 
 # engram
 from flagscale.models.megatron.engram.engram_builder import engram_builder
@@ -60,15 +62,15 @@ def get_batch_on_this_tp_rank(data_iterator):
         assert data_iterator is not None
         data = next(data_iterator)
         batch = {
-            'tokens': data["tokens"].cuda(non_blocking=True),
-            'labels': data["labels"].cuda(non_blocking=True),
-            'loss_mask': data["loss_mask"].cuda(non_blocking=True),
+            'tokens': data["tokens"].to(device=cur_platform.device_name(), non_blocking=True),
+            'labels': data["labels"].to(device=cur_platform.device_name(), non_blocking=True),
+            'loss_mask': data["loss_mask"].to(device=cur_platform.device_name(), non_blocking=True),
             'attention_mask': (
                 None
                 if "attention_mask" not in data
-                else data["attention_mask"].cuda(non_blocking=True)
+                else data["attention_mask"].to(device=cur_platform.device_name(), non_blocking=True)
             ),
-            'position_ids': data["position_ids"].cuda(non_blocking=True),
+            'position_ids': data["position_ids"].to(device=cur_platform.device_name(), non_blocking=True),
         }
 
         if args.pipeline_model_parallel_size == 1:
@@ -107,30 +109,30 @@ def get_batch_on_this_tp_rank(data_iterator):
         tokens = torch.empty(
             (args.micro_batch_size, args.seq_length),
             dtype=torch.int64,
-            device=torch.cuda.current_device(),
+            device=cur_platform.device_name(),
         )
         labels = torch.empty(
             (args.micro_batch_size, args.seq_length),
             dtype=torch.int64,
-            device=torch.cuda.current_device(),
+            device=cur_platform.device_name(),
         )
         loss_mask = torch.empty(
             (args.micro_batch_size, args.seq_length),
             dtype=torch.float32,
-            device=torch.cuda.current_device(),
+            device=cur_platform.device_name(),
         )
         if args.create_attention_mask_in_dataloader:
             attention_mask = torch.empty(
                 (args.micro_batch_size, 1, args.seq_length, args.seq_length),
                 dtype=torch.bool,
-                device=torch.cuda.current_device(),
+                device=cur_platform.device_name(),
             )
         else:
             attention_mask = None
         position_ids = torch.empty(
             (args.micro_batch_size, args.seq_length),
             dtype=torch.int64,
-            device=torch.cuda.current_device(),
+            device=cur_platform.device_name(),
         )
 
         if args.pipeline_model_parallel_size == 1:
@@ -217,7 +219,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and modelopt_args_enabled(args):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()
@@ -307,10 +309,7 @@ def is_dataset_built_on_rank(vp_stage=None):
 
 
 def core_gpt_dataset_config_from_args(args):
-    if args.legacy_tokenizer:
-        tokenizer = get_tokenizer()
-    else:
-        tokenizer = build_tokenizer(args)
+    tokenizer = build_tokenizer(args)
 
     # Sometimes --data-path is too long, instead we parse it from a file.
     blend: Optional[Tuple[List[str], Optional[List[float]]]]

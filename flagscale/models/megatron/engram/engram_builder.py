@@ -2,48 +2,38 @@
 # ruff: noqa: F401
 ## built-in
 import logging
+from typing import Optional
 
 from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
-from megatron.core.models.backends import (
-    BackendSpecProvider,
-)
-
+from megatron.core.models.backends import BackendSpecProvider
 ## megatron-core
 from megatron.core.models.gpt.gpt_layer_specs import (
-    get_gpt_decoder_block_spec,
-    get_gpt_layer_local_spec,
+    get_gpt_decoder_block_spec, get_gpt_layer_local_spec,
     get_gpt_layer_with_inference_spec,
-    get_gpt_layer_with_transformer_engine_spec,
-    get_gpt_mtp_block_spec,
-    get_mlp_module_spec_for_backend,
-)
+    get_gpt_layer_with_transformer_engine_spec, get_gpt_mtp_block_spec,
+    get_mlp_module_spec_for_backend)
 from megatron.core.models.gpt.gpt_model import GPTModel
-from megatron.core.transformer.attention import SelfAttention, SelfAttentionSubmodules
+from megatron.core.transformer.attention import (SelfAttention,
+                                                 SelfAttentionSubmodules)
 from megatron.core.transformer.enums import AttnMaskType, LayerType
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.multi_latent_attention import (
-    MLASelfAttention,
-    MLASelfAttentionSubmodules,
-)
+    MLASelfAttention, MLASelfAttentionSubmodules)
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.torch_norm import L2Norm
 from megatron.core.transformer.transformer_block import (
-    TransformerBlockSubmodules,
-    get_num_layers_to_build,
-)
+    TransformerBlockSubmodules, get_num_layers_to_build)
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import (
-    TransformerLayerSubmodules,
-    get_transformer_layer_offset,
-)
+    TransformerLayerSubmodules, get_transformer_layer_offset)
 from megatron.training import get_args, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 
 try:
     import transformer_engine as te  # pylint: disable=unused-import
-
     from megatron.core.extensions.transformer_engine import TENorm
-    from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
+    from megatron.core.extensions.transformer_engine_spec_provider import \
+        TESpecProvider
 
     HAVE_TE = True
 except ImportError:
@@ -51,7 +41,6 @@ except ImportError:
 
 try:
     import nvidia_kitchen  # pylint: disable=unused-import
-
     from megatron.core.extensions.kitchen import KitchenSpecProvider
 
     HAVE_KITCHEN = True
@@ -60,7 +49,6 @@ except ImportError:
 
 try:
     import apex  # pylint: disable=unused-import
-
     from megatron.core.fusions.fused_layer_norm import FusedLayerNorm
 
     HAVE_APEX = True
@@ -99,15 +87,12 @@ def _get_transformer_layer_spec(use_te, config):
             args.moe_grouped_gemm,
             args.qk_layernorm,
             args.multi_latent_attention,
-            moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
             qk_l2_norm=args.qk_l2_norm,
             use_kitchen=config.use_kitchen,
         )
     elif config.transformer_impl == "inference_optimized":
         return get_gpt_layer_with_inference_spec(
-            args.qk_layernorm,
-            args.multi_latent_attention,
-            qk_l2_norm=args.qk_l2_norm,
+            args.qk_layernorm, args.multi_latent_attention, qk_l2_norm=args.qk_l2_norm
         )
     else:
         return get_gpt_layer_local_spec(
@@ -115,7 +100,6 @@ def _get_transformer_layer_spec(use_te, config):
             args.moe_grouped_gemm,
             args.qk_layernorm,
             args.multi_latent_attention,
-            moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
             normalization=args.normalization,
             use_kitchen=config.use_kitchen,
         )
@@ -127,7 +111,6 @@ def get_engram_transformer_layer_spec(
     qk_layernorm: bool | None = False,
     multi_latent_attention: bool | None = False,
     fp8: str | None = None,  # pylint: disable=unused-argument
-    moe_use_legacy_grouped_gemm: bool | None = False,
     qk_l2_norm: bool | None = False,
     use_te_op_fuser: bool | None = False,
     use_kitchen: bool = False,
@@ -143,9 +126,13 @@ def get_engram_transformer_layer_spec(
         assert HAVE_KITCHEN
         backend: BackendSpecProvider = KitchenSpecProvider(fallback=TESpecProvider())
         if use_te_op_fuser:
-            raise AssertionError("use_te_op_fuser not compatible with using kitchen in mlp.")
+            raise AssertionError(
+                "use_te_op_fuser not compatible with using kitchen in mlp."
+            )
         if use_te_activation_func:
-            raise AssertionError("use_te_activation_func not compatible with using kitchen.")
+            raise AssertionError(
+                "use_te_activation_func not compatible with using kitchen."
+            )
     else:
         backend = TESpecProvider()
 
@@ -153,7 +140,6 @@ def get_engram_transformer_layer_spec(
         backend=backend,
         num_experts=num_experts,
         moe_grouped_gemm=moe_grouped_gemm,
-        moe_use_legacy_grouped_gemm=moe_use_legacy_grouped_gemm,
         use_te_op_fuser=use_te_op_fuser,
         use_te_activation_func=use_te_activation_func,
     )
@@ -208,10 +194,14 @@ def get_engram_transformer_layer_spec(
                         core_attention=backend.core_attention(),
                         linear_proj=backend.row_parallel_linear(),
                         q_layernorm=(
-                            L2Norm if qk_l2_norm else (qk_norm if qk_layernorm else IdentityOp)
+                            L2Norm
+                            if qk_l2_norm
+                            else (qk_norm if qk_layernorm else IdentityOp)
                         ),
                         k_layernorm=(
-                            L2Norm if qk_l2_norm else (qk_norm if qk_layernorm else IdentityOp)
+                            L2Norm
+                            if qk_l2_norm
+                            else (qk_norm if qk_layernorm else IdentityOp)
                         ),
                     ),
                 ),
@@ -238,7 +228,7 @@ def get_engram_decoder_block_spec(
     qk_l2_norm: bool | None = False,
     vp_stage: int | None = None,
     pp_rank: int | None = None,
-    is_dualpipev_first_chunk: bool | None = False,
+    dualpipev_stage: Optional[int] = None,
     use_moe: bool | None = False,
 ) -> TransformerBlockSubmodules:
     """GPT block spec."""
@@ -249,7 +239,6 @@ def get_engram_decoder_block_spec(
         moe_grouped_gemm=False,
         qk_layernorm=config.qk_layernorm,
         multi_latent_attention=config.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=config.moe_use_legacy_grouped_gemm,
         qk_l2_norm=qk_l2_norm,
         use_kitchen=config.use_kitchen,
         use_te_activation_func=config.use_te_activation_func,
@@ -259,7 +248,6 @@ def get_engram_decoder_block_spec(
         moe_grouped_gemm=config.moe_grouped_gemm,
         qk_layernorm=config.qk_layernorm,
         multi_latent_attention=config.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=config.moe_use_legacy_grouped_gemm,
         qk_l2_norm=qk_l2_norm,
         use_kitchen=config.use_kitchen,
         use_te_activation_func=config.use_te_activation_func,
@@ -270,7 +258,6 @@ def get_engram_decoder_block_spec(
         moe_grouped_gemm=False,
         qk_layernorm=config.qk_layernorm,
         multi_latent_attention=config.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=config.moe_use_legacy_grouped_gemm,
         qk_l2_norm=qk_l2_norm,
         use_kitchen=config.use_kitchen,
         use_te_activation_func=config.use_te_activation_func,
@@ -280,7 +267,6 @@ def get_engram_decoder_block_spec(
         moe_grouped_gemm=config.moe_grouped_gemm,
         qk_layernorm=config.qk_layernorm,
         multi_latent_attention=config.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=config.moe_use_legacy_grouped_gemm,
         qk_l2_norm=qk_l2_norm,
         use_kitchen=config.use_kitchen,
         use_te_activation_func=config.use_te_activation_func,
@@ -293,7 +279,8 @@ def get_engram_decoder_block_spec(
     if use_moe:
         if isinstance(config.moe_layer_freq, int):
             moe_layer_pattern = [
-                1 if (i % config.moe_layer_freq == 0) else 0 for i in range(config.num_layers)
+                1 if (i % config.moe_layer_freq == 0) else 0
+                for i in range(config.num_layers)
             ]
         elif isinstance(config.moe_layer_freq, list):
             moe_layer_pattern = config.moe_layer_freq
@@ -314,7 +301,9 @@ def get_engram_decoder_block_spec(
     for layer_number in range(config.num_layers):
         is_engram_layer = True if layer_number in config.engram_layer_ids else False
         if moe_layer_pattern[layer_number] == 1:
-            layer_specs.append(moe_engram_layer_spec if is_engram_layer else moe_orig_layer_spec)
+            layer_specs.append(
+                moe_engram_layer_spec if is_engram_layer else moe_orig_layer_spec
+            )
         elif moe_layer_pattern[layer_number] == 0:
             layer_specs.append(
                 dense_engram_layer_spec if is_engram_layer else dense_orig_layer_spec
@@ -329,7 +318,7 @@ def get_engram_decoder_block_spec(
         config,
         vp_stage=vp_stage,
         pp_rank=pp_rank,
-        is_dualpipev_first_chunk=is_dualpipev_first_chunk,
+        dualpipev_stage=dualpipev_stage,
     )
 
     if config.pipeline_model_parallel_layout is not None:
@@ -345,7 +334,7 @@ def get_engram_decoder_block_spec(
             config,
             vp_stage=vp_stage,
             pp_rank=pp_rank,
-            is_dualpipev_first_chunk=is_dualpipev_first_chunk,
+            dualpipev_stage=dualpipev_stage,
         )
         local_layer_specs = layer_specs[offset : offset + num_layers_to_build]
 
@@ -357,7 +346,9 @@ def get_engram_decoder_block_spec(
     return block_spec
 
 
-def engram_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None):
+def engram_builder(
+    args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None
+):
     print_rank_0("building Engram model ...")
 
     config = core_transformer_config_from_args(args)
@@ -385,9 +376,7 @@ def engram_builder(args, pre_process, post_process, vp_stage=None, config=None, 
     if args.use_engram:
         decoder_kwargs["use_moe"] = use_moe
 
-    transformer_layer_spec = decoder_func(
-        **decoder_kwargs,
-    )
+    transformer_layer_spec = decoder_func(**decoder_kwargs)
 
     # do not support engram for mtp now
     mtp_block_spec = None

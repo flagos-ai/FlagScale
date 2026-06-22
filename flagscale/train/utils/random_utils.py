@@ -22,8 +22,12 @@ import numpy as np
 import torch
 from safetensors.torch import load_file, save_file
 
+from megatron.plugin.platform import get_platform
+
 from flagscale.models.utils.constants import RNG_STATE
 from flagscale.train.datasets.utils import flatten_dict, unflatten_dict
+
+cur_platform = get_platform()
 
 
 def serialize_python_rng_state() -> dict[str, torch.Tensor]:
@@ -86,8 +90,8 @@ def serialize_torch_rng_state() -> dict[str, torch.Tensor]:
     `safetensors.save_file()` or `torch.save()`.
     """
     torch_rng_state_dict = {"torch_rng_state": torch.get_rng_state()}
-    if torch.cuda.is_available():
-        torch_rng_state_dict["torch_cuda_rng_state"] = torch.cuda.get_rng_state()
+    if cur_platform.is_available():
+        torch_rng_state_dict["torch_cuda_rng_state"] = cur_platform.get_rng_state()
     return torch_rng_state_dict
 
 
@@ -96,8 +100,8 @@ def deserialize_torch_rng_state(rng_state_dict: dict[str, torch.Tensor]) -> None
     Restores the rng state for `torch` from a dictionary produced by `serialize_torch_rng_state()`.
     """
     torch.set_rng_state(rng_state_dict["torch_rng_state"])
-    if torch.cuda.is_available() and "torch_cuda_rng_state" in rng_state_dict:
-        torch.cuda.set_rng_state(rng_state_dict["torch_cuda_rng_state"])
+    if cur_platform.is_available() and "torch_cuda_rng_state" in rng_state_dict:
+        cur_platform.set_rng_state(rng_state_dict["torch_cuda_rng_state"])
 
 
 def serialize_rng_state() -> dict[str, torch.Tensor]:

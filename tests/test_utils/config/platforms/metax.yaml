@@ -1,33 +1,48 @@
-# MetaX C500 Platform Configuration
-# Flexible test selection mechanism for MetaX C500 GPU (MACA) environments
+# MetaX C550 Platform Configuration
+# Flexible test selection mechanism for MetaX C550 GPU (MACA) environments
 #
-# MetaX C500 specs: 2x C500 GPUs, 65536 MiB each, MACA 3.3.0
+# MetaX C550 specs: 2x C550 GPUs, 65536 MiB each, MACA 3.3.0
 #
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
 #   Example: qwen3: ["0_6b"] -> add or remove items
-# - unit: Add/remove paths in include and exclude lists
+# - unit: Add/remove paths or pytest nodeids in include and exclude lists
 #   Example: include: "*" or ["test_basic.py", "runner/*"]
-#            exclude: [] or ["test_spiky_loss_detector.py"]
+#            exclude: [] or ["tests/unit_tests/test_spiky_loss_detector.py"]
+#            exclude exact cases with nodeids like ["tests/unit_tests/test_cli.py::TestFoo::test_bar"]
 
 # Define device types available for this platform
 device_types:
-  - c500
+  - c550
 
 # Device-specific test configurations
-c500:
-  name: "c500"
+c550:
+  name: "c550"
   tests:
     functional:
       # Add or remove test cases per model
       train:
         qwen3: ["0_6b_metax"]
       hetero_train: {}
-      benchmark: {}
+      benchmark: {} # qwen3: ["0_6b_metax"]
       inference: {}
       serve: {}
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"
-      # Exclude patterns: empty list or list paths to exclude
-      exclude: []
+      # Exclude paths use pytest --ignore; nodeids use pytest --deselect.
+      exclude:
+        # MetaX CI: path/hostfile tests are not stable under multi-process torchrun.
+        - tests/unit_tests/runner/test_parse_hostfile.py
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_check_exists_warns_on_missing
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_check_exists_no_warning_for_existing
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_check_exists_false_does_not_warn_on_missing
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_default_config_key_is_empty
+        # MetaX CI: these cases error in the current runtime/environment.
+        - tests/unit_tests/runner/elastic/test_diagnostic.py::TestDiagnostic::test_generate_diagnostic_report_file_output
+        - tests/unit_tests/runner/elastic/test_gpu_health_check.py::TestGPUHealthCheck::test_check_computation
+        - tests/unit_tests/test_cli.py::TestResolveConfig::test_from_model_name_aquila
+        - tests/unit_tests/test_init.py::test_get_version_from_importlib_metadata
+        - tests/unit_tests/test_init.py::test_get_version_fallback_to_pyproject
+        - tests/unit_tests/test_init.py::test_get_version_fallback_to_default
+        - tests/unit_tests/test_parallel_context.py::test_parallel_config

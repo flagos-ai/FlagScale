@@ -46,12 +46,18 @@ def _load_checkpoint(queue, args):
         from megatron.training.checkpointing import load_args_from_checkpoint, load_checkpoint
         from megatron.legacy.model import module
         from megatron.core import mpu
-        from megatron.legacy import fused_kernels
         from megatron.core.tensor_parallel.random import (
                 get_cuda_rng_tracker, _DATA_PARALLEL_RNG_TRACKER_NAME,
                 _EXPERT_PARALLEL_RNG_TRACKER_NAME, _MODEL_PARALLEL_RNG_TRACKER_NAME
             )
-        from tools.checkpoint.utils import _ConverterFakeProcessGroup
+        from tools.checkpoint.utils import (
+            _ConverterFakeProcessGroup,
+            get_expert_model_parallel_rank,
+            get_expert_tensor_parallel_rank,
+            get_mcore_model_parallel_size,
+            get_tensor_model_parallel_rank,
+            validate_mcore_parallel_size,
+        )
     except ModuleNotFoundError:
         print("Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting.")
         queue.put("exit")
@@ -78,7 +84,6 @@ def _load_checkpoint(queue, args):
         '--no-masked-softmax-fusion',
         '--no-bias-gelu-fusion',
         '--no-bias-dropout-fusion',
-        '--no-async-tensor-model-parallel-allreduce',
         '--use-cpu-initialization',
         '--micro-batch-size', '1',
         '--no-load-optim',
@@ -125,20 +130,27 @@ def _load_checkpoint(queue, args):
     _set_arg("hetero_pipeline_layer_split")
 
     # for engram
-    _set_arg("use_engram")
-    _set_arg("engram_layer_ids")
-    _set_arg("engram_hc_mult")
-    _set_arg("engram_kernel_size")
-    _set_arg("engram_pad_id")
-    _set_arg("engram_seed")
-    _set_arg("engram_vocab_size")
-    _set_arg("engram_tokenizer_name_or_path")
-    _set_arg("max_ngram_size")
-    _set_arg("n_embed_per_ngram")
-    _set_arg("n_head_per_ngram")
-    setattr(margs, "vocab_size", args.true_vocab_size)
-    engram_tokenizer_path_ckpt = getattr(checkpoint_args, "engram_tokenizer_name_or_path", None)
-    setattr(margs, "engram_tokenizer_name_or_path", os.path.join(root_path, engram_tokenizer_path_ckpt))
+    if getattr(checkpoint_args, "use_engram", False):
+        _set_arg("use_engram")
+        _set_arg("engram_layer_ids")
+        _set_arg("engram_hc_mult")
+        _set_arg("engram_kernel_size")
+        _set_arg("engram_pad_id")
+        _set_arg("engram_seed")
+        _set_arg("engram_vocab_size")
+        _set_arg("engram_tokenizer_name_or_path")
+        _set_arg("max_ngram_size")
+        _set_arg("n_embed_per_ngram")
+        _set_arg("n_head_per_ngram")
+        if args.true_vocab_size is not None:
+            setattr(margs, "vocab_size", args.true_vocab_size)
+        engram_tokenizer_path_ckpt = getattr(checkpoint_args, "engram_tokenizer_name_or_path", None)
+        if engram_tokenizer_path_ckpt and not os.path.isabs(engram_tokenizer_path_ckpt):
+            engram_tokenizer_path_ckpt = os.path.join(root_path, engram_tokenizer_path_ckpt)
+        setattr(margs, "engram_tokenizer_name_or_path", engram_tokenizer_path_ckpt)
+    else:
+        setattr(margs, "use_engram", False)
+        setattr(margs, "engram_layer_ids", [])
 
     # for hetero
     if margs.hetero_process_meshes is not None:
@@ -148,7 +160,7 @@ def _load_checkpoint(queue, args):
 
     # Arguments do sanity checks on the world size, but we don't care,
     # so trick it into thinking we are plenty of processes
-    margs.world_size = margs.tensor_model_parallel_size * margs.pipeline_model_parallel_size * margs.expert_model_parallel_size
+    margs.world_size = get_mcore_model_parallel_size(margs) * margs.pipeline_model_parallel_size
 
     # Explicitly copy data types from checkpoint.
     margs.fp16 = checkpoint_args.fp16
@@ -170,6 +182,7 @@ def _load_checkpoint(queue, args):
 
     print("*"*20 + "validate loader arguments" + "*"*20)
     margs = validate_args(margs)
+    validate_mcore_parallel_size(margs)
 
     def check_for_arg(arg_name, default=None):
         if getattr(margs, arg_name, None) is None:
@@ -224,14 +237,20 @@ def _load_checkpoint(queue, args):
     tp_size = margs.tensor_model_parallel_size
     pp_size = margs.pipeline_model_parallel_size
     ep_size = margs.expert_model_parallel_size
+    etp_size = margs.expert_tensor_parallel_size
+    mcore_model_parallel_size = get_mcore_model_parallel_size(margs)
     vp_size = margs.virtual_pipeline_model_parallel_size or 1
     mpu.set_tensor_model_parallel_world_size(tp_size)
     mpu.set_pipeline_model_parallel_world_size(pp_size)
     mpu.set_expert_model_parallel_world_size(ep_size)
+    if hasattr(mpu, "set_expert_tensor_parallel_world_size"):
+        mpu.set_expert_tensor_parallel_world_size(etp_size)
     mpu.set_virtual_pipeline_model_parallel_world_size(margs.virtual_pipeline_model_parallel_size)
     mpu.set_tensor_model_parallel_rank(0)
     mpu.set_pipeline_model_parallel_rank(0)
     mpu.set_expert_model_parallel_rank(0)
+    if hasattr(mpu, "set_expert_tensor_parallel_rank"):
+        mpu.set_expert_tensor_parallel_rank(0)
     mpu.set_virtual_pipeline_model_parallel_rank(0)
     # For backward compatibility during local parallel states refactoring
     fake_tp_group = _ConverterFakeProcessGroup(size=tp_size)
@@ -242,10 +261,10 @@ def _load_checkpoint(queue, args):
     fake_pp_group = _ConverterFakeProcessGroup(size=margs.pipeline_model_parallel_size)
     fake_cp_group = _ConverterFakeProcessGroup(size=margs.context_parallel_size)
     fake_dp_group = _ConverterFakeProcessGroup(size=margs.data_parallel_size)
-    fake_etp_group = _ConverterFakeProcessGroup(size=margs.expert_tensor_parallel_size)
-    edp_parallel_size = margs.tensor_model_parallel_size * margs.context_parallel_size // (margs.expert_tensor_parallel_size * margs.expert_model_parallel_size)
+    fake_etp_group = _ConverterFakeProcessGroup(size=etp_size)
+    edp_parallel_size = mcore_model_parallel_size // (etp_size * ep_size)
     fake_edp_group = _ConverterFakeProcessGroup(size=edp_parallel_size)
-    fake_etp_ep_group = _ConverterFakeProcessGroup(size=margs.expert_tensor_parallel_size*margs.expert_model_parallel_size)
+    fake_etp_ep_group = _ConverterFakeProcessGroup(size=etp_size * ep_size)
     fake_tcp_group = _ConverterFakeProcessGroup(size=margs.tensor_model_parallel_size*margs.context_parallel_size)
     mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
     mpu._CONTEXT_PARALLEL_GROUP = fake_cp_group
@@ -254,13 +273,10 @@ def _load_checkpoint(queue, args):
     mpu._EXPERT_DATA_PARALLEL_GROUP = fake_edp_group
     mpu._EXPERT_TENSOR_AND_MODEL_PARALLEL_GROUP = fake_etp_ep_group
     mpu._TENSOR_AND_CONTEXT_PARALLEL_GROUP = fake_tcp_group
-    mpu._EXPERT_TENSOR_PARALLEL_GROUP = fake_tp_group
+    mpu._EXPERT_TENSOR_PARALLEL_GROUP = fake_etp_group
     mpu._DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._INTRA_PARTIAL_DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._LAST_RANK_WHEN_USING_PIPELINE = pp_size - 1
-
-    # fused kernel
-    fused_kernels.load(margs)
 
     # random
     CUDA_RNG_STATE_TRACKER = get_cuda_rng_tracker()
@@ -291,6 +307,7 @@ def _load_checkpoint(queue, args):
     md.previous_tensor_parallel_size = margs.tensor_model_parallel_size
     md.previous_pipeline_parallel_size = margs.pipeline_model_parallel_size
     md.previous_expert_parallel_size = margs.expert_model_parallel_size
+    md.previous_expert_tensor_parallel_size = margs.expert_tensor_parallel_size
     md.previous_decoder_first_pipeline_num_layers = margs.decoder_first_pipeline_num_layers
     md.true_vocab_size = args.true_vocab_size # true (non-padded) vocab size
     md.make_vocab_size_divisible_by = margs.make_vocab_size_divisible_by
@@ -302,16 +319,22 @@ def _load_checkpoint(queue, args):
         # for one pp stage
         nonlocal consumed_train_samples
         nonlocal consumed_valid_samples
-        tp_size = margs.tensor_model_parallel_size
         pp_size = margs.pipeline_model_parallel_size
         vp_size = margs.virtual_pipeline_model_parallel_size or 1
 
         models = [[] for _ in range(vp_size)]
         for rank_id in range(count):
-            tp_rank = rank_id % tp_size
-            ep_rank = rank_id // tp_size
+            tp_rank = get_tensor_model_parallel_rank(rank_id, margs)
+            ep_rank = get_expert_model_parallel_rank(rank_id, margs)
+            etp_rank = get_expert_tensor_parallel_rank(rank_id, margs)
             mpu.set_tensor_model_parallel_rank(tp_rank)
             mpu.set_expert_model_parallel_rank(ep_rank)
+            if hasattr(mpu, "set_expert_tensor_parallel_rank"):
+                mpu.set_expert_tensor_parallel_rank(etp_rank)
+            fake_tp_group.set_rank(tp_rank)
+            fake_ep_group.set_rank(ep_rank)
+            fake_etp_group.set_rank(etp_rank)
+            fake_etp_ep_group.set_rank(ep_rank * etp_size + etp_rank)
             if pp_size > 1 and vp_size > 1:
                 model_ = []
                 for vp_rank in range(vp_size):
@@ -353,7 +376,7 @@ def _load_checkpoint(queue, args):
     mpu.set_pipeline_model_parallel_rank(0)
     fake_pp_group = _ConverterFakeProcessGroup(rank=0, size=pp_size)
     mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
-    all_models = [get_models(tp_size * ep_size, margs.params_dtype)]
+    all_models = [get_models(mcore_model_parallel_size, margs.params_dtype)]
     models = all_models[0][0] # pp0vpp0
 
     md.consumed_train_samples = consumed_train_samples
@@ -379,7 +402,7 @@ def _load_checkpoint(queue, args):
             mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
 
             if pp_rank > 0 and vp_rank == 0:
-                all_models.append(get_models(tp_size * ep_size, margs.params_dtype))
+                all_models.append(get_models(mcore_model_parallel_size, margs.params_dtype))
 
             models = all_models[pp_rank][vp_rank]
             for layer_id in range(len(models[0].decoder.layers)):
@@ -387,7 +410,9 @@ def _load_checkpoint(queue, args):
                 margs.total_layer_num = total_layer_num
 
                 engram_layer_id  = total_layer_num # get_global_layer_id
-                if margs.use_engram and engram_layer_id in margs.engram_layer_ids:
+                if getattr(margs, "use_engram", False) and engram_layer_id in getattr(
+                    margs, "engram_layer_ids", []
+                ):
                     ckpt_plugin.get_engram_ckpt(message, models, engram_layer_id, margs)
 
                 ckpt_plugin.get_attn_ckpt(message, models, layer_id, margs)
@@ -406,9 +431,11 @@ def _load_checkpoint(queue, args):
         ckpt_plugin.get_output_layer_ckpt(message, models, margs)
         queue_put("output layer", message)
 
-    message = dict()
-    if margs.mtp_num_layers:
-        for mtp_layer_id in range(margs.mtp_num_layers):
+    mtp_num_layers = getattr(margs, "mtp_num_layers", 0)
+    if getattr(args, "skip_mtp", False):
+        mtp_num_layers = 0
+    if mtp_num_layers:
+        for mtp_layer_id in range(mtp_num_layers):
             message = dict()
             ckpt_plugin.get_mtp_ckpt(message, models, mtp_layer_id, margs)
             queue_put(f"mtp module {mtp_layer_id}", message)

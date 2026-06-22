@@ -2,7 +2,7 @@
 
 -r ../common.txt
 
-torchvision==0.22.1
+torchvision==0.23.0
 
 # for robotics
 datasets==4.5.0

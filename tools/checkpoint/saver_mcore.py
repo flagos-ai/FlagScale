@@ -23,6 +23,9 @@ def add_arguments(parser):
     group.add_argument("--target-expert-parallel-size", type=int,
                       help='Target expert model parallel size, default to the expert parallel size '
                       'in the input checkpoint if provided by the loader, otherwise to 1.')
+    group.add_argument("--target-expert-tensor-parallel-size", type=int,
+                       help='Target expert tensor parallel size, default to the expert tensor parallel size '
+                       'in the input checkpoint if provided by the loader, otherwise to the target tensor parallel size.')
     group.add_argument("--target-num-experts", type=int, default=None,
                        help='Target num of experts, default to the num_experts in the input checkpoint'
                        'if provided by the loader, otherwise to None. NOTE: Do not support target_num_experts'
@@ -54,14 +57,20 @@ def save_checkpoint(queue, args):
         from megatron.training.arguments import parse_args, validate_args
         from megatron.training.checkpointing import save_checkpoint, get_checkpoint_name
         from megatron.training.global_vars import set_global_variables, get_args
-        from megatron.training.tokenizer.tokenizer import _vocab_size_with_padding
-        from megatron.legacy import fused_kernels
+        from megatron.training.tokenizer.tokenizer import vocab_size_with_padding
         from megatron.core import mpu
         from megatron.core.tensor_parallel.random import (
                 get_cuda_rng_tracker, _DATA_PARALLEL_RNG_TRACKER_NAME,
                 _EXPERT_PARALLEL_RNG_TRACKER_NAME, _MODEL_PARALLEL_RNG_TRACKER_NAME
             )
-        from tools.checkpoint.utils import _ConverterFakeProcessGroup
+        from tools.checkpoint.utils import (
+            _ConverterFakeProcessGroup,
+            get_expert_model_parallel_rank,
+            get_expert_tensor_parallel_rank,
+            get_mcore_model_parallel_size,
+            get_tensor_model_parallel_rank,
+            validate_mcore_parallel_size,
+        )
     except ModuleNotFoundError:
         print("Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting.")
         queue.put("exit")
@@ -135,6 +144,12 @@ def save_checkpoint(queue, args):
                   "Default to 1.")
             args.target_expert_parallel_size = 1
 
+    if args.target_expert_tensor_parallel_size is None:
+        if hasattr(md, 'previous_expert_tensor_parallel_size'):
+            args.target_expert_tensor_parallel_size = md.previous_expert_tensor_parallel_size
+        else:
+            args.target_expert_tensor_parallel_size = args.target_tensor_parallel_size
+
     if args.target_num_experts is None:
         if hasattr(md, 'previous_num_experts'):
             args.target_num_experts = md.previous_num_experts
@@ -148,7 +163,11 @@ def save_checkpoint(queue, args):
         if args.target_num_experts > md.previous_num_experts:
             print(f"Warning: experts[{md.previous_num_experts}-{args.target_num_experts}] will be random initailized.")
 
-    os.environ["WORLD_SIZE"] = f'{args.target_tensor_parallel_size * args.target_pipeline_parallel_size * args.target_expert_parallel_size}'
+    target_model_parallel_size = max(
+        args.target_tensor_parallel_size,
+        args.target_expert_parallel_size * args.target_expert_tensor_parallel_size,
+    )
+    os.environ["WORLD_SIZE"] = f'{target_model_parallel_size * args.target_pipeline_parallel_size}'
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 
     # We want all arguments to come from us
@@ -165,11 +184,11 @@ def save_checkpoint(queue, args):
         '--tensor-model-parallel-size', str(args.target_tensor_parallel_size),
         '--pipeline-model-parallel-size', str(args.target_pipeline_parallel_size),
         '--expert-model-parallel-size', str(args.target_expert_parallel_size),
+        '--expert-tensor-parallel-size', str(args.target_expert_tensor_parallel_size),
         '--context-parallel-size', '1',
         '--no-masked-softmax-fusion',
         '--no-bias-gelu-fusion',
         '--no-bias-dropout-fusion',
-        '--no-async-tensor-model-parallel-allreduce',
         '--use-cpu-initialization',
         '--transformer-impl', 'transformer_engine',
         '--micro-batch-size', '1',
@@ -220,10 +239,11 @@ def save_checkpoint(queue, args):
     if hasattr (md, 'checkpoint_args'):
         # These are arguments that we are either changing, or cause problems for validation if they are set
         # Note that some of these deal with T5 so will need to be changed if we support T5.
-        args_to_keep = ['tensor_model_parallel_size', 'pipeline_model_parallel_size', 'expert_model_parallel_size', 'world_size', 'params_dtype',
+        args_to_keep = ['tensor_model_parallel_size', 'pipeline_model_parallel_size', 'expert_model_parallel_size',
+                        'expert_tensor_parallel_size', 'world_size', 'params_dtype',
                         'num_layers_per_virtual_pipeline_stage', 'virtual_pipeline_model_parallel_size',
                         'masked_softmax_fusion', 'bias_gelu_fusion', 'bias_dropout_fusion',
-                        'sequence_parallel', 'async_tensor_model_parallel_allreduce',
+                        'sequence_parallel',
                         'no_load_optim', 'no_load_rng', 'no_save_optim', 'no_save_rng',
                         'vocab_file', 'tokenizer_model',
                         'save_interval', 'save', 'load', 'use_mcore_models', 'num_experts',
@@ -263,6 +283,7 @@ def save_checkpoint(queue, args):
 
     print("*"*20 + "validate saver arguments" + "*"*20)
     validate_args(margs)
+    validate_mcore_parallel_size(margs)
 
     # Use M-core models & unset loaded paths.
     margs.use_legacy_models = False
@@ -292,10 +313,13 @@ def save_checkpoint(queue, args):
     margs.model_type = model_plugin.model_type
 
     if md.true_vocab_size is not None:
-        margs.padded_vocab_size = _vocab_size_with_padding(md.true_vocab_size, margs)
+        margs.padded_vocab_size = vocab_size_with_padding(md.true_vocab_size, margs)
     else:
         # margs.padded_vocab_size will be set in ckpt_plugin.set_embedding_ckpt func
         margs.padded_vocab_size = None
+
+    if getattr(args, "skip_mtp", False):
+        margs.mtp_num_layers = 0
 
     """
     use megatron args build object and init env
@@ -314,15 +338,21 @@ def save_checkpoint(queue, args):
     tp_size = margs.tensor_model_parallel_size
     pp_size = margs.pipeline_model_parallel_size
     ep_size = margs.expert_model_parallel_size
+    etp_size = margs.expert_tensor_parallel_size
+    mcore_model_parallel_size = get_mcore_model_parallel_size(margs)
     vp_size = margs.virtual_pipeline_model_parallel_size
     if vp_size is not None and vp_size > 1:
         raise NotImplementedError("vpp-convert is not implemented")
     mpu.set_tensor_model_parallel_world_size(tp_size)
     mpu.set_pipeline_model_parallel_world_size(pp_size)
     mpu.set_expert_model_parallel_world_size(ep_size)
+    if hasattr(mpu, "set_expert_tensor_parallel_world_size"):
+        mpu.set_expert_tensor_parallel_world_size(etp_size)
     mpu.set_tensor_model_parallel_rank(0)
     mpu.set_pipeline_model_parallel_rank(0)
     mpu.set_expert_model_parallel_rank(0)
+    if hasattr(mpu, "set_expert_tensor_parallel_rank"):
+        mpu.set_expert_tensor_parallel_rank(0)
     # For backward compatibility during local parallel states refactoring
     fake_tp_group = _ConverterFakeProcessGroup(size=tp_size)
     fake_ep_group = _ConverterFakeProcessGroup(size=ep_size)
@@ -332,10 +362,10 @@ def save_checkpoint(queue, args):
     fake_pp_group = _ConverterFakeProcessGroup(size=margs.pipeline_model_parallel_size)
     fake_cp_group = _ConverterFakeProcessGroup(size=margs.context_parallel_size)
     fake_dp_group = _ConverterFakeProcessGroup(size=margs.data_parallel_size)
-    fake_etp_group = _ConverterFakeProcessGroup(size=margs.expert_tensor_parallel_size)
-    edp_parallel_size = margs.tensor_model_parallel_size * margs.context_parallel_size // (margs.expert_tensor_parallel_size * margs.expert_model_parallel_size)
+    fake_etp_group = _ConverterFakeProcessGroup(size=etp_size)
+    edp_parallel_size = mcore_model_parallel_size // (etp_size * ep_size)
     fake_edp_group = _ConverterFakeProcessGroup(size=edp_parallel_size)
-    fake_etp_ep_group = _ConverterFakeProcessGroup(size=margs.expert_tensor_parallel_size*margs.expert_model_parallel_size)
+    fake_etp_ep_group = _ConverterFakeProcessGroup(size=etp_size * ep_size)
     fake_tcp_group = _ConverterFakeProcessGroup(size=margs.tensor_model_parallel_size*margs.context_parallel_size)
     mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
     mpu._CONTEXT_PARALLEL_GROUP = fake_cp_group
@@ -344,14 +374,10 @@ def save_checkpoint(queue, args):
     mpu._EXPERT_DATA_PARALLEL_GROUP = fake_edp_group
     mpu._EXPERT_TENSOR_AND_MODEL_PARALLEL_GROUP = fake_etp_ep_group
     mpu._TENSOR_AND_CONTEXT_PARALLEL_GROUP = fake_tcp_group
-    mpu._EXPERT_TENSOR_PARALLEL_GROUP = fake_tp_group
+    mpu._EXPERT_TENSOR_PARALLEL_GROUP = fake_etp_group
     mpu._DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._INTRA_PARTIAL_DATA_PARALLEL_GROUP_WITH_CP = fake_dp_group
     mpu._LAST_RANK_WHEN_USING_PIPELINE = pp_size - 1
-
-
-    # fused kernel
-    fused_kernels.load(margs)
 
     # random
     CUDA_RNG_STATE_TRACKER = get_cuda_rng_tracker()
@@ -360,10 +386,27 @@ def save_checkpoint(queue, args):
     CUDA_RNG_STATE_TRACKER.add(_MODEL_PARALLEL_RNG_TRACKER_NAME, 44)
     CUDA_RNG_STATE_TRACKER.add(_EXPERT_PARALLEL_RNG_TRACKER_NAME, 45)
 
+    def set_model_parallel_rank(rank_id):
+        tp_rank = get_tensor_model_parallel_rank(rank_id, margs)
+        ep_rank = get_expert_model_parallel_rank(rank_id, margs)
+        etp_rank = get_expert_tensor_parallel_rank(rank_id, margs)
+        mpu.set_tensor_model_parallel_rank(tp_rank)
+        mpu.set_expert_model_parallel_rank(ep_rank)
+        if hasattr(mpu, "set_expert_tensor_parallel_rank"):
+            mpu.set_expert_tensor_parallel_rank(etp_rank)
+        fake_tp_group.set_rank(tp_rank)
+        fake_ep_group.set_rank(ep_rank)
+        fake_etp_group.set_rank(etp_rank)
+        fake_etp_ep_group.set_rank(ep_rank * etp_size + etp_rank)
+        return tp_rank, ep_rank, etp_rank
+
     def get_models(count, dtype):
         pre_process = mpu.is_pipeline_first_stage()
         post_process = mpu.is_pipeline_last_stage()
-        models = [model_plugin.get_mg_model(dtype, pre_process, post_process) for _ in range(count)]
+        models = []
+        for rank_id in range(count):
+            set_model_parallel_rank(rank_id)
+            models.append(model_plugin.get_mg_model(dtype, pre_process, post_process))
         return models
 
     """
@@ -375,7 +418,7 @@ def save_checkpoint(queue, args):
     mpu.set_pipeline_model_parallel_rank(0)
     fake_pp_group = _ConverterFakeProcessGroup(rank=0, size=margs.pipeline_model_parallel_size)
     mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
-    models = get_models(tp_size * ep_size, md.params_dtype)
+    models = get_models(mcore_model_parallel_size, md.params_dtype)
     ckpt_plugin.set_embedding_ckpt(msg, models, md, margs)
     check_message(msg)
 
@@ -388,7 +431,7 @@ def save_checkpoint(queue, args):
         mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
 
         if pp_rank > 0:
-            models = get_models(tp_size * ep_size, md.params_dtype)
+            models = get_models(mcore_model_parallel_size, md.params_dtype)
 
         for layer_id in range(len(models[0].decoder.layers)):
             msg = queue_get(f"transformer layer {total_layer_num}")
@@ -420,10 +463,7 @@ def save_checkpoint(queue, args):
                 print("ERROR: got some more data but was expecting to be done")
 
         for tp_ep_rank, model in enumerate(models):
-            tp_rank = tp_ep_rank % tp_size
-            ep_rank = tp_ep_rank // tp_size
-            mpu.set_tensor_model_parallel_rank(tp_rank)
-            mpu.set_expert_model_parallel_rank(ep_rank)
+            tp_rank, ep_rank, _ = set_model_parallel_rank(tp_ep_rank)
             checkpoint_name = get_checkpoint_name(margs.save, md.iteration)
             print(f"megtron model is saving to {checkpoint_name} ...")
             save_checkpoint(md.iteration, [model], None, None,

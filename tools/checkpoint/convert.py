@@ -64,6 +64,14 @@ def main():
     parser.add_argument(
         "--max-queue-size", type=int, default=50, help="Maximum number of tensors in the queue"
     )
+    parser.add_argument(
+        "--skip-mtp",
+        action="store_true",
+        help=(
+            "Skip Multi-Token Prediction (MTP) modules during conversion. "
+            "Use this when the target implementation only contains the main LM layers."
+        ),
+    )
 
     extend_cases = [["mistral", "mixtral"]]
 

@@ -49,7 +49,7 @@ folder to get started.
     pip install -U scikit-build-core==0.11 pybind11 ninja cmake
     git clone https://github.com/flagos-ai/FlagGems
     cd FlagGems
-    pip install --no-build-isolation . 
+    pip install --no-build-isolation .
     ```
     See more details in [FlagGems](https://github.com/flagos-ai/FlagGems)
 

@@ -23,21 +23,17 @@ from megatron.core.utils import (
     deprecate_inference_params,
     make_viewless_tensor,
 )
-
-# engram
-from .engram import Engram
-from .engram_config import EngramConfig
+from megatron.core.transformer.engram import EngramModule 
 
 
 class EngramTransformerLayer(TransformerLayer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        assert isinstance(self.config, EngramConfig), "config must be a EngramConfig"
         self.engram_hash_layer_id = (
             self.layer_number - 1
         )  # global layer_number starts at 1 in MCore
-        self.engram = Engram(
-            engram_cfg=self.config,
+        self.engram = EngramModule(
+            config=self.config,
             layer_id=self.engram_hash_layer_id,
         )
 
@@ -81,11 +77,14 @@ class EngramTransformerLayer(TransformerLayer):
             sequence_len_offset=sequence_len_offset,
             inference_params=inference_params,
         )
+    
+    def pre_compute_embedding(self, hash_input_ids: Tensor):
+        self.engram.pre_compute_embedding(hash_input_ids)
 
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
-        raise NotImplementedError("Sharded state dict is not supported for EngramTransformerLayer")
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)
 
 
 class EngramTransformerBlock(TransformerBlock):
@@ -283,6 +282,14 @@ class EngramTransformerBlock(TransformerBlock):
                         # Build kwargs based on layer type
                         layer_kwargs = {}
 
+                        # Pre-compute embeddings for the next EngramTransformerLayer if exists to overlap with current layer's computation
+                        if l_no < len(self.layers) - 1:
+                            next_layer = self.layers[l_no + 1]
+                            if isinstance(next_layer, EngramTransformerLayer):
+                                engram_hash_layer_id = next_layer.layer_number - 1
+                                hash_input_ids = engram_hash_input_ids[engram_hash_layer_id]
+                                next_layer.pre_compute_embedding(hash_input_ids)
+
                         # Only pass input_ids to EngramTransformerLayer
                         if isinstance(layer, EngramTransformerLayer):
                             layer_kwargs["input_ids"] = input_ids
@@ -333,8 +340,14 @@ class EngramTransformerBlock(TransformerBlock):
             hidden_states = hidden_states.clone()
 
         return hidden_states
-
+    
     def sharded_state_dict(
-        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict = None
+        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
-        raise NotImplementedError("Sharded state dict is not supported for EngramTransformerBlock")
+        # EngramModule let the layers be non-homogeneous, so we need to set the flag in metadata to let the sharded state dict logic know.
+        # This is useful when all layer are same, the TransformerBlock will be homogeneous, it generate sharded_state_dict will same keys for all layer and need all layers have the same structure.
+        # The layer has engram module does not fit this assumption.
+        # If the flag is set to True, the sharded_state_dict will use layer_number to generate different keys for different layer, which is same to models has dense layer leading and moe layer following.
+        # Actually, engram really causes the layers to be non-homogeneous.
+        metadata["non_homogeneous_layers"] = True
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)

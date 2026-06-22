@@ -12,6 +12,8 @@ import torch.nn as nn
 from safetensors.torch import save_file
 from torch.distributed._composable.fsdp import fully_shard
 
+from tests.unit_tests.test_utilities import Utils as TestUtils
+
 from flagscale.models.utils.constants import (
     CHECKPOINTS_DIR,
     LAST_CHECKPOINT_LINK,
@@ -181,7 +183,7 @@ def _init_dist():
     os.environ.setdefault("MASTER_PORT", "29500")
     os.environ.setdefault("RANK", "0")
     os.environ.setdefault("WORLD_SIZE", "1")
-    dist.init_process_group(backend="nccl")
+    dist.init_process_group(backend=TestUtils.dist_backend())
 
 
 def _build_fsdp2_checkpoint(
@@ -211,13 +213,13 @@ def _build_fsdp2_checkpoint(
     save_training_state(ckpt_dir, step, optimizer_state_dict, scheduler)
 
 
-requires_cuda = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="CUDA required for FSDP2 tests"
+requires_accelerator = pytest.mark.skipif(
+    not TestUtils.has_accelerator(), reason="Accelerator required for FSDP2 tests"
 )
 
 
 def _make_fsdp_model():
-    model = SimpleModel().cuda()
+    model = SimpleModel().to(TestUtils.accelerator_device())
     fully_shard(model)
     return model
 
@@ -235,11 +237,11 @@ def _get_full_optim_sd(model, opt):
 
 
 # FIXME: (yupu) Blocking release, comment out for now
-# @requires_cuda
+# @requires_accelerator
 # class TestFSDP2:
 #     """Tests for FSDP2 save/load round-trips.
 
-#     Uses a real single-GPU FSDP2 setup (nccl, world_size=1).
+#     Uses a real single-accelerator FSDP2 setup.
 #     """
 
 #     @pytest.fixture(autouse=True)
@@ -268,7 +270,7 @@ def _get_full_optim_sd(model, opt):
 #         model = _make_fsdp_model()
 #         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-#         loss = model(torch.randn(2, 10, device="cuda")).sum()
+#         loss = model(torch.randn(2, 10, device=TestUtils.accelerator_device())).sum()
 #         loss.backward()
 #         opt.step()
 #         opt.zero_grad()
@@ -290,7 +292,7 @@ def _get_full_optim_sd(model, opt):
 #         sched = torch.optim.lr_scheduler.StepLR(opt, step_size=10, gamma=0.1)
 
 #         for _ in range(5):
-#             loss = model(torch.randn(2, 10, device="cuda")).sum()
+#             loss = model(torch.randn(2, 10, device=TestUtils.accelerator_device())).sum()
 #             loss.backward()
 #             opt.step()
 #             opt.zero_grad()
@@ -317,7 +319,7 @@ def _get_full_optim_sd(model, opt):
 #         model = _make_fsdp_model()
 #         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-#         loss = model(torch.randn(2, 10, device="cuda")).sum()
+#         loss = model(torch.randn(2, 10, device=TestUtils.accelerator_device())).sum()
 #         loss.backward()
 #         opt.step()
 #         opt.zero_grad()
@@ -336,7 +338,7 @@ def _get_full_optim_sd(model, opt):
 #         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 #         # Only compute gradients for linear2 by zeroing out linear1 grads
-#         loss = model(torch.randn(2, 10, device="cuda")).sum()
+#         loss = model(torch.randn(2, 10, device=TestUtils.accelerator_device())).sum()
 #         loss.backward()
 #         for name, p in model.named_parameters():
 #             if "linear1" in name:

@@ -86,17 +86,12 @@ from flagscale.train.megatron.train_robobrain_x0 import (
     lerobot_collate_fn,
 )
 
-
-@pytest.fixture(scope="module", autouse=True)
-def cleanup_mocked_modules():
-    """Cleanup mocked modules after all tests in this module complete."""
-    yield
-    # Restore original modules or remove mocks
-    for mod in _mock_modules:
-        if _original_modules[mod] is None:
-            sys.modules.pop(mod, None)
-        else:
-            sys.modules[mod] = _original_modules[mod]
+# Restore original modules immediately after import to avoid polluting other test files
+for mod in _mock_modules:
+    if _original_modules[mod] is None:
+        sys.modules.pop(mod, None)
+    else:
+        sys.modules[mod] = _original_modules[mod]
 
 
 class MockArgs:
