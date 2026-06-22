@@ -28,6 +28,7 @@ from flagscale.train.datasets.lerobot_dataset import (
 )
 from flagscale.train.datasets.utils import dataset_to_policy_features
 from flagscale.models.configs.types import FeatureType
+from flagscale.models.utils.hub_utils import resolve_dataset_path
 from flagscale.train.processor import PolicyProcessorPipeline
 from flagscale.models.utils.constants import (
     ACTION,
@@ -91,7 +92,9 @@ def apply_fsdp2(policy, device_mesh):
 
 
 def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
-    ds_meta = LeRobotDatasetMetadata(root=config.data.data_path, revision=None)
+    data_path = resolve_dataset_path(config.data.data_path)
+
+    ds_meta = LeRobotDatasetMetadata(root=data_path, revision=None)
     delta_timestamps = _resolve_delta_timestamps(policy_config, ds_meta)
 
 
@@ -116,7 +119,7 @@ def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
     image_transforms = _resize_to_uint8_hwc
 
     dataset = LeRobotDataset(
-        root=config.data.data_path,
+        root=data_path,
         episodes=None,
         delta_timestamps=delta_timestamps,
         image_transforms=image_transforms,
@@ -474,8 +477,10 @@ def main(config: TrainConfig, seed: int):
         policy = TrainablePolicy.from_config(policy_config)
         policy.to(get_platform().name())
 
+        data_path = resolve_dataset_path(config.data.data_path)
+
         ds = get_train_dataset(
-            config.data.data_path,
+            data_path,
             batch_size=config.system.batch_size,
             task_encoder=TaskEncoder(config.data.wds),
             shuffle_buffer_size=1000,
@@ -491,8 +496,9 @@ def main(config: TrainConfig, seed: int):
 
         vlm_dl_iter = None
         if getattr(config.data, "vlm_data_path", None):
+            vlm_data_path = resolve_dataset_path(config.data.vlm_data_path)
             vlm_ds = get_train_dataset(
-                config.data.vlm_data_path,
+                vlm_data_path,
                 batch_size=config.system.batch_size,
                 task_encoder=TaskEncoder(config.data.wds),
                 shuffle_buffer_size=1000,

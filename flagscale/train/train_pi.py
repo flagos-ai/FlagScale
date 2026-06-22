@@ -47,7 +47,7 @@ from flagscale.models.utils.constants import (
 from flagscale.models.configs.types import PolicyFeature
 from flagscale.models.utils.constants import ACTION, OBS_PREFIX, REWARD
 from flagscale.models.configs.types import FeatureType
-from flagscale.models.utils.hub_utils import resolve_model_path
+from flagscale.models.utils.hub_utils import resolve_dataset_path, resolve_model_path
 from flagscale.models.pi0.configuration_pi0 import PI0Config
 from flagscale.models.pi0.modeling_pi0 import PI0Policy
 from flagscale.models.pi05.configuration_pi05 import PI05Config
@@ -134,12 +134,14 @@ def make_dataset(cfg: DataConfig, policy_config):
     image_transforms = (
         ImageTransforms(cfg.image_transforms) if enable_image_transform else None
     )
+    data_path = resolve_dataset_path(cfg.data_path)
+
     # Leave the revision to None
-    ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
+    ds_meta = LeRobotDatasetMetadata(root=data_path, revision=None)
     delta_timestamps = resolve_delta_timestamps(policy_config, ds_meta)
 
     dataset = LeRobotDataset(
-        root=cfg.data_path,
+        root=data_path,
         episodes=None,
         delta_timestamps=delta_timestamps,
         image_transforms=image_transforms,

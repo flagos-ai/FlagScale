@@ -28,7 +28,7 @@ cd FlagScale/
 pip install ".[cuda-train]" --verbose
 ```
 
-Install additional dependencies for downloading datasets:
+Install additional dependencies for automatic model and dataset downloads:
 
 ```sh
 # For HuggingFace Hub
@@ -40,9 +40,11 @@ pip install modelscope
 
 ## Training
 
-### Prepare Dataset
+### Dataset
 
 FlagScale uses the **LeRobotDataset v3.0** format. For detailed information about the format structure, see the [LeRobotDataset v3.0 documentation](https://huggingface.co/docs/lerobot/en/lerobot-dataset-v3).
+
+By default, `data.data_path` can be either a HuggingFace/ModelScope dataset repo ID or a local dataset root. If a repo ID is provided, FlagScale will automatically download the dataset during training. Set `FLAGSCALE_USE_MODELSCOPE=true` to download from ModelScope instead of HuggingFace Hub.
 
 For example, to download the `libero_goal_no_noops` dataset:
 
@@ -132,7 +134,7 @@ Configure the following fields:
 - `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (e.g., `1.0e-5`)
 
 **Data settings**:
-- `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot`)
+- `data.data_path` - LeRobot dataset repo ID or local dataset root path (e.g., `IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot` or `/workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot`)
 - `data.action_delta_indices` - List of action horizon indices to predict (default: `[0..15]` for 16-step horizon)
 - `data.preprocessor.steps[groot_pack_inputs].config.embodiment_tag` - Must match `model.embodiment_tag`
 - `data.preprocessor.steps[rename_observations_processor].config.rename_map` - Dictionary mapping dataset camera keys to policy keys (optional). Check the `features` key in your dataset's `meta/info.json` to determine the correct mapping:

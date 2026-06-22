@@ -3,7 +3,12 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from flagscale.models.utils.hub_utils import _get_lock, resolve_model_path, use_modelscope
+from flagscale.models.utils.hub_utils import (
+    _get_lock,
+    resolve_dataset_path,
+    resolve_model_path,
+    use_modelscope,
+)
 
 
 class TestUseModelscope(unittest.TestCase):
@@ -70,6 +75,7 @@ class TestResolveModelPath(unittest.TestCase):
             result = resolve_model_path("org/model", revision="v1", cache_dir="/tmp/ms")
             mock_ms_module.snapshot_download.assert_called_once_with(
                 model_id="org/model",
+                repo_type="model",
                 cache_dir="/tmp/ms",
                 revision="v1",
                 ignore_file_pattern=None,
@@ -98,6 +104,43 @@ class TestResolveModelPath(unittest.TestCase):
             _, kwargs = mock_dl.call_args
             self.assertEqual(kwargs["allow_patterns"], ["*.safetensors"])
             self.assertEqual(kwargs["ignore_patterns"], ["*.bin"])
+
+
+class TestResolveDatasetPath(unittest.TestCase):
+    def test_local_directory_returned_as_is(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = resolve_dataset_path(tmpdir)
+            self.assertEqual(result, tmpdir)
+
+    @patch("flagscale.models.utils.hub_utils.use_modelscope", return_value=False)
+    def test_hf_dataset_download(self, _mock_use_ms):
+        with patch("huggingface_hub.snapshot_download", return_value="/cache/dataset") as mock_dl:
+            result = resolve_dataset_path("org/dataset", revision="main", cache_dir="/tmp/cache")
+            mock_dl.assert_called_once_with(
+                "org/dataset",
+                repo_type="dataset",
+                revision="main",
+                cache_dir="/tmp/cache",
+                allow_patterns=None,
+                ignore_patterns=None,
+            )
+            self.assertEqual(result, "/cache/dataset")
+
+    @patch("flagscale.models.utils.hub_utils.use_modelscope", return_value=True)
+    def test_modelscope_dataset_download(self, _mock_use_ms):
+        mock_ms_module = MagicMock()
+        mock_ms_module.snapshot_download.return_value = "/cache/ms_dataset"
+        with patch.dict("sys.modules", {"modelscope.hub.snapshot_download": mock_ms_module}):
+            result = resolve_dataset_path("org/dataset", revision="v1", cache_dir="/tmp/ms")
+            mock_ms_module.snapshot_download.assert_called_once_with(
+                model_id="org/dataset",
+                repo_type="dataset",
+                cache_dir="/tmp/ms",
+                revision="v1",
+                ignore_file_pattern=None,
+                allow_patterns=None,
+            )
+            self.assertEqual(result, "/cache/ms_dataset")
 
 
 if __name__ == "__main__":

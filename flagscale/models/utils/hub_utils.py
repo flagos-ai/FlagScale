@@ -26,6 +26,58 @@ def _get_lock(model_name_or_path: str, cache_dir: str | None = None) -> filelock
     return filelock.FileLock(lock_file, mode=0o666)
 
 
+def _resolve_hub_path(
+    name_or_path: str,
+    repo_type: str,
+    revision: str | None = None,
+    cache_dir: str | None = None,
+    allow_patterns: list[str] | str | None = None,
+    ignore_patterns: list[str] | str | None = None,
+) -> str:
+    """Resolve a local path or HF/ModelScope repo ID to a local directory path."""
+    if use_modelscope():
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+    if Path(name_or_path).is_dir():
+        logger.info(f"{repo_type.capitalize()} path is local directory: {name_or_path}")
+        return name_or_path
+
+    with _get_lock(f"{repo_type}:{name_or_path}", cache_dir):
+        if use_modelscope():
+            logger.info(f"Downloading {repo_type} from ModelScope: {name_or_path}")
+            from modelscope.hub.snapshot_download import snapshot_download
+
+            local_path = snapshot_download(
+                model_id=name_or_path,
+                repo_type=repo_type,
+                cache_dir=cache_dir,
+                revision=revision,
+                ignore_file_pattern=ignore_patterns,
+                allow_patterns=allow_patterns,
+            )
+        else:
+            logger.info(f"Downloading {repo_type} from HuggingFace Hub: {name_or_path}")
+            from huggingface_hub import snapshot_download
+
+            local_path = snapshot_download(
+                name_or_path,
+                repo_type=repo_type,
+                revision=revision,
+                cache_dir=cache_dir,
+                allow_patterns=allow_patterns,
+                ignore_patterns=ignore_patterns,
+            )
+
+    if not local_path:
+        raise RuntimeError(
+            f"Failed to download {repo_type} '{name_or_path}': "
+            "snapshot_download returned an empty path"
+        )
+
+    logger.info(f"{repo_type.capitalize()} resolved to: {local_path}")
+    return local_path
+
+
 def resolve_model_path(
     model_name_or_path: str,
     revision: str | None = None,
@@ -37,52 +89,34 @@ def resolve_model_path(
 
     If ``model_name_or_path`` is already a local directory, returns it as-is.
     Otherwise downloads the model repo and returns the local cache path.
-
-    The download backend is selected by the ``FLAGSCALE_USE_MODELSCOPE`` env var:
-    - ``false`` (default): uses ``huggingface_hub.snapshot_download``
-    - ``true``: uses ``modelscope.hub.snapshot_download``
-
-    When ModelScope is enabled, ``HF_HUB_OFFLINE=1`` is set automatically so that
-    downstream HuggingFace calls (AutoTokenizer, cached_file, etc.) do not attempt
-    to reach huggingface.co.
     """
-    if use_modelscope():
-        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    return _resolve_hub_path(
+        model_name_or_path,
+        repo_type="model",
+        revision=revision,
+        cache_dir=cache_dir,
+        allow_patterns=allow_patterns,
+        ignore_patterns=ignore_patterns,
+    )
 
-    if Path(model_name_or_path).is_dir():
-        logger.info(f"Model path is local directory: {model_name_or_path}")
-        return model_name_or_path
 
-    with _get_lock(model_name_or_path, cache_dir):
-        if use_modelscope():
-            logger.info(f"Downloading model from ModelScope: {model_name_or_path}")
-            from modelscope.hub.snapshot_download import snapshot_download
+def resolve_dataset_path(
+    dataset_name_or_path: str,
+    revision: str | None = None,
+    cache_dir: str | None = None,
+    allow_patterns: list[str] | str | None = None,
+    ignore_patterns: list[str] | str | None = None,
+) -> str:
+    """Resolve a dataset name or HF/ModelScope repo ID to a local directory path.
 
-            local_path = snapshot_download(
-                model_id=model_name_or_path,
-                cache_dir=cache_dir,
-                revision=revision,
-                ignore_file_pattern=ignore_patterns,
-                allow_patterns=allow_patterns,
-            )
-        else:
-            logger.info(f"Downloading model from HuggingFace Hub: {model_name_or_path}")
-            from huggingface_hub import snapshot_download
-
-            local_path = snapshot_download(
-                model_name_or_path,
-                repo_type="model",
-                revision=revision,
-                cache_dir=cache_dir,
-                allow_patterns=allow_patterns,
-                ignore_patterns=ignore_patterns,
-            )
-
-    if not local_path:
-        raise RuntimeError(
-            f"Failed to download model '{model_name_or_path}': "
-            "snapshot_download returned an empty path"
-        )
-
-    logger.info(f"Model resolved to: {local_path}")
-    return local_path
+    If ``dataset_name_or_path`` is already a local directory, returns it as-is.
+    Otherwise downloads the dataset repo and returns the local cache path.
+    """
+    return _resolve_hub_path(
+        dataset_name_or_path,
+        repo_type="dataset",
+        revision=revision,
+        cache_dir=cache_dir,
+        allow_patterns=allow_patterns,
+        ignore_patterns=ignore_patterns,
+    )
