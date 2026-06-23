@@ -889,6 +889,139 @@ def _add_vision_args(parser):
     )
     return parser
 
+def _add_straggler_args(parser):
+    group = parser.add_argument_group(title="flagscale straggler")
+
+    group.add_argument(
+        "--enable-straggler-detection",
+        action="store_true",
+        default=False,
+        help="Enable FlagScale straggler detection.",
+    )
+    group.add_argument(
+        "--straggler-profiling-interval",
+        type=int,
+        default=10,
+        help="Record straggler samples every N steps after warmup.",
+    )
+    group.add_argument(
+        "--straggler-report-interval",
+        type=int,
+        default=100,
+        help="Generate a straggler report every N steps.",
+    )
+    group.add_argument(
+        "--straggler-threshold",
+        type=float,
+        default=1.5,
+        help="Slowdown ratio used to mark a rank as a straggler.",
+    )
+    group.add_argument(
+        "--straggler-warmup-steps",
+        type=int,
+        default=10,
+        help="Skip the first N steps before profiling stragglers.",
+    )
+    group.add_argument(
+        "--straggler-enable-comm-logging",
+        dest="straggler_enable_comm_logging",
+        action="store_true",
+        help="Enable communication logging in the FlagScale straggler detector.",
+    )
+    group.add_argument(
+        "--no-straggler-enable-comm-logging",
+        dest="straggler_enable_comm_logging",
+        action="store_false",
+        help="Disable communication logging in the FlagScale straggler detector.",
+    )
+    group.set_defaults(straggler_enable_comm_logging=True)
+    group.add_argument(
+        "--straggler-enable-gpu-profile",
+        dest="straggler_enable_gpu_profile",
+        action="store_true",
+        help="Enable CUDA event timing for straggler profiling when available.",
+    )
+    group.add_argument(
+        "--no-straggler-enable-gpu-profile",
+        dest="straggler_enable_gpu_profile",
+        action="store_false",
+        help="Disable CUDA event timing for straggler profiling.",
+    )
+    group.set_defaults(straggler_enable_gpu_profile=True)
+    group.add_argument(
+        "--straggler-log-dir",
+        type=str,
+        default=None,
+        help="Directory used to save FlagScale straggler reports.",
+    )
+    return parser
+def _add_perf_monitor_args(parser):
+    group = parser.add_argument_group(title="flagscale perf monitor")
+
+    group.add_argument(
+        "--enable-perf-monitor",
+        action="store_true",
+        default=False,
+        help="Enable FlagScale performance monitoring during training.",
+    )
+    group.add_argument(
+        "--perf-log-interval",
+        type=int,
+        default=10,
+        help="Log performance metrics every N iterations.",
+    )
+    group.add_argument(
+        "--perf-log-dir",
+        type=str,
+        default=None,
+        help="Directory used to save performance monitor logs.",
+    )
+    group.add_argument(
+        "--perf-console-output",
+        action="store_true",
+        default=False,
+        help="Also emit performance monitor logs to stdout on rank 0.",
+    )
+    group.add_argument(
+        "--perf-log-format",
+        type=str,
+        choices=["text", "json", "both"],
+        default="both",
+        help="Output format for performance monitor files.",
+    )
+    group.add_argument(
+        "--perf-memory-tracking",
+        dest="perf_memory_tracking",
+        action="store_true",
+        help="Track CUDA memory usage in the performance monitor.",
+    )
+    group.add_argument(
+        "--no-perf-memory-tracking",
+        dest="perf_memory_tracking",
+        action="store_false",
+        help="Disable CUDA memory tracking in the performance monitor.",
+    )
+    group.set_defaults(perf_memory_tracking=True)
+    group.add_argument(
+        "--perf-breakdown",
+        action="store_true",
+        default=False,
+        help="Include estimated component breakdowns in performance logs.",
+    )
+    group.add_argument(
+        "--perf-max-log-files",
+        type=int,
+        default=10,
+        help="Maximum number of historical performance log files to keep.",
+    )
+    group.add_argument(
+        "--perf-model-type",
+        type=str,
+        choices=["auto", "gpt", "llama", "qwen", "mixtral", "aquila", "moe"],
+        default="auto",
+        help="Model type hint used for FLOPS estimation.",
+    )
+    return parser
 
 def _add_flagos_args(parser):
     group = parser.add_argument_group(title="flagscale fl")
@@ -975,6 +1108,8 @@ def add_flagscale_arguments(parser):
     parser = _add_auto_tuner_args(parser)
     parser = _add_auto_skip_spiky_loss(parser)
     parser = _add_peft_args(parser)
+    parser = _add_straggler_args(parser)
     parser = _add_flagos_args(parser)
     parser = _add_flagscale_specific_args(parser)
+    parser = _add_perf_monitor_args(parser)
     return parser

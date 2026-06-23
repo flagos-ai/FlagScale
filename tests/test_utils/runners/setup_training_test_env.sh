@@ -13,7 +13,7 @@ INSTALL_COMMON_DEPS=false
 INSTALL_CLI=false
 INSTALL_PLATFORM_DEPS=true
 COPY_DATA=false
-MEGATRON_LM_FL_REF="77a74339605b0bd03ace957293b8e12a823b2999"
+
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -25,7 +25,6 @@ while [[ $# -gt 0 ]]; do
         --install-cli) INSTALL_CLI=true; shift ;;
         --skip-platform-deps) INSTALL_PLATFORM_DEPS=false; shift ;;
         --copy-data) COPY_DATA=true; shift ;;
-        --megatron-lm-fl-ref) MEGATRON_LM_FL_REF="$2"; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -116,7 +115,6 @@ setup_metax_training_env() {
     local te_dir="/tmp/TransformerEngine-FL"
 
     git clone https://github.com/flagos-ai/Megatron-LM-FL.git "$megatron_dir"
-    git -C "$megatron_dir" checkout "$MEGATRON_LM_FL_REF"
     python -m pip install "$megatron_dir" --no-build-isolation --root-user-action=ignore
 
     git clone --depth 1 https://github.com/flagos-ai/TransformerEngine-FL.git "$te_dir"
