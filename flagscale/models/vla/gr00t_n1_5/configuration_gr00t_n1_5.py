@@ -20,7 +20,7 @@ class Gr00tN15Config(PreTrainedConfig):
 
     # Whether to initialize model weights from base_model_path.
     # Fine-tuned checkpoints set this to False and load weights from model.safetensors.
-    load_from_base_model: bool = True
+    load_pretrained: bool = True
 
     # Fine-tuning control flags (passed to GR00TN15.from_pretrained)
     tune_llm: bool = False

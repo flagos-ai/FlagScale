@@ -42,13 +42,14 @@ from safetensors.torch import save_file
 from torch import Tensor
 
 from flagscale.models.utils.constants import (
-    GR00T_CONFIG_DIR,
     SAFETENSORS_FILE,
     resolve_pretrained_dir,
 )
 from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.models.vla.gr00t_n1_5.configuration_gr00t_n1_5 import Gr00tN15Config
 from flagscale.models.vla.gr00t_n1_5.gr00t_n1 import GR00TN15, GR00TN15Config
+
+GR00T_CONFIG_DIR = "gr00t_config"
 
 
 class Gr00tN15(TrainablePolicy):
@@ -60,7 +61,7 @@ class Gr00tN15(TrainablePolicy):
 
         self._handle_flash_attention_compatibility()
 
-        if config.load_from_base_model:
+        if config.load_pretrained:
             self._groot_model = GR00TN15.from_pretrained(
                 pretrained_model_name_or_path=config.base_model_path,
                 tune_llm=config.tune_llm,
@@ -102,7 +103,7 @@ class Gr00tN15(TrainablePolicy):
         save_config = dataclasses.replace(
             self.config,
             base_model_path=GR00T_CONFIG_DIR,
-            load_from_base_model=False,
+            load_pretrained=False,
         )
         save_config._save_pretrained(save_directory)
 
@@ -126,7 +127,7 @@ class Gr00tN15(TrainablePolicy):
         config = dataclasses.replace(
             config,
             base_model_path=str(base_model_path),
-            load_from_base_model=False,
+            load_pretrained=False,
         )
 
         return super().from_pretrained(pretrained_path, device=device, config=config)
