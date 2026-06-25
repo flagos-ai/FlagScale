@@ -1,3 +1,26 @@
+from flagscale.models.configs.types import FeatureType, PolicyFeature
+
+
+def reorder_visual_input_features(
+    input_features: dict[str, PolicyFeature],
+    preferred_image_order: list[str] | None = None,
+) -> dict[str, PolicyFeature]:
+    """Reorder visual features while leaving other inputs untouched."""
+
+    if not preferred_image_order:
+        return dict(input_features)
+
+    visual_keys = [key for key, ft in input_features.items() if ft.type == FeatureType.VISUAL]
+    ordered_visual_keys = [key for key in preferred_image_order if key in visual_keys]
+    # Keep dataset-defined order for visual keys that are not listed in the recipe.
+    ordered_visual_keys.extend(key for key in visual_keys if key not in ordered_visual_keys)
+
+    reordered = {key: ft for key, ft in input_features.items() if ft.type != FeatureType.VISUAL}
+    for key in ordered_visual_keys:
+        reordered[key] = input_features[key]
+    return reordered
+
+
 def get_vlm_config(vlm_config) -> dict:
     """
     Extract common fields from any VLM config, handling structural differences.

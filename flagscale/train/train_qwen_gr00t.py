@@ -1,5 +1,6 @@
 # Mainly adopted from
 # https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/scripts/lerobot_train.py
+# ruff: noqa: I001
 
 import argparse
 import os
@@ -48,6 +49,8 @@ from flagscale.train.utils.train_utils import (
 )
 from flagscale.train.utils.random_utils import serialize_rng_state, deserialize_rng_state
 from flagscale.train.utils.optim_setup import setup_optimizer_and_scheduler
+from flagscale.models.vla.qwen_gr00t import QwenGr00t
+from flagscale.models.vla.utils import reorder_visual_input_features
 from flagscale.models.vla import TrainablePolicy
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 from flagscale.platforms import get_platform
@@ -206,6 +209,24 @@ def format_train_tracker_step(train_tracker: MetricsTracker) -> str:
     return " ".join(display_list)
 
 
+def make_policy(
+    config: TrainConfig,
+    ds_meta: LeRobotDatasetMetadata | None = None,
+):
+    features = dataset_to_policy_features(ds_meta.features)
+
+    # Use == instead of `is` for FeatureType.ACTION comparison
+    # because flagscale.FeatureType and lerobot.FeatureType are different enum classes
+    output_features = {
+        key: ft
+        for key, ft in features.items()
+        if ft.type == FeatureType.ACTION
+    }
+    input_features = {key: ft for key, ft in features.items() if key not in output_features}
+    # Preserve dataset feature order unless the recipe explicitly requests a visual reorder.
+    image_key_order = list(getattr(config.data, "image_key_order", []) or [])
+    if image_key_order:
+        input_features = reorder_visual_input_features(input_features, image_key_order)
 
 def make_pre_post_processors(
     policy,
