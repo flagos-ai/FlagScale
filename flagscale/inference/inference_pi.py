@@ -14,6 +14,7 @@ from flagscale.models.pi05.modeling_pi05 import PI05Policy
 from flagscale.models.utils.constants import ACTION, OBS_STATE
 from flagscale.platforms import get_platform  # noqa: F401 must be before model imports
 from flagscale.runner.utils import logger
+from flagscale.train.processor.pipeline import get_device_override
 from flagscale.train.train_pi import make_pre_post_processors
 
 
@@ -126,7 +127,7 @@ def run_inference(config_path: str):
 
     processor_kwargs = {}
     processor_kwargs["preprocessor_overrides"] = {
-        "device_processor": {"device": engine_cfg.device},
+        **get_device_override(getattr(engine_cfg, "device", None)),
         "normalizer_processor": {
             "stats": dataset_stats,
             "features": {**policy_config.input_features},
