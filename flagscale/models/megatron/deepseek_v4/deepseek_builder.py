@@ -108,7 +108,7 @@ def get_deepseek_layer_spec(
     if build_engram:
         engram_module = EngramModule 
     else:
-        engram_module = IdentityOp
+        engram_module = None
     submodules = DeepSeekTransformerLayerSubmodules(
         input_layernorm=input_layernorm,
         self_attention=hybrid_attn_spec,

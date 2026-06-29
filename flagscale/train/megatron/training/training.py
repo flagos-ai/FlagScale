@@ -558,42 +558,68 @@ def num_floating_point_operations(args, batch_size):
             https://arxiv.org/abs/2305.10403
             https://arxiv.org/abs/2205.05198
             '''
-            ## MLA
-            if args.q_lora_rank is None:
-                q_term = (
-                    args.hidden_size
-                    * args.num_attention_heads
-                    * (args.qk_head_dim + args.qk_pos_emb_head_dim)
-                )
-            else:
+            if args.experimental_attention_variant == "dsv4_hybrid":
+                ## DSv4 hybrid MLA projections (per layer, per token).
+                ## In dsv4_hybrid mode, qk_head_dim + qk_pos_emb_head_dim == v_head_dim
+                ## (qk_head_dim is derived as v_head_dim - qk_pos_emb_head_dim), and the
+                ## joint KV is produced by a single hidden -> v_head_dim projection.
+                ## Full core attention is replaced by sparse attention and is accounted
+                ## for in the dsv4_hybrid branch below.
                 q_term = args.q_lora_rank * (
                     args.hidden_size
-                    + args.num_attention_heads * (args.qk_head_dim + args.qk_pos_emb_head_dim)
-                    + 1
+                    + args.num_attention_heads * args.v_head_dim
+                    + 1  # q norm
                 )
-            standard_self_attn_term = (
-                forward_backward_expansion_factor
-                * fma_expansion_factor
-                * (
-                    ## q lora + rope + q norm
-                    q_term
-                    ## kv lora + rope + kv norm
-                    + args.kv_lora_rank
-                    * (
+                kv_term = args.hidden_size * args.v_head_dim + args.v_head_dim  # kv proj + kv norm
+                ## Grouped low-rank output projection:
+                ##  wo_a:        (n_head * v_head_dim) -> (o_groups * o_lora_rank)
+                ##  linear_proj: (o_groups * o_lora_rank) -> hidden
+                o_term = (
+                    args.num_attention_heads * args.v_head_dim * args.o_lora_rank
+                    + args.o_groups * args.o_lora_rank * args.hidden_size
+                )
+                standard_self_attn_term = (
+                    forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * (q_term + kv_term + o_term)
+                )
+            else:
+                ## MLA
+                if args.q_lora_rank is None:
+                    q_term = (
                         args.hidden_size
-                        + args.num_attention_heads * (args.qk_head_dim + args.v_head_dim)
+                        * args.num_attention_heads
+                        * (args.qk_head_dim + args.qk_pos_emb_head_dim)
+                    )
+                else:
+                    q_term = args.q_lora_rank * (
+                        args.hidden_size
+                        + args.num_attention_heads * (args.qk_head_dim + args.qk_pos_emb_head_dim)
                         + 1
                     )
-                    + args.hidden_size * args.qk_pos_emb_head_dim
-                    ## o proj
-                    + (args.num_attention_heads * args.v_head_dim) * args.hidden_size
-                    ## core attn
-                    + args.seq_length
-                    * (args.num_attention_heads * (args.qk_head_dim + args.qk_pos_emb_head_dim))
-                    / 2  # causal mask (only half of the mask is non-zero)
-                    + args.seq_length * args.num_attention_heads * args.v_head_dim / 2
+                standard_self_attn_term = (
+                    forward_backward_expansion_factor
+                    * fma_expansion_factor
+                    * (
+                        ## q lora + rope + q norm
+                        q_term
+                        ## kv lora + rope + kv norm
+                        + args.kv_lora_rank
+                        * (
+                            args.hidden_size
+                            + args.num_attention_heads * (args.qk_head_dim + args.v_head_dim)
+                            + 1
+                        )
+                        + args.hidden_size * args.qk_pos_emb_head_dim
+                        ## o proj
+                        + (args.num_attention_heads * args.v_head_dim) * args.hidden_size
+                        ## core attn
+                        + args.seq_length
+                        * (args.num_attention_heads * (args.qk_head_dim + args.qk_pos_emb_head_dim))
+                        / 2  # causal mask (only half of the mask is non-zero)
+                        + args.seq_length * args.num_attention_heads * args.v_head_dim / 2
+                    )
                 )
-            )
 
         else:
             ## MHA or GQA
