@@ -32,14 +32,16 @@ system:
   reset_attention_mask: true
   qk_layernorm: true
   sequence_parallel: true
-  use_distributed_optimizer: false
-  use_padded_layerwise_optimizer: false
+  use_distributed_optimizer: true
   num_distributed_optimizer_instances: 1
   overlap_grad_reduce: true
   overlap_param_gather: true
-  attention_backend: auto
-  check_weight_hash_across_dp_replicas_interval: 1
+  attention_backend: unfused
+  check_weight_hash_across_dp_replicas_interval: 10
+  check_for_large_grads: true
   calculate_per_token_loss: true
+  deterministic_mode: true
+  recompute_granularity: selective
   recompute_modules:
     - mhc
   precision:
@@ -83,8 +85,7 @@ model:
   clip_grad: 1.0
   position_embedding_type: rope
   untie_embeddings_and_output_weights: true
-  no_position_embedding: true
-  no_rope_fusion: true
+  no_position_embedding: true   # no use
 
   # mla args ==================
   multi_latent_attention: true
@@ -128,6 +129,7 @@ model:
   o_lora_rank: 128
   q_lora_rank: 128
   csa_compress_ratios: "[128]*2+([128]+[4])*1+[128]"
+  activation_func_clamp_value: 10.0
 
   # mtp_args
   mtp_num_layers: 1
@@ -150,15 +152,13 @@ model:
   # pytorch_profiler_collect_callstack: true
 
   optimizer:
-    optimizer: dist_muon
-    muon_tp_mode: distributed
     clip_grad: 1.0
     weight_decay: 0.1
     adam_beta1: 0.9
     adam_beta2: 0.95
     lr_scheduler:
-      lr: 3.0e-3
-      min_lr: 3.0e-4
+      lr: 3.9e-6
+      min_lr: 3.9e-7
       lr_warmup_fraction: 0.01
       lr_decay_style: WSD
       lr_wsd_decay_style: cosine

@@ -827,11 +827,6 @@ def _add_distributed_args(parser):
         action='store_true',
         help='Indicate whether not running on a shared file system.',
     )
-    group.add_argument(
-        '--use-padded-layerwise-optimizer',
-        action='store_true',
-        help='Enable pad when use layer-wise optimizer.'
-    )
     return parser
 
 
