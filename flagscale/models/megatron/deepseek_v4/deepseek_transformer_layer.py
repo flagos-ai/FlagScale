@@ -78,13 +78,11 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
         self._deepseek_engram_hash_input_ids = kwargs.pop(
             "engram_hash_input_ids", getattr(self, "_deepseek_engram_hash_input_ids", None)
         )
-        self._mhc_recompute_manager = kwargs.pop("mhc_recompute_manager", None)
 
         try:
             return super().forward(*args, **kwargs)
         finally:
             self._deepseek_engram_hash_input_ids = None
-            self._mhc_recompute_manager = None
 
     def _forward_attention(
         self,
@@ -127,6 +125,7 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
             sequence_len_offset=sequence_len_offset,
             padding_mask=padding_mask,
             input_ids=input_ids,
+            mhc_recompute_manager=mhc_recompute_manager,
             inference_params=inference_params,
         )
 
