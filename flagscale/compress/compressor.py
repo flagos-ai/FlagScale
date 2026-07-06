@@ -7,26 +7,26 @@ from omegaconf import OmegaConf
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, AutoModelForVision2Seq
 from torch.utils.data import DataLoader
 
-# 1. 先导入 adapter 模块
+# 1. Import adapter module first
 import flagscale.compress.adapter
 from flagscale.compress.adapter import LLMCompressorAdapter
 
-# --- Monkey Patch Start (关键修复) ---
-# 既然 adapter.py 内部调用了 oneshot，我们直接修改 adapter 模块里的这个函数引用
-# 这样无论它原本是从哪里导入的，都会执行我们的 wrapper
+# --- Monkey Patch Start (critical fix) ---
+# Since adapter.py calls oneshot internally, patch the reference inside the adapter module directly
+# This ensures our wrapper is called regardless of the original import source
 if hasattr(flagscale.compress.adapter, "oneshot"):
     print(">> [Patch] Found 'oneshot' in adapter, applying fix...")
     _real_oneshot = flagscale.compress.adapter.oneshot
 
     def _patched_oneshot(**kwargs):
-        # 拦截并删除导致报错的参数
+        # Intercept and remove parameters that cause errors
         if "num_calibration_batches" in kwargs:
             print(">> [Patch] Removing unsupported 'num_calibration_batches' argument")
             del kwargs["num_calibration_batches"]
-        # 调用原始函数
+        # Call the original function
         return _real_oneshot(**kwargs)
-
-    # 将 adapter 模块里的 oneshot 替换为我们的版本
+    
+    # Replace the oneshot reference in the adapter module with our patched version
     flagscale.compress.adapter.oneshot = _patched_oneshot
 else:
     print(">> [Warning] Could not find 'oneshot' in flagscale.compress.adapter. Patch may not work.")
@@ -66,7 +66,7 @@ def compress(cfg):
         except:
             model_cls = AutoModelForCausalLM
 
-    # 修复 float16 问题
+    # Fix float16 issue
     dtype_str = cfg.model.get("torch_dtype", "float16")
     if isinstance(dtype_str, str):
         dtype_str = dtype_str.replace("torch.", "")
@@ -85,7 +85,7 @@ def compress(cfg):
 
     compress_args = OmegaConf.to_container(cfg.compress_args, resolve=True)
 
-    # 双重保险：在传入 Adapter 前也尝试移除
+    # Extra safety: also attempt removal before passing to Adapter
     if "num_calibration_batches" in compress_args:
         del compress_args["num_calibration_batches"]
 

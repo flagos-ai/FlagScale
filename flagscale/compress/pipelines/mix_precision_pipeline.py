@@ -110,16 +110,14 @@ class MixPrecisionPipeline(CalibrationPipeline):
 
         LifecycleCallbacks.calibration_epoch_start()
         print("+++++++++++++++++++++++++++++++++++++++++++++")
-        print(
-            f"DEBUG: Processing {len(sorted_layers)} layers with Auto-Search (8-bit vs QuIP-4bit)."
-        )
+        print(f"DEBUG: Processing {len(sorted_layers)} layers with Auto-Search (8-bit vs QuIP-4bit).")
+        
+        search_results = [] 
+        all_layer_scores = []   # new: collect per-layer cosine similarity for each strategy
+        global_quip_targets = [] 
 
-        search_results = []
-        all_layer_scores = []  # 新增：收集每层各策略cos sim
-        global_quip_targets = []
-
-        # [MOD-1] 扩展搜索候选：加入 W4A16 / W4A16_ASYM
-        # 理由：不改变搜索主循环，仅增加候选配置维度（scheme + symmetry）
+        # [MOD-1] Extend search candidates: add W4A16 / W4A16_ASYM
+        # Rationale: keep the main search loop unchanged, only expand candidate config dimensions (scheme + symmetry)
         candidate_configs = [
             {
                 "name": "Std-8bit",
@@ -196,10 +194,10 @@ class MixPrecisionPipeline(CalibrationPipeline):
                 f"W4A16_ASYM={layer_score_row['W4A16_ASYM']:.6f}"
             )
 
-            # [MOD-4] 三个4bit先内部选优，再与8bit比较（沿用原阈值思想）
+            # [MOD-4] Select the best among three 4-bit candidates first, then compare against 8-bit (following original threshold logic)
             score_8bit = layer_stats["Std-8bit"]["score"]
 
-            # 默认值：保证所有分支下 search_results 都可安全写入
+            # Default: ensure search_results is safely writable in all branches
             score_diff = float("nan")
             size_diff_mb = 0.0
 
@@ -209,7 +207,7 @@ class MixPrecisionPipeline(CalibrationPipeline):
             valid_4_names = [n for n in four_bit_names if not math.isnan(layer_stats[n]["score"])]
 
             if not valid_4_names:
-                # 所有 4-bit 策略评分均失败，强制回退 8-bit 并打印警告
+                # All 4-bit strategy scores failed; force fallback to 8-bit and print warning
                 print(f"[WARN] Layer {layer_name}: all 4-bit evaluations failed, forcing Std-8bit.")
                 best_config = layer_stats["Std-8bit"]["config"]
                 best_score = score_8bit
@@ -224,10 +222,8 @@ class MixPrecisionPipeline(CalibrationPipeline):
                 )
 
                 if math.isnan(score_8bit):
-                    # 8-bit 评分也失败，无法比较，默认选最优 4-bit
-                    print(
-                        f"[WARN] Layer {layer_name}: Std-8bit evaluation failed, using best 4-bit."
-                    )
+                    # 8-bit scoring also failed; cannot compare, default to best 4-bit
+                    print(f"[WARN] Layer {layer_name}: Std-8bit evaluation failed, using best 4-bit.")
                     best_config = layer_stats[best_4_name]["config"]
                     best_score = score_4best
                 elif score_diff <= ACCEPTANCE_THRESHOLD:
@@ -366,8 +362,8 @@ def _apply_official_quip_transform(model, layer_name, layer_module, block_size=1
         ignore=["lm_head"],
     )
 
-    # [FIX-2b] initialized 属性在部分版本的 modifier 中不存在，
-    # 用 getattr 设默认值 False，保证向后兼容。
+    # [FIX-2b] The 'initialized' attribute may not exist in some modifier versions;
+    # use getattr with default False to ensure backward compatibility.
     if not getattr(modifier, "initialized", False):
         modifier.on_initialize(state=active_session().lifecycle)
         _ensure_quip_weights_materialized(layer_module)
@@ -468,39 +464,39 @@ class QuIPWrapper(torch.nn.Module):
 
 def _get_scale_and_zeropoint(weight, bits, symmetric=True, ch_axis=0):
     """
-    [FIX] 统一qparam语义，避免ASYM手写公式与fake_quantize契约错配。
-    - symmetric=True: 保持原实现（最小改动）
-    - symmetric=False: 使用 torch.quantize_per_channel 生成同语义 qparams
+    [FIX] Unify qparam semantics to avoid mismatch between ASYM manual formula and fake_quantize contract.
+    - symmetric=True: keep original implementation (minimal change)
+    - symmetric=False: use torch.quantize_per_channel to generate semantically consistent qparams
     """
     if symmetric:
-        # ===== 原逻辑保留 =====
+        # ===== original logic preserved =====
         w_max = weight.abs().amax(dim=1, keepdim=True)
         qmax = 2 ** (bits - 1) - 1
         scale = torch.clamp(w_max / qmax, min=1e-5)
         zero_point = torch.zeros_like(scale, dtype=torch.int32)
         return scale, zero_point
     else:
-        # ===== [修改点-1] ASYM 不再手推公式，改为PyTorch原生qparam生成 =====
-        # 说明：按每输出通道量化（Linear权重通常out_features在dim=0）
-        assert bits == 4, "当前W4A16_ASYM路径预期4bit，可按需放宽"
-        qmin, qmax = 0, 2**bits - 1
+        # ===== [MOD-1] ASYM no longer uses manual formula; switched to PyTorch native qparam generation =====
+        # Note: quantize per output channel (Linear weights typically have out_features at dim=0)
+        assert bits == 4, "W4A16_ASYM path currently expects 4-bit; relax as needed"
+        qmin, qmax = 0, 2 ** bits - 1
 
         w_f = weight.detach().float()
-        # per-channel min/max（沿输入维归约）
-        w_min = w_f.amin(dim=1)  # [out_features]
-        w_max = w_f.amax(dim=1)  # [out_features]
+        # per-channel min/max (reduce along input dimension)
+        w_min = w_f.amin(dim=1)   # [out_features]
+        w_max = w_f.amax(dim=1)   # [out_features]
         scales = torch.clamp((w_max - w_min) / float(qmax - qmin), min=1e-8)
         zps = torch.round(qmin - w_min / scales).clamp(qmin, qmax).to(torch.int32)
 
-        # 用原生量化再反取qparams，确保语义闭环
+        # use native quantization to derive qparams, ensuring semantic consistency
         q = torch.quantize_per_channel(
             w_f, scales=scales, zero_points=zps, axis=ch_axis, dtype=torch.quint8
         )
         s_lib = q.q_per_channel_scales().to(w_f.device).view(-1, 1)
         zp_lib = q.q_per_channel_zero_points().to(w_f.device).to(torch.int32).view(-1, 1)
 
-        zp_lib = zp_lib.to(torch.int32)  # 对齐 fake_quantize 预期 dtype
-        s_lib = torch.clamp(s_lib, min=1e-8)  # 防极小 scale 数值不稳
+        zp_lib = zp_lib.to(torch.int32)                  # align to expected dtype for fake_quantize
+        s_lib = torch.clamp(s_lib, min=1e-8)             # prevent numerical instability from very small scale values
 
         return s_lib.to(weight.dtype), zp_lib
 
@@ -514,8 +510,7 @@ def _torch_ref_qdq_asym_per_channel(weight, scale, zero_point, ch_axis=0):
     )
     return q.dequantize().to(weight.device, dtype=weight.dtype)
 
-
-# [MOD-2] 增加 symmetric 参数（默认True兼容旧调用）
+# [MOD-2] Add symmetric parameter (default True for backward compatibility)
 def _calculate_layer_metrics(layer, bits, use_quip=False, symmetric=True):
     """
     Calculates Cosine Similarity with STRICT filtering to avoid QuIP artifacts crash.
@@ -578,7 +573,7 @@ def _calculate_layer_metrics(layer, bits, use_quip=False, symmetric=True):
                 else:
                     func_used = f"Std({bits}b)"
 
-                # [MOD-2] 显式传入按输出通道量化轴，避免维度约定歧义
+                # [MOD-2] Explicitly pass output-channel quantization axis to avoid dimension convention ambiguity
                 scale, zero_point = _get_scale_and_zeropoint(
                     w_to_quant, bits, symmetric=symmetric, ch_axis=0
                 )
@@ -681,11 +676,8 @@ def _extract_real_scheme_from_module(layer, target_bits):
                         return w_config
     return None
 
-
-# [MOD-5] 增加 group_id 与 symmetric
-def _set_layer_quantization_bits(
-    session, layer, layer_name, target_bits, group_id="group_0", symmetric=True
-):
+# [MOD-5] Add group_id and symmetric
+def _set_layer_quantization_bits(session, layer, layer_name, target_bits, group_id="group_0", symmetric=True):
     for name, submodule in layer.named_modules():
         if ("gate" in name and "proj" not in name) or name.endswith(".gate"):
             continue
@@ -772,7 +764,7 @@ def _set_layer_quantization_bits(
     if target_bits == 8:
         return
 
-    # [MOD-7] 显式写入symmetric，区分group_2和group_3
+    # [MOD-7] Explicitly write symmetric to distinguish group_2 and group_3
     if target_group_key not in current_groups:
         base_source = current_groups.get("group_0")
         if not base_source:
@@ -783,13 +775,13 @@ def _set_layer_quantization_bits(
 
         real_scheme = _extract_real_scheme_from_module(layer, target_bits)
 
-        # 先确定weights容器
+        # First determine the weights container
         if real_scheme:
             new_group["weights"] = real_scheme
         elif "weights" not in new_group or not new_group["weights"]:
             new_group["weights"] = {}
 
-        # 再强制覆盖关键字段，保证group_2/group_3语义准确
+        # Then forcibly overwrite key fields to ensure accurate group_2/group_3 semantics
         new_group["weights"]["num_bits"] = target_bits
         new_group["weights"]["symmetric"] = symmetric
 
@@ -856,12 +848,12 @@ def _ordered_weights_dict(weights: dict) -> dict:
             w[k] = v
 
     if int(w.get("num_bits", 8)) == 8:
-        w["strategy"] = "channel"
-        w["group_size"] = None  # [FIX-2c] 与官方 8-bit channel 配置一致
-        w["zp_dtype"] = None
+        w["strategy"]   = "channel"
+        w["group_size"] = None               # [FIX-2c] consistent with official 8-bit channel config
+        w["zp_dtype"]   = None
     else:
-        w["strategy"] = "group"
-        w["group_size"] = 128  # group 策略才需要 group_size
+        w["strategy"]   = "group"
+        w["group_size"] = 128                # group_size is only needed for group strategies
         if w.get("zp_dtype", None) is None and (w.get("symmetric", True) is False):
             w["zp_dtype"] = "torch.int8"
 
@@ -991,15 +983,14 @@ def _sync_modifier_config_to_model(session, model, quip_layers_list):
         "targets": ["Linear"],
         "weights": final_weights_0,
     }
-
-    # [MOD-10] 其余组按“是否实际命中targets”决定是否写入
+    
     for gk in ["group_1", "group_2", "group_3"]:
         if gk in source_groups:
             v = copy.deepcopy(to_dict_safe(source_groups[gk]))
             if v.get("targets"):
                 v["targets"] = _collapse_moe_targets(v["targets"])
                 v["targets"] = sorted(v["targets"], key=layer_sort_key)
-            if v.get("targets"):  # 只有非空才保留
+            if v.get("targets"):   # only keep non-empty targets
                 final_groups[gk] = v
 
     for gk, gv in final_groups.items():
@@ -1110,7 +1101,7 @@ def _simulate_and_verify(model, tokenizer=None):
             use_group = (group_size > 0) and (in_f % group_size == 0)
             w_float = w.data.float()
 
-            # [修改点-3] 复用统一qparam入口，保证评估/模拟一致
+            # [MOD-3] Reuse unified qparam entry to ensure eval/simulation consistency
             q_args = QuantizationArgs(num_bits=bits, symmetric=symmetric)
 
             if use_group:

@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 system:
-  save_dir: Qwen3_30B_MixPrecision_Search
+  save_dir: ./outputs
 
 compress_args:
   scheme: "mix_precision_search"

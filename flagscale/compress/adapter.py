@@ -10,9 +10,9 @@ class LLMCompressorAdapter:
     def __init__(
         self,
         model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizer | None = None,
-        dataset: Any | None = None,
-        output_dir: str = "./output",
+        tokenizer: Optional[PreTrainedTokenizer] = None,
+        dataset: Optional[Any] = None,
+        output_dir: str = "./outputs",
         num_calibration_steps: int = 512,
         **kwargs,
     ):
