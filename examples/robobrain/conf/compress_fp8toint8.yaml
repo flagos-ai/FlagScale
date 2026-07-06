@@ -1,9 +1,9 @@
 # FP8 -> W8A8 Quantization Config
 # Usage:
-#   cd /workspace/lhy/FlagScale
+#   cd /path/to/FlagScale
 #   python run.py --config-path examples/robobrain/conf --config-name compress_fp8toint8 \
-#       experiment.envs.MODEL_ID=/path/to/fp8_model \
-#       experiment.envs.SAVE_DIR=/path/to/output
+#       experiment.envs.MODEL_ID=./models \
+#       experiment.envs.SAVE_DIR=./outputs
 #
 # Only MODEL_ID and SAVE_DIR are required overrides. Other envs have sensible defaults.
 
@@ -27,10 +27,10 @@ experiment:
     deploy:
       use_fs_serve: false
   cmds:
-    before_start: "source /root/miniconda3/etc/profile.d/conda.sh && conda activate flagscale_env"
+    before_start: "conda activate flagscale_env"
   envs:
-    MODEL_ID: /workspace/lhy/qwen3/Qwen3.5-27B-FP8
-    SAVE_DIR: /workspace/lhy/qwen3/Qwen3.5-27B-W8A8-test
+    MODEL_ID: ./models
+    SAVE_DIR: ./outputs
     DEVICE: "auto"
     MAX_WORKERS: "8"
 

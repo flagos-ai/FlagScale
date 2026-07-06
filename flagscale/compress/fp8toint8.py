@@ -25,7 +25,7 @@ from llmcompressor import model_free_ptq
 
 #Global defaults
 MODEL_ID = os.environ.get("MODEL_ID", "./models")
-SAVE_DIR = os.environ.get("SAVE_DIR", "./output")
+SAVE_DIR = os.environ.get("SAVE_DIR", "./outputs")
 _device_env = os.environ.get("DEVICE", "auto")
 if _device_env == "auto":
     DEVICE = None
