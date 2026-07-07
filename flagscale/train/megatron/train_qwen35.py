@@ -372,6 +372,7 @@ def forward_step(data_iterator, model: Qwen35Model):
             video_input_mask=video_input_mask,
             attention_mask=attention_mask,
             labels=labels,
+            loss_mask=loss_mask,
         )
 
     return output_tensor, partial(loss_func, loss_mask, model=model)

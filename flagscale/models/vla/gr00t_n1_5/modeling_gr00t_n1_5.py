@@ -33,14 +33,23 @@ Notes:
   from LeRobot, see `GrootPolicy.finetune_with_groot_runner` below.
 """
 
+import dataclasses
 import os
+from pathlib import Path
 
 import torch
+from safetensors.torch import save_file
 from torch import Tensor
 
+from flagscale.models.utils.constants import (
+    SAFETENSORS_FILE,
+    resolve_pretrained_dir,
+)
 from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.models.vla.gr00t_n1_5.configuration_gr00t_n1_5 import Gr00tN15Config
-from flagscale.models.vla.gr00t_n1_5.gr00t_n1 import GR00TN15
+from flagscale.models.vla.gr00t_n1_5.gr00t_n1 import GR00TN15, GR00TN15Config
+
+GR00T_CONFIG_DIR = "gr00t_config"
 
 
 class Gr00tN15(TrainablePolicy):
@@ -52,13 +61,28 @@ class Gr00tN15(TrainablePolicy):
 
         self._handle_flash_attention_compatibility()
 
-        self._groot_model = GR00TN15.from_pretrained(
-            pretrained_model_name_or_path=config.base_model_path,
-            tune_llm=config.tune_llm,
-            tune_visual=config.tune_visual,
-            tune_projector=config.tune_projector,
-            tune_diffusion_model=config.tune_diffusion_model,
-        )
+        if config.load_pretrained:
+            self._groot_model = GR00TN15.from_pretrained(
+                pretrained_model_name_or_path=config.base_model_path,
+                tune_llm=config.tune_llm,
+                tune_visual=config.tune_visual,
+                tune_projector=config.tune_projector,
+                tune_diffusion_model=config.tune_diffusion_model,
+            )
+        else:
+            gr00t_config = GR00TN15Config.from_pretrained(config.base_model_path)
+            self._groot_model = GR00TN15(
+                gr00t_config,
+                local_model_path=config.base_model_path,
+            )
+            self._groot_model.backbone.set_trainable_parameters(
+                tune_visual=config.tune_visual,
+                tune_llm=config.tune_llm,
+            )
+            self._groot_model.action_head.set_trainable_parameters(
+                tune_projector=config.tune_projector,
+                tune_diffusion_model=config.tune_diffusion_model,
+            )
 
         self._groot_model.compute_dtype = config.compute_dtype
         self._groot_model.config.compute_dtype = config.compute_dtype
@@ -67,6 +91,46 @@ class Gr00tN15(TrainablePolicy):
             self.input_features = config.input_features
         if config.output_features:
             self.output_features = config.output_features
+
+    def _save_pretrained(self, save_directory: Path, state_dict=None) -> None:
+        """Save a self-contained GR00T N1.5 checkpoint."""
+        save_directory = Path(save_directory)
+
+        gr00t_config_dir = save_directory / GR00T_CONFIG_DIR
+        gr00t_config_dir.mkdir(parents=True, exist_ok=True)
+        self._groot_model.config.save_pretrained(gr00t_config_dir)
+
+        save_config = dataclasses.replace(
+            self.config,
+            base_model_path=GR00T_CONFIG_DIR,
+            load_pretrained=False,
+        )
+        save_config._save_pretrained(save_directory)
+
+        if state_dict is not None:
+            state_dict = {k: v.clone().contiguous() for k, v in state_dict.items()}
+        else:
+            state_dict = {k: v.clone().contiguous() for k, v in self.state_dict().items()}
+        save_file(state_dict, str(save_directory / SAFETENSORS_FILE))
+
+    @classmethod
+    def from_pretrained(cls, pretrained_path, device="cpu", *, config=None):
+        """Load a fine-tuned GR00T N1.5 checkpoint without reloading the base model."""
+        path = resolve_pretrained_dir(Path(pretrained_path), SAFETENSORS_FILE)
+        if config is None:
+            config = Gr00tN15Config.from_pretrained(path)
+
+        base_model_path = Path(config.base_model_path)
+        if not base_model_path.is_absolute():
+            base_model_path = path / base_model_path
+
+        config = dataclasses.replace(
+            config,
+            base_model_path=str(base_model_path),
+            load_pretrained=False,
+        )
+
+        return super().from_pretrained(pretrained_path, device=device, config=config)
 
     def forward(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """Training forward pass.

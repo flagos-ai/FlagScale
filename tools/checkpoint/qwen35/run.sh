@@ -1,30 +1,25 @@
 #!/bin/bash
-# Unified checkpoint conversion entry point for Qwen3.5 (dense + MoE).
-# Automatically selects the correct script based on direction and model type.
+# Unified checkpoint conversion entry point for Qwen3.5
+# Dispatches to convert_qwen35.py with --direction.
 #
-# Usage: ./run.sh <direction> <model_type> [python_args...]
+# Usage: ./run.sh <direction> [python_args...]
 #
 #   direction:  meg2hf | hf2meg
-#   model_type: dense | moe
 #
-# All remaining arguments are passed directly to the underlying Python script.
+# All remaining arguments are passed directly to convert_qwen35.py.
 #
 # Examples:
-#   ./run.sh meg2hf dense \
-#       --yaml /workspace/FlagScale/examples/qwen35/conf/train/4b.yaml \
-#       --meg-ckpt-dir /workspace/FlagScale/train_qwen35_4b/checkpoints/iter_0000001 \
-#       --save-dir /workspace/FlagScale/converted_hf_qwen35_4b
-#
-#   ./run.sh hf2meg moe \
-#       --yaml /workspace/FlagScale/examples/qwen35/conf/train/35b_a3b.yaml \
-#       --hf-dir /workspace/data/qwen/qwen35_data/qwen35_35ba3b \
-#       --save-dir /workspace/FlagScale/checkpoints/qwen35_35ba3b_hf2meg/
-#
-#   ./run.sh meg2hf dense \
+#   ./run.sh hf2meg \
 #       --yaml /path/to/4b.yaml \
-#       --meg-ckpt-dir /path/to/ckpt \
-#       --save-dir /path/to/out \
-#       --hf-ref-dir /path/to/hf/ref
+#       --hf-path Qwen/Qwen3.5-4B \
+#       --meg-path /path/to/meg/save \
+#       [--ref-path /path/to/ref]
+#
+#   ./run.sh meg2hf \
+#       --yaml /path/to/4b.yaml \
+#       --meg-path /path/to/meg \
+#       --hf-path /path/to/hf/save \
+#       [--ref-path /path/to/ref]
 
 set -e
 
@@ -32,45 +27,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 show_help() {
     cat <<'EOF'
-Usage: ./run.sh <direction> <model_type> [python_args...]
+Usage: ./run.sh <direction> [python_args...]
 
   direction:  meg2hf | hf2meg
-  model_type: dense | moe
 
-All remaining arguments are passed directly to the underlying Python script.
+All remaining arguments are passed directly to convert_qwen35.py.
 
-Common arguments:
-  --yaml PATH               Path to training yaml config (required)
-  --save-dir PATH           Output directory (required)
+Required arguments:
+  --yaml PATH          Path to training yaml config
+  --hf-path PATH|ID    Path to HF checkpoint directory, or a ModelScope model ID (hf2meg only)
+  --meg-path PATH      Path to Megatron checkpoint directory (input or output)
 
-  For meg2hf:
-    --meg-ckpt-dir PATH     Megatron checkpoint directory (required)
-    --hf-ref-dir PATH       Reference HF model for validation (optional)
-
-  For hf2meg:
-    --hf-dir PATH           HF checkpoint directory (required)
-    --ref-ckpt-dir PATH     Reference Megatron checkpoint for validation (optional)
-    --adjust-embedding      Adjust embedding vocab size to match reference (optional)
+Optional arguments:
+  --ref-path PATH      Reference checkpoint for validation
+  --tp N               Override tensor model parallel size
+  --pp N               Override pipeline model parallel size
+  --ep N               Override expert model parallel size (MoE only)
+  --adjust-ln          Enable legacy layer-norm adjustment
+  --adjust-embedding   Adjust embedding vocab size to reference (hf2meg only)
 
 Examples:
-  # Dense: Megatron -> HF
-  ./run.sh meg2hf dense \
+  # HF -> Megatron (download Qwen3.5-4B from ModelScope automatically)
+  ./run.sh hf2meg \
       --yaml /path/to/4b.yaml \
-      --meg-ckpt-dir /path/to/ckpt \
-      --save-dir /path/to/out
+      --hf-path Qwen/Qwen3.5-4B \
+      --meg-path /path/to/meg/save \
+      --ref-path /path/to/ref/meg
 
-  # MoE: HF -> Megatron
-  ./run.sh hf2meg moe \
-      --yaml /path/to/35b_a3b.yaml \
-      --hf-dir /path/to/hf \
-      --save-dir /path/to/out
-
-  # With validation
-  ./run.sh meg2hf dense \
+  # Megatron -> HF
+  ./run.sh meg2hf \
       --yaml /path/to/4b.yaml \
-      --meg-ckpt-dir /path/to/ckpt \
-      --save-dir /path/to/out \
-      --hf-ref-dir /path/to/hf/ref
+      --meg-path /path/to/meg \
+      --hf-path /path/to/hf/save \
+      --ref-path /path/to/ref/hf
 EOF
 }
 
@@ -81,36 +70,13 @@ if [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ $# -lt 2 ]; then
 fi
 
 DIRECTION=$1
-MODEL_TYPE=$2
-shift 2
-# Resolve script path
-case "$DIRECTION" in
-    meg2hf)
-        case "$MODEL_TYPE" in
-            dense) SCRIPT="$SCRIPT_DIR/meg2hf_qwen35_dense.py" ;;
-            moe)   SCRIPT="$SCRIPT_DIR/meg2hf_qwen35_moe.py"   ;;
-            *) echo "Error: unknown model_type '$MODEL_TYPE'. Use: dense | moe" >&2; exit 1 ;;
-        esac
-        ;;
-    hf2meg)
-        case "$MODEL_TYPE" in
-            dense) SCRIPT="$SCRIPT_DIR/hf2meg_qwen35_dense.py" ;;
-            moe)   SCRIPT="$SCRIPT_DIR/hf2meg_qwen35_moe.py"   ;;
-            *) echo "Error: unknown model_type '$MODEL_TYPE'. Use: dense | moe" >&2; exit 1 ;;
-        esac
-        ;;
-    *)
-        echo "Error: unknown direction '$DIRECTION'. Use: meg2hf | hf2meg" >&2
-        exit 1
-        ;;
-esac
+shift
 
 echo "=================================================="
 echo "Direction : $DIRECTION"
-echo "Model type: $MODEL_TYPE"
-echo "Script    : $SCRIPT"
+echo "Script    : $SCRIPT_DIR/convert_qwen35.py"
 echo "Args      : $*"
 echo "=================================================="
 echo ""
 
-python "$SCRIPT" "$@"
+python "$SCRIPT_DIR/convert_qwen35.py" --direction "$DIRECTION" "$@"

@@ -116,6 +116,24 @@ def _get_runner_cmd_train(
         del runner_args["nsys_rep_file_path"]
     if "deploy" in runner_args:
         del runner_args["deploy"]
+    if "enable_perf_monitor" in runner_args:
+        del runner_args["enable_perf_monitor"]
+    if "perf_log_interval" in runner_args:
+        del runner_args["perf_log_interval"]
+    if "perf_log_dir" in runner_args:
+        del runner_args["perf_log_dir"]
+    if "perf_console_output" in runner_args:
+        del runner_args["perf_console_output"]
+    if "perf_log_format" in runner_args:
+        del runner_args["perf_log_format"]
+    if "perf_memory_tracking" in runner_args:
+        del runner_args["perf_memory_tracking"]
+    if "perf_breakdown" in runner_args:
+        del runner_args["perf_breakdown"]
+    if "perf_max_log_files" in runner_args:
+        del runner_args["perf_max_log_files"]
+    if "perf_model_type" in runner_args:
+        del runner_args["perf_model_type"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port

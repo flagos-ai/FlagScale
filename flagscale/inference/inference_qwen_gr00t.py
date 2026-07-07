@@ -10,6 +10,7 @@ from flagscale.models.utils.constants import OBS_STATE
 from flagscale.models.vla import TrainablePolicy
 from flagscale.platforms import get_platform  # noqa: F401 must be before model imports
 from flagscale.train.processor import PolicyProcessorPipeline
+from flagscale.train.processor.pipeline import get_device_override
 
 
 def load_image(image_path: str, size: tuple[int, int] | None = None) -> torch.Tensor:
@@ -35,11 +36,13 @@ def run_inference(config_path: str):
     generate_cfg = cfg.generate
 
     pretrained_dir = engine_cfg.model
-    model = TrainablePolicy.from_pretrained(pretrained_dir, device=engine_cfg.device)
+    runtime_device = getattr(engine_cfg, "device", None) or "cpu"
+    model = TrainablePolicy.from_pretrained(pretrained_dir, device=runtime_device)
 
     preprocessor = PolicyProcessorPipeline.from_pretrained(
         pretrained_dir,
         config_filename="policy_preprocessor.json",
+        overrides=get_device_override(runtime_device),
     )
     postprocessor = PolicyProcessorPipeline.from_pretrained(
         pretrained_dir,

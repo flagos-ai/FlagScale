@@ -4,7 +4,7 @@ Training configuration models using Pydantic.
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, Field, field_validator
@@ -138,6 +138,17 @@ class CheckpointConfig(BaseModel):
     save_freq: int = 1000
     output_directory: str
     resume_from: str | None = None
+    pretrained_from: str | None = None
+
+
+class ActivationCheckpointConfig(BaseModel):
+    """Activation checkpointing (recomputation) configuration."""
+
+    mode: Literal["full", "selective", "memory_budget", "none"] = "none"
+    selective_ac_option: str = "2"
+    preserve_rng_state: bool = True
+    memory_budget: float = 0.5
+    checkpoint_patterns: list[str] | None = None
 
 
 class SystemConfig(BaseModel):
@@ -154,6 +165,9 @@ class SystemConfig(BaseModel):
     num_workers: int = 4
 
     checkpoint: CheckpointConfig
+    activation_checkpoint: ActivationCheckpointConfig = Field(
+        default_factory=ActivationCheckpointConfig
+    )
     raw: DictConfig | None = Field(default=None, exclude=True)
 
     def __getattr__(self, name):
@@ -177,7 +191,7 @@ class DataConfig(BaseModel):
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
     dataset_type: str = "lerobot"
-    data_path: str = Field(..., description="Path to training dataset")
+    data_path: str | None = Field(default=None, description="Path to training dataset (unused when data_mix is set)")
     tolerance_s: float = 0.0001
     use_imagenet_stats: bool = True
     rename_map: dict[str, str] | None = None

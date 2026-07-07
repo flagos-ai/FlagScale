@@ -18,7 +18,6 @@ from transformers import (
     Qwen3VLForConditionalGeneration,
 )
 
-from flagscale.logger import logger
 from flagscale.models.vla.registry import register_vlm
 from flagscale.platforms.platform_manager import get_platform
 
@@ -91,14 +90,9 @@ class QwenVLBackbone(nn.Module):
         if isinstance(instructions, str):
             instructions = [instructions]
 
-        logger.info(f"[prepare_input] image_feature_keys={image_feature_keys}")
         batch_images: list[list[Image.Image]] | None = None
         for key in image_feature_keys:
             imgs = batch[key]
-            if isinstance(imgs, torch.Tensor):
-                logger.info(
-                    f"[prepare_input] key={key} tensor shape={imgs.shape} dtype={imgs.dtype}"
-                )
             if isinstance(imgs, torch.Tensor) and imgs.ndim == 3:
                 imgs = [imgs]
             key_images = [_to_pil(img) for img in imgs]
@@ -111,9 +105,6 @@ class QwenVLBackbone(nn.Module):
         for idx, sample_images in enumerate(batch_images):
             batch_images[idx] = [img for img in sample_images if img is not None]
 
-        logger.info(
-            f"[prepare_input] batch_size={len(batch_images)} images_per_sample={[len(s) for s in batch_images]} pil_size={batch_images[0][0].size if batch_images else None}"
-        )
         return batch_images, instructions
 
     def build_qwenvl_inputs(
@@ -139,10 +130,6 @@ class QwenVLBackbone(nn.Module):
         return messages
 
     def forward(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
-        logger.info(
-            f"[VLM.forward] input keys={list(batch.keys())} "
-            + " ".join(f"{k}={v.shape}" for k, v in batch.items() if isinstance(v, torch.Tensor))
-        )
         with torch.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16):
             outputs = self.model(
                 **batch,
@@ -150,9 +137,6 @@ class QwenVLBackbone(nn.Module):
                 return_dict=True,
                 **kwargs,
             )
-        logger.info(
-            f"[VLM.forward] hidden_states: {len(outputs.hidden_states)} layers, last={outputs.hidden_states[-1].shape}"
-        )
         # TODO: (yupu) We should output the original outputs, not just the hidden states.
         return {"hidden_states": outputs.hidden_states}
 
@@ -197,13 +181,6 @@ class Qwen25VLBackbone(QwenVLBackbone):
             text=texts, images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt"
         )
 
-        logger.info(
-            "[Qwen25.build_qwenvl_inputs] "
-            + " ".join(
-                f"{k}={v.shape}" for k, v in batch_input.items() if isinstance(v, torch.Tensor)
-            )
-        )
-
         # Use current CUDA device instead of self.model.device, which returns
         # a DTensor device under FSDP2 and causes mixed Tensor/DTensor errors.
         return batch_input.to(get_platform().device())
@@ -243,13 +220,6 @@ class Qwen3VLBackbone(QwenVLBackbone):
             add_generation_prompt=True,
             return_dict=True,
             return_tensors="pt",
-        )
-
-        logger.info(
-            "[Qwen3.build_qwenvl_inputs] "
-            + " ".join(
-                f"{k}={v.shape}" for k, v in batch_inputs.items() if isinstance(v, torch.Tensor)
-            )
         )
 
         # Use current CUDA device instead of self.model.device, which returns

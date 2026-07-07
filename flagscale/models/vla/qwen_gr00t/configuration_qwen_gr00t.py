@@ -23,6 +23,10 @@ class QwenGr00tConfig(PreTrainedConfig):
 
     prompt_template: str | None = None
 
+    # Chunked cross-entropy for VLM co-training loss.
+    # 0 = disabled (use HF model's built-in CE), >0 = chunk size in tokens.
+    chunked_ce_tokens: int = 0
+
     normalization_mapping: dict[str, NormalizationMode] = field(
         default_factory=lambda: {
             "VISUAL": NormalizationMode.IDENTITY,
@@ -61,8 +65,14 @@ class QwenGr00tConfig(PreTrainedConfig):
         action_model = GR00TActionHeadConfig.from_omegaconf(model_cfg.action_model)
 
         prompt_template = getattr(model_cfg, "prompt_template", None)
+        chunked_ce_tokens = getattr(model_cfg, "chunked_ce_tokens", 0)
 
-        kwargs = dict(vlm=vlm, action_model=action_model, prompt_template=prompt_template)
+        kwargs = dict(
+            vlm=vlm,
+            action_model=action_model,
+            prompt_template=prompt_template,
+            chunked_ce_tokens=chunked_ce_tokens,
+        )
 
         raw_norm = getattr(model_cfg, "normalization_mapping", None)
         if raw_norm is not None:

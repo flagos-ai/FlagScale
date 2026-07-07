@@ -19,6 +19,24 @@ system:
     # Path to a checkpoint directory to resume training from (e.g. /path/to/checkpoints/005000)
     # resume_from:
 
+  # --- Activation Checkpointing ---
+  # Modes: "none" (default), "full", "selective", "memory_budget"
+  # "full": wraps every FSDP unit with gradient checkpointing
+  # "selective": wraps every Nth layer (selective_ac_option="2" = every 2nd)
+  #              or uses per-op SAC (selective_ac_option="op")
+  # "memory_budget": compiler-driven (requires torch.compile)
+  activation_checkpoint:
+    mode: none
+    # For selective mode: "2" = every 2nd layer, "3" = every 3rd, "op" = per-op SAC
+    # selective_ac_option: "2"
+    preserve_rng_state: false
+    # For memory_budget mode only:
+    # memory_budget: 0.5
+    # Only checkpoint the action model (DiT blocks). VLM layers use dynamic
+    # sequence lengths (variable vision tokens) which breaks recomputation.
+    # checkpoint_patterns:
+    #   - "action_model\\._head\\.model\\.transformer_blocks\\.\\d+$"
+
 model:
   model_name: qwen_gr00t
   vlm:
@@ -55,6 +73,12 @@ model:
       positional_embeddings: None
 
   prompt_template: "Your task is {instruction}. To identify the key objects for your task. Locate their bounding boxes in [x1,y1,x2,y2] format."
+
+  # --- Chunked Cross Entropy ---
+  # 0 = disabled
+  # >0 = chunk size in tokens. Processes logits in fixed-size chunks to reduce
+  #       peak memory from the [batch*seq_len, vocab_size] float32 softmax tensor.
+  chunked_ce_tokens: 0
 
   normalization_mapping:
     VISUAL: IDENTITY
@@ -123,6 +147,21 @@ data:
   # Path to VLM co-training data (WDS/Energon format). Leave unset to disable co-training.
   # vlm_data_path: /workspace/datasets/vlm_cotrain/
   tolerance_s: 0.0001
+
+  # --- Data Mixture ---
+  # When data_mix is set, it takes precedence over data_path.
+  # Each entry specifies a dataset path and sampling weight.
+  # Weights are relative — they get normalized internally.
+  # Optional: data_root_dir as a common prefix for relative paths.
+  #
+  # data_root_dir: /workspace/datasets/
+  # data_mix:
+  #   - path: IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
+  #     weight: 1.0
+  #   - path: IPEC-COMMUNITY/libero_spatial_no_noops_1.0.0_lerobot
+  #     weight: 0.5
+  # balance_dataset_weights: true  # scale weights by dataset size (default: true)
+
   preprocessor:
     name: policy_preprocessor
     steps:
