@@ -41,9 +41,6 @@ system:
   check_for_large_grads: true
   calculate_per_token_loss: true
   deterministic_mode: true
-  recompute_granularity: selective
-  recompute_modules:
-    - mhc
   precision:
     bf16: true
     attention_softmax_in_fp32: true
