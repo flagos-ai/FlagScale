@@ -68,6 +68,11 @@ try:
 except ImportError:
     has_rl_utils = False
 
+import csv
+from torch.autograd.profiler import DeviceType
+PROFILER_NCCL_FILTER = {"nccl", "AllReduce", "AllGather", "AllToAll", "Broadcast", "ReduceScatter"}
+PROFILER_MEM_FILTER = {"memcpy", "memset"}
+
 # Canonical list of RL timer names to include in timers_to_log.
 # When the profiling branch is merged, this will be imported from rl_profiling
 # as RL_LOGGABLE_TIMER_NAMES instead of being defined here.
@@ -3217,7 +3222,58 @@ def train(
         def trace_handler(p):
             profile_dir = Path(f"{args.tensorboard_dir}/../torch_profile")
             profile_dir.mkdir(parents=True, exist_ok=True)
-            p.export_chrome_trace(f"{profile_dir}/rank-{torch.distributed.get_rank()}.json.gz")
+            rank = torch.distributed.get_rank()
+            p.export_chrome_trace(f"{profile_dir}/rank-{rank}.json.gz")
+            #  CUDA kernel profiling
+            csv_cuda = f"{profile_dir}/rank-{rank}_cuda_kernel_non_comm.csv"
+            cuda_rows = []
+            for item in p.key_averages():
+                op_name = item.key
+                # collect only non-communication ops with non-zero CUDA time
+                if hasattr(item, 'cuda_time_total') and item.cuda_time_total > 0:
+                    # filter out communication and memory copy ops
+                    is_nccl = any(w.lower() in op_name.lower() for w in PROFILER_NCCL_FILTER)
+                    is_mem = any(w.lower() in op_name.lower() for w in PROFILER_MEM_FILTER)
+                    if is_nccl or is_mem:
+                        continue
+                    avg_cuda = item.cuda_time_total / item.count if item.count > 0 else 0.0
+                    cuda_rows.append({
+                        "kernel_name": op_name,
+                        "count": item.count,
+                        "total_cuda_us": item.cuda_time_total,
+                        "avg_cuda_us": round(avg_cuda, 2),
+                        "self_cuda_us": item.self_cuda_time_total
+                    })
+            cuda_rows.sort(key=lambda x: x["total_cuda_us"], reverse=True)
+            with open(csv_cuda, "w", newline="", encoding="utf-8-sig") as f:
+                field_names = ["kernel_name", "count", "total_cuda_us", "avg_cuda_us", "self_cuda_us"]
+                writer = csv.DictWriter(f, fieldnames=field_names)
+                writer.writeheader()
+                writer.writerows(cuda_rows)
+            print(f"[CUDA] non communication op list is saved to: {csv_cuda}")
+            # PyTorch ATen op profiling
+            csv_torch = f"{profile_dir}/rank-{rank}_torch_aten_op.csv"
+            torch_rows = []
+            for item in p.key_averages():
+                op_name = item.key
+                if item.device_type != DeviceType.CPU:
+                    continue
+                avg_cpu = item.cpu_time_total / item.count if item.count > 0 else 0.0
+                torch_rows.append({
+                    "aten_op_name": op_name,
+                    "count": item.count,
+                    "total_cpu_us": item.cpu_time_total,
+                    "avg_cpu_us": round(avg_cpu, 2),
+                    "self_cpu_us": item.self_cpu_time_total
+                })
+
+            torch_rows.sort(key=lambda x: x["total_cpu_us"], reverse=True)
+            with open(csv_torch, "w", newline="", encoding="utf-8-sig") as f:
+                field_names = ["aten_op_name", "count", "total_cpu_us", "avg_cpu_us", "self_cpu_us"]
+                writer = csv.DictWriter(f, fieldnames=field_names)
+                writer.writeheader()
+                writer.writerows(torch_rows)
+            print(f"[Torch Aten] op list is saved to: {csv_torch}")
         prof = torch.profiler.profile(
             schedule=torch.profiler.schedule(
                 wait=max(args.profile_step_start - 1, 0),
