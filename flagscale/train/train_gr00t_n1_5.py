@@ -516,7 +516,7 @@ def main(config: TrainConfig, seed: int):
     step = 0
     resume_from = config.system.checkpoint.resume_from
     if resume_from:
-        step = load_training_state_fsdp2(
+        step, _dl_state = load_training_state_fsdp2(
             Path(resume_from), policy, optimizer, lr_scheduler,
         )
         saved_rng = serialize_rng_state()

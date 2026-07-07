@@ -80,7 +80,13 @@ class PiGemmaRMSNorm(nn.Module):
         self.cond_dim = cond_dim
         if cond_dim is not None:
             self.dense = nn.Linear(cond_dim, dim * 3, bias=True)
-            nn.init.zeros_(self.dense.weight)
+            try:
+                nn.init.zeros_(self.dense.weight)
+            except (RuntimeError, NotImplementedError):
+                # Under init_empty_weights, parameters are meta tensors and
+                # inplace initialization is not supported. The pretrained
+                # checkpoint will materialize these weights immediately.
+                pass
         else:
             self.weight = nn.Parameter(torch.zeros(dim))
             self.dense = None

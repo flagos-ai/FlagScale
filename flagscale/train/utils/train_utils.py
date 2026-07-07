@@ -17,6 +17,7 @@
 # limitations under the License.
 from pathlib import Path
 
+import torch
 import torch.nn as nn
 from safetensors.torch import load_file, save_file
 from torch.distributed.checkpoint.state_dict import (
@@ -28,6 +29,7 @@ from torch.optim import Optimizer
 
 from flagscale.models.utils.constants import (
     CHECKPOINTS_DIR,
+    DATALOADER_STATE,
     LAST_CHECKPOINT_LINK,
     OPTIMIZER_PARAM_GROUPS,
     OPTIMIZER_STATE,
@@ -40,6 +42,28 @@ from flagscale.models.utils.constants import (
 from flagscale.train.datasets.utils import flatten_dict, load_json, unflatten_dict, write_json
 from flagscale.train.utils.io_utils import deserialize_json_into_object
 from flagscale.train.utils.random_utils import load_rng_state, save_rng_state
+
+
+class StatefulDistributedSampler(torch.utils.data.distributed.DistributedSampler):
+    """DistributedSampler with state_dict/load_state_dict for StatefulDataLoader."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._yielded = 0
+
+    def __iter__(self):
+        full_indices = list(super().__iter__())
+        for idx in full_indices[self._yielded :]:
+            self._yielded += 1
+            yield idx
+        self._yielded = 0
+
+    def state_dict(self):
+        return {"epoch": self.epoch, "yielded": self._yielded}
+
+    def load_state_dict(self, state_dict):
+        self.set_epoch(state_dict["epoch"])
+        self._yielded = state_dict["yielded"]
 
 
 def get_step_identifier(step: int, total_steps: int) -> str:
@@ -78,6 +102,7 @@ def save_checkpoint(
     optimizer_state_dict: dict | None = None,
     lr_scheduler=None,
     preprocessor=None,
+    dataloader_state: dict | None = None,
     postprocessor=None,
     state_dict: dict | None = None,
 ) -> None:
@@ -122,7 +147,7 @@ def save_checkpoint(
         preprocessor.save_pretrained(pretrained_dir)
     if postprocessor is not None:
         postprocessor.save_pretrained(pretrained_dir)
-    save_training_state(checkpoint_dir, step, optimizer_state_dict, lr_scheduler)
+    save_training_state(checkpoint_dir, step, optimizer_state_dict, lr_scheduler, dataloader_state)
 
 
 def save_training_state(
@@ -130,6 +155,7 @@ def save_training_state(
     train_step: int,
     optimizer_state_dict: dict | None = None,
     scheduler=None,
+    dataloader_state: dict | None = None,
 ) -> None:
     save_dir = checkpoint_dir / TRAINING_STATE_DIR
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +165,8 @@ def save_training_state(
         save_optimizer_state(optimizer_state_dict, save_dir)
     if scheduler is not None:
         save_scheduler_state(scheduler, save_dir)
+    if dataloader_state is not None:
+        save_dataloader_state(dataloader_state, save_dir)
 
 
 def load_model_state_fsdp2(model: nn.Module, pretrained_dir: Path) -> None:
@@ -171,10 +199,10 @@ def load_training_state_fsdp2(
     model: nn.Module,
     optimizer: Optimizer,
     scheduler,
-) -> int:
+) -> tuple[int, dict | None]:
     """Load full training state into an FSDP2-wrapped model and optimizer.
 
-    Returns the training step to resume from.
+    Returns a tuple of (training step, dataloader state dict or None).
     """
     pretrained_dir = checkpoint_dir / PRETRAINED_MODEL_DIR
     training_state_dir = checkpoint_dir / TRAINING_STATE_DIR
@@ -187,7 +215,12 @@ def load_training_state_fsdp2(
     if scheduler is not None:
         load_scheduler_state(scheduler, training_state_dir)
 
-    return step
+    dl_state = None
+    dl_state_path = training_state_dir / DATALOADER_STATE
+    if dl_state_path.exists():
+        dl_state = load_dataloader_state(training_state_dir)
+
+    return step, dl_state
 
 
 def save_optimizer_state(state_dict: dict, save_dir: Path) -> None:
@@ -206,3 +239,11 @@ def load_scheduler_state(scheduler, save_dir: Path):
     state_dict = deserialize_json_into_object(save_dir / SCHEDULER_STATE, scheduler.state_dict())
     scheduler.load_state_dict(state_dict)
     return scheduler
+
+
+def save_dataloader_state(state: dict, save_dir: Path) -> None:
+    write_json(state, save_dir / DATALOADER_STATE)
+
+
+def load_dataloader_state(save_dir: Path) -> dict:
+    return load_json(save_dir / DATALOADER_STATE)

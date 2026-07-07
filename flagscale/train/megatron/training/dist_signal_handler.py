@@ -13,6 +13,8 @@ SIGNAL_MAP = {
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
 
+from megatron.plugin.decorators import overridable
+
 
 def get_world_size():
     if torch.distributed.is_available() and torch.distributed.is_initialized():
@@ -22,6 +24,7 @@ def get_world_size():
     return world_size
 
 
+@overridable
 def get_device(local_rank=None):
     backend = torch.distributed.get_backend()
     if backend == 'nccl':

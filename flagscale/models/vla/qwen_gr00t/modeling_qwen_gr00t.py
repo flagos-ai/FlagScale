@@ -32,6 +32,7 @@ from flagscale.models.vla.base_policy import TrainablePolicy
 from flagscale.models.vla.registry import build_action_model, build_vlm
 from flagscale.models.vla.utils import get_vlm_config
 from flagscale.platforms.platform_manager import get_platform
+from flagscale.train.utils.chunked_cross_entropy import chunked_cross_entropy_loss
 
 
 class QwenGr00t(TrainablePolicy):
@@ -158,7 +159,16 @@ class QwenGr00t(TrainablePolicy):
 
         if vlm_batch is not None:
             with torch.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16):
-                vlm_loss = self.vlm.model(**vlm_batch, return_dict=True).loss
+                if self.config.chunked_ce_tokens > 0:
+                    labels = vlm_batch.pop("labels")
+                    output_vlm = self.vlm.model(**vlm_batch, return_dict=True)
+                    vlm_loss = chunked_cross_entropy_loss(
+                        output_vlm.logits,
+                        labels,
+                        chunk_tokens=self.config.chunked_ce_tokens,
+                    )
+                else:
+                    vlm_loss = self.vlm.model(**vlm_batch, return_dict=True).loss
             result["vlm_loss"] = vlm_loss
 
         return result

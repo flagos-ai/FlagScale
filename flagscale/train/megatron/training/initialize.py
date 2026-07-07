@@ -37,6 +37,7 @@ from megatron.training.yaml_arguments import validate_yaml
 from megatron.training.arguments_fs import FSTrainArguments
 from megatron.training.global_vars import set_spiky_loss_detector
 from megatron.plugin.hetero.parallel_context import set_parallel_context
+from megatron.plugin.decorators import overridable
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ def initialize_megatron(
         # No continuation function
         return None
 
-
+@overridable
 def _compile_dependencies():
 
     args = get_args()

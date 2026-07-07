@@ -47,7 +47,7 @@ def _get_args_megatron(config: DictConfig):
     new_config_dict.update(config_dict["model"])
     new_config_dict.update(config_dict["data"])
 
-    ignore_keys = ["log_dir", "details_dir", "scripts_dir", "pids_dir"]
+    ignore_keys = ["log_dir", "details_dir", "scripts_dir", "pids_dir", "straggler_dir"]
     # Flatten the dictionary to a list of arguments
     args = flatten_dict_to_args(new_config_dict, ignore_keys)
 
@@ -116,6 +116,17 @@ def _update_config_train(config: DictConfig):
         resolve_path(system.logging.wandb_save_dir, "logging.wandb_save_dir")
         if system.logging.get("wandb_save_dir", None)
         else os.path.join(exp_dir, "wandb")
+    )
+
+    system.logging.straggler_dir = (
+        resolve_path(system.logging.straggler_dir, "logging.straggler_dir")
+        if system.logging.get("straggler_dir", None)
+        else os.path.join(log_dir, "straggler")
+    )
+    system.straggler_log_dir = (
+        resolve_path(system.straggler_log_dir, "system.straggler_log_dir")
+        if system.get("straggler_log_dir", None)
+        else system.logging.straggler_dir
     )
 
     # Tokenizer file paths — resolve before passing to the training subprocess,
@@ -248,6 +259,9 @@ def _generate_run_script_train(
         f.write(f"mkdir -p {system_config.logging.details_dir}\n")
         f.write(f"mkdir -p {system_config.logging.tensorboard_dir}\n")
         f.write(f"mkdir -p {system_config.logging.wandb_save_dir}\n")
+        f.write(f"mkdir -p {system_config.logging.straggler_dir}\n")
+        if system_config.get("straggler_log_dir", None):
+            f.write(f"mkdir -p {system_config.straggler_log_dir}\n")
         f.write("\n")
         f.write(f"cd {pkg_dir}\n")
         f.write("\n")
