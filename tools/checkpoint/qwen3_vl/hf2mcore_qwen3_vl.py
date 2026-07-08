@@ -208,7 +208,9 @@ def load_megatron_model(args):
 
 
 @torch.inference_mode()
-def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
+def convert_checkpoint_from_megatron_to_transformers(
+    mgmodel, hfmodel, args, hf_pretrained_model=None
+):
     if args.fp16:
         mgmodel = mgmodel.half()
         hfmodel = hfmodel.half()
@@ -230,7 +232,14 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
     vision_head_dim = vision_hidden_size // mgvision.config.num_attention_heads
     copied_numel = 0
     safe_copy(mgvision.rotary_pos_emb.inv_freq, hfvision.rotary_pos_emb.inv_freq)
-    copied_numel += safe_copy(mgvision.patch_embed.proj.weight, hfvision.patch_embed.proj.weight)
+    # patch_embed: mcore may use Linear (enable_linear) while hf uses Conv3d
+    mg_patch_weight = mgvision.patch_embed.proj.weight
+    hf_patch_weight = hfvision.patch_embed.proj.weight
+    if mg_patch_weight.dim() == 2 and hf_patch_weight.dim() == 5:
+        # mcore Linear [embed_dim, flat_dim] -> hf Conv3d [embed_dim, C, T, H, W]
+        copied_numel += safe_copy(mg_patch_weight.view(hf_patch_weight.shape), hf_patch_weight)
+    else:
+        copied_numel += safe_copy(mg_patch_weight, hf_patch_weight)
     copied_numel += safe_copy(mgvision.patch_embed.proj.bias, hfvision.patch_embed.proj.bias)
     copied_numel += safe_copy(mgvision.pos_embed.weight, hfvision.pos_embed.weight)
 
@@ -367,7 +376,7 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
 
     copied_numel += safe_copy(mgllm.decoder.final_layernorm.weight, hfllm.norm.weight)
     if args.untie_embeddings_and_output_weights:
-        safe_copy(mgllm.output_layer.weight, hfmodel.lm_head.weight)
+        safe_copy(mgllm.output_layer.weight, hf_pretrained_model.lm_head.weight)
 
     n_params = sum(
         [
@@ -382,7 +391,9 @@ def convert_checkpoint_from_megatron_to_transformers(mgmodel, hfmodel, args):
 
 
 @torch.inference_mode()
-def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
+def convert_checkpoint_from_transformers_to_megatron(
+    hfmodel, mgmodel, args, hf_pretrained_model=None
+):
     if args.fp16:
         mgmodel = mgmodel.half()
         hfmodel = hfmodel.half()
@@ -410,7 +421,14 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
     copied_numel = 0
     # rotary_pos_emb.inv_freq is buffer not parameter
     safe_copy(hfvision.rotary_pos_emb.inv_freq, mgvision.rotary_pos_emb.inv_freq)
-    copied_numel += safe_copy(hfvision.patch_embed.proj.weight, mgvision.patch_embed.proj.weight)
+    # patch_embed: hf uses Conv3d while mcore may use Linear (enable_linear)
+    hf_patch_weight = hfvision.patch_embed.proj.weight
+    mg_patch_weight = mgvision.patch_embed.proj.weight
+    if hf_patch_weight.dim() == 5 and mg_patch_weight.dim() == 2:
+        # hf Conv3d [embed_dim, C, T, H, W] -> mcore Linear [embed_dim, flat_dim]
+        copied_numel += safe_copy(hf_patch_weight.reshape(mg_patch_weight.shape), mg_patch_weight)
+    else:
+        copied_numel += safe_copy(hf_patch_weight, mg_patch_weight)
     copied_numel += safe_copy(hfvision.patch_embed.proj.bias, mgvision.patch_embed.proj.bias)
     copied_numel += safe_copy(hfvision.pos_embed.weight, mgvision.pos_embed.weight)
 
@@ -550,7 +568,7 @@ def convert_checkpoint_from_transformers_to_megatron(hfmodel, mgmodel, args):
     copied_numel += safe_copy(hfllm.norm.weight, mgllm.decoder.final_layernorm.weight)
     if args.untie_embeddings_and_output_weights:
         # lm_head not in hfllm
-        safe_copy(hfmodel.lm_head.weight, mgllm.output_layer.weight)
+        safe_copy(hf_pretrained_model.lm_head.weight, mgllm.output_layer.weight)
 
     n_params = sum([t.numel() for t in hfllm.state_dict().values()])
     assert n_params == copied_numel, (
@@ -873,7 +891,9 @@ def main():
             args.hf_ckpt_path, torch_dtype=config.torch_dtype
         )
         mg_model = load_megatron_model(args)
-        convert_checkpoint_from_megatron_to_transformers(mg_model, hf_model, args)
+        convert_checkpoint_from_megatron_to_transformers(
+            mg_model, hf_model.model, args, hf_pretrained_model=hf_model
+        )
         save_hfmodel(args, hf_model)
     else:
         config = AutoConfig.from_pretrained(args.load)
@@ -881,7 +901,9 @@ def main():
             args.load, torch_dtype=config.torch_dtype
         )
         mg_model = model_provider()
-        convert_checkpoint_from_transformers_to_megatron(hf_model, mg_model, args)
+        convert_checkpoint_from_transformers_to_megatron(
+            hf_model.model, mg_model, args, hf_pretrained_model=hf_model
+        )
         save_mgmodel(mg_model, args)
 
 
