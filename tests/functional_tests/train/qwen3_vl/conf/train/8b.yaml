@@ -93,13 +93,13 @@ model:
 
 data:
   no_use_system_prompt: True
-  data_path: /nfs/lizhiyu/embody/data/blip_laion_cc_sbu_558k_first_5k/wds-2/
-  vision_root: /nfs/lizhiyu/embody/data/blip_laion_cc_sbu_558k_first_5k/
+  data_path: /home/gitlab-runner/data/blip_laion_cc_sbu_558k_first_5k/wds-2/
+  vision_root: /home/gitlab-runner/data/blip_laion_cc_sbu_558k_first_5k/
   dataloader_type: external
   split: 100,0,0
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
-    tokenizer_path: /nfs/lizhiyu/embody/data/Qwen3-VL-8B-Instruct-tp2/
+    tokenizer_path: /home/gitlab-runner/tokenizers/Qwen3-VL-8B-Instruct
     # vocab_size: 151936 #
     extra_vocab_size: 293 # Qwen3-VL specific. total vocab size = 151643 + extra_vocab_size
     make_vocab_size_divisible_by: 64
