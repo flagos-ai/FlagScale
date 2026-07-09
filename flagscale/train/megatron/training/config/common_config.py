@@ -41,6 +41,15 @@ class ProfilingConfig:
     use_pytorch_profiler: bool = False
     """Use the built-in pytorch profiler. Useful if you wish to view profiles in tensorboard."""
 
+    use_hipprof_profiler: bool = False
+    """Use hipprof session control for profiling."""
+
+    hipprof_bin_path: str = ""
+    """Path to the hipprof executable used to send session start/stop commands."""
+
+    hipprof_session_id: str = ""
+    """hipprof session id to control. If empty, HIPPROF_SESSION_ID is used."""
+
     pytorch_profiler_collect_shapes: bool = False
     """Collect tensor shape in pytorch profiler."""
   
