@@ -1,0 +1,33 @@
+defaults:
+  - _self_
+  - train: 8b
+
+experiment:
+  exp_name: 8b
+  exp_dir: tests/functional_tests/train/qwen3_vl/test_results/8b
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_qwen3_vl.py
+  runner:
+    ssh_port: null
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0,1,2,3"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+    NCCL_ALGO: "Ring"
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    NVTE_FLASH_ATTN: 1
+    NVTE_FUSED_ATTN: 0
+    CUDNN_BENCHMARK: "false"
+    CUDNN_DETERMINISTIC: "true"
+  cmds:
+    before_start: source /root/miniconda3/bin/activate flagscale-train && pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226100830f41de38d1f1204d7848b54b1f3e && pip install transformers==4.57
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
