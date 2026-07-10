@@ -43,8 +43,6 @@ import logging
 import math
 import os
 import socket
-import shlex
-import subprocess
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -148,6 +146,7 @@ from megatron.core.utils import (
 )
 from megatron.core.fp8_utils import correct_amax_history_if_needed
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.hipprof import hipprof_session_control
 from megatron.core.pipeline_parallel.utils import (
     is_pp_first_stage,
     is_pp_last_stage,
@@ -355,49 +354,6 @@ def _get_global_rank() -> int:
 
 def _is_profile_rank(args) -> bool:
     return len(args.profile_ranks) == 0 or _get_global_rank() in args.profile_ranks
-
-
-def _format_command(cmd):
-    return " ".join(shlex.quote(str(part)) for part in cmd)
-
-
-def _hipprof_session_control(args, action):
-    if action not in ("start", "stop"):
-        raise ValueError(f"Unsupported hipprof session action: {action}")
-
-    session_id = getattr(args, "hipprof_session_id", "") or os.environ.get("HIPPROF_SESSION_ID", "")
-    if not session_id:
-        raise RuntimeError(
-            "hipprof profiling requires train.model.hipprof_session_id "
-            "or HIPPROF_SESSION_ID."
-        )
-
-    hipprof_bin = (
-        getattr(args, "hipprof_bin_path", "")
-        or os.environ.get("HIPPROF_BIN_PATH", "")
-        or "hipprof"
-    )
-    cmd = [hipprof_bin, "--session", session_id, f"--{action}"]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            f"hipprof executable not found: {hipprof_bin}. "
-            "Set train.model.hipprof_bin_path or HIPPROF_BIN_PATH."
-        ) from exc
-    except subprocess.CalledProcessError as exc:
-        output = []
-        if exc.stdout:
-            output.append(f"stdout:\n{exc.stdout.strip()}")
-        if exc.stderr:
-            output.append(f"stderr:\n{exc.stderr.strip()}")
-        details = "\n".join(output)
-        if details:
-            details = "\n" + details
-        raise RuntimeError(
-            f"hipprof session {action} failed with exit code {exc.returncode}: "
-            f"{_format_command(cmd)}{details}"
-        ) from exc
 
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
@@ -2885,7 +2841,7 @@ def post_training_step_callbacks(
             if prof.execution_trace_observer is not None:
                 prof.execution_trace_observer.unregister_callback()
         elif getattr(args, "use_hipprof_profiler", False):
-            _hipprof_session_control(args, "stop")
+            hipprof_session_control("stop")
         else:
             torch.cuda.check_error(torch.cuda.cudart().cudaProfilerStop())
             if nsys_nvtx_context is not None:
@@ -3331,7 +3287,7 @@ def train(
                 prof.step()
             elif getattr(args, "use_hipprof_profiler", False):
                 if iteration == args.profile_step_start:
-                    _hipprof_session_control(args, "start")
+                    hipprof_session_control("start")
             elif iteration == args.profile_step_start:
                 torch.cuda.check_error(torch.cuda.cudart().cudaProfilerStart())
                 nsys_nvtx_context = torch.autograd.profiler.emit_nvtx(record_shapes=True)
