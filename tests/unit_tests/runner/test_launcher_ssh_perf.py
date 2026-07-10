@@ -37,3 +37,36 @@ def test_get_runner_cmd_train_strips_perf_monitor_runner_keys():
     assert "--perf_console_output" not in cmd
     assert "--log_dir" in cmd
     assert "--rdzv_endpoint" in cmd
+
+
+def test_get_runner_cmd_train_strips_hipprof_runner_keys():
+    config = OmegaConf.create(
+        {
+            "experiment": {
+                "runner": {
+                    "backend": "torchrun",
+                    "nnodes": 1,
+                    "nproc_per_node": 8,
+                    "rdzv_backend": "static",
+                    "hipprof_bin_path": "/opt/dtk/bin/hipprof",
+                    "hipprof_output_dir": "/tmp/hipprof",
+                }
+            },
+            "train": {
+                "system": {
+                    "logging": {
+                        "details_dir": "/tmp/details",
+                    }
+                },
+                "model": {
+                    "profile": True,
+                    "use_hipprof_profiler": True,
+                },
+            },
+        }
+    )
+
+    cmd = _get_runner_cmd_train("localhost", "127.0.0.1", 29500, 1, 0, 8, config)
+
+    assert "--hipprof_bin_path" not in cmd
+    assert "--hipprof_output_dir" not in cmd
