@@ -20,7 +20,7 @@ def hipprof_session_control(action):
         )
 
     hipprof_bin = os.environ.get("HIPPROF_BIN_PATH", "") or "hipprof"
-    command = [hipprof_bin, "--session", session_id, f"--{action}"]
+    command = [hipprof_bin, "--session-client", session_id, f"--{action}"]
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
     except FileNotFoundError as error:

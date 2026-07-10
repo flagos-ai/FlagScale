@@ -10,7 +10,7 @@ from flagscale.train.megatron.hipprof import hipprof_session_control
 
 class HipprofSessionControlTests(unittest.TestCase):
     @patch("flagscale.train.megatron.hipprof.subprocess.run")
-    def test_start_uses_wrapper_environment(self, run):
+    def test_start_uses_session_client_from_wrapper_environment(self, run):
         with patch.dict(
             os.environ,
             {
@@ -22,7 +22,7 @@ class HipprofSessionControlTests(unittest.TestCase):
             hipprof_session_control("start")
 
         run.assert_called_once_with(
-            ["/opt/dtk/bin/hipprof", "--session", "session-7", "--start"],
+            ["/opt/dtk/bin/hipprof", "--session-client", "session-7", "--start"],
             check=True,
             capture_output=True,
             text=True,
