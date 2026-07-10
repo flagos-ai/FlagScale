@@ -81,9 +81,11 @@ class HipprofEnvironmentTests(unittest.TestCase):
             ),
         ]
         for runner, model, message in cases:
-            with self.subTest(message=message):
-                with self.assertRaisesRegex(ValueError, message):
-                    configure_hipprof_env(runner, model, {})
+            with (
+                self.subTest(message=message),
+                self.assertRaisesRegex(ValueError, message),
+            ):
+                configure_hipprof_env(runner, model, {})
 
 
 if __name__ == "__main__":

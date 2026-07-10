@@ -1,7 +1,10 @@
-import os
-from collections.abc import Mapping
-from typing import Optional
+from __future__ import annotations
 
+import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 HIPPROF_RUNNER_KEYS = ("hipprof_bin_path", "hipprof_output_dir")
 HIPPROF_WRAPPER_PATH = "tools/profiling/hipprof_python_wrapper.sh"
@@ -20,7 +23,7 @@ def remove_launcher_profiling_args(runner_args: dict) -> None:
 def configure_hipprof_env(
     runner_config: Mapping,
     model_config: Mapping,
-    current_env: Optional[Mapping] = None,
+    current_env: Mapping | None = None,
 ) -> dict:
     env = dict(current_env or {})
     hipprof_bin_path = runner_config.get("hipprof_bin_path", None)
@@ -32,8 +35,7 @@ def configure_hipprof_env(
         return env
     if not enabled:
         raise ValueError(
-            "hipprof runner configuration requires "
-            "train.model.use_hipprof_profiler: true"
+            "hipprof runner configuration requires train.model.use_hipprof_profiler: true"
         )
     if not model_config.get("profile", False):
         raise ValueError("hipprof step profiling requires train.model.profile: true")
@@ -42,9 +44,7 @@ def configure_hipprof_env(
             "hipprof profiling requires both experiment.runner.hipprof_bin_path "
             "and experiment.runner.hipprof_output_dir"
         )
-    if runner_config.get("nsys_bin_path", None) or runner_config.get(
-        "nsys_rep_file_path", None
-    ):
+    if runner_config.get("nsys_bin_path", None) or runner_config.get("nsys_rep_file_path", None):
         raise ValueError("nsys and hipprof launcher profiling cannot be enabled together")
 
     hipprof_executable = str(hipprof_bin_path)

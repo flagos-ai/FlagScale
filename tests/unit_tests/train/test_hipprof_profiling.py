@@ -29,9 +29,11 @@ class HipprofSessionControlTests(unittest.TestCase):
         )
 
     def test_missing_session_points_to_yaml(self):
-        with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "experiment.runner"):
-                hipprof_session_control("stop")
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            self.assertRaisesRegex(RuntimeError, "experiment.runner"),
+        ):
+            hipprof_session_control("stop")
 
     def test_invalid_action_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unsupported"):
@@ -45,13 +47,15 @@ class HipprofSessionControlTests(unittest.TestCase):
             output="out text",
             stderr="err text",
         )
-        with patch.dict(
-            os.environ,
-            {"HIPPROF_SESSION_ID": "session-9"},
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {"HIPPROF_SESSION_ID": "session-9"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(RuntimeError, "out text") as error,
         ):
-            with self.assertRaisesRegex(RuntimeError, "out text") as error:
-                hipprof_session_control("start")
+            hipprof_session_control("start")
         self.assertIn("err text", str(error.exception))
 
 

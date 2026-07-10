@@ -7,7 +7,6 @@ import time
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = ROOT / "tools/profiling/hipprof_python_wrapper.sh"
 
@@ -123,9 +122,7 @@ class HipprofWrapperTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             events = log.read_text()
-            launch = next(
-                line for line in events.splitlines() if line.startswith("hipprof_args=")
-            )
+            launch = next(line for line in events.splitlines() if line.startswith("hipprof_args="))
             session_match = re.search(r"--session ([^ ]+)", launch)
             self.assertIsNotNone(session_match)
             session = session_match.group(1)
