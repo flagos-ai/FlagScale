@@ -54,7 +54,7 @@ fi
 host="${HOSTNAME:-$(hostname)}"
 local_rank="${LOCAL_RANK:-na}"
 session_prefix="${HIPPROF_SESSION_ID_PREFIX:-flagscale}"
-session_id="${HIPPROF_SESSION_ID:-${session_prefix}_${host}_rank${global_rank}_pid$$}"
+session_id="${session_prefix}_${host}_rank${global_rank}_pid$$"
 export HIPPROF_BIN_PATH="$hipprof_bin"
 export HIPPROF_SESSION_ID="$session_id"
 

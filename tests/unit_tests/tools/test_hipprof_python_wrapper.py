@@ -102,6 +102,7 @@ class HipprofWrapperTests(unittest.TestCase):
                     "HIPPROF_TRACE": "HIP,HSA",
                     "HIPPROF_GROUP_STREAM": "1",
                     "HIPPROF_SEGMENT_SIZE": "6000",
+                    "HIPPROF_SESSION_ID": "stale-shared-session",
                     "HIPPROF_TEST_LOG": str(log),
                 }
             )
@@ -128,6 +129,8 @@ class HipprofWrapperTests(unittest.TestCase):
             session_match = re.search(r"--session ([^ ]+)", launch)
             self.assertIsNotNone(session_match)
             session = session_match.group(1)
+            self.assertNotEqual(session, "stale-shared-session")
+            self.assertIn("_rank2_", session)
             self.assertIn(f"python_session={session}", events)
             for argument in (
                 "--trace-off",
