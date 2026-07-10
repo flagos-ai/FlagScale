@@ -44,11 +44,7 @@ if [[ -n "$profile_ranks" && "$global_rank" != "na" ]]; then
   esac
 fi
 
-hipprof_bin="${HIPPROF_BIN_PATH:-}"
-if [[ -z "$hipprof_bin" ]]; then
-  hipprof_bin="$(infer_cli_values --hipprof-bin-path "$@")"
-fi
-hipprof_bin="${hipprof_bin:-hipprof}"
+hipprof_bin="${HIPPROF_BIN_PATH:-hipprof}"
 output_root="${HIPPROF_OUTPUT_DIR:-}"
 if [[ -z "$output_root" ]]; then
   echo "HIPPROF_OUTPUT_DIR is required when using hipprof_python_wrapper.sh" >&2
@@ -66,8 +62,7 @@ out_dir="${output_root}/${host}_global${global_rank}_local${local_rank}_pid$$"
 mkdir -p "$out_dir"
 
 trace_args=()
-api_trace="$(printf '%s%s%s' H S A)"
-trace_list="${HIPPROF_TRACE:-HIP,RCCL,${api_trace}}"
+trace_list="${HIPPROF_TRACE:-HIP,RCCL,HSA}"
 IFS=',' read -r -a traces <<< "$trace_list"
 for trace in "${traces[@]}"; do
   trace_key="$(printf '%s' "${trace// /}" | tr '[:lower:]' '[:upper:]')"
@@ -75,7 +70,7 @@ for trace in "${traces[@]}"; do
   if [[ "$trace_key" == "" || "$trace_key" == "NONE" ]]; then
     continue
   fi
-  if [[ "$trace_key" == "HIP" || "$trace_key" == "RCCL" || "$trace_key" == "$api_trace" ]]; then
+  if [[ "$trace_key" == "HIP" || "$trace_key" == "RCCL" || "$trace_key" == "HSA" ]]; then
     trace_args+=("--${trace_arg}-trace")
     continue
   fi
@@ -95,26 +90,12 @@ if [[ -n "$segment_size" ]]; then
   segment_args+=(--segment-size "$segment_size")
 fi
 
-"$hipprof_bin" \
+exec "$hipprof_bin" \
   --session "$session_id" \
+  --trace-off \
   "${trace_args[@]}" \
   "${group_args[@]}" \
   "${segment_args[@]}" \
   -d "$out_dir" \
   -o "$out_dir/result" \
-  "$real_python" "$@" &
-
-child=$!
-cleanup() {
-  "$hipprof_bin" --session "$session_id" --stop >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-sleep "${HIPPROF_SESSION_WARMUP_SECONDS:-2}"
-cleanup
-
-set +e
-wait "$child"
-status=$?
-set -e
-exit "$status"
+  "$real_python" "$@"
