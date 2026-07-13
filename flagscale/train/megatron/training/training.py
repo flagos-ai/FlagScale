@@ -371,6 +371,117 @@ def print_datetime(string, override_timestamp=None):
         time_str = datetime.fromtimestamp(override_timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')
     print_rank_0(f'[{string}] datetime: {time_str} ')
 
+
+def _dsv4_hybrid_self_attention_flops(
+    *,
+    hidden_size,
+    num_attention_heads,
+    v_head_dim,
+    q_lora_rank,
+    o_groups,
+    o_lora_rank,
+    csa_window_size,
+    seq_length,
+    n_layers_r0,
+    n_layers_r4,
+    n_layers_r128,
+    dsa_indexer_n_heads,
+    dsa_indexer_head_dim,
+    dsa_indexer_topk,
+):
+    """Per-iteration DSv4-hybrid self-attention FLOPs coefficients.
+
+    DSv4 attention layers are MLA-based but replace full ``O(L^2)`` core
+    attention with sparse attention (sliding window + compressed-KV), plus a
+    main compressor and, on ``ratio==4`` layers, a learned indexer (DSA). This
+    is the SINGLE SOURCE OF TRUTH shared by the standard-model path
+    (``transformer_flops``) and the hybrid-model path (``hybrid_flops``): the
+    two differ only in how they obtain the per-ratio attention-layer counts
+    (a ``csa_compress_ratios`` list vs. Window/CSA/HCA pattern symbols).
+
+    Layer-type ratios:
+      * ``r==0``   (Window): window-only attention; no compressor / indexer.
+      * ``r==4``   (CSA):    window + learned-topk over compressed KV
+        (compressor + indexer).
+      * ``r==128`` (HCA):    window + all compressed KV (compressor only).
+
+    Returns ``(token_linear, core)`` WITHOUT the fwd+bwd (x3) or FMA (x2)
+    expansion factors -- the caller applies those. Multiply ``token_linear`` by
+    the real (unpadded) token count and ``core`` by ``sum_i(L_i ** 2)``.
+    """
+    n_attn_layers = n_layers_r0 + n_layers_r4 + n_layers_r128
+
+    # ---- MLA projections (token-linear, per attention layer) ----
+    # DSv4 hybrid MLA: ``qk_head_dim + qk_pos_emb_head_dim == v_head_dim`` and the
+    # joint KV is a single ``hidden -> v_head_dim`` projection; the output uses a
+    # grouped low-rank ``(o_groups x o_lora_rank)`` projection (NOT the dense
+    # ``num_heads * v_head_dim -> hidden`` projection of plain MLA).
+    q_term = q_lora_rank * (hidden_size + num_attention_heads * v_head_dim + 1)
+    kv_term = hidden_size * v_head_dim + v_head_dim
+    o_term = num_attention_heads * v_head_dim * o_lora_rank + o_groups * o_lora_rank * hidden_size
+    mla_proj_term = (q_term + kv_term + o_term) * n_attn_layers
+
+    # ---- Sparse attention (replaces full core attention) ----
+    # Split into token-linear parts (window attention, constant per token) and
+    # L^2 parts (compressed-KV attention, scales with sequence length) so THD
+    # packed sequences get correct ``seqlen_squared_sum`` scaling.
+    # r=0: window-only, fixed per-token cost.
+    sparse_attn_r0 = n_layers_r0 * num_attention_heads * csa_window_size * v_head_dim * 2
+    # r=128: window (token-linear) + all compressed KV (L^2). Compressed
+    # positions per token ~= L/(128*2) (causal /2), x2 for QK^T + softmax@V ->
+    # L^2 coefficient ``num_heads * v_head_dim / 128``.
+    sparse_attn_r128_window = n_layers_r128 * num_attention_heads * csa_window_size * v_head_dim * 2
+    sparse_attn_r128_core = n_layers_r128 * num_attention_heads * v_head_dim / 128
+
+    # ---- Main compressor (ratio > 0 layers) ----
+    # Two projections per layer (wkv + wgate): ``hidden -> coff * v_head_dim``.
+    # ratio == 4: coff = 2 (overlapping windows); ratio == 128: coff = 1.
+    main_compressor_term = (
+        n_layers_r4 * hidden_size * (2 * v_head_dim) * 2
+        + n_layers_r128 * hidden_size * (1 * v_head_dim) * 2
+    )
+
+    # ---- r=4 layers: sparse attention + indexer ----
+    if n_layers_r4 > 0:
+        assert (
+            dsa_indexer_n_heads is not None
+        ), "dsa_indexer_n_heads must be set for dsv4_hybrid with ratio==4 layers."
+        assert (
+            dsa_indexer_head_dim is not None
+        ), "dsa_indexer_head_dim must be set for dsv4_hybrid with ratio==4 layers."
+        assert (
+            dsa_indexer_topk is not None
+        ), "dsa_indexer_topk must be set for dsv4_hybrid with ratio==4 layers."
+        effective_topk_4 = min(dsa_indexer_topk, seq_length // 4)
+        avg_comp_4 = effective_topk_4 * (1 - effective_topk_4 * 4 / (2 * seq_length))
+        sparse_attn_r4 = (
+            n_layers_r4 * num_attention_heads * (csa_window_size + avg_comp_4) * v_head_dim * 2
+        )
+        # Indexer token-linear: compressor (coff=2, wkv + wgate), Q proj, weights proj.
+        indexer_token_term = (
+            n_layers_r4 * hidden_size * (2 * dsa_indexer_head_dim) * 2
+            + n_layers_r4 * q_lora_rank * dsa_indexer_n_heads * dsa_indexer_head_dim
+            + n_layers_r4 * hidden_size * dsa_indexer_n_heads
+        )
+        # Indexer L^2: scoring each query against ~L/4 compressed positions.
+        indexer_scoring_core = n_layers_r4 * dsa_indexer_n_heads * dsa_indexer_head_dim / 4
+    else:
+        sparse_attn_r4 = 0
+        indexer_token_term = 0
+        indexer_scoring_core = 0
+
+    token_linear = (
+        mla_proj_term
+        + sparse_attn_r0
+        + sparse_attn_r4
+        + sparse_attn_r128_window
+        + main_compressor_term
+        + indexer_token_term
+    )
+    core = sparse_attn_r128_core + indexer_scoring_core
+    return token_linear, core
+
+
 def num_floating_point_operations(args, batch_size):
     def mlp_layer_flops(batch_size, seq_len, hidden_size, expansion=4.0, swiglu=False):
         """Calculate FLOPs for an MLP layer."""
@@ -564,30 +675,13 @@ def num_floating_point_operations(args, batch_size):
             https://arxiv.org/abs/2205.05198
             '''
             if args.experimental_attention_variant == "dsv4_hybrid":
-                ## DSv4 hybrid MLA projections (per layer, per token).
-                ## In dsv4_hybrid mode, qk_head_dim + qk_pos_emb_head_dim == v_head_dim
-                ## (qk_head_dim is derived as v_head_dim - qk_pos_emb_head_dim), and the
-                ## joint KV is produced by a single hidden -> v_head_dim projection.
-                ## Full core attention is replaced by sparse attention and is accounted
-                ## for in the dsv4_hybrid branch below.
-                q_term = args.q_lora_rank * (
-                    args.hidden_size
-                    + args.num_attention_heads * args.v_head_dim
-                    + 1  # q norm
-                )
-                kv_term = args.hidden_size * args.v_head_dim + args.v_head_dim  # kv proj + kv norm
-                ## Grouped low-rank output projection:
-                ##  wo_a:        (n_head * v_head_dim) -> (o_groups * o_lora_rank)
-                ##  linear_proj: (o_groups * o_lora_rank) -> hidden
-                o_term = (
-                    args.num_attention_heads * args.v_head_dim * args.o_lora_rank
-                    + args.o_groups * args.o_lora_rank * args.hidden_size
-                )
-                standard_self_attn_term = (
-                    forward_backward_expansion_factor
-                    * fma_expansion_factor
-                    * (q_term + kv_term + o_term)
-                )
+                ## DSv4 hybrid: the MLA projections AND the sparse attention that
+                ## replaces full core attention are both computed together by
+                ## ``_dsv4_hybrid_self_attention_flops`` in the dsv4_hybrid branch
+                ## below (the single source of truth shared with ``hybrid_flops``).
+                ## Zero the standard MLA terms here so they are not double-counted.
+                standard_self_attn_term = 0
+                standard_self_attn_core_term = 0
             else:
                 ## MLA
                 if args.q_lora_rank is None:
@@ -655,6 +749,7 @@ def num_floating_point_operations(args, batch_size):
                 )
             )
 
+        dsv4_hybrid_standard_self_attn_term = 0
         if is_linear_attention_variant(args.experimental_attention_variant):
             # Calculate number of dense and MoE Transformer MLPs.
             if isinstance(args.linear_attention_freq, int):
@@ -717,6 +812,46 @@ def num_floating_point_operations(args, batch_size):
                     "Invalid experimental_attention_variant: "
                     f"{args.experimental_attention_variant}"
                 )
+        elif args.experimental_attention_variant == "dsv4_hybrid":
+            # DSv4 hybrid: MLA projections + sparse attention (window /
+            # compressed-KV), main compressor, and learned indexer (DSA) are all
+            # computed by the shared ``_dsv4_hybrid_self_attention_flops`` helper.
+            # The standard MLA terms were zeroed above to avoid double-counting.
+            num_linear_attention_layers = 0
+            linear_self_attn_term = 0
+            num_standard_attention_layers = num_layers
+
+            compress_ratios = args.csa_compress_ratios
+            assert compress_ratios is not None, "csa_compress_ratios must be set for dsv4_hybrid"
+            assert len(compress_ratios) == num_layers, (
+                f"Invalid length of csa_compress_ratios: {len(compress_ratios)}, "
+                f"expected num_layers + mtp_num_layers ({num_layers})."
+            )
+            # ratio == 0: window-only; ratio == 4: window + topk compressed KV
+            # (compressor + indexer); ratio == 128: window + all compressed KV.
+            dsv4_token_term, dsv4_core_term = _dsv4_hybrid_self_attention_flops(
+                hidden_size=args.hidden_size,
+                num_attention_heads=args.num_attention_heads,
+                v_head_dim=args.v_head_dim,
+                q_lora_rank=args.q_lora_rank,
+                o_groups=args.o_groups,
+                o_lora_rank=args.o_lora_rank,
+                csa_window_size=args.csa_window_size,
+                seq_length=args.seq_length,
+                n_layers_r0=sum(1 for r in compress_ratios if r == 0),
+                n_layers_r4=sum(1 for r in compress_ratios if r == 4),
+                n_layers_r128=sum(1 for r in compress_ratios if r == 128),
+                dsa_indexer_n_heads=args.dsa_indexer_n_heads,
+                dsa_indexer_head_dim=args.dsa_indexer_head_dim,
+                dsa_indexer_topk=args.dsa_indexer_topk,
+            )
+            dsv4_hybrid_extra_term = (
+                forward_backward_expansion_factor * fma_expansion_factor * dsv4_token_term
+            )
+            dsv4_hybrid_extra_core_term = (
+                forward_backward_expansion_factor * fma_expansion_factor * dsv4_core_term  * args.seq_length
+            )
+            dsv4_hybrid_standard_self_attn_term = dsv4_hybrid_extra_term + dsv4_hybrid_extra_core_term
         else:
             num_linear_attention_layers = 0
             linear_self_attn_term = 0
@@ -725,6 +860,7 @@ def num_floating_point_operations(args, batch_size):
         self_attn_term = (
             linear_self_attn_term * num_linear_attention_layers
             + standard_self_attn_term * num_standard_attention_layers
+            + dsv4_hybrid_standard_self_attn_term
         )
 
         total_floating_point_operations = (

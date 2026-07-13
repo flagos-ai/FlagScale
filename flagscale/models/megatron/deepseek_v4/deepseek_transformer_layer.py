@@ -61,7 +61,7 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
         """Include the DeepSeek-specific submodules in cudagraph pre-forward hooks."""
         submodules = super()._get_submodules_under_cudagraphs()
 
-        if isinstance(self.engram, IdentityOp):
+        if self.engram is None:
             return submodules
 
         try:
