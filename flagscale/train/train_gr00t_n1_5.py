@@ -35,6 +35,7 @@ from flagscale.train.utils.logging_utils import (
     format_big_number,
 )
 from flagscale.train.utils.train_utils import (
+    StatefulDistributedSampler,
     get_step_checkpoint_dir,
     load_training_state_fsdp2,
     save_checkpoint,
@@ -453,8 +454,8 @@ def main(config: TrainConfig, seed: int):
     num_workers = config.system.num_workers
     shuffle = config.system.shuffle
 
-    # DistributedSampler ensures each rank gets different data
-    sampler = torch.utils.data.distributed.DistributedSampler(
+    # Use StatefulDistributedSampler for checkpoint/resume support.
+    sampler = StatefulDistributedSampler(
         dataset,
         num_replicas=world_size,
         rank=rank,
@@ -516,13 +517,23 @@ def main(config: TrainConfig, seed: int):
     step = 0
     resume_from = config.system.checkpoint.resume_from
     if resume_from:
-        step, _dl_state = load_training_state_fsdp2(
+        step, dl_state = load_training_state_fsdp2(
             Path(resume_from), policy, optimizer, lr_scheduler,
         )
-        saved_rng = serialize_rng_state()
-        for _ in range(step):
-            next(dl_iter)
-        deserialize_rng_state(saved_rng)
+        # Restore dataloader position via StatefulDistributedSampler if state
+        # was saved; otherwise fall back to advancing the iterator manually.
+        if (
+            dl_state is not None
+            and sampler is not None
+            and hasattr(sampler, "load_state_dict")
+        ):
+            sampler.load_state_dict(dl_state)
+        else:
+            saved_rng = serialize_rng_state()
+            for _ in range(step):
+                next(dl_iter)
+            deserialize_rng_state(saved_rng)
+
         logger.info(f"Resumed from checkpoint at step {step}")
 
     dist.barrier()
@@ -605,6 +616,12 @@ def main(config: TrainConfig, seed: int):
                 checkpoint_dir = get_step_checkpoint_dir(
                     output_dir, config.system.train_steps, step
                 )
+                dl_state = (
+                    sampler.state_dict()
+                    if sampler is not None
+                    and hasattr(sampler, "state_dict")
+                    else None
+                )
                 save_checkpoint(
                     checkpoint_dir=checkpoint_dir,
                     step=step,
@@ -615,6 +632,7 @@ def main(config: TrainConfig, seed: int):
                     preprocessor=preprocessor,
                     postprocessor=postprocessor,
                     state_dict=state_dict,
+                    dataloader_state=dl_state,
                 )
                 update_last_checkpoint(checkpoint_dir)
 
