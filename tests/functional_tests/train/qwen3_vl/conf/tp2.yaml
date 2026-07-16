@@ -1,10 +1,10 @@
 defaults:
   - _self_
-  - train: 8b
+  - train: tp2
 
 experiment:
-  exp_name: 8b
-  exp_dir: tests/functional_tests/train/qwen3_vl/test_results/8b
+  exp_name: tp2
+  exp_dir: tests/functional_tests/train/qwen3_vl/test_results/tp2
   task:
     type: train
     backend: megatron
