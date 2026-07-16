@@ -56,7 +56,7 @@ def convert_moe_mlp_hf2meg(hf_sd, meg_sd, layer_idx, hf_pfx, mg_pfx, cfg):
     stacked_down = hf_sd.get(f"{hf_pfx}.mlp.experts.down_proj")
     if stacked_gu is not None:
         for e in range(cfg.num_experts):
-            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc1.weight{e}"] = stacked_gu[e]
+            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc1.weight{e}"] = stacked_gu[e].clone()
     else:
         for e in range(cfg.num_experts):
             mk = f"{mg_pfx}.mlp.experts.linear_fc1.weight{e}"
@@ -67,7 +67,7 @@ def convert_moe_mlp_hf2meg(hf_sd, meg_sd, layer_idx, hf_pfx, mg_pfx, cfg):
 
     if stacked_down is not None:
         for e in range(cfg.num_experts):
-            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc2.weight{e}"] = stacked_down[e]
+            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc2.weight{e}"] = stacked_down[e].clone()
     else:
         for e in range(cfg.num_experts):
             mk = f"{mg_pfx}.mlp.experts.linear_fc2.weight{e}"

@@ -36,6 +36,10 @@ class Config:
         self.pp = cfg.get("pipeline_model_parallel_size", 1)
         self.ep = cfg.get("expert_model_parallel_size", 1)
 
+        # Uneven PP: optional per-stage layer counts
+        self.decoder_first_pipeline_num_layers = cfg.get("decoder_first_pipeline_num_layers", None)
+        self.decoder_last_pipeline_num_layers = cfg.get("decoder_last_pipeline_num_layers", None)
+
         self.num_layers = _require(cfg, "num_layers")
         self.hidden_size = _require(cfg, "hidden_size")
         self.num_attention_heads = _require(cfg, "num_attention_heads")
@@ -77,6 +81,71 @@ class Config:
     @property
     def is_moe(self):
         return self.num_experts is not None and self.num_experts > 0
+
+    @property
+    def pp_layer_counts(self):
+        """Return a list of layer counts per PP rank, supporting uneven splits.
+
+        Uses decoder_first/last_pipeline_num_layers if set; otherwise divides
+        evenly.  For PP=1, returns [num_layers].
+        """
+        if self.pp == 1:
+            return [self.num_layers]
+
+        first = self.decoder_first_pipeline_num_layers
+        last = self.decoder_last_pipeline_num_layers
+
+        if first is None and last is None:
+            # Even split
+            base = self.num_layers // self.pp
+            counts = [base] * self.pp
+            # Distribute remainder to last ranks
+            remainder = self.num_layers - base * self.pp
+            for i in range(remainder):
+                counts[self.pp - 1 - i] += 1
+            return counts
+
+        # Uneven split: derive from first/last constraints
+        if first is not None and last is not None:
+            if self.pp == 2:
+                assert first + last == self.num_layers, (
+                    f"first({first}) + last({last}) != num_layers({self.num_layers})"
+                )
+                return [first, last]
+            # PP > 2: middle ranks share the remainder evenly
+            middle_total = self.num_layers - first - last
+            middle_ranks = self.pp - 2
+            base = middle_total // middle_ranks
+            counts = [first] + [base] * middle_ranks + [last]
+            remainder = middle_total - base * middle_ranks
+            for i in range(remainder):
+                counts[middle_ranks - i] += 1
+            return counts
+
+        if first is not None:
+            # Only first is specified
+            if self.pp == 2:
+                return [first, self.num_layers - first]
+            remaining = self.num_layers - first
+            middle_and_last = self.pp - 1
+            base = remaining // middle_and_last
+            counts = [first] + [base] * middle_and_last
+            remainder = remaining - base * middle_and_last
+            for i in range(remainder):
+                counts[self.pp - 1 - i] += 1
+            return counts
+
+        # Only last is specified
+        if self.pp == 2:
+            return [self.num_layers - last, last]
+        remaining = self.num_layers - last
+        first_and_middle = self.pp - 1
+        base = remaining // first_and_middle
+        counts = [base] * first_and_middle + [last]
+        remainder = remaining - base * first_and_middle
+        for i in range(remainder):
+            counts[first_and_middle - 1 - i] += 1
+        return counts
 
 
 def _require(d, key):

@@ -3,30 +3,95 @@
 import os
 
 import torch
-from safetensors import safe_open
 
-from qwen35.io import find_megatron_shard
+from qwen35.io import find_megatron_shard, load_hf_weights
+
+# Tolerance for floating-point checkpoint comparison.
+_RTOL = 1e-5
+_ATOL = 1e-6
 
 
-def validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, use_ep=False):
-    """Compare generated Megatron shards with a reference checkpoint."""
+def _list_megatron_ranks(ref_dir, cfg):
+    """List all (pp_rank, tp_rank, ep_rank) tuples found in a reference Megatron checkpoint.
+
+    Scans ``ref_dir`` as well as ``release/`` and ``iter_*/`` subdirectories.
+    Directory names are parsed according to ``cfg.pp`` and ``cfg.ep``.
+    """
+    candidates = [ref_dir]
+    release_dir = os.path.join(ref_dir, "release")
+    if os.path.isdir(release_dir):
+        candidates.append(release_dir)
+
+    if os.path.isdir(ref_dir):
+        for d in sorted(os.listdir(ref_dir)):
+            if d.startswith("iter_") and os.path.isdir(os.path.join(ref_dir, d)):
+                candidates.append(os.path.join(ref_dir, d))
+                iter_release = os.path.join(ref_dir, d, "release")
+                if os.path.isdir(iter_release):
+                    candidates.append(iter_release)
+
+    ranks = set()
+    for base in candidates:
+        for entry in os.listdir(base):
+            if not entry.startswith("mp_rank_"):
+                continue
+            parts = entry.split("_")[2:]  # strip "mp_rank" prefix
+            if not parts:
+                continue
+            try:
+                nums = [int(p) for p in parts]
+            except ValueError:
+                continue
+
+            tp_rank = nums[0]
+            pp_rank = 0
+            ep_rank = 0
+            if len(nums) == 2:
+                if cfg.pp > 1:
+                    pp_rank = nums[1]
+                elif cfg.ep > 1:
+                    ep_rank = nums[1]
+            elif len(nums) >= 3:
+                pp_rank, ep_rank = nums[1], nums[2]
+
+            ranks.add((pp_rank, tp_rank, ep_rank))
+
+    return ranks
+
+
+def validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, use_ep=False, skip_value=False):
+    """Compare generated Megatron shards with a reference checkpoint.
+
+    ``shards_dict`` keys are either ``(pp_rank, tp_rank)`` or
+    ``(pp_rank, tp_rank, ep_rank)`` tuples.  The reference checkpoint is
+    expected to contain matching shards.
+    """
     if ref_dir is None:
         return True
 
     print("\n" + "=" * 80)
     print("Validation: Comparing generated Megatron checkpoint with reference")
+    if skip_value:
+        print("(value comparison disabled, checking structure/keys/shapes only)")
     print("=" * 80)
 
     all_ok = True
+    gen_ranks = set()
     for rank_tuple in sorted(shards_dict.keys()):
-        if use_ep:
-            pp_rank, tp_rank, _ep_rank = rank_tuple
+        if len(rank_tuple) == 3:
+            pp_rank, tp_rank, ep_rank = rank_tuple
         else:
             pp_rank, tp_rank = rank_tuple
+            ep_rank = 0
+        gen_ranks.add((pp_rank, tp_rank, ep_rank))
 
-        ref_path = find_megatron_shard(ref_dir, tp_rank, pp_rank)
+        ref_path = find_megatron_shard(ref_dir, tp_rank, pp_rank, ep_rank)
         if ref_path is None:
-            print(f"  Skip: reference not found for PP={pp_rank}, TP={tp_rank}")
+            rank_label = f"PP={pp_rank}, TP={tp_rank}"
+            if cfg.ep > 1:
+                rank_label = f"PP={pp_rank}, TP={tp_rank}, EP={ep_rank}"
+            print(f"  FAIL: reference not found for {rank_label}")
+            all_ok = False
             continue
 
         ref_sd = torch.load(ref_path, map_location="cpu", weights_only=False)["model"]
@@ -42,40 +107,76 @@ def validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, use_ep=False):
         missing = ref_keys - gen_keys
         extra = gen_keys - ref_keys
 
+        rank_label = f"PP={pp_rank}, TP={tp_rank}"
+        if cfg.ep > 1:
+            rank_label = f"PP={pp_rank}, TP={tp_rank}, EP={ep_rank}"
+
         if missing:
-            print(f"  PP={pp_rank}, TP={tp_rank}: Missing keys ({len(missing)}):")
+            print(f"  {rank_label}: Missing keys ({len(missing)}):")
             for k in sorted(missing)[:5]:
                 print(f"    {k}")
             all_ok = False
         if extra:
-            print(f"  PP={pp_rank}, TP={tp_rank}: Extra keys ({len(extra)}):")
+            print(f"  {rank_label}: Extra keys ({len(extra)}):")
             for k in sorted(extra)[:5]:
                 print(f"    {k}")
             all_ok = False
 
         mismatches = 0
+        max_diff_info = None
         for k in ref_keys & gen_keys:
-            if isinstance(ref_sd[k], torch.Tensor) and isinstance(gen_sd[k], torch.Tensor):
-                if ref_sd[k].shape != gen_sd[k].shape:
-                    if "embedding.word_embeddings" in k:
-                        print(
-                            "  Embedding shape differs (expected if not using --adjust-embedding):"
-                        )
+            if not isinstance(ref_sd[k], torch.Tensor) or not isinstance(gen_sd[k], torch.Tensor):
+                continue
+            if ref_sd[k].shape != gen_sd[k].shape:
+                if "embedding.word_embeddings" in k:
+                    print("  Embedding shape differs (expected if not using --adjust-embedding):")
+                    print(f"    ref: {tuple(ref_sd[k].shape)}, gen: {tuple(gen_sd[k].shape)}")
+                else:
+                    mismatches += 1
+                    if mismatches <= 3:
+                        print(f"  Shape mismatch: {k}")
                         print(f"    ref: {tuple(ref_sd[k].shape)}, gen: {tuple(gen_sd[k].shape)}")
-                    else:
-                        mismatches += 1
-                        if mismatches <= 3:
-                            print(f"  Shape mismatch: {k}")
-                            print(
-                                f"    ref: {tuple(ref_sd[k].shape)}, gen: {tuple(gen_sd[k].shape)}"
-                            )
+            elif not skip_value and not torch.allclose(
+                ref_sd[k], gen_sd[k], rtol=_RTOL, atol=_ATOL
+            ):
+                mismatches += 1
+                diff = (ref_sd[k] - gen_sd[k]).abs()
+                info = (k, diff.max().item(), diff.mean().item())
+                if max_diff_info is None or info[1] > max_diff_info[1]:
+                    max_diff_info = info
+                if mismatches <= 3:
+                    print(f"  Value mismatch: {k}")
+                    print(
+                        f"    max_diff={diff.max().item():.6e}, mean_diff={diff.mean().item():.6e}"
+                    )
 
         if mismatches > 0:
-            print(f"  Total shape mismatches: {mismatches}")
+            print(f"  Total mismatches: {mismatches}")
+            if max_diff_info:
+                print(
+                    f"  Largest difference: {max_diff_info[0]} "
+                    f"max_diff={max_diff_info[1]:.6e}, mean_diff={max_diff_info[2]:.6e}"
+                )
             all_ok = False
 
         if not missing and not extra and mismatches == 0:
-            print(f"  PP={pp_rank}, TP={tp_rank}: OK")
+            print(f"  {rank_label}: OK")
+
+    ref_ranks = _list_megatron_ranks(ref_dir, cfg)
+    missing_in_ref = gen_ranks - ref_ranks
+    extra_in_ref = ref_ranks - gen_ranks
+    if missing_in_ref:
+        print(
+            f"  FAIL: ranks present in generated checkpoint but missing in reference: "
+            f"{sorted(missing_in_ref)}"
+        )
+        all_ok = False
+    if extra_in_ref:
+        print(
+            f"  FAIL: ranks present in reference but missing in generated checkpoint: "
+            f"{sorted(extra_in_ref)}"
+        )
+        all_ok = False
 
     print("=" * 80)
     print("Validation PASSED" if all_ok else "Validation FAILED")
@@ -83,72 +184,72 @@ def validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, use_ep=False):
     return all_ok
 
 
-def load_hf_shapes(hf_dir):
-    """Load shape dict from a reference HF checkpoint."""
-    if hf_dir is None:
-        return None
-    shapes = {}
-    for st_file in sorted(os.listdir(hf_dir)):
-        if not st_file.endswith(".safetensors"):
-            continue
-        with safe_open(os.path.join(hf_dir, st_file), framework="pt", device="cpu") as f:
-            for key in f.keys():
-                shapes[key] = list(f.get_tensor(key).shape)
-    return shapes
-
-
-def validate_meg2hf_against_ref(hf_sd, cfg, ref_dir):
+def validate_meg2hf_against_ref(hf_sd, cfg, ref_dir, skip_value=False):
     """Compare generated HF checkpoint with a reference HF model."""
     if ref_dir is None:
         return True
 
     print("\n" + "=" * 100)
-    print("Shape Comparison: Converted vs Reference HF Model")
+    print("Value Comparison: Converted vs Reference HF Model")
+    if skip_value:
+        print("(value comparison disabled, checking structure/keys/shapes only)")
     print("=" * 100)
 
-    ref_shapes = load_hf_shapes(ref_dir)
-    if ref_shapes is None or len(ref_shapes) == 0:
-        print("No reference shapes provided, skipping comparison.")
+    ref_sd = load_hf_weights(ref_dir)
+    if not ref_sd:
+        print("No reference weights found, skipping comparison.")
         return True
 
-    import math
     import re
 
     expected_missing = set()
-    for k in list(ref_shapes.keys()):
+    for k in list(ref_sd.keys()):
         m = re.search(r"layers\.(\d+)\.", k)
         if m:
             layer_idx = int(m.group(1))
             if layer_idx >= cfg.num_layers:
                 expected_missing.add(k)
 
-    all_keys = sorted(set(list(hf_sd.keys()) + list(ref_shapes.keys())))
-    mismatches, missing, extra, matched = [], [], [], 0
+    ref_keys = set(k for k in ref_sd.keys() if "_extra_state" not in k)
+    gen_keys = set(k for k in hf_sd.keys() if "_extra_state" not in k)
 
-    for k in all_keys:
-        in_conv = k in hf_sd
-        in_ref = k in ref_shapes
-        if in_conv and in_ref:
-            cs = list(hf_sd[k].shape)
-            rs = ref_shapes[k]
-            if cs == rs:
-                matched += 1
-            else:
-                mismatches.append((k, cs, rs))
-        elif in_conv:
-            extra.append(k)
-        elif k not in expected_missing:
-            missing.append(k)
+    missing = [k for k in (ref_keys - gen_keys) if k not in expected_missing]
+    extra = list(gen_keys - ref_keys)
 
-    print(f"\nMatched: {matched}/{len(all_keys)}")
+    mismatches = []
+    matched = 0
+    for k in sorted(ref_keys & gen_keys):
+        if k in expected_missing:
+            continue
+        ref_t = ref_sd[k]
+        gen_t = hf_sd[k]
+        if not isinstance(ref_t, torch.Tensor) or not isinstance(gen_t, torch.Tensor):
+            continue
+        if ref_t.shape != gen_t.shape:
+            mismatches.append((k, list(gen_t.shape), list(ref_t.shape), None, None))
+        elif skip_value or torch.allclose(ref_t, gen_t, rtol=_RTOL, atol=_ATOL):
+            matched += 1
+        else:
+            diff = (ref_t - gen_t).abs()
+            mismatches.append(
+                (k, list(gen_t.shape), list(ref_t.shape), diff.max().item(), diff.mean().item())
+            )
+
+    print(f"\nMatched: {matched}/{len(ref_keys & gen_keys)}")
     if mismatches:
-        print(f"\nShape mismatches ({len(mismatches)}):")
-        for k, cs, rs in mismatches:
-            print(f"  {k:80s} converted={cs} ref={rs}")
+        print(f"\nMismatches ({len(mismatches)}):")
+        for k, cs, rs, max_d, mean_d in mismatches:
+            if max_d is None:
+                print(f"  {k:80s} converted={cs} ref={rs}")
+            else:
+                print(
+                    f"  {k:80s} converted={cs} ref={rs} "
+                    f"max_diff={max_d:.6e}, mean_diff={mean_d:.6e}"
+                )
     if missing:
         print(f"\nMissing in converted ({len(missing)}):")
         for k in missing:
-            print(f"  {k:80s} ref_shape={ref_shapes[k]}")
+            print(f"  {k:80s} ref_shape={list(ref_sd[k].shape)}")
     if extra:
         print(f"\nExtra in converted ({len(extra)}):")
         for k in extra:
@@ -156,8 +257,8 @@ def validate_meg2hf_against_ref(hf_sd, cfg, ref_dir):
     if expected_missing:
         print(f"\nExpected missing (Megatron has no equivalent): {len(expected_missing)}")
 
-    conv_total = sum(t.numel() for t in hf_sd.values())
-    ref_total = sum(math.prod(shape) if shape else 1 for shape in ref_shapes.values())
+    conv_total = sum(t.numel() for t in hf_sd.values() if isinstance(t, torch.Tensor))
+    ref_total = sum(t.numel() for t in ref_sd.values() if isinstance(t, torch.Tensor))
     print(f"\nConverted total params: {conv_total:>15,}")
     print(f"Reference total params: {ref_total:>15,}")
     print(f"Difference:             {conv_total - ref_total:>15,}")

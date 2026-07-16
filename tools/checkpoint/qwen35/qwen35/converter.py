@@ -259,14 +259,6 @@ class BaseConverter:
         vis_head_dim = vis_h // vis_heads
         vis_qg = vis_heads
 
-        num_qg = cfg.num_query_groups
-        kv_ch = cfg.kv_channels
-        heads_per_group = cfg.num_attention_heads // num_qg
-        if cfg.attention_output_gate:
-            total_hpg = 2 * heads_per_group + 2
-        else:
-            total_hpg = heads_per_group + 2
-
         for k, v in meg_sd.items():
             if not isinstance(v, torch.Tensor):
                 for r in range(tp):
@@ -367,10 +359,11 @@ class BaseConverter:
                 for r in range(tp):
                     shards[r][k] = chunks[r]
             elif "linear_qkv.weight" in k:
-                viewed = v.view(num_qg, total_hpg, kv_ch, cfg.hidden_size)
-                chunks = viewed.chunk(tp, dim=0)
+                # Simple dim-0 chunk / cat for TP sharding of the fused QKV weight.
+                # This is valid for any TP size, including cases where num_query_groups < tp.
+                chunks = v.chunk(tp, dim=0)
                 for r in range(tp):
-                    shards[r][k] = chunks[r].reshape(-1, cfg.hidden_size)
+                    shards[r][k] = chunks[r]
             elif "linear_proj.weight" in k:
                 chunks = v.chunk(tp, dim=1)
                 for r in range(tp):
@@ -483,13 +476,9 @@ class BaseConverter:
             elif "out_proj.weight" in k:
                 merged[k] = torch.cat(vals, dim=1)
             elif "linear_qkv.weight" in k:
-                heads_per_group = cfg.num_attention_heads // cfg.num_query_groups
-                if cfg.attention_output_gate:
-                    total_hpg = 2 * heads_per_group + 2
-                else:
-                    total_hpg = heads_per_group + 2
-                viewed = [x.view(-1, total_hpg, cfg.kv_channels, cfg.hidden_size) for x in vals]
-                merged[k] = torch.cat(viewed, dim=0).view(-1, cfg.hidden_size)
+                # TP split is a simple contiguous dim-0 chunk, so merge is
+                # just concatenation along dim 0.
+                merged[k] = torch.cat(vals, dim=0)
             elif "linear_proj.weight" in k:
                 merged[k] = torch.cat(vals, dim=1)
             elif "q_layernorm" in k or "k_layernorm" in k:
@@ -566,7 +555,7 @@ class BaseConverter:
     # -------------------------------------------------------------------------
     # Public run methods
     # -------------------------------------------------------------------------
-    def run_hf2meg(self, hf_dir, save_dir, ref_dir=None):
+    def run_hf2meg(self, hf_dir, save_dir, ref_dir=None, skip_value=False):
         """Run HF -> Megatron conversion and save release checkpoint."""
         cfg = self.cfg
         hf_dir = ensure_hf_path(hf_dir)
@@ -596,11 +585,11 @@ class BaseConverter:
         print(f"Saved release checkpoint to {os.path.join(save_dir, 'release')}")
 
         if ref_dir:
-            success = validate_hf2meg_against_ref(shards_dict, cfg, ref_dir)
+            success = validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, skip_value=skip_value)
             return success
         return True
 
-    def run_meg2hf(self, meg_dir, save_dir, ref_dir=None):
+    def run_meg2hf(self, meg_dir, save_dir, ref_dir=None, skip_value=False):
         """Run Megatron -> HF conversion and save safetensors."""
         cfg = self.cfg
         pp_merged = {}
@@ -631,7 +620,7 @@ class BaseConverter:
         print(f"Saved HF checkpoint to {save_dir}")
 
         if ref_dir:
-            success = validate_meg2hf_against_ref(hf_sd, cfg, ref_dir)
+            success = validate_meg2hf_against_ref(hf_sd, cfg, ref_dir, skip_value=skip_value)
             return success
         return True
 
@@ -655,7 +644,7 @@ class MoEConverter(BaseConverter):
     def __init__(self, cfg: Config, adjust_embedding=False):
         super().__init__(cfg, adjust_embedding=adjust_embedding)
 
-    def run_hf2meg(self, hf_dir, save_dir, ref_dir=None):
+    def run_hf2meg(self, hf_dir, save_dir, ref_dir=None, skip_value=False):
         cfg = self.cfg
         print(f"Loading HF weights from {hf_dir}...")
         hf_sd = load_hf_weights(hf_dir)
@@ -685,14 +674,14 @@ class MoEConverter(BaseConverter):
         save_megatron_release_checkpoint(shards_dict, save_dir, cfg)
         print(f"Saved release checkpoint to {os.path.join(save_dir, 'release')}")
 
-        if ref_dir and cfg.ep == 1:
-            success = validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, use_ep=True)
+        if ref_dir:
+            success = validate_hf2meg_against_ref(
+                shards_dict, cfg, ref_dir, use_ep=True, skip_value=skip_value
+            )
             return success
-        elif ref_dir:
-            print("Validation against reference checkpoint is only supported for EP=1; skipping.")
         return True
 
-    def run_meg2hf(self, meg_dir, save_dir, ref_dir=None):
+    def run_meg2hf(self, meg_dir, save_dir, ref_dir=None, skip_value=False):
         cfg = self.cfg
         pp_merged = {}
         for pp_rank in range(cfg.pp):
@@ -726,6 +715,6 @@ class MoEConverter(BaseConverter):
         print(f"Saved HF checkpoint to {save_dir}")
 
         if ref_dir:
-            success = validate_meg2hf_against_ref(hf_sd, cfg, ref_dir)
+            success = validate_meg2hf_against_ref(hf_sd, cfg, ref_dir, skip_value=skip_value)
             return success
         return True

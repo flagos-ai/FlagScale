@@ -21,7 +21,9 @@ Examples:
 """
 
 import argparse
+import shutil
 import sys
+import tempfile
 
 from qwen35.config import Config, detect_model_type
 from qwen35.constants import LN_ADJUSTMENT
@@ -36,11 +38,16 @@ def parse_args():
         choices=["hf2meg", "meg2hf"],
         help="Conversion direction",
     )
-    p.add_argument("--hf-path", required=True, help="Path to HF checkpoint directory")
+    p.add_argument(
+        "--hf-path",
+        default=None,
+        help="For hf2meg: input HF checkpoint directory or ModelScope model ID. "
+        "For meg2hf: output HF checkpoint directory (optional if --ref-path is given).",
+    )
     p.add_argument(
         "--meg-path",
-        required=True,
-        help="For hf2meg: output Megatron checkpoint directory. "
+        default=None,
+        help="For hf2meg: output Megatron checkpoint directory (optional if --ref-path is given). "
         "For meg2hf: input Megatron checkpoint directory.",
     )
     p.add_argument(
@@ -52,12 +59,14 @@ def parse_args():
         "--ref-path",
         default=None,
         help="Reference checkpoint path for validation (Megatron ref for hf2meg, "
-        "HF ref for meg2hf).",
+        "HF ref for meg2hf). When provided, the corresponding output path may be omitted; "
+        "output will be written to a temporary directory, validated, and cleaned up.",
     )
     p.add_argument(
-        "--adjust-embedding",
+        "--ref-skip-value",
         action="store_true",
-        help="Adjust embedding vocab size to match reference checkpoint (hf2meg only)",
+        help="When validating against --ref-path, skip numerical value comparison "
+        "and only compare structure, keys, and shapes.",
     )
     p.add_argument(
         "--adjust-ln",
@@ -70,6 +79,11 @@ def parse_args():
         "--no-adjust-ln",
         action="store_true",
         help=argparse.SUPPRESS,
+    )
+    p.add_argument(
+        "--adjust-embedding",
+        action="store_true",
+        help="During hf2meg, adjust vocab size to match the reference checkpoint.",
     )
     p.add_argument(
         "--tp",
@@ -89,11 +103,23 @@ def parse_args():
         default=None,
         help="Override expert model parallel size from YAML (MoE only)",
     )
-    return p.parse_args()
+    return p.parse_args(), p
 
 
 def main():
-    args = parse_args()
+    args, parser = parse_args()
+
+    # Validate required paths based on direction
+    if args.direction == "hf2meg":
+        if not args.hf_path:
+            parser.error("--hf-path is required for hf2meg")
+        if not args.meg_path and not args.ref_path:
+            parser.error("--meg-path is required for hf2meg when --ref-path is not provided")
+    else:
+        if not args.meg_path:
+            parser.error("--meg-path is required for meg2hf")
+        if not args.hf_path and not args.ref_path:
+            parser.error("--hf-path is required for meg2hf when --ref-path is not provided")
 
     # Apply CLI override for layer norm adjustment
     if args.adjust_ln:
@@ -129,11 +155,32 @@ def main():
     print(f"TP={cfg.tp}, PP={cfg.pp}, EP={cfg.ep}")
     print(f"Layers={cfg.num_layers}, hidden={cfg.hidden_size}")
     print(f"LN adjustment: {LN_ADJUSTMENT}")
+    print(f"Ref skip value: {args.ref_skip_value}")
 
-    if args.direction == "hf2meg":
-        success = converter.run_hf2meg(args.hf_path, args.meg_path, args.ref_path)
-    else:
-        success = converter.run_meg2hf(args.meg_path, args.hf_path, args.ref_path)
+    temp_dir = None
+    try:
+        if args.direction == "hf2meg":
+            out_dir = args.meg_path
+            if not out_dir:
+                temp_dir = tempfile.mkdtemp(prefix="qwen35_hf2meg_")
+                out_dir = temp_dir
+                print(f"No --meg-path provided; using temporary output: {out_dir}")
+            success = converter.run_hf2meg(
+                args.hf_path, out_dir, args.ref_path, skip_value=args.ref_skip_value
+            )
+        else:
+            out_dir = args.hf_path
+            if not out_dir:
+                temp_dir = tempfile.mkdtemp(prefix="qwen35_meg2hf_")
+                out_dir = temp_dir
+                print(f"No --hf-path provided; using temporary output: {out_dir}")
+            success = converter.run_meg2hf(
+                args.meg_path, out_dir, args.ref_path, skip_value=args.ref_skip_value
+            )
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print(f"Cleaned up temporary output directory: {temp_dir}")
 
     sys.exit(0 if success else 1)
 

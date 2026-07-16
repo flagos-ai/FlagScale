@@ -52,20 +52,18 @@ def find_megatron_shard(meg_dir, tp_rank=0, pp_rank=0, ep_rank=None):
         if os.path.isdir(iter_release):
             candidates.append(iter_release)
 
-    suffixes = []
-    full = f"{tp_rank:02d}"
-    if pp_rank > 0:
-        full = f"{full}_{pp_rank:03d}"
-    if ep_rank is not None and ep_rank > 0:
-        full = f"{full}_{ep_rank:03d}"
-    suffixes.append(full)
-
-    # Fallbacks for older naming conventions
-    if ep_rank is not None and ep_rank > 0 and pp_rank == 0:
-        suffixes.append(f"{tp_rank:02d}_{ep_rank:03d}")
-    if pp_rank > 0 and (ep_rank is None or ep_rank == 0):
+    ep_rank = ep_rank if ep_rank is not None else 0
+    suffixes = [
+        # Standard PP>1 and EP>1 naming: tp_pp_ep
+        f"{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}",
+    ]
+    # PP>1 EP=1 naming (only valid when ep_rank==0, otherwise ambiguous)
+    if ep_rank == 0:
         suffixes.append(f"{tp_rank:02d}_{pp_rank:03d}")
-    if pp_rank == 0 and (ep_rank is None or ep_rank == 0):
+    # PP=1 EP>1 naming: tp_ep
+    suffixes.append(f"{tp_rank:02d}_{ep_rank:03d}")
+    # PP=1 EP=1 naming (only valid when both are 0)
+    if pp_rank == 0 and ep_rank == 0:
         suffixes.append(f"{tp_rank:02d}")
 
     for base in candidates:
@@ -81,13 +79,14 @@ def save_megatron_release_checkpoint(shards_dict, save_dir, cfg):
     release_dir = os.path.join(save_dir, "release")
     os.makedirs(release_dir, exist_ok=True)
 
-    use_ep = cfg.ep > 1
     for rank_tuple, shard in shards_dict.items():
-        if use_ep:
+        # Support both (pp, tp) and (pp, tp, ep) tuple layouts regardless of cfg.ep.
+        if len(rank_tuple) == 3:
             pp_rank, tp_rank, ep_rank = rank_tuple
         else:
             pp_rank, tp_rank = rank_tuple
             ep_rank = None
+        use_ep = ep_rank is not None and ep_rank >= 0 and cfg.ep > 1
 
         name = f"mp_rank_{tp_rank:02d}"
         if cfg.pp > 1:

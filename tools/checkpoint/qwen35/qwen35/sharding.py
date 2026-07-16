@@ -39,30 +39,71 @@ def merge_tp_row_parallel(shards):
 # PP helpers
 # -----------------------------------------------------------------------------
 def split_pp_layers(state_dict, cfg):
-    """Split a full LLM state_dict into per-PP-rank chunks.
+    """Split a full state dict into per-PP-rank chunks.
+
+    Megatron PP checkpoints use per-stage local layer indices: each PP rank
+    stores its transformer layers as ``layers.0``, ``layers.1``, ... regardless
+    of the global position.  Non-transformer tensors follow the Megatron
+    placement convention:
+
+    * First PP rank:  word embeddings and the full vision model.
+    * Last PP rank:   final layernorm, output layer, and MTP modules.
 
     Returns a list of dicts indexed by pp_rank.
     """
-    num_layers = cfg.num_layers
     pp_size = cfg.pp
     if pp_size == 1:
         return [state_dict]
 
-    layers_per_rank = num_layers // pp_size
+    layer_counts = cfg.pp_layer_counts
+    # Precompute global offset for each PP rank
+    offsets = [0]
+    for c in layer_counts[:-1]:
+        offsets.append(offsets[-1] + c)
+
     per_pp = [dict() for _ in range(pp_size)]
 
     for key, value in state_dict.items():
-        m = re.search(r"\.layers\.(\d+)\.", key)
-        if not m:
-            # Non-layer keys (embeddings/final norm/MTP) go to the last PP rank by convention.
+        # Vision model lives on the first PP rank and is not split.
+        if key.startswith("vision_model."):
+            per_pp[0][key] = value
+            continue
+
+        # Word embeddings are placed on the first and last PP ranks
+        # (first for pre_process, last for output_layer weight tying).
+        if key.startswith("language_model.embedding."):
+            per_pp[0][key] = value
             per_pp[-1][key] = value
             continue
 
-        layer_idx = int(m.group(1))
-        pp_rank = layer_idx // layers_per_rank
-        if pp_rank >= pp_size:
+        # Final norm, output layer, and MTP live on the last PP rank.
+        if (
+            key.startswith("language_model.decoder.final_layernorm.")
+            or key.startswith("language_model.output_layer.")
+            or key.startswith("language_model.mtp.")
+        ):
+            per_pp[-1][key] = value
+            continue
+
+        # Transformer layers are partitioned and renamed to local indices.
+        m = re.search(r"language_model\.decoder\.layers\.(\d+)\.", key)
+        if m:
+            layer_idx = int(m.group(1))
+            # Find which PP rank this global layer belongs to
             pp_rank = pp_size - 1
-        per_pp[pp_rank][key] = value
+            for r in range(pp_size):
+                if layer_idx < offsets[r] + layer_counts[r]:
+                    pp_rank = r
+                    break
+            local_idx = layer_idx - offsets[pp_rank]
+            local_key = (
+                key[: m.start()] + f"language_model.decoder.layers.{local_idx}." + key[m.end() :]
+            )
+            per_pp[pp_rank][local_key] = value
+            continue
+
+        # Any unexpected keys default to the last PP rank.
+        per_pp[-1][key] = value
 
     return per_pp
 
@@ -71,15 +112,38 @@ def merge_pp_layers(pp_state_dicts, cfg):
     """Merge per-PP-rank state dicts into a single state_dict.
 
     Accepts either a dict mapping pp_rank -> state_dict or a list ordered by
-    pp_rank.
+    pp_rank.  Local transformer layer indices are converted back to global
+    indices; other keys keep their original names.
     """
     merged = {}
     if isinstance(pp_state_dicts, dict):
         ranks = sorted(pp_state_dicts.keys())
     else:
         ranks = range(len(pp_state_dicts))
+
+    layer_counts = cfg.pp_layer_counts
+    # Precompute global offset for each PP rank
+    offsets = [0]
+    for c in layer_counts[:-1]:
+        offsets.append(offsets[-1] + c)
+
     for r in ranks:
-        merged.update(pp_state_dicts[r])
+        sd = pp_state_dicts[r]
+        global_offset = offsets[r]
+        for key, value in sd.items():
+            m = re.search(r"language_model\.decoder\.layers\.(\d+)\.", key)
+            if not m:
+                # Embeddings (replicated), vision, final norm, output layer, MTP, etc.
+                # Keep the first occurrence; replicated tensors are identical across ranks.
+                if key not in merged:
+                    merged[key] = value
+                continue
+            local_idx = int(m.group(1))
+            global_idx = global_offset + local_idx
+            global_key = (
+                key[: m.start()] + f"language_model.decoder.layers.{global_idx}." + key[m.end() :]
+            )
+            merged[global_key] = value
     return merged
 
 

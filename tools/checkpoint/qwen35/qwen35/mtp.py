@@ -16,19 +16,25 @@ def _restore_ln(weight):
     return weight + 1.0 if _constants.LN_ADJUSTMENT else weight
 
 
-# HF -> Megatron direct mappings (dense-style base).
-_MTP_DIRECT_HF2MEG = {
+# HF -> Megatron direct mappings.
+# Dense and MoE checkpoints use different names for the post-attention
+# layernorm that feeds the MLP.
+_MTP_DIRECT_HF2MEG_BASE = {
     "mtp.fc.weight": "language_model.mtp.layers.0.eh_proj.weight",
     "mtp.pre_fc_norm_embedding.weight": "language_model.mtp.layers.0.enorm.weight",
     "mtp.pre_fc_norm_hidden.weight": "language_model.mtp.layers.0.hnorm.weight",
     "mtp.norm.weight": "language_model.mtp.layers.0.final_layernorm.weight",
-    "mtp.layers.0.post_attention_layernorm.weight": "language_model.mtp.layers.0.mtp_model_layer.mlp.linear_fc1.layer_norm_weight",
     "mtp.layers.0.mlp.down_proj.weight": "language_model.mtp.layers.0.mtp_model_layer.mlp.linear_fc2.weight",
     "mtp.layers.0.input_layernorm.weight": "language_model.mtp.layers.0.mtp_model_layer.self_attention.linear_qkv.layer_norm_weight",
     "mtp.layers.0.self_attn.q_norm.weight": "language_model.mtp.layers.0.mtp_model_layer.self_attention.q_layernorm.weight",
     "mtp.layers.0.self_attn.k_norm.weight": "language_model.mtp.layers.0.mtp_model_layer.self_attention.k_layernorm.weight",
     "mtp.layers.0.self_attn.o_proj.weight": "language_model.mtp.layers.0.mtp_model_layer.self_attention.linear_proj.weight",
 }
+
+_MTP_POST_ATTN_LN_DENSE = (
+    "language_model.mtp.layers.0.mtp_model_layer.mlp.linear_fc1.layer_norm_weight"
+)
+_MTP_POST_ATTN_LN_MOE = "language_model.mtp.layers.0.mtp_model_layer.pre_mlp_layernorm.weight"
 
 _MTP_LN_KEYS_HF2MEG = {
     "mtp.pre_fc_norm_embedding.weight",
@@ -40,17 +46,29 @@ _MTP_LN_KEYS_HF2MEG = {
     "mtp.layers.0.self_attn.k_norm.weight",
 }
 
-# Megatron -> HF direct mappings (dense-style base).
-_MTP_DIRECT_MEG2HF = {v: k for k, v in _MTP_DIRECT_HF2MEG.items()}
-_MTP_LN_KEYS_MEG2HF = {
-    "language_model.mtp.layers.0.enorm.weight",
-    "language_model.mtp.layers.0.hnorm.weight",
-    "language_model.mtp.layers.0.final_layernorm.weight",
-    "language_model.mtp.layers.0.mtp_model_layer.mlp.linear_fc1.layer_norm_weight",
-    "language_model.mtp.layers.0.mtp_model_layer.self_attention.linear_qkv.layer_norm_weight",
-    "language_model.mtp.layers.0.mtp_model_layer.self_attention.q_layernorm.weight",
-    "language_model.mtp.layers.0.mtp_model_layer.self_attention.k_layernorm.weight",
-}
+
+def _get_mtp_mappings(is_moe):
+    """Return (hf2meg, meg2hf, ln_keys_meg2hf) for dense or MoE MTP naming."""
+    post_ln = _MTP_POST_ATTN_LN_MOE if is_moe else _MTP_POST_ATTN_LN_DENSE
+    hf2meg = {
+        **_MTP_DIRECT_HF2MEG_BASE,
+        "mtp.layers.0.post_attention_layernorm.weight": post_ln,
+    }
+    meg2hf = {v: k for k, v in hf2meg.items()}
+    ln_keys_meg2hf = {
+        "language_model.mtp.layers.0.enorm.weight",
+        "language_model.mtp.layers.0.hnorm.weight",
+        "language_model.mtp.layers.0.final_layernorm.weight",
+        post_ln,
+        "language_model.mtp.layers.0.mtp_model_layer.self_attention.linear_qkv.layer_norm_weight",
+        "language_model.mtp.layers.0.mtp_model_layer.self_attention.q_layernorm.weight",
+        "language_model.mtp.layers.0.mtp_model_layer.self_attention.k_layernorm.weight",
+    }
+    return hf2meg, meg2hf, ln_keys_meg2hf
+
+
+# Backwards-compatible module-level constants (dense defaults).
+_MTP_DIRECT_HF2MEG, _MTP_DIRECT_MEG2HF, _MTP_LN_KEYS_MEG2HF = _get_mtp_mappings(is_moe=False)
 
 
 def _convert_mtp_mlp_hf2meg(hf_sd, meg_sd, cfg):
@@ -100,7 +118,8 @@ def _convert_mtp_mlp_hf2meg(hf_sd, meg_sd, cfg):
 
 def convert_mtp_hf2meg(hf_sd, meg_sd, cfg):
     """Convert MTP parameters from HF to Megatron."""
-    for hk, mk in _MTP_DIRECT_HF2MEG.items():
+    hf2meg, _, _ = _get_mtp_mappings(cfg.is_moe)
+    for hk, mk in hf2meg.items():
         if hk in hf_sd:
             meg_sd[mk] = _adjust_ln(hf_sd[hk]) if hk in _MTP_LN_KEYS_HF2MEG else hf_sd[hk]
 
@@ -157,9 +176,10 @@ def _convert_mtp_mlp_meg2hf(full_sd, hf_sd, cfg):
 
 def convert_mtp_meg2hf(full_sd, hf_sd, cfg):
     """Convert MTP parameters from Megatron to HF."""
-    for mk, hk in _MTP_DIRECT_MEG2HF.items():
+    _, meg2hf, ln_keys_meg2hf = _get_mtp_mappings(cfg.is_moe)
+    for mk, hk in meg2hf.items():
         if mk in full_sd:
-            hf_sd[hk] = _restore_ln(full_sd[mk]) if mk in _MTP_LN_KEYS_MEG2HF else full_sd[mk]
+            hf_sd[hk] = _restore_ln(full_sd[mk]) if mk in ln_keys_meg2hf else full_sd[mk]
 
     mk = "language_model.mtp.layers.0.mtp_model_layer.self_attention.linear_qkv.weight"
     if mk in full_sd:
