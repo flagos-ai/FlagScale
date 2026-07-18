@@ -12,6 +12,7 @@ from megatron.training import get_args, print_rank_0
 
 try:
     from megatron.post_training.model_builder import modelopt_gpt_mamba_builder
+
     has_nvidia_modelopt = True
 except ImportError:
     has_nvidia_modelopt = False
@@ -22,7 +23,13 @@ import megatron.legacy.model  # isort: skip
 
 
 def model_provider(
-    model_builder: Callable, pre_process=True, post_process=True, vp_stage: Optional[int] = None, config=None, pg_collection=None, dualpipev_stage: Optional[int] = None
+    model_builder: Callable,
+    pre_process=True,
+    post_process=True,
+    vp_stage: Optional[int] = None,
+    config=None,
+    pg_collection=None,
+    dualpipev_stage: Optional[int] = None,
 ) -> Union[GPTModel, megatron.legacy.model.GPTModel, MambaModel]:
     """Builds the model.
 
@@ -49,21 +56,31 @@ def model_provider(
 
         def oom_observer(device, alloc, device_alloc, device_free):
             # snapshot right after an OOM happened
-            print('saving allocated state during OOM')
+            print("saving allocated state during OOM")
 
             filename = f"oom_rank-{torch.distributed.get_rank()}_{args.memory_snapshot_path}"
             torch.cuda.memory._dump_snapshot(filename)
 
         torch._C._cuda_attach_out_of_memory_observer(oom_observer)
 
-    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):
+    if has_nvidia_modelopt and getattr(args, "modelopt_enabled", False):
         # [ModelOpt]: Use custom builder + spec when modelopt is enabled
         model_builder = modelopt_gpt_mamba_builder
         assert not args.use_dualpipev
 
     if dualpipev_stage is not None:
-        return model_builder(args, pre_process, post_process, vp_stage, config=config, pg_collection=pg_collection, dualpipev_stage=dualpipev_stage)
-    return model_builder(args, pre_process, post_process, vp_stage, config=config, pg_collection=pg_collection)
+        return model_builder(
+            args,
+            pre_process,
+            post_process,
+            vp_stage,
+            config=config,
+            pg_collection=pg_collection,
+            dualpipev_stage=dualpipev_stage,
+        )
+    return model_builder(
+        args, pre_process, post_process, vp_stage, config=config, pg_collection=pg_collection
+    )
 
 
 def count_parameters_in_layer(model, layer_name):

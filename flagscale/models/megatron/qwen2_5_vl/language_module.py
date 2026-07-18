@@ -33,13 +33,21 @@ class QwenVLLanguageModelEmbedding(LanguageModelEmbedding):
         config: TransformerConfig,
         vocab_size: int,
         max_sequence_length: int,
-        position_embedding_type: Literal['learned_absolute', 'rope', 'none'] = 'learned_absolute',
+        position_embedding_type: Literal["learned_absolute", "rope", "none"] = "learned_absolute",
         num_tokentypes: int = 0,
-        scatter_to_sequence_parallel: bool = False, # chage default to False
+        scatter_to_sequence_parallel: bool = False,  # chage default to False
     ):
-        assert scatter_to_sequence_parallel == False, "QwenVLLanguageModelEmbedding does not support scatter_to_sequence_parallel"
-        super().__init__(config, vocab_size, max_sequence_length, position_embedding_type, num_tokentypes, scatter_to_sequence_parallel)
-
+        assert scatter_to_sequence_parallel == False, (
+            "QwenVLLanguageModelEmbedding does not support scatter_to_sequence_parallel"
+        )
+        super().__init__(
+            config,
+            vocab_size,
+            max_sequence_length,
+            position_embedding_type,
+            num_tokentypes,
+            scatter_to_sequence_parallel,
+        )
 
     def forward(
         self,
@@ -49,7 +57,7 @@ class QwenVLLanguageModelEmbedding(LanguageModelEmbedding):
         image_input_mask: Tensor = None,
         video_input_mask: Tensor = None,
         image_embeds: Tensor = None,
-        video_embeds: Tensor = None
+        video_embeds: Tensor = None,
     ) -> Tensor:
         """Forward pass of the embedding module.
 
@@ -89,9 +97,13 @@ class QwenVLLanguageModelEmbedding(LanguageModelEmbedding):
             if not self.reduce_scatter_embeddings:
                 embeddings = embeddings.clone()
                 if image_embeds is not None:
-                    embeddings[image_input_mask] = image_embeds.to(embeddings.device, embeddings.dtype)
+                    embeddings[image_input_mask] = image_embeds.to(
+                        embeddings.device, embeddings.dtype
+                    )
                 if video_embeds is not None:
-                    embeddings[video_input_mask] = video_embeds.to(embeddings.device, embeddings.dtype)
+                    embeddings[video_input_mask] = video_embeds.to(
+                        embeddings.device, embeddings.dtype
+                    )
                 embeddings = tensor_parallel.scatter_to_sequence_parallel_region(embeddings)
             # `scatter_to_sequence_parallel_region` returns a view, which prevents
             # the original tensor from being garbage collected. Clone to facilitate GC.
@@ -142,8 +154,8 @@ class QwenVLLanguageModel(GPTModel):
         parallel_output: bool = True,
         share_embeddings_and_output_weights: bool = False,
         position_embedding_type: Literal[
-            'learned_absolute', 'rope', 'mrope', 'none'
-        ] = 'learned_absolute',
+            "learned_absolute", "rope", "mrope", "none"
+        ] = "learned_absolute",
         rotary_percent: float = 1.0,
         rotary_base: int = 10000,
         rope_scaling: bool = False,
@@ -152,20 +164,25 @@ class QwenVLLanguageModel(GPTModel):
         seq_len_interpolation_factor: Optional[float] = None,
         mtp_block_spec: Optional[ModuleSpec] = None,
     ) -> None:
-        super().__init__(config=config, transformer_layer_spec=transformer_layer_spec,
-                         vocab_size=vocab_size, max_sequence_length=max_sequence_length,
-                         pre_process=pre_process, post_process=post_process,
-                         fp16_lm_cross_entropy=fp16_lm_cross_entropy,
-                         parallel_output=parallel_output,
-                         share_embeddings_and_output_weights=share_embeddings_and_output_weights,
-                         position_embedding_type=position_embedding_type,
-                         rotary_percent=rotary_percent,
-                         rotary_base=rotary_base,
-                         rope_scaling=rope_scaling,
-                         rope_scaling_factor=rope_scaling_factor,
-                         scatter_embedding_sequence_parallel=scatter_embedding_sequence_parallel,
-                         seq_len_interpolation_factor=seq_len_interpolation_factor,
-                         mtp_block_spec=mtp_block_spec)
+        super().__init__(
+            config=config,
+            transformer_layer_spec=transformer_layer_spec,
+            vocab_size=vocab_size,
+            max_sequence_length=max_sequence_length,
+            pre_process=pre_process,
+            post_process=post_process,
+            fp16_lm_cross_entropy=fp16_lm_cross_entropy,
+            parallel_output=parallel_output,
+            share_embeddings_and_output_weights=share_embeddings_and_output_weights,
+            position_embedding_type=position_embedding_type,
+            rotary_percent=rotary_percent,
+            rotary_base=rotary_base,
+            rope_scaling=rope_scaling,
+            rope_scaling_factor=rope_scaling_factor,
+            scatter_embedding_sequence_parallel=scatter_embedding_sequence_parallel,
+            seq_len_interpolation_factor=seq_len_interpolation_factor,
+            mtp_block_spec=mtp_block_spec,
+        )
         if self.pre_process:
             self.embedding = QwenVLLanguageModelEmbedding(
                 config=self.config,

@@ -418,7 +418,7 @@ class VisionAttention(Attention):
         sequence_len_offset: Optional[int] = None,
         *,
         inference_params: Optional[BaseInferenceContext] = None,
-        rotary_pos_cos_sin = None,
+        rotary_pos_cos_sin=None,
     ) -> Tuple[Tensor, Tensor]:
         """
         Perform a forward pass through the attention module.
@@ -446,9 +446,9 @@ class VisionAttention(Attention):
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
         if inference_context and inference_context.is_dynamic_batching():
-            assert is_fa_min_version(
-                "2.7.3"
-            ), "flash attn verion v2.7.3 and above is required for dynamic batching."
+            assert is_fa_min_version("2.7.3"), (
+                "flash attn verion v2.7.3 and above is required for dynamic batching."
+            )
 
         # hidden_states: [sq, b, h]
         if self.config.flash_decode and not self.training and inference_context is not None:
@@ -608,9 +608,9 @@ class VisionAttention(Attention):
                     kv_lengths,
                     block_table,
                 )
-                core_attn_out = rearrange(core_attn_out, 's b h d -> s b (h d)')
+                core_attn_out = rearrange(core_attn_out, "s b h d -> s b (h d)")
 
-        if packed_seq_params is not None and packed_seq_params.qkv_format == 'thd':
+        if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":
             # reshape to same output shape as unpacked case
             # (t, np, hn) -> (t, b=1, h=np*hn)
             # t is the pack size = sum (sq_i)
@@ -641,7 +641,6 @@ class SelfAttentionVision(VisionAttention):
         attn_mask_type=AttnMaskType.padding,
         cp_comm_type: str = None,
         pg_collection: ProcessGroupCollection = None,
-
     ):
         super().__init__(
             config=config,
@@ -663,7 +662,7 @@ class SelfAttentionVision(VisionAttention):
             bias=self.config.add_bias_linear or self.config.add_qkv_bias,
             skip_bias_add=False,
             is_expert=False,
-            tp_comm_buffer_name='qkv',
+            tp_comm_buffer_name="qkv",
         )
 
         if submodules.q_layernorm is not None:
@@ -785,12 +784,10 @@ class SelfAttentionVision(VisionAttention):
         ]
 
         if SplitAlongDim is not None:
-
             # [sq, b, ng, (np/ng + 2) * hn]
             # --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
             (query, key, value) = SplitAlongDim(mixed_qkv, 3, split_arg_list)
         else:
-
             # [sq, b, ng, (np/ng + 2) * hn]
             # --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
             (query, key, value) = torch.split(mixed_qkv, split_arg_list, dim=3)

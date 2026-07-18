@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 def test_get_version_from_importlib_metadata(mocker):
     """Test version retrieval from importlib.metadata"""
     mocker.patch("importlib.metadata.version", return_value="1.2.3")

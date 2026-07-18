@@ -88,14 +88,16 @@ def set_seed(seed: int):
     if get_platform().name() == "cuda":
         torch.backends.cudnn.enabled = True
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = False 
+        torch.backends.cudnn.deterministic = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def init_distributed():
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     get_platform().set_device(local_rank)
-    torch.distributed.init_process_group(backend=get_platform().dist_backend(), init_method="env://")
+    torch.distributed.init_process_group(
+        backend=get_platform().dist_backend(), init_method="env://"
+    )
 
     return local_rank
 
@@ -144,9 +146,7 @@ def make_dataset(cfg: DataConfig, policy_config):
     # TODO: (yupu) Remove hard-coded video backend
     video_backend = "torchcodec"
 
-    image_transforms = (
-        ImageTransforms(cfg.image_transforms) if enable_image_transform else None
-    )
+    image_transforms = ImageTransforms(cfg.image_transforms) if enable_image_transform else None
     # Leave the revision to None
     ds_meta = LeRobotDatasetMetadata(root=cfg.data_path, revision=None)
     delta_timestamps = resolve_delta_timestamps(policy_config, ds_meta)
@@ -164,16 +164,12 @@ def make_dataset(cfg: DataConfig, policy_config):
     if cfg.use_imagenet_stats:
         for key in dataset.meta.camera_keys:
             for stats_type, stats in IMAGENET_STATS.items():
-                dataset.meta.stats[key][stats_type] = torch.tensor(
-                    stats, dtype=torch.float32
-                )
+                dataset.meta.stats[key][stats_type] = torch.tensor(stats, dtype=torch.float32)
 
     return dataset
 
 
-def resolve_delta_timestamps(
-    cfg, ds_meta: LeRobotDatasetMetadata
-) -> dict[str, list] | None:
+def resolve_delta_timestamps(cfg, ds_meta: LeRobotDatasetMetadata) -> dict[str, list] | None:
     """Resolves delta_timestamps by reading from the 'delta_indices' properties of the PreTrainedConfig.
 
     Args:
@@ -196,9 +192,7 @@ def resolve_delta_timestamps(
         if key == ACTION and cfg.action_delta_indices is not None:
             delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
         if key.startswith(OBS_PREFIX) and cfg.observation_delta_indices is not None:
-            delta_timestamps[key] = [
-                i / ds_meta.fps for i in cfg.observation_delta_indices
-            ]
+            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.observation_delta_indices]
 
     if len(delta_timestamps) == 0:
         delta_timestamps = None
@@ -261,9 +255,7 @@ def validate_visual_features_consistency(
         cfg (PreTrainedConfig): The model or policy configuration containing input_features and type.
         features (Dict[str, PolicyFeature]): A mapping of feature names to PolicyFeature objects.
     """
-    expected_visuals = {
-        k for k, v in cfg.input_features.items() if v.type == FeatureType.VISUAL
-    }
+    expected_visuals = {k for k, v in cfg.input_features.items() if v.type == FeatureType.VISUAL}
     provided_visuals = {k for k, v in features.items() if v.type == FeatureType.VISUAL}
     if not provided_visuals.issubset(expected_visuals):
         raise_feature_mismatch_error(provided_visuals, expected_visuals)
@@ -450,9 +442,13 @@ def update_policy(
     policy_model = policy.module if isinstance(policy, FSDP) else policy
     use_amp = getattr(policy_model.config, "use_amp", False)
 
-    autocast_context = torch.amp.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16) if use_amp else nullcontext()
+    autocast_context = (
+        torch.amp.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16)
+        if use_amp
+        else nullcontext()
+    )
     with autocast_context:
-        loss, _= policy.forward(batch)
+        loss, _ = policy.forward(batch)
     # TODO(rcadene): policy.unnormalize_outputs(out_dict)
 
     loss.backward()
@@ -496,9 +492,7 @@ def main(config: TrainConfig, seed: int):
 
     model_name = config.model.model_name.lower()
     if model_name not in ["pi0", "pi0.5"]:
-        raise ValueError(
-            f"Invalid model_name: {model_name}. Must be 'pi0' or 'pi0.5'"
-        )
+        raise ValueError(f"Invalid model_name: {model_name}. Must be 'pi0' or 'pi0.5'")
 
     # Load base config from checkpoint
     if model_name == "pi0.5":
@@ -705,7 +699,10 @@ def main(config: TrainConfig, seed: int):
         if step % config.system.log_freq == 0 and is_main_process:
             logger.info(f"step: {step} loss: {train_tracker}")
 
-        if config.system.checkpoint.save_checkpoint and step % config.system.checkpoint.save_freq == 0:
+        if (
+            config.system.checkpoint.save_checkpoint
+            and step % config.system.checkpoint.save_freq == 0
+        ):
             dist.barrier()
             state_dict = get_model_state_dict(
                 policy,
@@ -757,7 +754,7 @@ if __name__ == "__main__":
 
     # Extract experiment config (seed, exp_dir, etc.)
     experiment_config = OmegaConf.to_container(config.experiment, resolve=True)
-    seed = experiment_config.get('seed', 42)
+    seed = experiment_config.get("seed", 42)
 
     logger.info("=" * 100)
     logger.info(f"Experiment: {experiment_config}")

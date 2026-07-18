@@ -3,13 +3,11 @@
 import torch
 from torch import nn
 
-class RMSNorm(torch.nn.Module):
 
-    def __init__(self,
-                 dim: int,
-                 eps: float = 1e-6,
-                 sequence_parallel: bool = False,
-                 config: dict = None):
+class RMSNorm(torch.nn.Module):
+    def __init__(
+        self, dim: int, eps: float = 1e-6, sequence_parallel: bool = False, config: dict = None
+    ):
         """RMS Normaliation module
 
         Args:
@@ -22,7 +20,7 @@ class RMSNorm(torch.nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
 
-        setattr(self.weight, 'sequence_parallel', sequence_parallel)
+        setattr(self.weight, "sequence_parallel", sequence_parallel)
 
     def _norm(self, x):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)

@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import json
@@ -24,8 +23,10 @@ from io import open
 try:
     from functools import lru_cache
 except ImportError:
+
     def lru_cache():
         return lambda func: func
+
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class RWKVTokenizer:
     RWKV Trie-based tokenizer.
     Compatible interface with Megatron tokenizer.
     """
+
     @classmethod
     def from_pretrained(cls, tokenizer_path, *inputs, **kwargs):
         tokenizer = cls(tokenizer_path, *inputs, **kwargs)
@@ -78,7 +80,7 @@ class RWKVTokenizer:
         self.idx2token = {}
         self.token2idx = {}
 
-        files = [f for f in os.listdir(tokenizer_path) if f.endswith('.txt')]
+        files = [f for f in os.listdir(tokenizer_path) if f.endswith(".txt")]
         if not files:
             raise ValueError(f"No .txt vocab files found in {tokenizer_path}")
         for vocab_file in files:
@@ -88,9 +90,11 @@ class RWKVTokenizer:
 
         sorted_tokens = []
         for line in lines:
-            idx = int(line[:line.index(' ')])
-            token_bytes = eval(line[line.index(' '):line.rindex(' ')])
-            token_bytes = token_bytes.encode("utf-8") if isinstance(token_bytes, str) else token_bytes
+            idx = int(line[: line.index(" ")])
+            token_bytes = eval(line[line.index(" ") : line.rindex(" ")])
+            token_bytes = (
+                token_bytes.encode("utf-8") if isinstance(token_bytes, str) else token_bytes
+            )
             sorted_tokens.append(token_bytes)
             self.idx2token[idx] = token_bytes
             self.token2idx[token_bytes] = idx
@@ -126,7 +130,7 @@ class RWKVTokenizer:
         return tokens
 
     def decode_bytes(self, tokens):
-        return b''.join([self.idx2token[i] for i in tokens])
+        return b"".join([self.idx2token[i] for i in tokens])
 
     def encode(self, text):
         return self.encode_bytes(text.encode("utf-8"))
@@ -135,7 +139,7 @@ class RWKVTokenizer:
         try:
             return self.decode_bytes(tokens).decode("utf-8")
         except Exception:
-            return '\ufffd'
+            return "\ufffd"
 
     def convert_tokens_to_ids(self, tokens):
         ids = []
@@ -160,4 +164,4 @@ class RWKVTokenizer:
 
     @property
     def vocab_size(self):
-        return len(self.idx2token) + len(getattr(self, 'special_tokens', {}))
+        return len(self.idx2token) + len(getattr(self, "special_tokens", {}))

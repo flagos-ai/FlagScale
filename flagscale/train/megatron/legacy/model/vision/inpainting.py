@@ -17,7 +17,6 @@ from megatron.legacy.model.vision.utils import resize
 
 
 class VitInpaintingModel(MegatronModule):
-
     def __init__(self, config, pre_process=True, post_process=True):
         super(VitInpaintingModel, self).__init__()
         args = get_args()
@@ -40,29 +39,26 @@ class VitInpaintingModel(MegatronModule):
 
         if self.post_process:
             self.linear_decoder = get_linear_layer(
-                self.hidden_size,
-                self.backbone.flatten_dim,
-                torch.nn.init.zeros_
+                self.hidden_size, self.backbone.flatten_dim, torch.nn.init.zeros_
             )
 
     def set_input_tensor(self, input_tensor):
         self.backbone.set_input_tensor(input_tensor)
 
     def forward(self, input):
-
         hidden_states = self.backbone(input)
 
         if not self.post_process:
             return hidden_states
         decoded_output = self.linear_decoder(hidden_states)
         output = einops.rearrange(
-                decoded_output,
-                "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
-                p1=self.patch_dim,
-                p2=self.patch_dim,
-                h=self.img_h//self.patch_dim,
-                w=self.img_w//self.patch_dim,
-            )
+            decoded_output,
+            "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
+            p1=self.patch_dim,
+            p2=self.patch_dim,
+            h=self.img_h // self.patch_dim,
+            w=self.img_w // self.patch_dim,
+        )
 
         return output
 
@@ -71,6 +67,7 @@ class MLP(torch.nn.Module):
     """
     Linear Embedding
     """
+
     def __init__(self, input_dim=2048, embed_dim=768):
         super().__init__()
         self.proj = torch.nn.Linear(input_dim, embed_dim)
@@ -106,7 +103,9 @@ class MitInpaintingModel(MegatronModule):
         self.linear_c2 = MLP(input_dim=c2_in_channels, embed_dim=self.embedding_dim)
         self.linear_c1 = MLP(input_dim=c1_in_channels, embed_dim=self.embedding_dim)
 
-        self.conv_fuse = torch.nn.Conv2d(self.embedding_dim*4, self.embedding_dim, 1, 1, bias=False)
+        self.conv_fuse = torch.nn.Conv2d(
+            self.embedding_dim * 4, self.embedding_dim, 1, 1, bias=False
+        )
         self.norm = apex.parallel.SyncBatchNorm(self.embedding_dim)
         self.dropout = torch.nn.Dropout2d(0.1)
 
@@ -121,13 +120,13 @@ class MitInpaintingModel(MegatronModule):
 
         n, _, h, w = c4.shape
         _c4 = self.linear_c4(c4).permute(0, 2, 1).reshape(n, -1, c4.shape[2], c4.shape[3])
-        _c4 = resize(_c4, size=c1.size()[2:], mode='bilinear', align_corners=False)
+        _c4 = resize(_c4, size=c1.size()[2:], mode="bilinear", align_corners=False)
 
         _c3 = self.linear_c3(c3).permute(0, 2, 1).reshape(n, -1, c3.shape[2], c3.shape[3])
-        _c3 = resize(_c3, size=c1.size()[2:], mode='bilinear', align_corners=False)
+        _c3 = resize(_c3, size=c1.size()[2:], mode="bilinear", align_corners=False)
 
         _c2 = self.linear_c2(c2).permute(0, 2, 1).reshape(n, -1, c2.shape[2], c2.shape[3])
-        _c2 = resize(_c2, size=c1.size()[2:], mode='bilinear', align_corners=False)
+        _c2 = resize(_c2, size=c1.size()[2:], mode="bilinear", align_corners=False)
 
         _c1 = self.linear_c1(c1).permute(0, 2, 1).reshape(n, -1, c1.shape[2], c1.shape[3])
 
@@ -145,8 +144,8 @@ class MitInpaintingModel(MegatronModule):
             "b (c p1 p2) h w -> b c (h p1) (w p2)",
             p1=self.patch_dim,
             p2=self.patch_dim,
-            h=self.img_h//self.patch_dim,
-            w=self.img_w//self.patch_dim,
+            h=self.img_h // self.patch_dim,
+            w=self.img_w // self.patch_dim,
         )
 
         return output

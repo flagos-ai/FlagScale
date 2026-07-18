@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 def fn(input_data):
     res = input_data + "__add_process_fn"
     return res

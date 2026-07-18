@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 def _get_version() -> str:
     """Get version from importlib.metadata or parse pyproject.toml as fallback."""
     try:

@@ -19,6 +19,7 @@ from megatron.core.transformer.spec_utils import ModuleSpec, build_module
 from flagscale.models.megatron.qwen2_5_vl.vit_model import PatchEmbed
 from flagscale.models.megatron.qwen3_vl.vision_transformer_block import VisionTransformerBlock
 
+
 # reference from https://github.com/huggingface/transformers/blob/d08b98b965176ea9cf8c8e8b24995c955b7e2ec9/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L79
 # this is different from RotaryEmbedding in megatron.core.transformer.rotary_embedding.
 # Don't cat the even and odd parts here.
@@ -59,9 +60,8 @@ class Qwen3VisionModel(VisionModule):
         projection_config: TransformerConfig,
         projection_layer_spec: ModuleSpec,
         projection_type: str = "mlp",
-
         pre_process: bool = True,
-        post_process: bool = False
+        post_process: bool = False,
     ) -> None:
         super().__init__(config=transformer_config)
 
@@ -83,10 +83,12 @@ class Qwen3VisionModel(VisionModule):
             temporal_patch_size=temporal_patch_size,
             in_channels=in_channels,
             embed_dim=embed_dim,
-            bias=True
+            bias=True,
         )
 
-        self.pos_embed = nn.Embedding(transformer_config.num_position_embeddings, transformer_config.hidden_size)
+        self.pos_embed = nn.Embedding(
+            transformer_config.num_position_embeddings, transformer_config.hidden_size
+        )
         self.num_grid_per_side = int(transformer_config.num_position_embeddings**0.5)
 
         head_dim = embed_dim // num_heads
@@ -105,7 +107,6 @@ class Qwen3VisionModel(VisionModule):
             pre_process=self.pre_process,
             post_process=self.post_process,
             post_layer_norm=True,
-
             # NOTE: for deepstack
             projection_config=projection_config,
             projection_layer_spec=projection_layer_spec,
@@ -121,7 +122,7 @@ class Qwen3VisionModel(VisionModule):
             projection_config,
             projection_layer_spec,
             projection_type,
-            projection_config.ffn_hidden_size
+            projection_config.ffn_hidden_size,
         )
         self.input_tensor = None
 
@@ -138,7 +139,7 @@ class Qwen3VisionModel(VisionModule):
         if not isinstance(input_tensor, list):
             input_tensor = [input_tensor]
 
-        assert len(input_tensor) == 1, 'input_tensor should only be length 1 for gpt/bert'
+        assert len(input_tensor) == 1, "input_tensor should only be length 1 for gpt/bert"
         self.decoder.set_input_tensor(input_tensor[0])
 
     def rot_pos_emb(self, grid_thw: torch.Tensor) -> torch.Tensor:
@@ -270,15 +271,19 @@ class Qwen3VisionModel(VisionModule):
         vision_data = vision_data + pos_embeds
 
         seq_len, _ = vision_data.size()
-        vision_data = vision_data.reshape(seq_len, 1, -1) # change to (seq_len, batch_size=1, hidden_size)
+        vision_data = vision_data.reshape(
+            seq_len, 1, -1
+        )  # change to (seq_len, batch_size=1, hidden_size)
 
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
-        rotary_pos_emb = rotary_pos_emb.reshape(seq_len, 1, 1, -1).repeat(1, 1, 1, 2) # change to (seq_len, batch_size=1, 1, dim), and repeat for even adn odd
+        rotary_pos_emb = rotary_pos_emb.reshape(seq_len, 1, 1, -1).repeat(
+            1, 1, 1, 2
+        )  # change to (seq_len, batch_size=1, 1, dim), and repeat for even adn odd
 
         hidden_states, deepstack_feature_lists = self.decoder(
-            hidden_states = vision_data,
-            attention_mask = None,
-            inference_params = inference_params,
+            hidden_states=vision_data,
+            attention_mask=None,
+            inference_params=inference_params,
             rotary_pos_emb=rotary_pos_emb,
             packed_seq_params=self.build_packed_seq_params(grid_thw),
             **(extra_block_kwargs or {}),
@@ -291,7 +296,6 @@ class Qwen3VisionModel(VisionModule):
     def build_packed_seq_params(
         self,
         grid_thw: Optional[torch.Tensor],
-
     ) -> PackedSeqParams:
         # NOTE: each frame is a sequence (rather than each grid)
         seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
@@ -301,7 +305,7 @@ class Qwen3VisionModel(VisionModule):
         return PackedSeqParams(
             cu_seqlens_q=cu_seqlens,
             cu_seqlens_kv=cu_seqlens,
-            qkv_format='thd',
+            qkv_format="thd",
             max_seqlen_q=max_seqlen_q,
-            max_seqlen_kv=max_seqlen_q
+            max_seqlen_kv=max_seqlen_q,
         )

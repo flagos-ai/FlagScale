@@ -19,6 +19,7 @@ from megatron.core.packed_seq_params import PackedSeqParams
 from .vision_model import Qwen3VisionModel
 from .language_model import Qwen3VLLanguageModule
 
+
 # Note: This is under development and may be missing features.
 class Qwen3VLModel(MegatronModule):
     """Qwen3VL multi-modal model.
@@ -61,9 +62,8 @@ class Qwen3VLModel(MegatronModule):
         vision_projection_config: TransformerConfig,
         vision_projection_layer_spec: ModuleSpec,
         vision_projection_type: str = "mlp",
-
         parallel_output: bool = True,
-        language_position_embedding_type: str = 'mrope',
+        language_position_embedding_type: str = "mrope",
         language_rotary_percent: float = 1.0,
         pre_process: bool = True,
         post_process: bool = True,
@@ -71,8 +71,8 @@ class Qwen3VLModel(MegatronModule):
         add_decoder: bool = True,
         language_rotary_base: int = 10000,
         fp16_lm_cross_entropy: bool = False,
-        language_share_embeddings_and_output_weights: bool=False,
-        vp_stage: int=None
+        language_share_embeddings_and_output_weights: bool = False,
+        vp_stage: int = None,
     ) -> None:
         super().__init__(config=language_transformer_config)
 
@@ -90,7 +90,9 @@ class Qwen3VLModel(MegatronModule):
         self.vision_projection = None
         self.language_model = None
 
-        self.square_merge_size = vision_projection_config.ffn_hidden_size // vision_transformer_config.hidden_size
+        self.square_merge_size = (
+            vision_projection_config.ffn_hidden_size // vision_transformer_config.hidden_size
+        )
 
         # This attribute is needed to check if an all-reduce is required
         # on the word embeddings inside `finalize_model_grads._allreduce_word_embedding_grads`.
@@ -103,7 +105,7 @@ class Qwen3VLModel(MegatronModule):
                 vision_projection_layer_spec,
                 projection_type=vision_projection_type,
                 pre_process=True,
-                post_process=True
+                post_process=True,
             )
 
         self.language_model = Qwen3VLLanguageModule(
@@ -139,7 +141,7 @@ class Qwen3VLModel(MegatronModule):
         # gives us non-lists or None
         if not isinstance(input_tensor, list):
             input_tensor = [input_tensor]
-        assert len(input_tensor) == 1, 'input_tensor should only be length 1 for Qwen2VL'
+        assert len(input_tensor) == 1, "input_tensor should only be length 1 for Qwen2VL"
 
         if self.pre_process:
             self.encoder_hidden_state = input_tensor[0]
@@ -177,10 +179,8 @@ class Qwen3VLModel(MegatronModule):
         vision_data: torch.Tensor = None,
         vision_grid_thw: torch.Tensor = None,
         video_start_index: int = -1,
-
         image_input_mask: torch.Tensor = None,
         video_input_mask: torch.Tensor = None,
-
         attention_mask: torch.Tensor = None,
         labels: torch.Tensor = None,
         inference_params: InferenceParams = None,
@@ -217,8 +217,8 @@ class Qwen3VLModel(MegatronModule):
             deepstack_feature_lists = None
             if vision_grid_thw.shape[0] > 0:
                 vision_embeds, deepstack_feature_lists = self.vision_model(
-                    vision_data=vision_data, # If None, vision model should use intermediate outputs (EPP > 1)
-                    grid_thw=vision_grid_thw # should provided in each EPP stage
+                    vision_data=vision_data,  # If None, vision model should use intermediate outputs (EPP > 1)
+                    grid_thw=vision_grid_thw,  # should provided in each EPP stage
                 )
 
             # If running inference, the language model KV cache will be updated for image token positions.
@@ -233,13 +233,13 @@ class Qwen3VLModel(MegatronModule):
             if use_inference_kv_cache:
                 language_embeddings: torch.Tensor = self.language_model.embedding(
                     input_ids=input_ids,
-                    position_ids=None # NOTE: disable
+                    position_ids=None,  # NOTE: disable
                 )  # [text_seq_len, b, h_language]
                 # NOTE: why not cat here? is it the combined embeddings useless?
                 combined_embeddings = language_embeddings
             elif vision_embeds is not None:
                 if image_input_mask is not None:
-                    image_input_mask = image_input_mask.T # shape [seqlen, mbs]
+                    image_input_mask = image_input_mask.T  # shape [seqlen, mbs]
                 if video_input_mask is not None:
                     video_input_mask = video_input_mask.T
 
@@ -256,20 +256,22 @@ class Qwen3VLModel(MegatronModule):
                     video_embeds = vision_embeds[video_start_index:]
                     visual_pos_masks = torch.logical_or(image_input_mask, video_input_mask)
                 else:
-                    raise ValueError(f"Expect video token start index in range [0, {vision_embeds.shape[0]}], but got {video_start_index}")
+                    raise ValueError(
+                        f"Expect video token start index in range [0, {vision_embeds.shape[0]}], but got {video_start_index}"
+                    )
 
                 combined_embeddings = self.language_model.embedding(
                     input_ids=input_ids,
-                    position_ids=None, # NOTE: disable
+                    position_ids=None,  # NOTE: disable
                     image_input_mask=image_input_mask,
                     video_input_mask=video_input_mask,
                     image_embeds=image_embeds,
-                    video_embeds=video_embeds
+                    video_embeds=video_embeds,
                 )  # [text_seq_len, b, h_language]
             else:
                 combined_embeddings = self.language_model.embedding(
                     input_ids=input_ids,
-                    position_ids=None # NOTE: disable
+                    position_ids=None,  # NOTE: disable
                 )  # [text_seq_len, b, h_language]
                 visual_pos_masks = None
                 deepstack_feature_lists = None
@@ -281,12 +283,12 @@ class Qwen3VLModel(MegatronModule):
 
         output = self.language_model(
             input_ids=None,
-            position_ids=position_ids,              # None in encoder
-            attention_mask=attention_mask,          # None in encoder
-            decoder_input=combined_embeddings,      # only not None in the first decoder PP stage
-            labels=labels,                          # only not None in the last decoder PP stage
-            inference_params=inference_params,      # currently always None
-            packed_seq_params=packed_seq_params,    # currently always None
+            position_ids=position_ids,  # None in encoder
+            attention_mask=attention_mask,  # None in encoder
+            decoder_input=combined_embeddings,  # only not None in the first decoder PP stage
+            labels=labels,  # only not None in the last decoder PP stage
+            inference_params=inference_params,  # currently always None
+            packed_seq_params=packed_seq_params,  # currently always None
             visual_pos_masks=visual_pos_masks,
             deepstack_visual_embeds=deepstack_feature_lists,
             **(extra_block_kwargs or {}),
@@ -373,24 +375,47 @@ class Qwen3VLModel(MegatronModule):
                     text_len = ed - st
 
                     st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
-                    llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+                    llm_pos_ids_list.append(
+                        torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx
+                    )
 
                     # t_index is always 0 because llm_grid_t is always 1 (we use timestamps to encode the temporal information for videos)
-                    t_index = torch.arange(llm_grid_t).view(-1, 1).expand(-1, llm_grid_h * llm_grid_w).flatten()
-                    h_index = torch.arange(llm_grid_h).view(1, -1, 1).expand(llm_grid_t, -1, llm_grid_w).flatten()
-                    w_index = torch.arange(llm_grid_w).view(1, 1, -1).expand(llm_grid_t, llm_grid_h, -1).flatten()
-                    llm_pos_ids_list.append(torch.stack([t_index, h_index, w_index]) + text_len + st_idx)
+                    t_index = (
+                        torch.arange(llm_grid_t)
+                        .view(-1, 1)
+                        .expand(-1, llm_grid_h * llm_grid_w)
+                        .flatten()
+                    )
+                    h_index = (
+                        torch.arange(llm_grid_h)
+                        .view(1, -1, 1)
+                        .expand(llm_grid_t, -1, llm_grid_w)
+                        .flatten()
+                    )
+                    w_index = (
+                        torch.arange(llm_grid_w)
+                        .view(1, 1, -1)
+                        .expand(llm_grid_t, llm_grid_h, -1)
+                        .flatten()
+                    )
+                    llm_pos_ids_list.append(
+                        torch.stack([t_index, h_index, w_index]) + text_len + st_idx
+                    )
                     st = ed + llm_grid_t * llm_grid_h * llm_grid_w
 
                 if st < len(input_tokens):
                     st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
                     text_len = len(input_tokens) - st
-                    llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+                    llm_pos_ids_list.append(
+                        torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx
+                    )
 
                 llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
                 position_ids[..., i, attention_mask[i] == 1] = llm_positions.to(position_ids.device)
                 mrope_position_deltas.append(llm_positions.max() + 1 - len(total_input_ids[i]))
-            mrope_position_deltas = torch.tensor(mrope_position_deltas, device=input_ids.device).unsqueeze(1)
+            mrope_position_deltas = torch.tensor(
+                mrope_position_deltas, device=input_ids.device
+            ).unsqueeze(1)
             return position_ids, mrope_position_deltas
         else:
             if attention_mask is not None:

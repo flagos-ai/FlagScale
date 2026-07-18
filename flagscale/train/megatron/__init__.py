@@ -20,10 +20,12 @@
 # Make this a namespace package to allow imports from multiple locations
 try:
     import pkgutil
+
     __path__ = pkgutil.extend_path(__path__, __name__)
 except (AttributeError, NameError):
     # If __path__ doesn't exist yet, create it
     import os
+
     __path__ = [os.path.dirname(__file__)]
 
 # The installed megatron-core package will have megatron.core and megatron.plugin

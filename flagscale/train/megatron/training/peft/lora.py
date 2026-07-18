@@ -62,7 +62,7 @@ class LoRALinear(AdapterWrapper):
         return linear_output + adapter_output, bias
 
 
-class LoRA(PEFT, peft_type='lora'):
+class LoRA(PEFT, peft_type="lora"):
     """
     Implements the LoRA (Low-Rank Adaptation) module for parameter-efficient fine-tuning.
 
@@ -124,7 +124,7 @@ class LoRA(PEFT, peft_type='lora'):
         for name, param in model.named_parameters():
             param.requires_grad = False
         for name, param in model.named_parameters():
-            if 'adapter' in name:
+            if "adapter" in name:
                 param.requires_grad = True
 
     def load_state_dict_pre_hooks(self, model: nn.Module):
