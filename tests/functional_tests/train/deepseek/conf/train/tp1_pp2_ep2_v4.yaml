@@ -137,7 +137,7 @@ model:
   micro_batch_size: 1
   global_batch_size: 16
   eval_iters: 0
-  train_iters: 3
+  train_iters: 10
   eval_interval: 10000
 
   # nsys profile args =================
