@@ -1,0 +1,19 @@
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  use_flash_attn: True
+  sequence_parallel: True
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    wandb_project: "compress-robobrain"
+    wandb_exp_name: "compress-robobrain"
+  save_dir: RoboBrain_Compressed
+
+
+model:
+  model_cls: AutoModelForPreTraining
+  model_path: BAAI/RoboBrain
+  device_map: cuda:0
+  low_cpu_mem_usage: true
+  torch_dtype: float16
