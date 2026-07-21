@@ -1,5 +1,6 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
-""" Configuration for the vision tower, the llm tower and the projector. """
+"""Configuration for the vision tower, the llm tower and the projector."""
+
 import torch
 
 from megatron.core.activations import quick_gelu, squared_relu, fast_gelu
@@ -16,9 +17,7 @@ def get_language_model_config(config):
     # Add qwen2_7b config
     if config.language_model_type == "qwen2_7b":
         config.activation_func = torch.nn.functional.silu
-        config.add_bias_linear = (
-            False  # linear_qkv has bias but linear_proj and MLP has no bias
-        )
+        config.add_bias_linear = False  # linear_qkv has bias but linear_proj and MLP has no bias
         config.add_qkv_bias = True
         config.bias_activation_fusion = False
         config.gated_linear_unit = True
@@ -33,9 +32,7 @@ def get_language_model_config(config):
     # Add qwen2_1.5b config
     elif config.language_model_type == "qwen2_1.5b":
         config.activation_func = torch.nn.functional.silu
-        config.add_bias_linear = (
-            False  # linear_qkv has bias but linear_proj and MLP has no bias
-        )
+        config.add_bias_linear = False  # linear_qkv has bias but linear_proj and MLP has no bias
         config.add_qkv_bias = True
         config.bias_activation_fusion = False
         config.gated_linear_unit = True

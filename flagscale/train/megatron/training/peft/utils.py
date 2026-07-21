@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import math
 import re
 
@@ -106,7 +120,7 @@ def is_expert_linear(fqn):
     Return whether the current base module is an expert linear module.
     See ParallelLinearAdapter.is_expert for usage details.
     """
-    return re.match(r'(?!.*shared_).*mlp\..*experts.*\.linear_fc[1-2]$', fqn) is not None
+    return re.match(r"(?!.*shared_).*mlp\..*experts.*\.linear_fc[1-2]$", fqn) is not None
 
 
 def init_method_normal(sigma):
@@ -137,7 +151,6 @@ def init_method_const(val):
 
 
 class ParallelLinearAdapter(nn.Module):
-
     def __init__(
         self,
         in_features: int,
@@ -151,9 +164,8 @@ class ParallelLinearAdapter(nn.Module):
         out_init_method: str = "zero",
         dropout: float = 0.0,
         alpha: float | None = None,
-        dropout_position: str = 'post',
+        dropout_position: str = "post",
     ):
-
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -220,11 +232,11 @@ class ParallelLinearAdapter(nn.Module):
             self.dropout = None
 
     def _get_init_fn(self, init_method: str):
-        if init_method == 'xavier':
+        if init_method == "xavier":
             init_fn = nn.init.xavier_normal_
-        elif init_method == 'normal':
+        elif init_method == "normal":
             init_fn = init_method_normal(0.2)
-        elif init_method == 'kaiming':
+        elif init_method == "kaiming":
             init_fn = init_method_kaiming_uniform(math.sqrt(5))
         elif init_method == "zero":
             init_fn = init_method_const(0.0)
@@ -234,13 +246,13 @@ class ParallelLinearAdapter(nn.Module):
 
     def forward(self, x):
         """ """
-        if self.dropout is not None and self.dropout_position == 'pre':
+        if self.dropout is not None and self.dropout_position == "pre":
             x = self.dropout(x)
 
         x, _ = self.linear_in(x)
         x, _ = self.linear_out(x)
 
-        if self.dropout is not None and self.dropout_position == 'post':
+        if self.dropout is not None and self.dropout_position == "post":
             x = self.dropout(x)
 
         x = x * (self.alpha / self.dim)
@@ -248,7 +260,7 @@ class ParallelLinearAdapter(nn.Module):
         return x
 
     def sharded_state_dict(
-        self, prefix: str = '', sharded_offsets: tuple = (), metadata: Optional[dict] = None
+        self, prefix: str = "", sharded_offsets: tuple = (), metadata: Optional[dict] = None
     ):
         """
         Sharded state dict for LoRA adapter. Special treatment is given to the linear_fc1 adapter

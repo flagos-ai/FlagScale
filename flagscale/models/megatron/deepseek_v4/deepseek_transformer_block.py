@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 ## built-in
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple, Union, cast
@@ -11,13 +25,18 @@ from megatron.core.fp4_utils import get_fp4_context
 from megatron.core.fp8_utils import get_fp8_context
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.packed_seq_params import PackedSeqParams
+
 if TYPE_CHECKING:
     from megatron.core.tensor_parallel.random import CheckpointManager
 else:
     CheckpointManager = None
 
 # megatron-core
-from megatron.core.transformer.transformer_block import TransformerBlock, apply_module, get_transformer_layer_offset
+from megatron.core.transformer.transformer_block import (
+    TransformerBlock,
+    apply_module,
+    get_transformer_layer_offset,
+)
 from megatron.core.utils import (
     WrappedTensor,
     deprecate_inference_params,
@@ -66,6 +85,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
         And if not using mhc recompute, this is no needed. So we just keep the function signature and leave it empty for now.
         """
         pass
+
     # @staticmethod
     # def _finalize_mhc_recompute_layer(
     #     mhc_manager: Optional[CheckpointManager],
@@ -96,7 +116,9 @@ class DeepSeekTransformerBlock(TransformerBlock):
         inference_params: Optional[BaseInferenceContext] = None,
         dynamic_inference_decode_only: Optional[bool] = None,
         input_ids: Optional[Tensor] = None,  # Used for hash-based MoE Router
-        engram_hash_input_ids: Optional[Tensor] = None,  # This is the input ids used for hashing in engram, which can be different from the input_ids used for attention mask and positional embedding. Only used when engram is enabled and at least one of the layers in this block has engram hashing.  
+        engram_hash_input_ids: Optional[
+            Tensor
+        ] = None,  # This is the input ids used for hashing in engram, which can be different from the input_ids used for attention mask and positional embedding. Only used when engram is enabled and at least one of the layers in this block has engram hashing.
     ):
         """
         Perform the forward pass through the transformer block.
@@ -149,7 +171,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
         # for refined recompute
         self.current_microbatch = -1
         if len(self.layers) > 0:
-            if hasattr(self.layers[0], 'current_microbatch'):
+            if hasattr(self.layers[0], "current_microbatch"):
                 self.current_microbatch = self.layers[0].current_microbatch
         saved_recompute_granularity = self.config.recompute_granularity
         ########## FlagScale End ##########
@@ -166,7 +188,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
 
         # Calculate the global layer offset for this pipeline stage
         # This is needed to convert local layer indices to global indices for feature extraction
-        pp_group = self.pg_collection.pp if hasattr(self.pg_collection, 'pp') else None
+        pp_group = self.pg_collection.pp if hasattr(self.pg_collection, "pp") else None
         layer_offset = get_transformer_layer_offset(
             self.config, self.vp_stage, get_pg_rank(pp_group)
         )
@@ -235,7 +257,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
         use_mhc_recompute = (
             self.training
             and self.config.enable_hyper_connections
-            and self.config.recompute_granularity == 'selective'
+            and self.config.recompute_granularity == "selective"
             and "mhc" in self.config.recompute_modules
         )
         mhc_layer_managers, mhc_is_last_in_recompute_block = self._build_mhc_recompute_layer_plan(
@@ -244,7 +266,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
 
         with rng_context, outer_quantization_context:
             # Forward pass.
-            if self.config.recompute_granularity == 'full' and self.training:
+            if self.config.recompute_granularity == "full" and self.training:
                 checkpointed_result = self._checkpointed_forward(
                     hidden_states=hidden_states,
                     attention_mask=attention_mask,
@@ -257,7 +279,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
                     padding_mask=padding_mask,
                     extract_layer_indices=extract_layer_indices,
                     layer_offset=layer_offset,
-                    input_ids=input_ids
+                    input_ids=input_ids,
                 )
                 # Handle return value from _checkpointed_forward
                 if len(extract_layer_indices) > 0:
@@ -282,7 +304,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
                             inner_quantization_context = nullcontext()
                     else:
                         inner_quantization_context = nullcontext()
-                    
+
                     mhc_manager = mhc_layer_managers[l_no]
                     if mhc_manager is not None:
                         mhc_manager.is_last_layer_in_recompute_block = (
@@ -290,7 +312,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
                         )
 
                     with self.offload_context, inner_quantization_context:
-                        #### FlagScale Begin #### 
+                        #### FlagScale Begin ####
                         # Pre-compute embeddings for the next DeepSeekTransformerLayer if engram exists, to overlap with current layer's computation
                         if l_no < len(self.layers) - 1:
                             next_layer = self.layers[l_no + 1]
@@ -312,7 +334,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
                             sequence_len_offset=sequence_len_offset,
                             padding_mask=padding_mask,
                             mhc_recompute_manager=mhc_manager,
-                            input_ids=input_ids
+                            input_ids=input_ids,
                         )
 
                     self._finalize_mhc_recompute_layer(
@@ -337,7 +359,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
             hidden_states = HyperConnectionModule.output_contract(
                 hidden_states, self.config.num_residual_streams
             )  # [s, b, n*C] -> [s, b, C]
-        
+
         # Final layer norm.
         if self.final_layernorm is not None:
             hidden_states = apply_module(self.final_layernorm)(cast(Tensor, hidden_states))
@@ -360,7 +382,7 @@ class DeepSeekTransformerBlock(TransformerBlock):
             return hidden_states, intermediate_hidden_states
 
         return hidden_states
-    
+
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
@@ -372,4 +394,6 @@ class DeepSeekTransformerBlock(TransformerBlock):
         if metadata is None:
             metadata = {}
         metadata["non_homogeneous_layers"] = True
-        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)
+        return super().sharded_state_dict(
+            prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata
+        )

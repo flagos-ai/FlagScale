@@ -86,9 +86,9 @@ class SFTDataset(GPTDataset):
 
                 print(f"> Used Dataset: aux_loss_mask ...")
                 if self.loss_mask_dataset is not None:
-                    assert len(self.dataset) == len(
-                        self.loss_mask_dataset
-                    ), f"Samples are not equal, ({len(self.dataset)} != {len(self.loss_mask_dataset)})"
+                    assert len(self.dataset) == len(self.loss_mask_dataset), (
+                        f"Samples are not equal, ({len(self.dataset)} != {len(self.loss_mask_dataset)})"
+                    )
 
     def __getitem__(self, idx: Optional[int]) -> Dict[str, torch.Tensor]:
         """Abstract method implementation

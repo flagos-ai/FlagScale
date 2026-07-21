@@ -25,14 +25,23 @@ import megatron.legacy.model  # isort: skip
 # NOTE: Loading `megatron.legacy.model` earlier fails due to circular import
 
 
-def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None, dualpipev_stage=None):
-    print_rank_0('building GPT model ...')
+def gpt_builder(
+    args,
+    pre_process,
+    post_process,
+    vp_stage=None,
+    config=None,
+    pg_collection=None,
+    dualpipev_stage=None,
+):
+    print_rank_0("building GPT model ...")
     if config is None:
         if args.yaml_cfg is not None:
             config = core_transformer_config_from_yaml(args, "language_model")
         else:
             ######### FlagScale Begin #########
             from megatron.plugin.hetero.parallel_context import get_parallel_context
+
             para_ctx = get_parallel_context()
             if para_ctx is not None:
                 config = para_ctx.get_transformer_config()
@@ -80,7 +89,7 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
         if args.mtp_num_layers is not None:
             assert not (config.transformer_impl == "inference_optimized")
             if (
-                hasattr(transformer_layer_spec, 'layer_specs')
+                hasattr(transformer_layer_spec, "layer_specs")
                 and len(transformer_layer_spec.layer_specs) == 0
             ):
                 # Get the decoder layer spec explicitly if no decoder layer in the last stage,
@@ -89,7 +98,11 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
             else:
                 # Define the decoder block spec
                 decoder_layer_specs = get_gpt_decoder_layer_specs(
-                    config, use_transformer_engine=use_te, normalization=args.normalization, qk_l2_norm=args.qk_l2_norm, vp_stage=vp_stage
+                    config,
+                    use_transformer_engine=use_te,
+                    normalization=args.normalization,
+                    qk_l2_norm=args.qk_l2_norm,
+                    vp_stage=vp_stage,
                 )
                 transformer_layer_spec_for_mtp = decoder_layer_specs[-1]
             # Use spec of the last layer in decoder block as spec of the transformer layer in MTP

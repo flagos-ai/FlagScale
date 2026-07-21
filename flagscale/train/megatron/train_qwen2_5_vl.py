@@ -73,6 +73,7 @@ except ImportError:
 from megatron.training.training import pretrain
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
 stimer = StragglerDetector()
@@ -134,7 +135,7 @@ def model_provider(
         args.rotary_seq_len_interpolation_factor is not None
         or args.rotary_seq_len_interpolation_factor != 1
     ):
-        print_rank_0('Multimodal RoPE currently not support RoPE interpolation, set to None...')
+        print_rank_0("Multimodal RoPE currently not support RoPE interpolation, set to None...")
         args.rotary_seq_len_interpolation_factor = None
 
     vision_config = get_vision_model_config(args, deepcopy(config))
@@ -162,7 +163,7 @@ def model_provider(
         drop_vision_class_token=False,  # NOTE: no class token to drop?
         vision_projection_config=vision_projector_config,
         vision_projection_layer_spec=vision_projector_spec,
-        vision_projection_type='mlp',
+        vision_projection_type="mlp",
         allow_missing_vision_projection_checkpoint=args.allow_missing_vision_projection_checkpoint,
         language_position_embedding_type=args.position_embedding_type,
         language_rotary_percent=args.rotary_percent,
@@ -461,8 +462,8 @@ def get_batch(data_iterator):
     # shape: n_video_samples
     video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
     # shape: n_video_samples
-    second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)[
-        'second_per_grid_ts'
+    second_per_grid_ts = broadcast_data(["second_per_grid_ts"], data, torch.float32)[
+        "second_per_grid_ts"
     ]
 
     image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
@@ -522,7 +523,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, "modelopt_enabled", False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()
@@ -563,7 +564,7 @@ def loss_func(
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
     reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
 
-    return (loss, num_tokens, {'lm loss': reporting_loss})
+    return (loss, num_tokens, {"lm loss": reporting_loss})
 
 
 def forward_step(data_iterator, model: Qwen2_5VLModel):
@@ -577,7 +578,7 @@ def forward_step(data_iterator, model: Qwen2_5VLModel):
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    timers("batch-generator", log_level=2).start()
     global stimer
     with stimer(bdata=True):
         (
@@ -593,7 +594,7 @@ def forward_step(data_iterator, model: Qwen2_5VLModel):
             image_input_mask,
             video_input_mask,
         ) = get_batch(data_iterator)
-    timers('batch-generator').stop()
+    timers("batch-generator").stop()
     vision_data = torch.cat([imgs, videos], dim=0)
     vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
     with stimer:
@@ -879,7 +880,7 @@ if __name__ == "__main__":
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
+        args_defaults={"tokenizer_type": "Qwen2VLTokenizer"},
         extra_args_provider=add_multimodal_extra_args,
         process_non_loss_data_func=write_online_eval_to_tensorboard,
         non_loss_data_func=run_online_eval,

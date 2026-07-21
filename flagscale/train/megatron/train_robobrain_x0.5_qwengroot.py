@@ -29,6 +29,7 @@ from flagscale.logger import logger
 from flagscale.models.robobrain_x.qwen_groot import Qwen_GR00T
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
 # Sane Defaults
@@ -173,7 +174,11 @@ def main(cfg) -> None:
     while not done:
         batch = next(data_iter)
 
-        qwen_inputs, state, actions = batch.get("qwen_inputs"), batch.get("state"), batch.get("actions")
+        qwen_inputs, state, actions = (
+            batch.get("qwen_inputs"),
+            batch.get("state"),
+            batch.get("actions"),
+        )
         if not qwen_inputs or not actions:
             continue
         for i in qwen_inputs:

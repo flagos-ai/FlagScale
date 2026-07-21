@@ -126,7 +126,7 @@ class VisionTransformerBlock(TransformerBlock):
                     rotary_pos_emb,
                 )
 
-        if self.config.recompute_method == 'uniform':
+        if self.config.recompute_method == "uniform":
             # Uniformly divide the total number of Transformer layers and checkpoint
             # the input activation of each divided chunk.
             # A method to further reduce memory usage reducing checkpoints.
@@ -138,7 +138,7 @@ class VisionTransformerBlock(TransformerBlock):
 
                 layer_idx += self.config.recompute_num_layers
 
-        elif self.config.recompute_method == 'block':
+        elif self.config.recompute_method == "block":
             # Checkpoint the input activation of only a set number of individual
             # Transformer layers and skip the rest.
             # A method fully use the device memory removing redundant re-computation.
@@ -257,7 +257,7 @@ class VisionTransformerBlock(TransformerBlock):
 
         with rng_context, outer_fp8_context:
             # Forward pass.
-            if self.config.recompute_granularity == 'full' and self.training:
+            if self.config.recompute_granularity == "full" and self.training:
                 hidden_states = self._checkpointed_forward(
                     hidden_states=hidden_states,
                     attention_mask=attention_mask,
