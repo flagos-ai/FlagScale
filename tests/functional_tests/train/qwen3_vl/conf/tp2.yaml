@@ -25,7 +25,7 @@ experiment:
     CUDNN_BENCHMARK: "false"
     CUDNN_DETERMINISTIC: "true"
   cmds:
-    before_start: source /root/miniconda3/bin/activate flagscale-train && pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226100830f41de38d1f1204d7848b54b1f3e && pip install transformers==4.57
+    before_start: source /root/miniconda3/bin/activate flagscale-train && pip install git+https://github.com/NVIDIA/Megatron-Energon.git@ab40226100830f41de38d1f1204d7848b54b1f3e && pip install "multi-storage-client==0.42.0" && pip install transformers==4.57
 action: run
 
 hydra:
