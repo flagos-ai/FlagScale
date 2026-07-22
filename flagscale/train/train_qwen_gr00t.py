@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Mainly adopted from
 # https://github.com/huggingface/lerobot/blob/2b304eeb841ae6c371e3dd341bbbb9dd254b07cb/src/lerobot/scripts/lerobot_train.py
 
@@ -17,7 +31,11 @@ import torch
 import torch.distributed as dist
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.checkpoint.state_dict import get_model_state_dict, get_optimizer_state_dict, StateDictOptions
+from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    StateDictOptions,
+)
 from torch.optim import Optimizer
 
 from flagscale.logger import logger
@@ -96,7 +114,6 @@ def apply_fsdp2(policy, device_mesh):
 def make_dataset(config: TrainConfig, policy_config: PreTrainedConfig):
     ds_meta = LeRobotDatasetMetadata(root=config.data.data_path, revision=None)
     delta_timestamps = _resolve_delta_timestamps(policy_config, ds_meta)
-
 
     # torchcodec depends on NVIDIA NVDEC which is not available on all platforms (e.g. MUSA);
     # fall back to pyav for non-CUDA platforms.
@@ -256,7 +273,6 @@ def format_train_tracker_step(train_tracker: MetricsTracker) -> str:
         *[_format_meter_val(m) for m in train_tracker.metrics.values()],
     ]
     return " ".join(display_list)
-
 
 
 def make_pre_post_processors(
@@ -464,7 +480,9 @@ def update_policy(
     optimizer.zero_grad()
 
     autocast_context = (
-        torch.amp.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16) if use_amp else nullcontext()
+        torch.amp.autocast(get_platform().amp_device_type(), dtype=torch.bfloat16)
+        if use_amp
+        else nullcontext()
     )
     with autocast_context:
         output = policy(batch, vlm_batch=vlm_batch)
@@ -491,7 +509,9 @@ def update_policy(
         policy.update()
 
     train_metrics.loss = loss.item()
-    train_metrics.grad_norm = grad_norm.full_tensor().item() if hasattr(grad_norm, 'full_tensor') else grad_norm.item()
+    train_metrics.grad_norm = (
+        grad_norm.full_tensor().item() if hasattr(grad_norm, "full_tensor") else grad_norm.item()
+    )
     train_metrics.lr = optimizer.param_groups[0]["lr"]
     train_metrics.update_s = time.perf_counter() - start_time
     if "vlm_loss" in output and "vlm_loss" in train_metrics.metrics:
@@ -575,10 +595,17 @@ def main(config: TrainConfig, seed: int):
         policy = make_policy(policy_config, ds_meta)
         dist.barrier()
 
-        dataset_stats = ds_meta.stats if not isinstance(dataset, LeRobotMixtureDataset) else dataset.merged_stats
+        dataset_stats = (
+            ds_meta.stats
+            if not isinstance(dataset, LeRobotMixtureDataset)
+            else dataset.merged_stats
+        )
         # Create processors - only provide dataset_stats if not resuming from saved processors
         preprocessor, postprocessor = make_pre_post_processors(
-            policy, config.data, dataset_stats=dataset_stats, device=device.type,
+            policy,
+            config.data,
+            dataset_stats=dataset_stats,
+            device=device.type,
         )
 
         num_workers = 0  # config.system.num_workers
@@ -603,7 +630,6 @@ def main(config: TrainConfig, seed: int):
             drop_last=False,
             prefetch_factor=2 if num_workers > 0 else None,
         )
-
 
         dl_iter = cycle(dataloader)
         num_frames = dataset.num_frames if hasattr(dataset, "num_frames") else len(dataset)
@@ -631,7 +657,10 @@ def main(config: TrainConfig, seed: int):
     resume_from = config.system.checkpoint.resume_from
     if resume_from:
         step, dl_state = load_training_state_fsdp2(
-            Path(resume_from), policy, optimizer, lr_scheduler,
+            Path(resume_from),
+            policy,
+            optimizer,
+            lr_scheduler,
         )
         # Restore dataloader position via StatefulDistributedSampler if state
         # was saved; otherwise fall back to advancing the iterator manually.
@@ -729,7 +758,11 @@ def main(config: TrainConfig, seed: int):
                 checkpoint_dir = get_step_checkpoint_dir(
                     output_dir, config.system.train_steps, step
                 )
-                dl_state = sampler.state_dict() if sampler is not None and hasattr(sampler, "state_dict") else None
+                dl_state = (
+                    sampler.state_dict()
+                    if sampler is not None and hasattr(sampler, "state_dict")
+                    else None
+                )
                 save_checkpoint(
                     checkpoint_dir=checkpoint_dir,
                     step=step,

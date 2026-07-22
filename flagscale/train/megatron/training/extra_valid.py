@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import math
 
 import torch
@@ -9,10 +23,16 @@ from megatron.core.datasets.utils import get_blend_from_list
 from megatron.core.rerun_state_machine import RerunDataIterator
 from megatron.training.datasets.data_samplers import build_pretraining_data_loader
 from megatron.training import get_args, get_tokenizer, print_rank_0
-from megatron.training.global_vars import get_tensorboard_writer, get_wandb_writer, get_extra_valid_datasets, set_extra_valid_datasets
+from megatron.training.global_vars import (
+    get_tensorboard_writer,
+    get_wandb_writer,
+    get_extra_valid_datasets,
+    set_extra_valid_datasets,
+)
 from megatron.training.utils import is_last_rank, print_rank_last
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
 
@@ -67,9 +87,9 @@ def extra_valid_datasets_provider(data_path, num_samples):
         dataset_type, [0, num_samples, 0], is_dataset_built_on_rank, config
     ).build()
 
-    assert (
-        extra_train_ds is None and extra_test_ds is None
-    ), "train_ds and test_ds should be None for extra_valid_ds"
+    assert extra_train_ds is None and extra_test_ds is None, (
+        "train_ds and test_ds should be None for extra_valid_ds"
+    )
 
     print_rank_0("> finished creating GPT datasets ...")
 
@@ -84,9 +104,9 @@ def build_extra_valid_datasets(build_extra_valid_dataset_provider):
     if args.extra_valid_data_path is None:
         return [None]
 
-    assert (
-        len(args.extra_valid_data_path) % 2 == 0
-    ), "extra_valid_data_path format should be a list of weight, prefix and tag."
+    assert len(args.extra_valid_data_path) % 2 == 0, (
+        "extra_valid_data_path format should be a list of weight, prefix and tag."
+    )
 
     blend = args.extra_valid_data_path
     raw_num_tokens_per_dataset, raw_prefix_paths_per_dataset = zip(
@@ -114,9 +134,9 @@ def build_extra_valid_datasets(build_extra_valid_dataset_provider):
     args.extra_prefix_paths_list = raw_prefix_paths_per_dataset
     args.extra_num_samples_list = num_samples_per_dataset
 
-    assert len(raw_prefix_paths_per_dataset) == len(
-        num_samples_per_dataset
-    ), f"Number of extra_valid data paths {len(raw_prefix_paths_per_dataset)} does not match number of extra_valid data samples {len(num_samples_per_dataset)}"
+    assert len(raw_prefix_paths_per_dataset) == len(num_samples_per_dataset), (
+        f"Number of extra_valid data paths {len(raw_prefix_paths_per_dataset)} does not match number of extra_valid data samples {len(num_samples_per_dataset)}"
+    )
 
     extra_valid_datasets = []
     for path, num_samples in zip(raw_prefix_paths_per_dataset, num_samples_per_dataset):
@@ -140,7 +160,6 @@ def build_extra_valid_data_loaders(build_extra_valid_dataset_provider):
 
     # Construct the data pipeline
     if is_distributed or mpu.get_tensor_model_parallel_rank() == 0:
-
         # Build datasets if necessary.
         if get_extra_valid_datasets() is None:
             extra_valid_datasets = build_extra_valid_datasets(build_extra_valid_dataset_provider)
@@ -156,7 +175,9 @@ def build_extra_valid_data_loaders(build_extra_valid_dataset_provider):
         # Flags to know if we need to do extra_validation.
         is_none = map(lambda _: _ is None, extra_valid_dataloaders)
         do_extra_valid = len(extra_valid_dataloaders) > 0 and not any(is_none)
-        flags = torch.tensor([int(do_extra_valid)], dtype=torch.long, device=cur_platform.device_name())
+        flags = torch.tensor(
+            [int(do_extra_valid)], dtype=torch.long, device=cur_platform.device_name()
+        )
     else:
         flags = torch.tensor([0], dtype=torch.long, device=cur_platform.device_name())
 

@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Mainly adopted from https://github.com/alibaba/Pai-Megatron-Patch/blob/8949a6647cbf6b39837ad3dd911fa4aa0726895b/megatron_patch/model/qwen2_5_vl/visionmodel.py.
 
 from typing import Optional
@@ -49,7 +63,9 @@ class PatchEmbed(nn.Module):
             flat_dim = in_channels * temporal_patch_size * patch_size * patch_size
             self.proj = nn.Linear(flat_dim, embed_dim, bias=bias)
         else:
-            self.proj = nn.Conv3d(in_channels, embed_dim, kernel_size=self.kernel_size, stride=self.stride, bias=bias)
+            self.proj = nn.Conv3d(
+                in_channels, embed_dim, kernel_size=self.kernel_size, stride=self.stride, bias=bias
+            )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """
@@ -67,8 +83,9 @@ class PatchEmbed(nn.Module):
         # and https://github.com/pytorch/pytorch/issues/166122
         # and https://github.com/huggingface/transformers/pull/45041
         # By default, we use CUDNN's convolution ops with optimization.
-        return self.kernel_size == self.stride and \
-                version.parse(torch.__version__) > version.parse('2.9.0')
+        return self.kernel_size == self.stride and version.parse(torch.__version__) > version.parse(
+            "2.9.0"
+        )
 
     def _forward_matmul(self, hidden_states):
         target_dtype = self.proj.weight.dtype
@@ -83,11 +100,11 @@ class PatchEmbed(nn.Module):
         hidden_states = self.proj(hidden_states.to(dtype=target_dtype)).view(-1, self.embed_dim)
         return hidden_states
 
+
 # copied from https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2_vl/modeling_qwen2_vl.py
 class VisionRotaryEmbedding(nn.Module):
-    """
+    """ """
 
-    """
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
         # NOTE(lizhiyu): print inv_freq to check it.
@@ -99,6 +116,7 @@ class VisionRotaryEmbedding(nn.Module):
         # freqs [seq_len, dim // 2]
         freqs = torch.outer(seq, self.inv_freq)
         return freqs
+
 
 # reference from https://github.com/huggingface/transformers/blob/0ad3710d4767d4ac7ee95f33f8554373e59efade/src/transformers/models/qwen2_5_vl/modular_qwen2_5_vl.py#L243
 class Qwen2_5VisionModel(VisionModule):
@@ -122,9 +140,8 @@ class Qwen2_5VisionModel(VisionModule):
         projection_config: TransformerConfig,
         projection_layer_spec: ModuleSpec,
         projection_type: str = "mlp",
-
         pre_process: bool = True,
-        post_process: bool = False
+        post_process: bool = False,
     ) -> None:
         super().__init__(config=transformer_config)
 
@@ -164,7 +181,7 @@ class Qwen2_5VisionModel(VisionModule):
             spec=transformer_layer_spec,
             pre_process=self.pre_process,
             post_process=self.post_process,
-            post_layer_norm=True
+            post_layer_norm=True,
         )
 
         self.merge_hidden_size = projection_config.ffn_hidden_size
@@ -175,7 +192,7 @@ class Qwen2_5VisionModel(VisionModule):
                 projection_config,
                 projection_layer_spec,
                 projection_type,
-                projection_config.ffn_hidden_size
+                projection_config.ffn_hidden_size,
             )
         else:
             self.projection = None
@@ -188,7 +205,7 @@ class Qwen2_5VisionModel(VisionModule):
         Args:
             input_tensor (Tensor): Sets the input tensor for the model.
         """
-        if self.pre_process: # always True
+        if self.pre_process:  # always True
             self.input_tensor = input_tensor
         else:
             raise NotImplementedError()
@@ -223,9 +240,9 @@ class Qwen2_5VisionModel(VisionModule):
         return rotary_pos_emb
 
     def get_window_index(self, grid_thw):
-        '''
+        """
         grid_thw: (tiles, 3) ->
-        '''
+        """
         window_index: list = []
         cu_window_seqlens: list = [0]
         window_index_id = 0
@@ -234,13 +251,17 @@ class Qwen2_5VisionModel(VisionModule):
 
         for grid_t, grid_h, grid_w in grid_thw:
             llm_grid_h, llm_grid_w = (
-                grid_h // self.spatial_merge_size, # 224 // 2 = 112
+                grid_h // self.spatial_merge_size,  # 224 // 2 = 112
                 grid_w // self.spatial_merge_size,
             )
-            index = torch.arange(grid_t * llm_grid_h * llm_grid_w).reshape(grid_t, llm_grid_h, llm_grid_w)
-            pad_h = vit_merger_window_size - llm_grid_h % vit_merger_window_size # vit_merger_window_size = 4
+            index = torch.arange(grid_t * llm_grid_h * llm_grid_w).reshape(
+                grid_t, llm_grid_h, llm_grid_w
+            )
+            pad_h = (
+                vit_merger_window_size - llm_grid_h % vit_merger_window_size
+            )  # vit_merger_window_size = 4
             pad_w = vit_merger_window_size - llm_grid_w % vit_merger_window_size
-            num_windows_h = (llm_grid_h + pad_h) // vit_merger_window_size # 向上取整
+            num_windows_h = (llm_grid_h + pad_h) // vit_merger_window_size  # 向上取整
             num_windows_w = (llm_grid_w + pad_w) // vit_merger_window_size
             index_padded = F.pad(index, (0, pad_w, 0, pad_h), "constant", -100)
             index_padded = index_padded.reshape(
@@ -293,7 +314,7 @@ class Qwen2_5VisionModel(VisionModule):
         assert inference_params is None
 
         # Rotary positional embeddings (embedding is None for PP intermediate devices)
-        #vision_data (t, 3) --> (t, embed_dim)
+        # vision_data (t, 3) --> (t, embed_dim)
         vision_data = self.patch_embed(vision_data)
         # window_index: [tiles, num_windows]   cu_window_seqlens: [tiles * num_windows]
         window_index, cu_window_seqlens = self.get_window_index(grid_thw)
@@ -305,19 +326,23 @@ class Qwen2_5VisionModel(VisionModule):
         cu_window_seqlens = torch.unique_consecutive(cu_window_seqlens)
 
         seq_len, _ = vision_data.size()
-        vision_data = vision_data.reshape(seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
+        vision_data = vision_data.reshape(
+            seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1
+        )
         vision_data = vision_data[window_index, :, :]
         vision_data = vision_data.reshape(seq_len, 1, -1)
 
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
-        rotary_pos_emb = rotary_pos_emb.reshape(seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1)
+        rotary_pos_emb = rotary_pos_emb.reshape(
+            seq_len // self.spatial_merge_unit, self.spatial_merge_unit, -1
+        )
         rotary_pos_emb = rotary_pos_emb[window_index, :, :]
         rotary_pos_emb = rotary_pos_emb.reshape(seq_len, 1, 1, -1).repeat(1, 1, 1, 2)
 
         hidden_states = self.decoder(
-            hidden_states = vision_data,
-            attention_mask = None,
-            inference_params = inference_params,
+            hidden_states=vision_data,
+            attention_mask=None,
+            inference_params=inference_params,
             rotary_pos_emb=rotary_pos_emb,
             packed_seq_params=self.build_packed_seq_params(None, cu_window_seqlens),
             packed_seq_params_full=self.build_packed_seq_params(grid_thw),
@@ -339,14 +364,14 @@ class Qwen2_5VisionModel(VisionModule):
             seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0])
             cu_seqlens = seqlens.cumsum(dim=0)
             cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0).int()
-        else: # the step of cu_seqlens is window_size, not sampel seq_length
+        else:  # the step of cu_seqlens is window_size, not sampel seq_length
             seqlens = cu_seqlens[1:] - cu_seqlens[:-1]
 
         max_seqlen_q = seqlens.max()
         return PackedSeqParams(
             cu_seqlens_q=cu_seqlens,
             cu_seqlens_kv=cu_seqlens,
-            qkv_format='thd',
+            qkv_format="thd",
             max_seqlen_q=max_seqlen_q,
-            max_seqlen_kv=max_seqlen_q
+            max_seqlen_kv=max_seqlen_q,
         )

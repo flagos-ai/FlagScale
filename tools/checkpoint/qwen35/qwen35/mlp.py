@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """MLP conversion helpers (dense + MoE) shared across directions."""
 
 import torch
@@ -56,7 +70,7 @@ def convert_moe_mlp_hf2meg(hf_sd, meg_sd, layer_idx, hf_pfx, mg_pfx, cfg):
     stacked_down = hf_sd.get(f"{hf_pfx}.mlp.experts.down_proj")
     if stacked_gu is not None:
         for e in range(cfg.num_experts):
-            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc1.weight{e}"] = stacked_gu[e]
+            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc1.weight{e}"] = stacked_gu[e].clone()
     else:
         for e in range(cfg.num_experts):
             mk = f"{mg_pfx}.mlp.experts.linear_fc1.weight{e}"
@@ -67,7 +81,7 @@ def convert_moe_mlp_hf2meg(hf_sd, meg_sd, layer_idx, hf_pfx, mg_pfx, cfg):
 
     if stacked_down is not None:
         for e in range(cfg.num_experts):
-            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc2.weight{e}"] = stacked_down[e]
+            meg_sd[f"{mg_pfx}.mlp.experts.linear_fc2.weight{e}"] = stacked_down[e].clone()
     else:
         for e in range(cfg.num_experts):
             mk = f"{mg_pfx}.mlp.experts.linear_fc2.weight{e}"

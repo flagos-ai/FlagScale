@@ -2,7 +2,6 @@
 
 """Dataloaders."""
 
-
 import random
 
 import numpy as np
@@ -23,9 +22,9 @@ def build_pretraining_data_loader(dataset, consumed_samples):
         return None
     args = get_args()
 
-    if hasattr(dataset, 'split'):
+    if hasattr(dataset, "split"):
         split = dataset.split
-    elif hasattr(dataset, 'index_split'):
+    elif hasattr(dataset, "index_split"):
         split = dataset.index_split
     else:
         split = None
@@ -38,7 +37,7 @@ def build_pretraining_data_loader(dataset, consumed_samples):
             data_parallel_rank=mpu.get_data_parallel_rank(),
             data_parallel_size=mpu.get_data_parallel_world_size(),
         )
-    elif args.dataloader_type == 'single':
+    elif args.dataloader_type == "single":
         if args.hybrid_context_parallel:
             batch_sampler = HybridCPMegatronPretrainingSampler(
                 total_samples=len(dataset),
@@ -46,7 +45,8 @@ def build_pretraining_data_loader(dataset, consumed_samples):
                 micro_batch_size=args.micro_batch_size,
                 global_batch_size=args.global_batch_size,
                 data_parallel_rank=mpu.get_data_parallel_rank(),
-                data_parallel_size=mpu.get_data_parallel_world_size())
+                data_parallel_size=mpu.get_data_parallel_world_size(),
+            )
         else:
             # Megatron sampler
             batch_sampler = MegatronPretrainingSampler(
@@ -54,8 +54,9 @@ def build_pretraining_data_loader(dataset, consumed_samples):
                 consumed_samples=consumed_samples,
                 micro_batch_size=args.micro_batch_size,
                 data_parallel_rank=mpu.get_data_parallel_rank(),
-                data_parallel_size=mpu.get_data_parallel_world_size())
-    elif args.dataloader_type == 'cyclic':
+                data_parallel_size=mpu.get_data_parallel_world_size(),
+            )
+    elif args.dataloader_type == "cyclic":
         batch_sampler = MegatronPretrainingRandomSampler(
             dataset,
             total_samples=len(dataset),
@@ -70,7 +71,7 @@ def build_pretraining_data_loader(dataset, consumed_samples):
         # torch-compatible dataloader and define samplers, if needed.
         return dataset
     else:
-        raise Exception('{} dataloader type is not supported.'.format(args.dataloader_type))
+        raise Exception("{} dataloader type is not supported.".format(args.dataloader_type))
 
     def worker_init_fn(_):
         import os
@@ -91,12 +92,12 @@ def build_pretraining_data_loader(dataset, consumed_samples):
         if args.exit_signal_handler:
             DistributedSignalHandler(args.exit_signal).__enter__()
 
-    maybe_worker_init_fn = (
-        worker_init_fn if args.num_workers > 0 else None
-    )
+    maybe_worker_init_fn = worker_init_fn if args.num_workers > 0 else None
     # Torch dataloader.
     if args.hybrid_context_parallel:
-        extra_kwargs = {"collate_fn": lambda x: x,}
+        extra_kwargs = {
+            "collate_fn": lambda x: x,
+        }
     else:
         extra_kwargs = {}
     return torch.utils.data.DataLoader(
@@ -108,6 +109,7 @@ def build_pretraining_data_loader(dataset, consumed_samples):
         worker_init_fn=maybe_worker_init_fn,
         **extra_kwargs,
     )
+
 
 class MegatronPretrainingSampler:
     """
@@ -136,16 +138,16 @@ class MegatronPretrainingSampler:
         self.drop_last = drop_last
 
         # Sanity checks.
-        assert self.total_samples > 0, 'no sample to consume: {}'.format(self.total_samples)
-        assert (
-            self.consumed_samples < self.total_samples
-        ), 'no samples left to consume: {}, {}'.format(self.consumed_samples, self.total_samples)
+        assert self.total_samples > 0, "no sample to consume: {}".format(self.total_samples)
+        assert self.consumed_samples < self.total_samples, (
+            "no samples left to consume: {}, {}".format(self.consumed_samples, self.total_samples)
+        )
         assert self.micro_batch_size > 0
         assert data_parallel_size > 0
-        assert (
-            self.data_parallel_rank < data_parallel_size
-        ), 'data_parallel_rank should be smaller than data size: {}, ' '{}'.format(
-            self.data_parallel_rank, data_parallel_size
+        assert self.data_parallel_rank < data_parallel_size, (
+            "data_parallel_rank should be smaller than data size: {}, {}".format(
+                self.data_parallel_rank, data_parallel_size
+            )
         )
 
     def __len__(self):
@@ -178,6 +180,7 @@ class MegatronPretrainingSampler:
             start_idx, end_idx = self.get_start_end_idx()
             yield batch[start_idx:end_idx]
 
+
 class HybridCPMegatronPretrainingSampler(MegatronPretrainingSampler):
     """
     Data sampler for hybrid context parallel (Hybrid CP) format.
@@ -186,9 +189,24 @@ class HybridCPMegatronPretrainingSampler(MegatronPretrainingSampler):
     of the entire global batch.
     """
 
-    def __init__(self, total_samples, consumed_samples, micro_batch_size, global_batch_size,
-                 data_parallel_rank, data_parallel_size, drop_last=True):
-        super().__init__(total_samples, consumed_samples, micro_batch_size, data_parallel_rank, data_parallel_size, drop_last)
+    def __init__(
+        self,
+        total_samples,
+        consumed_samples,
+        micro_batch_size,
+        global_batch_size,
+        data_parallel_rank,
+        data_parallel_size,
+        drop_last=True,
+    ):
+        super().__init__(
+            total_samples,
+            consumed_samples,
+            micro_batch_size,
+            data_parallel_rank,
+            data_parallel_size,
+            drop_last,
+        )
         self.global_batch_size = global_batch_size
         self.data_parallel_size = data_parallel_size
         self.num_micro_batches = self.global_batch_size // self.micro_batch_times_data_parallel_size
@@ -197,7 +215,11 @@ class HybridCPMegatronPretrainingSampler(MegatronPretrainingSampler):
         return self.total_samples
 
     def get_start_end_idx_global_batch(self):
-        start_idx = [self.data_parallel_rank * self.micro_batch_size + i * self.micro_batch_size * self.data_parallel_size for i in range(self.num_micro_batches)]
+        start_idx = [
+            self.data_parallel_rank * self.micro_batch_size
+            + i * self.micro_batch_size * self.data_parallel_size
+            for i in range(self.num_micro_batches)
+        ]
         end_idx = [start_idx[i] + self.micro_batch_size for i in range(self.num_micro_batches)]
         return start_idx, end_idx
 
@@ -210,7 +232,7 @@ class HybridCPMegatronPretrainingSampler(MegatronPretrainingSampler):
                 start_idx, end_idx = self.get_start_end_idx_global_batch()
                 global_batch_idx = []
                 for i in range(self.num_micro_batches):
-                    global_batch_idx.extend(batch[start_idx[i]:end_idx[i]])
+                    global_batch_idx.extend(batch[start_idx[i] : end_idx[i]])
                 yield global_batch_idx
                 batch = []
 
@@ -219,8 +241,9 @@ class HybridCPMegatronPretrainingSampler(MegatronPretrainingSampler):
             start_idx, end_idx = self.get_start_end_idx_global_batch()
             global_batch_idx = []
             for i in range(self.num_micro_batches):
-                global_batch_idx.extend(batch[start_idx[i]:end_idx[i]])
+                global_batch_idx.extend(batch[start_idx[i] : end_idx[i]])
             yield global_batch_idx
+
 
 class RandomSeedDataset(Dataset):
     """
@@ -294,13 +317,13 @@ class MegatronPretrainingRandomSampler:
         self.last_batch_size = self.total_samples % self.micro_batch_times_data_parallel_size
 
         # Sanity checks.
-        assert self.total_samples > 0, 'no sample to consume: {}'.format(self.total_samples)
+        assert self.total_samples > 0, "no sample to consume: {}".format(self.total_samples)
         assert self.micro_batch_size > 0
         assert data_parallel_size > 0
-        assert (
-            self.data_parallel_rank < data_parallel_size
-        ), 'data_parallel_rank should be smaller than data size: {}, ' '{}'.format(
-            self.data_parallel_rank, data_parallel_size
+        assert self.data_parallel_rank < data_parallel_size, (
+            "data_parallel_rank should be smaller than data size: {}, {}".format(
+                self.data_parallel_rank, data_parallel_size
+            )
         )
 
     def __len__(self):

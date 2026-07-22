@@ -1,4 +1,19 @@
 #!/bin/bash
+
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Unified checkpoint conversion entry point for Qwen3.5
 # Dispatches to convert_qwen35.py with --direction.
 #
@@ -20,6 +35,10 @@
 #       --meg-path /path/to/meg \
 #       --hf-path /path/to/hf/save \
 #       [--ref-path /path/to/ref]
+#
+# When --ref-path is provided, the output path for the current direction
+# may be omitted; the result is written to a temporary directory, compared
+# against the reference, and then cleaned up.
 
 set -e
 
@@ -35,11 +54,20 @@ All remaining arguments are passed directly to convert_qwen35.py.
 
 Required arguments:
   --yaml PATH          Path to training yaml config
-  --hf-path PATH|ID    Path to HF checkpoint directory, or a ModelScope model ID (hf2meg only)
-  --meg-path PATH      Path to Megatron checkpoint directory (input or output)
+
+Direction-specific arguments:
+  --hf-path PATH|ID    For hf2meg: input HF checkpoint or ModelScope model ID (required).
+                       For meg2hf: output HF checkpoint directory (required unless --ref-path is given).
+  --meg-path PATH      For hf2meg: output Megatron checkpoint directory (required unless --ref-path is given).
+                       For meg2hf: input Megatron checkpoint directory (required).
 
 Optional arguments:
-  --ref-path PATH      Reference checkpoint for validation
+  --ref-path PATH      Reference checkpoint for validation. When provided, the
+                       output path for the current direction may be omitted; the
+                       converted checkpoint is written to a temporary directory,
+                       compared against the reference, and then deleted.
+  --ref-skip-value     When validating against --ref-path, skip numerical value
+                       comparison and only compare structure, keys, and shapes.
   --tp N               Override tensor model parallel size
   --pp N               Override pipeline model parallel size
   --ep N               Override expert model parallel size (MoE only)
@@ -59,6 +87,18 @@ Examples:
       --yaml /path/to/4b.yaml \
       --meg-path /path/to/meg \
       --hf-path /path/to/hf/save \
+      --ref-path /path/to/ref/hf
+
+  # HF -> Megatron validation only (no permanent output)
+  ./run.sh hf2meg \
+      --yaml /path/to/4b.yaml \
+      --hf-path Qwen/Qwen3.5-4B \
+      --ref-path /path/to/ref/meg
+
+  # Megatron -> HF validation only (no permanent output)
+  ./run.sh meg2hf \
+      --yaml /path/to/4b.yaml \
+      --meg-path /path/to/meg \
       --ref-path /path/to/ref/hf
 EOF
 }

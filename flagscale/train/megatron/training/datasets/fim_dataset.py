@@ -248,7 +248,6 @@ class GPTFIMDataset(GPTDataset):
         Maintain the same sample length (if transform creates a few extra tokens, drop them).
         """
         if self.np_rng.binomial(1, fim_rate):  # sample bernoulli dist
-
             # Use remove_special_tokens=True so character-level boundaries and re-tokenization
             # are consistent; otherwise ids_to_text(..., None) keeps special tokens when
             # include_special_tokens=True, changing contents and breaking e.g. split_sample.

@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Training configuration models using Pydantic.
 """
@@ -191,7 +205,9 @@ class DataConfig(BaseModel):
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
     dataset_type: str = "lerobot"
-    data_path: str | None = Field(default=None, description="Path to training dataset (unused when data_mix is set)")
+    data_path: str | None = Field(
+        default=None, description="Path to training dataset (unused when data_mix is set)"
+    )
     tolerance_s: float = 0.0001
     use_imagenet_stats: bool = True
     rename_map: dict[str, str] | None = None
@@ -233,7 +249,9 @@ class ModelConfig(BaseModel):
     # Required fields to identify which model and checkpoint to use
     model_name: str = Field(..., description="Model name: 'pi0' or 'pi0.5'")
     # None when the policy loads pretrained sub-components (e.g. VLM) internally
-    checkpoint_dir: str | None = Field(default=None, description="Path to pretrained model checkpoint")
+    checkpoint_dir: str | None = Field(
+        default=None, description="Path to pretrained model checkpoint"
+    )
     freeze: FreezeConfig | None = None
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
     raw: DictConfig | None = Field(default=None, exclude=True)
@@ -262,9 +280,7 @@ class ModelConfig(BaseModel):
 
     def get_model_config_dict(self) -> dict[str, Any]:
         """Get all model-specific config fields (excluding train-level fields)."""
-        return self.model_dump(
-            exclude={"model_name", "checkpoint_dir", "freeze", "optimizer"}
-        )
+        return self.model_dump(exclude={"model_name", "checkpoint_dir", "freeze", "optimizer"})
 
 
 class TrainConfig(BaseModel):
@@ -311,11 +327,13 @@ class TrainConfig(BaseModel):
 
     def to_omegaconf(self) -> DictConfig:
         """Reconstruct the full OmegaConf config from stored raw DictConfigs."""
-        return OmegaConf.create({
-            "system": self.system.raw,
-            "model": self.model.raw,
-            "data": self.data.raw,
-        })
+        return OmegaConf.create(
+            {
+                "system": self.system.raw,
+                "model": self.model.raw,
+                "data": self.data.raw,
+            }
+        )
 
     class Config:
         # Allow arbitrary types for complex objects

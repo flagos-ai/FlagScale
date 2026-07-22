@@ -22,24 +22,28 @@ from megatron.training.async_utils import (
 from . import arguments
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
+
 
 def destroy_state():
     from . import training
+
     training.destroy_global_state()
     rerun_state_machine.destroy_rerun_state_machine()
 
+
 def inprocess_restart(train, args):
     if inprocess is None:
-        warnings.warn('In-process restart is not available')
+        warnings.warn("In-process restart is not available")
         return train
 
-    if 'TORCH_CPP_LOG_LEVEL' not in os.environ or os.environ['TORCH_CPP_LOG_LEVEL'] not in (
-        'error',
-        'fatal',
+    if "TORCH_CPP_LOG_LEVEL" not in os.environ or os.environ["TORCH_CPP_LOG_LEVEL"] not in (
+        "error",
+        "fatal",
     ):
         warnings.warn(
-            'Set TORCH_CPP_LOG_LEVEL=error to suppress c10d waitForInput timeout warning messages'
+            "Set TORCH_CPP_LOG_LEVEL=error to suppress c10d waitForInput timeout warning messages"
         )
 
     # Layers represents a configuration for a layer of branches at a certain
@@ -53,7 +57,7 @@ def inprocess_restart(train, args):
             flag=inprocess.rank_assignment.LayerFlag.RESERVE,
         )
     ]
-    if args.inprocess_granularity == 'node':
+    if args.inprocess_granularity == "node":
         device_count = cur_platform.device_count()
 
         layers.append(
@@ -84,9 +88,8 @@ def inprocess_restart(train, args):
     class AbortCheckpoint(inprocess.abort.Abort):
         def __init__(self, async_strategy):
             self.async_strategy = async_strategy
-        def __call__(
-            self, state: inprocess.state.FrozenState
-        ) -> inprocess.state.FrozenState:
+
+        def __call__(self, state: inprocess.state.FrozenState) -> inprocess.state.FrozenState:
             reset_persistent_async_worker(self.async_strategy)
             return state
 
@@ -101,8 +104,8 @@ def inprocess_restart(train, args):
 
     train = inprocess.Wrapper(
         store_kwargs={
-            'timeout': timedelta(seconds=300),
-            'port': int(os.environ['MASTER_PORT']) + 2,
+            "timeout": timedelta(seconds=300),
+            "port": int(os.environ["MASTER_PORT"]) + 2,
         },
         initialize=initialize,
         abort=abort,
@@ -128,17 +131,16 @@ def inprocess_restart(train, args):
 
 
 def maybe_wrap_for_inprocess_restart(pretrain):
-
     args = arguments.parse_args(ignore_unknown_args=True)
 
     if args.inprocess_restart:
         pretrain = inprocess_restart(pretrain, args)
 
         store = torch.distributed.TCPStore(
-            host_name=os.environ['MASTER_ADDR'],
-            port=int(os.environ['MASTER_PORT'])+1,
-            world_size=int(os.getenv('WORLD_SIZE', '1')),
-            is_master=(int(os.getenv('RANK', '0')) == 0),
+            host_name=os.environ["MASTER_ADDR"],
+            port=int(os.environ["MASTER_PORT"]) + 1,
+            world_size=int(os.getenv("WORLD_SIZE", "1")),
+            is_master=(int(os.getenv("RANK", "0")) == 0),
             timeout=timedelta(seconds=300),
             wait_for_workers=True,
             use_libuv=True,
@@ -150,7 +152,6 @@ def maybe_wrap_for_inprocess_restart(pretrain):
 
 
 def maybe_force_nccl_backend_init(device_id):
-
     args = get_args()
 
     # Inprocess uses destroy_process_group to terminate NCCL backend, which

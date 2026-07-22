@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # ruff: noqa: RUF013
 ## built-in
 from typing import Optional
@@ -33,7 +47,7 @@ class LazyHashInputIds:
         self.input_ids = input_ids
         self.hash_stream = hash_stream
         self._result = None
-        self._is_async_pending = False        
+        self._is_async_pending = False
         # Async
         if self.hash_stream is not None:
             # self.hash_stream.wait_stream(cur_platform.current_stream())
@@ -61,11 +75,11 @@ class LazyHashInputIds:
             cur_platform.current_stream().wait_stream(self.hash_stream)
             self._is_async_pending = False  # Async finish
             self._record_current_stream()
-            
+
         # Case 2: Sync but no compute -> start compute
         elif self._result is None:
             self._result = self.hash_mapping.hash(self.input_ids)
-            
+
         # Case 3: Async or sync compute is finished.
         # print(f"[rank{torch.distributed.get_rank()}]: LazyHashInputIds result = {self._result}")
         return self._result[key]
@@ -226,6 +240,5 @@ class EngramModel(GPTModel):
             decoder_input,
             labels=labels,
             loss_mask=loss_mask,
-            extra_block_kwargs=extra_block_kwargs
+            extra_block_kwargs=extra_block_kwargs,
         )
-

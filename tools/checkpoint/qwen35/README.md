@@ -65,3 +65,19 @@ python convert_qwen35.py --direction meg2hf --meg-path ... --hf-path ... --yaml 
 ```bash
 python compare_two_ckpts.py --ref /path/to/ref/release --gen /path/to/gen/release --tp 2
 ```
+
+## WARNING
+
+If torch version < 2.9, maybe need modify (tools/checkpoint/qwen35/qwen35/config.py)
+
+```python
+self.use_linear_proj = cfg.get("vision_patch_embed_linear", True)
+```
+
+to
+
+```python
+self.use_linear_proj = cfg.get("vision_patch_embed_linear", False)
+```
+
+because qwen_vl will use linear instead of conv3d when torch version >= 2.9.
