@@ -1,13 +1,13 @@
 defaults:
   - _self_
-  - compress: w8a16
+  - compress: mix_precision
 
 experiment:
-  exp_name: robobrain
+  exp_name: qwen35_mix
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: compress
-    entrypoint: flagscale/compress/compressor.py
+    entrypoint: flagscale/compress/compressor_mix_precision.py
   runner:
     hostfile: null
   cmds:
@@ -21,5 +21,3 @@ action: run
 hydra:
   run:
     dir: ${experiment.exp_dir}/hydra
-
-
