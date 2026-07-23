@@ -66,23 +66,14 @@ class VisionTransformerBlock(TransformerBlock):
      1. It adds deepstack merger and norm layers
      2. It returns hidden_states and deepstack features in the forward function
     """
-
-    def __init__(
-        self,
-        config,
-        spec,
-        post_layer_norm=True,
-        pre_process=True,
-        post_process=True,
-        pg_collection=None,
-        vp_stage=None,
-        projection_config=None,  # Note: DeepStack
-        projection_layer_spec=None,  # Note: DeepStack
-        projection_type="mlp",  # Note: DeepStack):
-    ):
-        super().__init__(
-            config, spec, post_layer_norm, pre_process, post_process, pg_collection, vp_stage
-        )
+    def __init__(self, config, spec,
+                 post_layer_norm = True, pre_process = True, post_process = True,
+                 pg_collection = None, vp_stage = None, dualpipev_stage = None,
+                 projection_config = None,  # Note: DeepStack
+                 projection_layer_spec = None,  # Note: DeepStack
+                 projection_type = 'mlp',  # Note: DeepStack):
+                ):
+        super().__init__(config, spec, post_layer_norm, pre_process, post_process, pg_collection, vp_stage, dualpipev_stage)
 
         if self.final_layernorm != None:
             # NOTE(lizhiyu): replace final layernorm with TENorm if using TE

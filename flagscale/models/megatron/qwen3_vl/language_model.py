@@ -27,6 +27,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import WrappedTensor, deprecate_inference_params
 from megatron.core.models.gpt.gpt_model import GPTModel
 from megatron.core.process_groups_config import ProcessGroupCollection
+from megatron.core.transformer.multi_token_prediction import MultiTokenPredictionBlock
 
 from .language_transformer_block import LanguageTransformerBlock
 
@@ -101,7 +102,7 @@ class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
             freqs_t[..., idx] = freqs[dim, ..., idx]
         return freqs_t
 
-    def forward(self, position_ids: torch.Tensor, mrope_section: List[int]) -> Tensor:
+    def forward(self, position_ids: torch.Tensor, mrope_section: List[int], cp_group: Optional[torch.distributed.ProcessGroup] = None) -> Tensor:
         """Forward pass of multimodal RoPE embedding.
 
         Args:
@@ -142,10 +143,12 @@ class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
 
         # shape (seq_length, bs, 1, 2 * dim)
         emb = emb[..., None, :].transpose(0, 1).contiguous()
-        if self.cp_group is not None and self.cp_group.size() > 1:
+        if cp_group is None:
+            cp_group = self.cp_group
+        if cp_group is not None and cp_group.size() > 1:
             # slice rotary_pos_emb along sequence dimension and select the parition of the current
             # CP rank
-            emb = get_pos_emb_on_this_cp_rank(emb, 0, self.cp_group)
+            emb = get_pos_emb_on_this_cp_rank(emb, 0, cp_group)
         return emb
 
 
@@ -234,6 +237,7 @@ class Qwen3VLLanguageModule(GPTModel):
                 vocab_size=self.vocab_size,
                 max_sequence_length=self.max_sequence_length,
                 position_embedding_type=position_embedding_type,
+                tp_group=self.pg_collection.tp,
             )
         if self.position_embedding_type == "mrope" and not self.config.multi_latent_attention:
             self.rotary_pos_emb = Qwen3VLLanguageRotaryEmbedding(
@@ -263,7 +267,7 @@ class Qwen3VLLanguageModule(GPTModel):
 
         if self.mtp_process:
             self.mtp = MultiTokenPredictionBlock(
-                config=self.config, spec=self.mtp_block_spec, vp_stage=vp_stage
+                config=self.config, spec=self.mtp_block_spec, vp_stage=vp_stage, pg_collection=self.pg_collection
             )
 
         # Output
@@ -310,34 +314,28 @@ class Qwen3VLLanguageModule(GPTModel):
                 quant_config = get_quant_config_or_none(name, self.config.quant_recipe)
                 module.finish_init(quant_config)
 
-    def forward(
-        self,
-        input_ids,
-        position_ids,
-        attention_mask,
-        decoder_input=None,
-        labels=None,
-        inference_context=None,
-        packed_seq_params=None,
-        extra_block_kwargs=None,
-        runtime_gather_output=None,
-        # args for deepstack
-        visual_pos_masks: Optional[torch.Tensor] = None,
-        deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
-        *,
-        inference_params=None,
-        loss_mask=None,
-    ):
+    def forward(self, input_ids, position_ids, attention_mask,
+                decoder_input = None, labels = None, inference_context = None,
+                packed_seq_params = None, extra_block_kwargs = None,
+                runtime_gather_output = None,
+                # args for deepstack
+                visual_pos_masks: Optional[torch.Tensor] = None,
+                deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
+                *, inference_params = None,
+                loss_mask = None,
+                padding_mask: Optional[torch.Tensor] = None):
+
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
-        decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset = (
+        decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset, padding_mask = (
             self._preprocess(
                 input_ids=input_ids,
                 position_ids=position_ids,
                 decoder_input=decoder_input,
                 inference_context=inference_context,
                 packed_seq_params=packed_seq_params,
-            )
+                padding_mask=padding_mask,
+            )[:6]
         )
 
         # Run decoder.
@@ -350,8 +348,9 @@ class Qwen3VLLanguageModule(GPTModel):
             rotary_pos_sin=rotary_pos_sin,
             packed_seq_params=packed_seq_params,
             sequence_len_offset=sequence_len_offset,
-            visual_pos_masks=visual_pos_masks,
-            deepstack_visual_embeds=deepstack_visual_embeds,
+            padding_mask=padding_mask,
+            visual_pos_masks = visual_pos_masks,
+            deepstack_visual_embeds = deepstack_visual_embeds,
             **(extra_block_kwargs or {}),
         )
 

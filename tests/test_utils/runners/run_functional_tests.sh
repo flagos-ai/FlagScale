@@ -21,6 +21,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/utils.sh"
 
+# Ensure the repo root is on PYTHONPATH so training subprocesses can import
+# top-level packages that are not shipped by `pip install .` (e.g. `tools`,
+# used by train_qwen*_vl.py). The runner appends the pre-set PYTHONPATH when
+# generating the launch script, so this propagates to the torchrun workers.
+export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+
 # Defaults
 PLATFORM="default"
 DEVICE=""

@@ -104,13 +104,17 @@ IGNORE_IDX = -100
 
 
 def model_provider(
-    pre_process=True, post_process=True, add_encoder=True, add_decoder=True
+    pre_process=True, post_process=True, vp_stage=None, config=None, pg_collection=None
 ) -> Union[Qwen3VLModel]:
     args = get_args()
     print_rank_0("start building qwen3-vl model ...")
 
     # Config of vit, llm and projector
-    config = core_transformer_config_from_args(args, Qwen3VLTransformerConfig)
+    if config is None:
+        config = core_transformer_config_from_args(args, Qwen3VLTransformerConfig)
+    else:
+        # config passed from backend, use it directly
+        pass
     use_te = args.transformer_impl == "transformer_engine"
     if not use_te:
         raise NotImplementedError("The Qwen3-VL model is only implemented with TransformerEngine!")
@@ -158,11 +162,12 @@ def model_provider(
         language_rotary_base=args.rotary_base,
         pre_process=pre_process,
         post_process=post_process,
-        add_decoder=add_decoder,
-        add_encoder=add_encoder,
+
         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
         parallel_output=True,
         language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+        pg_collection=pg_collection,
+        vp_stage=vp_stage,
     )
 
     model.freeze(

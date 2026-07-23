@@ -71,8 +71,9 @@ class Qwen3VLModel(MegatronModule):
         add_decoder: bool = True,
         language_rotary_base: int = 10000,
         fp16_lm_cross_entropy: bool = False,
-        language_share_embeddings_and_output_weights: bool = False,
-        vp_stage: int = None,
+        language_share_embeddings_and_output_weights: bool=False,
+        pg_collection = None,
+        vp_stage: int=None
     ) -> None:
         super().__init__(config=language_transformer_config)
 
@@ -123,6 +124,7 @@ class Qwen3VLModel(MegatronModule):
             share_embeddings_and_output_weights=language_share_embeddings_and_output_weights,
             rope_scaling=False,
             mtp_block_spec=None,
+            pg_collection=pg_collection,
             vp_stage=vp_stage,
         )
         self.share_embeddings_and_output_weights = (

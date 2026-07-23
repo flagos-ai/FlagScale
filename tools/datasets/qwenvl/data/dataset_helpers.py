@@ -381,14 +381,19 @@ class TaskEncoder(
 
         # NOTE: we need to mask all system/user input tokens and assistant generation prefix tokens
         input_ids = self.tokenizer.apply_chat_template(
-            conversation, tokenize=True, return_tensors="np"
+            conversation,
+            tokenize=True,
+            return_tensors="np",
+            return_dict=False,
         )[0]
         target = input_ids.copy()
 
         conversation_start_idx = 0
         if self.use_system_prompt:
             system_prompt_prefix = len(
-                self.tokenizer.apply_chat_template([conversation[0]], tokenize=True)
+                self.tokenizer.apply_chat_template(
+                    [conversation[0]], tokenize=True, return_dict=False
+                )
             )
             conversation_start_idx = 1
         else:
@@ -403,7 +408,10 @@ class TaskEncoder(
         for turn_idx, turn in enumerate(conversation[conversation_start_idx:]):
             if self._single_turn_template:
                 turn_tokens = self.tokenizer.apply_chat_template(
-                    [turn], tokenize=True, return_tensors="np"
+                    [turn],
+                    tokenize=True,
+                    return_tensors="np",
+                    return_dict=False,
                 )[0]
                 turn_content = turn_tokens[system_prompt_prefix:]
                 n_tokens = len(turn_content)
@@ -414,7 +422,10 @@ class TaskEncoder(
             else:
                 prefix = conversation[: conversation_start_idx + turn_idx + 1]
                 prefix_tokens = self.tokenizer.apply_chat_template(
-                    prefix, tokenize=True, return_tensors="np"
+                    prefix,
+                    tokenize=True,
+                    return_tensors="np",
+                    return_dict=False,
                 )[0]
                 n_tokens = len(prefix_tokens) - prev_prefix_len
 
@@ -545,8 +556,16 @@ class TaskEncoder(
             {"role": "assistant", "content": answer},
         ]
 
-        user_inputs = self.tokenizer.apply_chat_template(conversation[:-1], tokenize=False)
-        text = self.tokenizer.apply_chat_template(conversation, tokenize=False)
+        user_inputs = self.tokenizer.apply_chat_template(
+            conversation[:-1],
+            tokenize=False,
+            return_dict=False,
+        )
+        text = self.tokenizer.apply_chat_template(
+            conversation,
+            tokenize=False,
+            return_dict=False,
+        )
 
         # text, target = self.tokenizer.tokenize_conversation(conversation, False, False)
         # replace <image> token by <image> * (thw)
