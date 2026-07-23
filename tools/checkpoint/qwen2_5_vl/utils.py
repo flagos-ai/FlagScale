@@ -188,7 +188,9 @@ def safe_copy(src_tensor: torch.Tensor, dst_tensor: torch.Tensor, skip_dtype_ass
             raise ValueError(
                 f"Get source dtype {src_tensor.dtype}, but target dtype {dst_tensor.dtype}"
             )
-    assert src_tensor.shape == dst_tensor.shape
+    assert src_tensor.shape == dst_tensor.shape, (
+        f"Get source shape {src_tensor.shape}, but target shape {dst_tensor.shape}"
+    )
     dst_tensor.data.copy_(src_tensor.data)
     return src_tensor.numel()
 

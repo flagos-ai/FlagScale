@@ -83,9 +83,8 @@ class PatchEmbed(nn.Module):
         # and https://github.com/pytorch/pytorch/issues/166122
         # and https://github.com/huggingface/transformers/pull/45041
         # By default, we use CUDNN's convolution ops with optimization.
-        return self.kernel_size == self.stride and version.parse(torch.__version__) > version.parse(
-            "2.9.0"
-        )
+        return self.kernel_size == self.stride and \
+                version.parse(torch.__version__) > version.parse('2.9.0') and version.parse(torch.__version__) < version.parse('2.11.0')
 
     def _forward_matmul(self, hidden_states):
         target_dtype = self.proj.weight.dtype

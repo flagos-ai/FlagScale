@@ -35,19 +35,12 @@ class QwenVLLanguageModelEmbedding(LanguageModelEmbedding):
         max_sequence_length: int,
         position_embedding_type: Literal["learned_absolute", "rope", "none"] = "learned_absolute",
         num_tokentypes: int = 0,
-        scatter_to_sequence_parallel: bool = False,  # chage default to False
+        scatter_to_sequence_parallel: bool = False, # chage default to False
+        tp_group = None,
     ):
-        assert scatter_to_sequence_parallel == False, (
-            "QwenVLLanguageModelEmbedding does not support scatter_to_sequence_parallel"
-        )
-        super().__init__(
-            config,
-            vocab_size,
-            max_sequence_length,
-            position_embedding_type,
-            num_tokentypes,
-            scatter_to_sequence_parallel,
-        )
+        assert scatter_to_sequence_parallel == False, "QwenVLLanguageModelEmbedding does not support scatter_to_sequence_parallel"
+        super().__init__(config, vocab_size, max_sequence_length, position_embedding_type, num_tokentypes, scatter_to_sequence_parallel, tp_group)
+
 
     def forward(
         self,

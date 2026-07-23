@@ -64,6 +64,22 @@ else:
 
 
 class LanguageTransformerBlock(TransformerBlock):
+
+    def __init__(
+        self,
+        config,
+        spec,
+        post_layer_norm=True,
+        pre_process=True,
+        post_process=True,
+        pg_collection=None,
+        vp_stage=None,
+        dualpipev_stage=None,
+    ):
+        super().__init__(
+            config, spec, post_layer_norm, pre_process, post_process, pg_collection, vp_stage, dualpipev_stage
+        )
+
     def _checkpointed_forward(
         self,
         hidden_states: Tensor,
@@ -211,6 +227,7 @@ class LanguageTransformerBlock(TransformerBlock):
         inference_context: Optional[BaseInferenceContext] = None,
         packed_seq_params: Optional[PackedSeqParams] = None,
         sequence_len_offset: Optional[Tensor] = None,
+        padding_mask: Optional[Tensor] = None,
         # args for deepstack
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
@@ -351,6 +368,7 @@ class LanguageTransformerBlock(TransformerBlock):
                             inference_context=inference_context,
                             packed_seq_params=packed_seq_params,
                             sequence_len_offset=sequence_len_offset,
+                            padding_mask=padding_mask,
                         )
                     # Deepstack visual embedding addition
                     # NOTE: Assume that this is first pipeline stage that has at least three layers.
