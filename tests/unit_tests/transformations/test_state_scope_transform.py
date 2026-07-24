@@ -14,6 +14,7 @@
 
 import unittest
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch import nn
@@ -42,6 +43,11 @@ class DummyHook(ModelHook):
         return args, kwargs
 
 
+class ResettableState:
+    def reset(self):
+        pass
+
+
 class TestStateScopeTransform(unittest.TestCase):
     def test_apply_registers_hook_on_backbone(self):
         pipeline = DummyPipeline()
@@ -59,7 +65,7 @@ class TestStateScopeTransform(unittest.TestCase):
         backbone = pipeline.unet
 
         reg = ModuleHookRegistry.get_or_create_registry(backbone)
-        store = StateStore(dict)
+        store = StateStore(ResettableState)
 
         # To make it work, we need to register the dummy hook first
         hook = DummyHook()
@@ -74,5 +80,36 @@ class TestStateScopeTransform(unittest.TestCase):
         ctx.state_scope_provider = lambda: "ctxA"
         with ctx.session():
             _ = backbone(x)
+            self.assertIn("ctxA", store._state_by_scope)
 
-        self.assertIn("ctxA", store._state_by_scope)
+        self.assertEqual(store._state_by_scope, {})
+
+    def test_hook_warns_when_context_has_no_state_scope(self):
+        pipeline = DummyPipeline()
+        backbone = pipeline.unet
+        StateScopeTransformation().apply(backbone)
+
+        x = torch.zeros(1, 2)
+        ctx = RuntimeContext()
+        with (
+            patch("flagscale.transformations.state_scope_transformation.logger") as logger,
+            ctx.session(),
+        ):
+            _ = backbone(x)
+
+        logger.warning.assert_called_once()
+
+    def test_cleanup_callback_is_registered_once_per_session_and_resets_on_exit(self):
+        pipeline = DummyPipeline()
+        backbone = pipeline.unet
+        reg = ModuleHookRegistry.get_or_create_registry(backbone)
+        StateScopeTransformation().apply(backbone)
+        reset = MagicMock()
+
+        x = torch.zeros(1, 2)
+        ctx = RuntimeContext(["ctxA"])
+        with patch.object(reg, "reset_stateful_hooks", reset), ctx.session():
+            _ = backbone(x)
+            _ = backbone(x)
+
+        reset.assert_called_once_with(recursive=True)

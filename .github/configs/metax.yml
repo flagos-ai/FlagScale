@@ -55,14 +55,14 @@ container_options: >-
 # =============================================================================
 # Package Manager Configuration
 # =============================================================================
-pkg_mgr: "conda"
+pkg_mgr: 'conda'
 
 # Environment path (conda installation path)
-env_path: "/opt/conda"
+env_path: '/opt/conda'
 
 # Conda environment names
 env_names:
-  train: "base"
-  hetero_train: ""
-  inference: ""
-  rl: ""
+  train: 'base'
+  hetero_train: ''
+  inference: ''
+  rl: ''

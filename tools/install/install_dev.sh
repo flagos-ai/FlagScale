@@ -86,7 +86,7 @@ install_sccache() {
         return 0
     fi
 
-    curl --connect-timeout 120 --max-time 600 --retry 5 --retry-delay 60 -L "$url" | tar xz || {
+    curl --connect-timeout 120 --max-time 1200 --retry 10 --retry-delay 60 -L "$url" | tar xz || {
         log_error "Failed to download sccache"
         [ -d "$tmp_dir" ] && rm -rf "$tmp_dir"
         return 1

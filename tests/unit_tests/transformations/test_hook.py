@@ -16,6 +16,7 @@
 
 import gc
 import unittest
+from unittest.mock import MagicMock
 
 import torch
 
@@ -204,3 +205,84 @@ class HookTests(unittest.TestCase):
         registry.register_hook(SkipLayerHook(skip_layer=False), "skip_layer_hook")
         output = self.model(input).mean().item()
         self.assertNotEqual(output, 0.0)
+
+    def test_duplicate_and_missing_hook_registration_paths(self):
+        registry = ModuleHookRegistry.get_or_create_registry(self.model)
+        registry.register_hook(AddHook(1), "add_hook")
+
+        with self.assertRaises(ValueError):
+            registry.register_hook(AddHook(2), "add_hook")
+
+        registry.remove_hook("missing_hook")
+        self.assertEqual(registry._order, ["add_hook"])
+        self.assertIs(registry.get_hook("missing_hook"), None)
+
+    def test_hook_execution_order_is_lifo_for_pre_and_fifo_for_post(self):
+        events = []
+
+        class RecordingHook(ModelHook):
+            def __init__(self, name):
+                super().__init__()
+                self.name = name
+
+            def pre_forward(self, module, *args, **kwargs):
+                events.append(f"pre:{self.name}")
+                return args, kwargs
+
+            def post_forward(self, module, output):
+                events.append(f"post:{self.name}")
+                return output
+
+        registry = ModuleHookRegistry.get_or_create_registry(self.model)
+        registry.register_hook(RecordingHook("first"), "first")
+        registry.register_hook(RecordingHook("second"), "second")
+
+        _ = self.model(torch.zeros(1, 4))
+
+        self.assertEqual(events, ["pre:second", "pre:first", "post:first", "post:second"])
+
+    def test_base_custom_forward_delegates_to_current_module_forward(self):
+        hook = ModelHook()
+        linear = torch.nn.Linear(2, 2)
+        x = torch.ones(1, 2)
+
+        expected = linear(x)
+        actual = hook.custom_forward(linear, x)
+
+        self.assertTrue(torch.allclose(expected, actual))
+
+    def test_remove_hook_recursively_removes_child_registry_hook(self):
+        root_registry = ModuleHookRegistry.get_or_create_registry(self.model)
+        child_registry = ModuleHookRegistry.get_or_create_registry(self.model.linear_1)
+        root_registry.register_hook(AddHook(1), "shared_hook")
+        child_registry.register_hook(AddHook(1), "shared_hook")
+
+        root_registry.remove_hook("shared_hook", recursive=True)
+
+        self.assertIs(root_registry.get_hook("shared_hook"), None)
+        self.assertIs(child_registry.get_hook("shared_hook"), None)
+
+    def test_stateful_hooks_reset_and_scope_are_applied_recursively(self):
+        root_registry = ModuleHookRegistry.get_or_create_registry(self.model)
+        child_registry = ModuleHookRegistry.get_or_create_registry(self.model.linear_1)
+        root_hook = ModelHook()
+        child_hook = ModelHook()
+        root_store = MagicMock()
+        child_store = MagicMock()
+        root_hook.register_stateful(root_store)
+        child_hook.register_stateful(child_store)
+        root_registry.register_hook(root_hook, "root_stateful")
+        child_registry.register_hook(child_hook, "child_stateful")
+
+        root_registry.set_state_scope("ctxA")
+        root_registry.reset_stateful_hooks(recursive=True)
+
+        root_store.set_scope.assert_called_once_with("ctxA")
+        child_store.set_scope.assert_called_once_with("ctxA")
+        root_store.reset.assert_called_once()
+        child_store.reset.assert_called_once()
+
+    def test_get_registry_if_present_ignores_unrelated_attribute(self):
+        self.model._flagscale_hooks = object()
+
+        self.assertIs(ModuleHookRegistry.get_registry_if_present(self.model), None)

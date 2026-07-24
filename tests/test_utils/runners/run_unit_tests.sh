@@ -109,7 +109,17 @@ run_unit_tests_for_device() {
         cat > "$COVERAGERC" <<EOF
 [run]
 parallel = true
-source = $PROJECT_ROOT
+source =
+    $PROJECT_ROOT/flagscale
+omit =
+    */tools/*
+    */tests/*
+    */examples/*
+    */docs/*
+    */docker/*
+    */setup.py
+    */run.py
+    */__init__.py
 data_file = $COVERAGE_DIR/.coverage
 EOF
     fi

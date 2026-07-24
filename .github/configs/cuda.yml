@@ -17,7 +17,7 @@
 # Test configurations are defined in tests/test_utils/config/platforms/cuda.yaml
 
 hardware_name: cuda
-display_name: "CUDA Tests"
+display_name: 'CUDA Tests'
 
 # Docker image for this hardware
 ci_image: harbor.baai.ac.cn/flagos/flagscale:cuda12.8.1-cudnn9.7.1-python3.12-torch2.7.0-time2507111538
@@ -66,14 +66,14 @@ container_options: >-
 #   2. Ensure uv is installed in the Docker image
 #   3. Set env_path to the virtual environment path (e.g., "/opt/venv")
 #
-pkg_mgr: "conda"  # Current: conda for CI/CD compatibility
+pkg_mgr: 'conda' # Current: conda for CI/CD compatibility
 
 # Environment path (venv path for uv, conda installation path for conda)
-env_path: "/root/miniconda3"
+env_path: '/root/miniconda3'
 
 # Conda environment name (for conda only)
 env_names:
-  train: "flagscale-train"
-  hetero_train: "flagscale-train"
-  inference: "flagscale-inference"
-  rl: "flagscale-rl"
+  train: 'flagscale-train'
+  hetero_train: 'flagscale-train'
+  inference: 'flagscale-inference'
+  rl: 'flagscale-rl'
