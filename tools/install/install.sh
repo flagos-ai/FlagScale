@@ -86,10 +86,10 @@ get_valid_tasks() {
 export_config() {
     # Paths
     export FLAGSCALE_HOME
-    export FLAGSCALE_CONDA="$FLAGSCALE_HOME/miniconda3"
-    export FLAGSCALE_DEPS="$FLAGSCALE_HOME/deps"
-    export FLAGSCALE_DOWNLOADS="$FLAGSCALE_HOME/downloads"
-    export UV_PROJECT_ENVIRONMENT="$FLAGSCALE_HOME/venv"
+    export FLAGSCALE_CONDA="${FLAGSCALE_CONDA:-$FLAGSCALE_HOME/miniconda3}"
+    export FLAGSCALE_DEPS="${FLAGSCALE_DEPS:-$FLAGSCALE_HOME/deps}"
+    export FLAGSCALE_DOWNLOADS="${FLAGSCALE_DOWNLOADS:-$FLAGSCALE_HOME/downloads}"
+    export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$FLAGSCALE_HOME/venv}"
 
     # Phase flags (for should_install functions)
     export FLAGSCALE_INSTALL_SYSTEM="$INSTALL_SYSTEM"

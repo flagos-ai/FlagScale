@@ -84,6 +84,7 @@ jobs:
       (github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'cuda') &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || needs.check_docker_changes.outputs.has_docker_changes != 'true')
     uses: ./.github/workflows/all_tests_common.yml
+    secrets: inherit
     with:
       platform: cuda
 
@@ -99,6 +100,7 @@ jobs:
     name: MetaX tests
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'metax'
     uses: ./.github/workflows/all_tests_common.yml
+    secrets: inherit
     with:
       platform: metax
 

@@ -1,31 +1,20 @@
-# Copyright 2026 FlagOS Contributors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 # MetaX C550 Hardware Configuration
 # This file defines CI/CD settings for MetaX C550 GPU (MACA) testing
 # Test configurations are defined in tests/test_utils/config/platforms/metax.yaml
 
 hardware_name: metax
-display_name: "MetaX C550 Tests"
+display_name: 'MetaX C550 Tests'
 
 # Docker images for MetaX C550 (MACA-based)
 ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 ci_train_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 ci_inference_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
 
+# Directory to store image tar files (shared between build and push workflows)
+tar_dir: /mnt/airs-business/cicd/image_tar
+
 # Runner labels for MetaX C550 hardware
-runner_labels: ["flagscale-metax-c550-gpu2-8c-256g"]
+runner_labels: ['flagscale-metax-c550-gpu2-8c-256g']
 
 # Container volumes (hardware-specific paths)
 container_volumes:
@@ -55,14 +44,14 @@ container_options: >-
 # =============================================================================
 # Package Manager Configuration
 # =============================================================================
-pkg_mgr: "conda"
+pkg_mgr: 'conda'
 
 # Environment path (conda installation path)
-env_path: "/opt/conda"
+env_path: '/opt/conda'
 
 # Conda environment names
 env_names:
-  train: "base"
-  hetero_train: ""
-  inference: ""
-  rl: ""
+  train: 'base'
+  hetero_train: ''
+  inference: ''
+  rl: ''

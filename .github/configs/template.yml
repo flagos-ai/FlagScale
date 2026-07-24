@@ -21,7 +21,7 @@ hardware_name: my_hardware  # Change this to your hardware name
 display_name: "My Hardware Tests"  # Display name for GitHub Actions
 
 # Docker image for this hardware (change image tag if needed)
-ci_image: localhost:5000/flagscale:my-hardware-image
+ci_image: harbor.baai.ac.cn/flagscale/flagscale:my-hardware-image
 
 # Runner labels for this hardware (CRITICAL - update these for your runners)
 runner_labels:

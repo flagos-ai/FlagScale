@@ -1,0 +1,123 @@
+# FlagScale Inference Dockerfile for MetaX Platform
+
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+ARG PKG_MGR=conda
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_CONDA=/opt/conda
+
+FROM ${BASE_IMAGE} AS base
+
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG UV_INDEX_URL=${PIP_INDEX_URL}
+ARG UV_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME}
+ENV FLAGSCALE_CONDA=${FLAGSCALE_CONDA}
+ENV UV_PROJECT_ENVIRONMENT=${FLAGSCALE_HOME}/venv
+ENV VIRTUAL_ENV=${FLAGSCALE_HOME}/venv
+ENV FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps
+ENV FLAGSCALE_DOWNLOADS=${FLAGSCALE_HOME}/downloads
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY=unsafe-best-match
+ENV UV_LINK_MODE=copy
+ENV MPI_HOME=/usr/local/mpi
+ENV PATH="${FLAGSCALE_HOME}/venv/bin:${FLAGSCALE_CONDA}/bin:/root/.local/bin:/usr/local/mpi/bin:$PATH"
+ENV LD_LIBRARY_PATH="/usr/local/mpi/lib64:/usr/local/mpi/lib:/usr/local/lib:$LD_LIBRARY_PATH"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates tar && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY tools/install/metax/env.sh /etc/profile.d/flagscale-env.sh
+
+WORKDIR /workspace
+
+FROM base AS deps
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG UV_INDEX_URL
+ARG UV_EXTRA_INDEX_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/opt/conda/pkgs \
+    . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh && \
+    chmod +x /workspace/tools/install/utils/*.sh && \
+    chmod +x /workspace/tools/install/metax/*.sh && \
+    cd /workspace && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_CONDA=${FLAGSCALE_CONDA} \
+    ./tools/install/install.sh --platform metax --task inference --pkg-mgr ${PKG_MGR} --no-system && \
+    rm -rf /workspace
+
+FROM deps AS dev
+
+CMD ["/bin/bash"]
+
+FROM base AS release
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG UV_INDEX_URL
+ARG UV_EXTRA_INDEX_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=cache,target=/opt/conda/pkgs \
+    . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh && \
+    chmod +x /workspace/tools/install/utils/*.sh && \
+    chmod +x /workspace/tools/install/metax/*.sh && \
+    cd /workspace && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_CONDA=${FLAGSCALE_CONDA} \
+    ./tools/install/install.sh --platform metax --task inference --pkg-mgr ${PKG_MGR} --no-system --no-dev && \
+    rm -rf /workspace
+
+CMD ["/bin/bash"]

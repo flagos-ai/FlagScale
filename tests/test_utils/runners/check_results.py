@@ -21,6 +21,25 @@ import pytest
 import requests
 from omegaconf import OmegaConf
 
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+
+def _extract_metric_value(line, key):
+    """Extract a metric value from a log line, tolerating formatting variations."""
+    cleaned_line = ANSI_ESCAPE_RE.sub("", line)
+    pattern = re.compile(
+        rf"{re.escape(key.rstrip(':'))}\s*:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)",
+        re.IGNORECASE,
+    )
+    match = pattern.search(cleaned_line)
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
 
 def find_directory(start_path, target_dir_name):
     """Recursively find directory by name."""
@@ -67,25 +86,10 @@ def extract_metrics_from_log(lines, metric_keys=None):
     results = {key: {"values": []} for key in metric_keys}
 
     for line in lines:
-        # Skip non-iteration lines
-        if "iteration" not in line:
-            continue
-
-        # Split by | and extract key-value pairs
-        parts = line.split("|")
-        for part in parts:
-            part = part.strip()
-            for key in metric_keys:
-                # Match "lm loss: 1.161108E+01" format
-                if part.startswith(key.rstrip(":")):
-                    # Extract the value after the colon
-                    match = re.search(r":\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", part)
-                    if match:
-                        try:
-                            value = float(match.group(1))
-                            results[key]["values"].append(value)
-                        except ValueError:
-                            continue
+        for key in metric_keys:
+            value = _extract_metric_value(line, key)
+            if value is not None:
+                results[key]["values"].append(value)
 
     return results
 
@@ -129,7 +133,8 @@ def find_latest_stdout_log(start_path):
 
     # Sort attempt directories numerically (attempt_0, attempt_1, ...)
     attempt_dirs.sort(
-        key=lambda x: int(x.split("_")[1]) if x.split("_")[1].isdigit() else -1, reverse=True
+        key=lambda x: int(x.split("_")[1]) if x.split("_")[1].isdigit() else -1,
+        reverse=True,
     )
     latest_attempt = os.path.join(latest_folder, attempt_dirs[0])
 
@@ -333,7 +338,11 @@ def test_inference_equal(path, task, model, case):
     print("\nResult checking")
     print("Result: ", result_lines)
     print("Gold Result: ", gold_value_lines)
-    print("len(result_lines), (gold_value_lines): ", len(result_lines), len(gold_value_lines))
+    print(
+        "len(result_lines), (gold_value_lines): ",
+        len(result_lines),
+        len(gold_value_lines),
+    )
 
     assert len(result_lines) == len(gold_value_lines)
 

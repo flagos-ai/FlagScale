@@ -45,7 +45,7 @@ get_pip_cmd() {
         conda)
             local conda_path="${FLAGSCALE_CONDA:-/opt/flagscale/miniconda3}"
             local env_name="${FLAGSCALE_ENV_NAME:-}"
-            if [ -n "$env_name" ]; then
+            if [ -n "$env_name" ] && [ "$env_name" != "base" ]; then
                 echo "$conda_path/envs/$env_name/bin/pip"
             else
                 echo "$conda_path/bin/pip"

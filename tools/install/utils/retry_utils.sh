@@ -84,7 +84,9 @@ retry_pip_install() {
     else
         # Has annotations — filter and install separately
         local filtered
-        filtered="$(mktemp)"
+        local req_dir
+        req_dir="$(dirname "$requirements_file")"
+        filtered="$(mktemp "$req_dir/.filtered.$(basename "$requirements_file").XXXXXX")"
         create_filtered_requirements "$requirements_file" "$filtered"
 
         # Install normal packages from filtered file

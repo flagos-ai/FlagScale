@@ -173,6 +173,7 @@ jobs:
   cli_validation:
     needs: checkout_and_config
     uses: ./.github/workflows/functional_tests_cli.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
@@ -193,6 +194,7 @@ jobs:
       matrix:
         device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/unit_tests_common.yml
+    secrets: inherit
     name: unit_tests
     with:
       platform: ${{ inputs.platform }}
@@ -212,6 +214,7 @@ jobs:
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.train_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_train.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.train_test_matrix }}
@@ -230,6 +233,7 @@ jobs:
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.hetero_train_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_hetero_train.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.hetero_train_test_matrix }}
@@ -248,6 +252,7 @@ jobs:
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_inference.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.inference_test_matrix }}
@@ -266,6 +271,7 @@ jobs:
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_serve.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.serve_test_matrix }}
@@ -302,6 +308,7 @@ jobs:
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.benchmark_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_benchmark.yml
+    secrets: inherit
     with:
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.benchmark_test_matrix }}

@@ -26,6 +26,25 @@ import math
 import re
 import sys
 
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+
+def _extract_metric_value(line, key):
+    cleaned_line = ANSI_ESCAPE_RE.sub("", line)
+    pattern = re.compile(
+        rf"{re.escape(key.rstrip(':'))}\s*:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)",
+        re.IGNORECASE,
+    )
+    match = pattern.search(cleaned_line)
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
 # Default benchmark metric keys if no gold values file is provided
 DEFAULT_METRIC_KEYS = [
     "elapsed time per iteration (ms):",
@@ -42,20 +61,10 @@ def extract_metrics_from_log(lines, metric_keys):
     results = {key: [] for key in metric_keys}
 
     for line in lines:
-        if "iteration" not in line:
-            continue
-
-        parts = line.split("|")
-        for part in parts:
-            part = part.strip()
-            for key in metric_keys:
-                if part.startswith(key.rstrip(":")):
-                    match = re.search(r":\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", part)
-                    if match:
-                        try:
-                            results[key].append(float(match.group(1)))
-                        except ValueError:
-                            continue
+        for key in metric_keys:
+            value = _extract_metric_value(line, key)
+            if value is not None:
+                results[key].append(value)
 
     return results
 

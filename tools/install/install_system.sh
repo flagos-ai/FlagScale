@@ -144,6 +144,7 @@ install_python_conda() {
     set_step "Installing Python ${PYTHON_VERSION} (conda)"
 
     local env_name="${FLAGSCALE_ENV_NAME:-}"
+    [ "$env_name" = "base" ] && env_name=""
 
     # Skip if conda already installed at FLAGSCALE_CONDA
     if [ -f "${FLAGSCALE_CONDA}/bin/conda" ]; then
