@@ -26,7 +26,12 @@ import tempfile
 import uuid
 from pathlib import Path
 
-EXPECTED_FINDING = {"not_enter": "collective_missing_enter"}
+EXPECTED_FINDING = {
+    "not_enter": "collective_missing_enter",
+    "api_mismatch": "collective_signature_mismatch",
+    "parameter_mismatch": "collective_signature_mismatch",
+    "p2p_missing": "p2p_missing_counterpart",
+}
 
 
 def _stop_process_group(process: subprocess.Popen, grace_s: float = 3.0) -> None:
@@ -78,6 +83,10 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
         "1",
         "--delayed-enter-threshold",
         "1",
+        "--p2p-timeout",
+        "1",
+        "--p2p-match-window",
+        "0.5",
         "--failure-grace-period",
         "2",
         "--scan-interval",

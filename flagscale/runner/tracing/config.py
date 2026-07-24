@@ -61,6 +61,8 @@ class TraceLaunchConfig:
     heartbeat_timeout_s: float = 30.0
     collective_timeout_s: float = 60.0
     delayed_enter_threshold_s: float = 30.0
+    p2p_timeout_s: float = 60.0
+    p2p_match_window_s: float = 30.0
     failure_grace_period_s: float = 60.0
     scan_interval_s: float = 1.0
     monitor_nice: int = 10
@@ -119,6 +121,10 @@ class TraceLaunchConfig:
                 f"{self.collective_timeout_s:g}",
                 "--delayed-enter-threshold",
                 f"{self.delayed_enter_threshold_s:g}",
+                "--p2p-timeout",
+                f"{self.p2p_timeout_s:g}",
+                "--p2p-match-window",
+                f"{self.p2p_match_window_s:g}",
                 "--failure-grace-period",
                 f"{self.failure_grace_period_s:g}",
                 "--scan-interval",
@@ -240,8 +246,21 @@ def prepare_trace_launch_config(
     collective_timeout_s = _positive_float(
         raw_dict.get("collective_timeout_s", 60.0), "collective_timeout_s"
     )
+    p2p_timeout_s = _positive_float(
+        raw_dict.get("p2p_timeout_s", collective_timeout_s), "p2p_timeout_s"
+    )
+    p2p_match_window_s = _positive_float(
+        raw_dict.get("p2p_match_window_s", min(30.0, p2p_timeout_s)),
+        "p2p_match_window_s",
+    )
     failure_grace_period_s = _positive_float(
-        raw_dict.get("failure_grace_period_s", collective_timeout_s),
+        raw_dict.get(
+            "failure_grace_period_s",
+            max(
+                collective_timeout_s,
+                p2p_timeout_s,
+            ),
+        ),
         "failure_grace_period_s",
     )
 
@@ -265,12 +284,20 @@ def prepare_trace_launch_config(
             raw_dict.get("delayed_enter_threshold_s", 30.0),
             "delayed_enter_threshold_s",
         ),
+        p2p_timeout_s=p2p_timeout_s,
+        p2p_match_window_s=p2p_match_window_s,
         failure_grace_period_s=failure_grace_period_s,
         scan_interval_s=_positive_float(raw_dict.get("scan_interval_s", 1.0), "scan_interval_s"),
         monitor_nice=monitor_nice,
     )
 
-    if resolved.failure_grace_period_s < resolved.collective_timeout_s:
+    if resolved.p2p_match_window_s > resolved.p2p_timeout_s:
+        raise ValueError("tracing.p2p_match_window_s must not exceed p2p_timeout_s")
+    minimum_failure_grace = max(
+        resolved.collective_timeout_s,
+        resolved.p2p_timeout_s,
+    )
+    if resolved.failure_grace_period_s < minimum_failure_grace:
         raise ValueError(
             "tracing.failure_grace_period_s must be at least the largest enabled detection timeout"
         )

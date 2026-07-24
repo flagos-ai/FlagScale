@@ -56,6 +56,31 @@ def run(scenario: str) -> None:
             time.sleep(30.0)
         return
 
+    if scenario == "api_mismatch":
+        if rank == 0:
+            dist.all_reduce(tensor)
+        else:
+            dist.broadcast(tensor, src=0)
+        return
+
+    if scenario == "parameter_mismatch":
+        mismatched = torch.ones(4 if rank == 0 else 8, device=f"cuda:{local_rank}")
+        dist.all_reduce(mismatched)
+        return
+
+    if scenario == "p2p_missing":
+        # Complete one matched pair first so ProcessGroupNCCL has initialized its
+        # lazily-created two-rank P2P communicator on both workers.
+        if rank == 0:
+            dist.send(tensor, dst=1)
+        else:
+            dist.recv(tensor, src=0)
+        if rank == 0:
+            dist.send(tensor, dst=1)
+        else:
+            time.sleep(30.0)
+        return
+
     raise ValueError(f"unknown scenario: {scenario}")
 
 
@@ -64,7 +89,13 @@ def main() -> int:
     parser.add_argument(
         "--scenario",
         required=True,
-        choices=("sanity", "not_enter"),
+        choices=(
+            "sanity",
+            "not_enter",
+            "api_mismatch",
+            "parameter_mismatch",
+            "p2p_missing",
+        ),
     )
     gpu_heartbeat.initialize_from_env()
     run(parser.parse_args().scenario)

@@ -101,6 +101,42 @@ def test_missing_enter_correlates_a_stale_heartbeat_as_suspected_crash():
     assert findings[0].details["confidence"] == "suspected"
 
 
+def test_api_mismatch_is_reported_and_suppresses_missing_enter():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, collective_timeout_s=1)
+    _ingest(analyzer, _event("nccl_call", comm_rank=0, rank=0), observed=1.0)
+    _ingest(
+        analyzer,
+        _event("nccl_call", comm_rank=1, rank=1, api="ncclBroadcast", root=0),
+        observed=1.0,
+    )
+
+    findings = analyzer.scan(now_monotonic_s=3.0, now_unix_ns=3_000_000_000)
+    assert [finding.hang_type for finding in findings] == ["collective_signature_mismatch"]
+    assert findings[0].details["mismatch_type"] == "api_mismatch"
+
+    assert analyzer.scan(now_monotonic_s=10.0, now_unix_ns=10_000_000_000) == []
+
+
+def test_parameter_and_root_mismatch_are_distinguished():
+    parameter_analyzer = TraceAnalyzer(run_id=RUN_ID)
+    _ingest(parameter_analyzer, _event("nccl_call", comm_rank=0, count=1024))
+    _ingest(parameter_analyzer, _event("nccl_call", comm_rank=1, count=2048))
+    parameter = parameter_analyzer.scan(now_monotonic_s=2.0, now_unix_ns=2_000_000_000)
+    assert parameter[0].details["mismatch_type"] == "parameter_mismatch"
+
+    root_analyzer = TraceAnalyzer(run_id=RUN_ID)
+    _ingest(
+        root_analyzer,
+        _event("nccl_call", comm_rank=0, api="ncclBroadcast", op=-1, root=0),
+    )
+    _ingest(
+        root_analyzer,
+        _event("nccl_call", comm_rank=1, api="ncclBroadcast", op=-1, root=1),
+    )
+    root = root_analyzer.scan(now_monotonic_s=2.0, now_unix_ns=2_000_000_000)
+    assert root[0].details["mismatch_type"] == "root_mismatch"
+
+
 def test_delayed_enter_is_reported_after_every_rank_enters():
     analyzer = TraceAnalyzer(run_id=RUN_ID, delayed_enter_threshold_s=5)
     _ingest(
@@ -141,6 +177,147 @@ def test_process_heartbeat_timeout_is_reported_as_suspected_liveness_failure():
     assert findings[0].hang_type == "rank_heartbeat_timeout"
     assert findings[0].details["timeout_type"] == "subsequent_heartbeat"
     assert findings[0].details["confidence"] == "suspected"
+
+
+def test_unique_p2p_send_recv_pair_is_resolved_without_a_finding():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    _ingest(
+        analyzer,
+        _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=1,
+            pid=11,
+            comm_rank=1,
+            peer=0,
+            call_seq=2,
+        ),
+    )
+
+    assert analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000) == []
+
+
+def test_unique_p2p_parameter_mismatch_is_confirmed():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    _ingest(
+        analyzer,
+        _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=1,
+            pid=11,
+            comm_rank=1,
+            peer=0,
+            count=2048,
+            call_seq=2,
+        ),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["p2p_call_mismatch"]
+    assert findings[0].details["confidence"] == "confirmed"
+
+
+def test_missing_p2p_counterpart_is_only_suspected():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    _ingest(
+        analyzer,
+        _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["p2p_missing_counterpart"]
+    assert findings[0].details["confidence"] == "suspected"
+
+
+def test_multiple_p2p_candidates_are_reported_as_ambiguous():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    for call_seq in (1, 2):
+        _ingest(
+            analyzer,
+            _event(
+                "nccl_call",
+                api="ncclSend",
+                comm_rank=0,
+                peer=1,
+                call_seq=call_seq,
+            ),
+        )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=1,
+            pid=11,
+            comm_rank=1,
+            peer=0,
+            call_seq=3,
+        ),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["ambiguous_p2p_match"]
+    assert findings[0].details["confidence"] == "unknown"
+
+
+def test_p2p_operation_index_resolves_completed_pair_before_missing_next_call():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        p2p_timeout_s=5,
+        p2p_match_window_s=2,
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_rank=0,
+            peer=1,
+            call_seq=1,
+            p2p_op_index=0,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_rank=0,
+            peer=1,
+            call_seq=2,
+            p2p_op_index=1,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=1,
+            pid=11,
+            comm_rank=1,
+            peer=0,
+            call_seq=3,
+            p2p_op_index=0,
+        ),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["p2p_missing_counterpart"]
+    assert findings[0].details["local_p2p_op_index"] == 1
 
 
 def test_missing_enter_is_downgraded_when_probe_dropped_events():

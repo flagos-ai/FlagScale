@@ -69,8 +69,14 @@ class _CollectiveRound:
     enters: dict[int, dict[str, Any]] = field(default_factory=dict)
 
 
+@dataclass
+class _P2PCall:
+    event: dict[str, Any]
+    effective_seen_monotonic_s: float
+
+
 class TraceAnalyzer:
-    """Detect Not-Entered-Hang facts."""
+    """Detect Not-Entered-Hang and collective Inconsistent-Hang facts."""
 
     def __init__(
         self,
@@ -80,6 +86,8 @@ class TraceAnalyzer:
         heartbeat_timeout_s: float = 30.0,
         collective_timeout_s: float = 60.0,
         delayed_enter_threshold_s: float = 30.0,
+        p2p_timeout_s: float = 60.0,
+        p2p_match_window_s: float = 30.0,
         detect_heartbeat_timeouts: bool = False,
     ) -> None:
         self.run_id = run_id
@@ -91,6 +99,8 @@ class TraceAnalyzer:
         )
         self.collective_timeout_s = float(collective_timeout_s)
         self.delayed_enter_threshold_s = float(delayed_enter_threshold_s)
+        self.p2p_timeout_s = float(p2p_timeout_s)
+        self.p2p_match_window_s = float(p2p_match_window_s)
         self.detect_heartbeat_timeouts = detect_heartbeat_timeouts
 
         self._processes: dict[int, _ProcessStart] = {}
@@ -98,6 +108,9 @@ class TraceAnalyzer:
         self._probe_status: dict[int, dict[str, Any]] = {}
         self._comm_members: dict[tuple[str, str], dict[int, int]] = {}
         self._rounds: dict[tuple[str, str, int], _CollectiveRound] = {}
+        self._p2p_calls: dict[tuple[str, str, int, int], list[_P2PCall]] = {}
+        self._seen_p2p_ids: set[tuple[Any, ...]] = set()
+        self._resolved_p2p_ids: set[tuple[Any, ...]] = set()
         self._reported: set[tuple[Any, ...]] = set()
 
     def ingest(
@@ -169,6 +182,12 @@ class TraceAnalyzer:
             return event_type in {"process_start", "comm_destroy", "nccl_call"}
 
         api = str(event.get("api", ""))
+        if api in {"ncclSend", "ncclRecv"}:
+            return self._ingest_p2p(
+                event,
+                observed_monotonic_s=observed_monotonic_s,
+                observed_unix_ns=observed_unix_ns,
+            )
         if api not in _COLLECTIVE_APIS:
             return True
 
@@ -216,6 +235,15 @@ class TraceAnalyzer:
             )
         completed_rounds: list[tuple[str, str, int]] = []
         for key, collective in list(self._rounds.items()):
+            mismatch = self._detect_signature_mismatch(collective, now_unix_ns)
+            if mismatch is not None:
+                self._emit_once(("collective_signature_mismatch", *key), mismatch, findings)
+                # A confirmed signature mismatch is the stronger upstream fact. Avoid
+                # also labeling the same split round as missing-enter.
+                if len(collective.enters) >= collective.expected_nranks:
+                    completed_rounds.append(key)
+                continue
+
             if len(collective.enters) >= collective.expected_nranks:
                 delayed = self._detect_delayed_enter(collective, now_unix_ns)
                 self._emit_once(("delayed_collective_enter", *key), delayed, findings)
@@ -236,7 +264,263 @@ class TraceAnalyzer:
         for key in completed_rounds:
             self._rounds.pop(key, None)
 
+        self._scan_p2p(
+            now_monotonic_s=now_monotonic_s,
+            now_unix_ns=now_unix_ns,
+            output=findings,
+        )
         return findings
+
+    def _ingest_p2p(
+        self,
+        event: dict[str, Any],
+        *,
+        observed_monotonic_s: float,
+        observed_unix_ns: int,
+    ) -> bool:
+        comm_hash = str(event.get("comm_uid_hash", ""))
+        comm_rank = _as_int(event.get("comm_rank"), default=-1)
+        peer = _as_int(event.get("peer"), default=-1)
+        if not comm_hash or comm_rank < 0 or peer < 0:
+            return False
+
+        event_id = _p2p_event_id(event)
+        if event_id in self._seen_p2p_ids:
+            return True
+        self._seen_p2p_ids.add(event_id)
+
+        api = str(event.get("api", ""))
+        src_rank, dst_rank = (comm_rank, peer) if api == "ncclSend" else (peer, comm_rank)
+        key = (self.run_id, comm_hash, src_rank, dst_rank)
+        timestamp_ns = _as_int(event.get("timestamp_unix_ns"), default=observed_unix_ns)
+        call = _P2PCall(
+            event=event,
+            effective_seen_monotonic_s=_effective_seen_monotonic(
+                timestamp_ns=timestamp_ns,
+                observed_monotonic_s=observed_monotonic_s,
+                observed_unix_ns=observed_unix_ns,
+            ),
+        )
+        calls = self._p2p_calls.setdefault(key, [])
+        calls.append(call)
+
+        opposite_api = "ncclRecv" if api == "ncclSend" else "ncclSend"
+        exact_candidates = self._p2p_candidates(
+            calls,
+            event,
+            expected_api=opposite_api,
+            require_same_signature=True,
+        )
+        # Resolve only a unique exact counterpart. Multiple candidates remain for the
+        # timeout path, which reports ambiguity instead of inventing an ordering.
+        if len(exact_candidates) == 1:
+            candidate = exact_candidates[0]
+            reverse_candidates = self._p2p_candidates(
+                calls,
+                candidate.event,
+                expected_api=api,
+                require_same_signature=True,
+            )
+            if len(reverse_candidates) == 1:
+                self._resolve_p2p_calls(call, candidate)
+        return True
+
+    def _scan_p2p(
+        self,
+        *,
+        now_monotonic_s: float,
+        now_unix_ns: int,
+        output: list[Finding],
+    ) -> None:
+        for key, calls in list(self._p2p_calls.items()):
+            for call in calls:
+                event = call.event
+                event_id = _p2p_event_id(event)
+                if event_id in self._resolved_p2p_ids:
+                    continue
+                age_s = now_monotonic_s - call.effective_seen_monotonic_s
+                if age_s < self.p2p_timeout_s:
+                    continue
+
+                api = str(event.get("api", ""))
+                opposite_api = "ncclRecv" if api == "ncclSend" else "ncclSend"
+                candidates = self._p2p_candidates(
+                    calls,
+                    event,
+                    expected_api=opposite_api,
+                    require_same_signature=False,
+                )
+                exact_candidates = self._p2p_candidates(
+                    calls,
+                    event,
+                    expected_api=opposite_api,
+                    require_same_signature=True,
+                )
+                reverse_exact_candidates: list[_P2PCall] = []
+
+                if len(exact_candidates) == 1:
+                    reverse_exact_candidates = self._p2p_candidates(
+                        calls,
+                        exact_candidates[0].event,
+                        expected_api=api,
+                        require_same_signature=True,
+                    )
+                    if len(reverse_exact_candidates) == 1:
+                        self._resolve_p2p_calls(call, exact_candidates[0])
+                        continue
+
+                src_rank, dst_rank = key[2], key[3]
+                if not candidates:
+                    finding = Finding(
+                        hang_type="p2p_missing_counterpart",
+                        run_id=self.run_id,
+                        comm_uid_hash=key[1],
+                        comm_seq=_as_int(event.get("comm_seq"), default=-1),
+                        detected_at_unix_ns=now_unix_ns,
+                        details={
+                            "observed_api": api,
+                            "expected_api": opposite_api,
+                            "src_comm_rank": src_rank,
+                            "dst_comm_rank": dst_rank,
+                            "count": _as_int(event.get("count"), default=-1),
+                            "datatype": _as_int(event.get("datatype"), default=-1),
+                            "local_group_id": _as_int(event.get("group_id"), default=0),
+                            "local_group_op_index": _as_int(event.get("group_op_index"), default=0),
+                            "local_p2p_op_index": _as_int(event.get("p2p_op_index"), default=-1),
+                            "waited_s": max(0.0, age_s),
+                            "reason": "counterpart_not_observed_in_match_window",
+                            "clock_assumption": "hosts have synchronized wall clocks",
+                            "confidence": "suspected",
+                        },
+                    )
+                    self._emit_once(("p2p_missing_counterpart", event_id), finding, output)
+                    self._resolved_p2p_ids.add(event_id)
+                    continue
+
+                reverse_candidates: list[_P2PCall] = []
+                if len(candidates) == 1:
+                    reverse_candidates = self._p2p_candidates(
+                        calls,
+                        candidates[0].event,
+                        expected_api=api,
+                        require_same_signature=False,
+                    )
+                if len(candidates) == 1 and not exact_candidates and len(reverse_candidates) == 1:
+                    candidate = candidates[0]
+                    send_event, recv_event = (
+                        (event, candidate.event) if api == "ncclSend" else (candidate.event, event)
+                    )
+                    finding = Finding(
+                        hang_type="p2p_call_mismatch",
+                        run_id=self.run_id,
+                        comm_uid_hash=key[1],
+                        comm_seq=_as_int(send_event.get("comm_seq"), default=-1),
+                        detected_at_unix_ns=now_unix_ns,
+                        details={
+                            "mismatch_type": "count_or_datatype_mismatch",
+                            "src_comm_rank": src_rank,
+                            "dst_comm_rank": dst_rank,
+                            "send": _p2p_summary(send_event),
+                            "recv": _p2p_summary(recv_event),
+                            "clock_assumption": "hosts have synchronized wall clocks",
+                            "confidence": "confirmed",
+                        },
+                    )
+                    pair_ids = tuple(
+                        sorted(
+                            (event_id, _p2p_event_id(candidate.event)),
+                            key=repr,
+                        )
+                    )
+                    self._emit_once(("p2p_call_mismatch", *pair_ids), finding, output)
+                    self._resolve_p2p_calls(call, candidate)
+                    continue
+
+                ambiguous_by_id = {
+                    _p2p_event_id(item.event): item
+                    for item in [
+                        call,
+                        *candidates,
+                        *reverse_candidates,
+                        *reverse_exact_candidates,
+                    ]
+                }
+                ambiguous_calls = list(ambiguous_by_id.values())
+                ambiguous_ids = tuple(
+                    sorted((_p2p_event_id(item.event) for item in ambiguous_calls), key=repr)
+                )
+                finding = Finding(
+                    hang_type="ambiguous_p2p_match",
+                    run_id=self.run_id,
+                    comm_uid_hash=key[1],
+                    comm_seq=_as_int(event.get("comm_seq"), default=-1),
+                    detected_at_unix_ns=now_unix_ns,
+                    details={
+                        "src_comm_rank": src_rank,
+                        "dst_comm_rank": dst_rank,
+                        "candidate_calls": [_p2p_summary(item.event) for item in ambiguous_calls],
+                        "reason": "multiple_time_window_candidates",
+                        "clock_assumption": "hosts have synchronized wall clocks",
+                        "confidence": "unknown",
+                    },
+                )
+                self._emit_once(("ambiguous_p2p_match", *ambiguous_ids), finding, output)
+                for item in ambiguous_calls:
+                    self._resolved_p2p_ids.add(_p2p_event_id(item.event))
+
+            retained: list[_P2PCall] = []
+            for call in calls:
+                event_id = _p2p_event_id(call.event)
+                if event_id in self._resolved_p2p_ids:
+                    self._resolved_p2p_ids.discard(event_id)
+                    self._seen_p2p_ids.discard(event_id)
+                else:
+                    retained.append(call)
+            if retained:
+                self._p2p_calls[key] = retained
+            else:
+                self._p2p_calls.pop(key, None)
+
+    def _resolve_p2p_calls(self, *calls: _P2PCall) -> None:
+        for call in calls:
+            self._resolved_p2p_ids.add(_p2p_event_id(call.event))
+
+    def _p2p_candidates(
+        self,
+        calls: list[_P2PCall],
+        event: dict[str, Any],
+        *,
+        expected_api: str,
+        require_same_signature: bool,
+    ) -> list[_P2PCall]:
+        candidates = [
+            candidate
+            for candidate in calls
+            if str(candidate.event.get("api", "")) == expected_api
+            and _p2p_event_id(candidate.event) not in self._resolved_p2p_ids
+            and (
+                not require_same_signature
+                or _p2p_signature(candidate.event) == _p2p_signature(event)
+            )
+            and _within_p2p_window(
+                candidate.event,
+                event,
+                window_s=self.p2p_match_window_s,
+            )
+        ]
+        # Files are polled rank by rank, so two sends can be observed before their
+        # corresponding receive. Prefer the per-communicator P2P sequence when both
+        # sides expose it; otherwise retain the conservative time-window behavior.
+        operation_index = _as_int(event.get("p2p_op_index"), default=-1)
+        if operation_index >= 0:
+            indexed_candidates = [
+                candidate
+                for candidate in candidates
+                if _as_int(candidate.event.get("p2p_op_index"), default=-2) == operation_index
+            ]
+            if indexed_candidates:
+                return indexed_candidates
+        return candidates
 
     def _scan_heartbeats(
         self,
@@ -294,6 +578,65 @@ class TraceAnalyzer:
                 },
             )
             self._emit_once(("rank_heartbeat_timeout", rank, pid, "subsequent"), finding, output)
+
+    def _detect_signature_mismatch(
+        self, collective: _CollectiveRound, now_unix_ns: int
+    ) -> Finding | None:
+        if len(collective.enters) < 2:
+            return None
+
+        by_api: dict[str, list[int]] = {}
+        for comm_rank, event in collective.enters.items():
+            by_api.setdefault(str(event.get("api", "")), []).append(comm_rank)
+        if len(by_api) > 1:
+            return Finding(
+                hang_type="collective_signature_mismatch",
+                run_id=collective.run_id,
+                comm_uid_hash=collective.comm_uid_hash,
+                comm_seq=collective.comm_seq,
+                detected_at_unix_ns=now_unix_ns,
+                details={
+                    "mismatch_type": "api_mismatch",
+                    "api_by_comm_rank": {
+                        str(rank): str(event.get("api", ""))
+                        for rank, event in sorted(collective.enters.items())
+                    },
+                    "entered_comm_ranks": sorted(collective.enters),
+                    "expected_nranks": collective.expected_nranks,
+                    "confidence": "confirmed",
+                },
+            )
+
+        signatures: dict[tuple[Any, ...], list[int]] = {}
+        for comm_rank, event in collective.enters.items():
+            signatures.setdefault(_collective_signature(event), []).append(comm_rank)
+        if len(signatures) <= 1:
+            return None
+
+        api = next(iter(by_api))
+        roots = {_as_int(event.get("root"), default=-1) for event in collective.enters.values()}
+        mismatch_type = (
+            "root_mismatch"
+            if api in {"ncclBroadcast", "ncclReduce"} and len(roots) > 1
+            else "parameter_mismatch"
+        )
+        return Finding(
+            hang_type="collective_signature_mismatch",
+            run_id=collective.run_id,
+            comm_uid_hash=collective.comm_uid_hash,
+            comm_seq=collective.comm_seq,
+            detected_at_unix_ns=now_unix_ns,
+            details={
+                "mismatch_type": mismatch_type,
+                "signature_by_comm_rank": {
+                    str(rank): _signature_dict(event)
+                    for rank, event in sorted(collective.enters.items())
+                },
+                "entered_comm_ranks": sorted(collective.enters),
+                "expected_nranks": collective.expected_nranks,
+                "confidence": "confirmed",
+            },
+        )
 
     def _detect_delayed_enter(
         self, collective: _CollectiveRound, now_unix_ns: int
@@ -430,3 +773,71 @@ def _effective_seen_monotonic(
     # modest inter-node clock skew cannot make a heartbeat immortal.
     age_s = max(0.0, (observed_unix_ns - timestamp_ns) / 1_000_000_000)
     return observed_monotonic_s - age_s
+
+
+def _p2p_event_id(event: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _as_int(event.get("rank"), default=-1),
+        _as_int(event.get("pid"), default=-1),
+        _as_int(event.get("call_seq"), default=-1),
+        str(event.get("api", "")),
+        _as_int(event.get("timestamp_unix_ns"), default=0),
+    )
+
+
+def _p2p_signature(event: dict[str, Any]) -> tuple[int, int]:
+    return (
+        _as_int(event.get("count"), default=-1),
+        _as_int(event.get("datatype"), default=-1),
+    )
+
+
+def _within_p2p_window(first: dict[str, Any], second: dict[str, Any], *, window_s: float) -> bool:
+    first_ns = _as_int(first.get("timestamp_unix_ns"), default=0)
+    second_ns = _as_int(second.get("timestamp_unix_ns"), default=0)
+    if first_ns <= 0 or second_ns <= 0:
+        return False
+    return abs(first_ns - second_ns) <= int(window_s * 1_000_000_000)
+
+
+def _p2p_summary(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rank": _as_int(event.get("rank"), default=-1),
+        "comm_rank": _as_int(event.get("comm_rank"), default=-1),
+        "api": str(event.get("api", "")),
+        "peer": _as_int(event.get("peer"), default=-1),
+        "count": _as_int(event.get("count"), default=-1),
+        "datatype": _as_int(event.get("datatype"), default=-1),
+        "timestamp_unix_ns": _as_int(event.get("timestamp_unix_ns"), default=0),
+        "local_group_id": _as_int(event.get("group_id"), default=0),
+        "local_group_op_index": _as_int(event.get("group_op_index"), default=0),
+        "local_p2p_op_index": _as_int(event.get("p2p_op_index"), default=-1),
+    }
+
+
+def _collective_signature(event: dict[str, Any]) -> tuple[Any, ...]:
+    api = str(event.get("api", ""))
+    root = _as_int(event.get("root"), default=-1) if api in {"ncclBroadcast", "ncclReduce"} else -1
+    op = (
+        _as_int(event.get("op"), default=-1)
+        if api in {"ncclAllReduce", "ncclReduceScatter", "ncclReduce"}
+        else -1
+    )
+    return (
+        api,
+        _as_int(event.get("count"), default=-1),
+        _as_int(event.get("datatype"), default=-1),
+        op,
+        root,
+    )
+
+
+def _signature_dict(event: dict[str, Any]) -> dict[str, Any]:
+    api, count, datatype, op, root = _collective_signature(event)
+    return {
+        "api": api,
+        "count": count,
+        "datatype": datatype,
+        "op": op,
+        "root": root,
+    }

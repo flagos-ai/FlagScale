@@ -50,6 +50,8 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
             "enabled": True,
             "probe_library": str(probe),
             "collective_timeout_s": 12,
+            "p2p_timeout_s": 12,
+            "p2p_match_window_s": 4,
             "failure_grace_period_s": 12,
         },
     )
@@ -63,6 +65,8 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
     assert "FLAGSCALE_RANK_HEARTBEAT" not in shell
     assert "LD_PRELOAD=" in shell
     assert "flagscale.runner.tracing.monitor" in shell
+    assert "--p2p-timeout 12" in shell
+    assert "--p2p-match-window 4" in shell
     assert "rc=\\$?" in resolved.command_body(0)
     assert resolved.shell_setup_lines(1)
     assert "flagscale.runner.tracing.monitor" not in "\n".join(resolved.shell_setup_lines(1))
@@ -77,6 +81,19 @@ def test_heartbeat_settings_must_use_the_independent_component(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="moved to experiment.runner.heartbeat"):
+        prepare_trace_launch_config(config, "run")
+
+
+def test_p2p_match_window_cannot_exceed_timeout(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "p2p_timeout_s": 10,
+            "p2p_match_window_s": 11,
+        },
+    )
+    with pytest.raises(ValueError, match="p2p_match_window_s"):
         prepare_trace_launch_config(config, "run")
 
 

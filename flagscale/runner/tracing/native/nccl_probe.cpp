@@ -56,11 +56,14 @@ struct Event {
   uint64_t count = 0;
   uint64_t stream = 0;
   uint64_t group_id = 0;
+  uint64_t group_op_index = 0;
+  uint64_t p2p_op_index = 0;
   int comm_rank = -1;
   int comm_nranks = 0;
   int datatype = -1;
   int op = -1;
   int root = -1;
+  int peer = -1;
   int result = 0;
   char api[32] = {};
   char phase[8] = {};
@@ -145,7 +148,10 @@ struct CommState {
   int rank = -1;
   int nranks = 0;
   char uid_hash[17] = {};
+  // P2P calls do not involve every communicator rank, so they must not shift the
+  // collective sequence used for cross-rank collective alignment.
   std::atomic<uint64_t> next_collective_sequence{0};
+  std::atomic<uint64_t> next_p2p_sequence{0};
   std::atomic<bool> active{true};
 };
 
@@ -391,8 +397,11 @@ class Runtime {
       line += ",\"datatype\":" + std::to_string(event.datatype);
       line += ",\"op\":" + std::to_string(event.op);
       line += ",\"root\":" + std::to_string(event.root);
+      line += ",\"peer\":" + std::to_string(event.peer);
       line += ",\"stream\":" + std::to_string(event.stream);
       line += ",\"group_id\":" + std::to_string(event.group_id);
+      line += ",\"group_op_index\":" + std::to_string(event.group_op_index);
+      line += ",\"p2p_op_index\":" + std::to_string(event.p2p_op_index);
       line += ",\"result\":" + std::to_string(event.result);
     }
     line += "}\n";
@@ -424,6 +433,7 @@ class Runtime {
 };
 
 thread_local uint64_t current_group_id = 0;
+thread_local uint64_t current_group_op_index = 0;
 thread_local unsigned int group_depth = 0;
 
 Event MakeBaseEvent(EventKind kind, const char* api, const char* phase) {
@@ -443,28 +453,37 @@ struct CallContext {
   uint64_t comm_seq = 0;
   uint64_t call_seq = 0;
   uint64_t group_id = 0;
+  uint64_t group_op_index = 0;
+  uint64_t p2p_op_index = 0;
 };
 
 CallContext BeginCall(const char* api, ncclComm_t comm, std::size_t count,
-                      ncclDataType_t datatype, int op, int root,
-                      cudaStream_t stream) noexcept {
+                      ncclDataType_t datatype, int op, int root, int peer,
+                      cudaStream_t stream, bool is_p2p = false) noexcept {
   try {
     Runtime& runtime = Runtime::Instance();
     Event event = MakeBaseEvent(EventKind::kNcclCall, api, "enter");
     CommState* state = runtime.comms().Find(comm);
     if (state != nullptr) {
-      event.comm_seq = state->next_collective_sequence.fetch_add(1);
+      event.comm_seq = is_p2p ? state->next_p2p_sequence.fetch_add(1)
+                              : state->next_collective_sequence.fetch_add(1);
       event.comm_rank = state->rank;
       event.comm_nranks = state->nranks;
       copy_text(event.comm_uid_hash, sizeof(event.comm_uid_hash), state->uid_hash);
+    }
+    if (is_p2p) {
+      event.p2p_op_index = event.comm_seq;
+      if (current_group_id != 0) event.group_op_index = current_group_op_index++;
     }
     event.count = static_cast<uint64_t>(count);
     event.datatype = static_cast<int>(datatype);
     event.op = op;
     event.root = root;
+    event.peer = peer;
     event.stream = reinterpret_cast<uintptr_t>(stream);
     runtime.Enqueue(event);
-    return CallContext{state, event.comm_seq, event.call_seq, event.group_id};
+    return CallContext{state, event.comm_seq, event.call_seq, event.group_id,
+                       event.group_op_index, event.p2p_op_index};
   } catch (...) {
     return {};
   }
@@ -472,13 +491,15 @@ CallContext BeginCall(const char* api, ncclComm_t comm, std::size_t count,
 
 void EndCall(const char* api, const CallContext& context, ncclResult_t result,
              std::size_t count, ncclDataType_t datatype, int op, int root,
-             cudaStream_t stream) noexcept {
+             int peer, cudaStream_t stream) noexcept {
   try {
     Runtime& runtime = Runtime::Instance();
     Event event = MakeBaseEvent(EventKind::kNcclCall, api, "exit");
     event.call_seq = context.call_seq;
     event.comm_seq = context.comm_seq;
     event.group_id = context.group_id;
+    event.group_op_index = context.group_op_index;
+    event.p2p_op_index = context.p2p_op_index;
     if (context.comm != nullptr) {
       event.comm_rank = context.comm->rank;
       event.comm_nranks = context.comm->nranks;
@@ -488,6 +509,7 @@ void EndCall(const char* api, const CallContext& context, ncclResult_t result,
     event.datatype = static_cast<int>(datatype);
     event.op = op;
     event.root = root;
+    event.peer = peer;
     event.stream = reinterpret_cast<uintptr_t>(stream);
     event.result = static_cast<int>(result);
     runtime.Enqueue(event);
@@ -610,11 +632,11 @@ FLAGSCALE_EXPORT ncclResult_t ncclAllReduce(const void* send_buffer, void* recei
   static Function real_function = LoadNext<Function>("ncclAllReduce");
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context = BeginCall("ncclAllReduce", comm, count, datatype,
-                                        static_cast<int>(op), -1, stream);
+                                        static_cast<int>(op), -1, -1, stream);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, count, datatype, op, comm, stream);
   EndCall("ncclAllReduce", context, result, count, datatype, static_cast<int>(op),
-          -1, stream);
+          -1, -1, stream);
   return result;
 }
 
@@ -626,10 +648,11 @@ FLAGSCALE_EXPORT ncclResult_t ncclAllGather(const void* send_buffer, void* recei
   static Function real_function = LoadNext<Function>("ncclAllGather");
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context =
-      BeginCall("ncclAllGather", comm, send_count, datatype, -1, -1, stream);
+      BeginCall("ncclAllGather", comm, send_count, datatype, -1, -1, -1, stream);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, send_count, datatype, comm, stream);
-  EndCall("ncclAllGather", context, result, send_count, datatype, -1, -1, stream);
+  EndCall("ncclAllGather", context, result, send_count, datatype, -1, -1, -1,
+          stream);
   return result;
 }
 
@@ -642,11 +665,11 @@ FLAGSCALE_EXPORT ncclResult_t ncclReduceScatter(const void* send_buffer,
   static Function real_function = LoadNext<Function>("ncclReduceScatter");
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context = BeginCall("ncclReduceScatter", comm, receive_count,
-                                        datatype, static_cast<int>(op), -1, stream);
+                                        datatype, static_cast<int>(op), -1, -1, stream);
   const ncclResult_t result = real_function(send_buffer, receive_buffer, receive_count,
                                             datatype, op, comm, stream);
   EndCall("ncclReduceScatter", context, result, receive_count, datatype,
-          static_cast<int>(op), -1, stream);
+          static_cast<int>(op), -1, -1, stream);
   return result;
 }
 
@@ -658,10 +681,10 @@ FLAGSCALE_EXPORT ncclResult_t ncclBroadcast(const void* send_buffer, void* recei
   static Function real_function = LoadNext<Function>("ncclBroadcast");
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context =
-      BeginCall("ncclBroadcast", comm, count, datatype, -1, root, stream);
+      BeginCall("ncclBroadcast", comm, count, datatype, -1, root, -1, stream);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, count, datatype, root, comm, stream);
-  EndCall("ncclBroadcast", context, result, count, datatype, -1, root, stream);
+  EndCall("ncclBroadcast", context, result, count, datatype, -1, root, -1, stream);
   return result;
 }
 
@@ -674,11 +697,39 @@ FLAGSCALE_EXPORT ncclResult_t ncclReduce(const void* send_buffer, void* receive_
   static Function real_function = LoadNext<Function>("ncclReduce");
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context = BeginCall("ncclReduce", comm, count, datatype,
-                                        static_cast<int>(op), root, stream);
+                                        static_cast<int>(op), root, -1, stream);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, count, datatype, op, root, comm, stream);
-  EndCall("ncclReduce", context, result, count, datatype, static_cast<int>(op),
-          root, stream);
+  EndCall("ncclReduce", context, result, count, datatype, static_cast<int>(op), root,
+          -1, stream);
+  return result;
+}
+
+FLAGSCALE_EXPORT ncclResult_t ncclSend(const void* send_buffer, size_t count,
+                                       ncclDataType_t datatype, int peer, ncclComm_t comm,
+                                       cudaStream_t stream) {
+  using Function = ncclResult_t (*)(const void*, size_t, ncclDataType_t, int,
+                                    ncclComm_t, cudaStream_t);
+  static Function real_function = LoadNext<Function>("ncclSend");
+  if (real_function == nullptr) return ncclInternalError;
+  const CallContext context =
+      BeginCall("ncclSend", comm, count, datatype, -1, -1, peer, stream, true);
+  const ncclResult_t result = real_function(send_buffer, count, datatype, peer, comm, stream);
+  EndCall("ncclSend", context, result, count, datatype, -1, -1, peer, stream);
+  return result;
+}
+
+FLAGSCALE_EXPORT ncclResult_t ncclRecv(void* receive_buffer, size_t count,
+                                       ncclDataType_t datatype, int peer, ncclComm_t comm,
+                                       cudaStream_t stream) {
+  using Function = ncclResult_t (*)(void*, size_t, ncclDataType_t, int, ncclComm_t,
+                                    cudaStream_t);
+  static Function real_function = LoadNext<Function>("ncclRecv");
+  if (real_function == nullptr) return ncclInternalError;
+  const CallContext context =
+      BeginCall("ncclRecv", comm, count, datatype, -1, -1, peer, stream, true);
+  const ncclResult_t result = real_function(receive_buffer, count, datatype, peer, comm, stream);
+  EndCall("ncclRecv", context, result, count, datatype, -1, -1, peer, stream);
   return result;
 }
 
@@ -690,18 +741,20 @@ FLAGSCALE_EXPORT ncclResult_t ncclGroupStart() {
   try {
     if (flagscale::tracing::group_depth == 0) {
       flagscale::tracing::current_group_id = Runtime::Instance().NextGroupId();
+      flagscale::tracing::current_group_op_index = 0;
     }
     ++flagscale::tracing::group_depth;
     tracing_group_started = true;
   } catch (...) {
   }
-  const CallContext context =
-      BeginCall("ncclGroupStart", nullptr, 0, ncclChar, -1, -1, nullptr);
+  const CallContext context = BeginCall("ncclGroupStart", nullptr, 0, ncclChar, -1,
+                                        -1, -1, nullptr);
   const ncclResult_t result = real_function();
-  EndCall("ncclGroupStart", context, result, 0, ncclChar, -1, -1, nullptr);
+  EndCall("ncclGroupStart", context, result, 0, ncclChar, -1, -1, -1, nullptr);
   if (result != ncclSuccess && tracing_group_started &&
       flagscale::tracing::group_depth > 0 && --flagscale::tracing::group_depth == 0) {
     flagscale::tracing::current_group_id = 0;
+    flagscale::tracing::current_group_op_index = 0;
   }
   return result;
 }
@@ -710,12 +763,13 @@ FLAGSCALE_EXPORT ncclResult_t ncclGroupEnd() {
   using Function = ncclResult_t (*)();
   static Function real_function = LoadNext<Function>("ncclGroupEnd");
   if (real_function == nullptr) return ncclInternalError;
-  const CallContext context =
-      BeginCall("ncclGroupEnd", nullptr, 0, ncclChar, -1, -1, nullptr);
+  const CallContext context = BeginCall("ncclGroupEnd", nullptr, 0, ncclChar, -1,
+                                        -1, -1, nullptr);
   const ncclResult_t result = real_function();
-  EndCall("ncclGroupEnd", context, result, 0, ncclChar, -1, -1, nullptr);
+  EndCall("ncclGroupEnd", context, result, 0, ncclChar, -1, -1, -1, nullptr);
   if (flagscale::tracing::group_depth > 0 && --flagscale::tracing::group_depth == 0) {
     flagscale::tracing::current_group_id = 0;
+    flagscale::tracing::current_group_op_index = 0;
   }
   return result;
 }
