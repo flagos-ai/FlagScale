@@ -15,12 +15,7 @@ from .module import MegatronModule
 
 
 class MultipleChoice(MegatronModule):
-
-    def __init__(self,
-                 config,
-                 num_tokentypes=2,
-                 pre_process=True,
-                 post_process=True):
+    def __init__(self, config, num_tokentypes=2, pre_process=True, post_process=True):
         super(MultipleChoice, self).__init__(share_embeddings_and_output_weights=False)
         args = get_args()
 
@@ -33,21 +28,20 @@ class MultipleChoice(MegatronModule):
             add_pooler=True,
             encoder_attn_mask_type=AttnMaskType.padding,
             pre_process=self.pre_process,
-            post_process=self.post_process)
+            post_process=self.post_process,
+        )
 
         # Multi-choice head.
         if self.post_process:
             self.multichoice_dropout = torch.nn.Dropout(args.hidden_dropout)
-            self.multichoice_head = get_linear_layer(args.hidden_size, 1,
-                                                     init_method)
-            self._multichoice_head_key = 'multichoice_head'
+            self.multichoice_head = get_linear_layer(args.hidden_size, 1, init_method)
+            self._multichoice_head_key = "multichoice_head"
 
     def set_input_tensor(self, input_tensor):
         """See megatron.legacy.model.transformer.set_input_tensor()"""
         self.language_model.set_input_tensor(input_tensor)
 
     def forward(self, model_input, attention_mask, tokentype_ids=None):
-
         # [batch, choices, sequence] --> [batch * choices, sequence] -->
         #    transformer --> [batch, choices] --> softmax
 
@@ -68,10 +62,7 @@ class MultipleChoice(MegatronModule):
         position_ids = bert_position_ids(input_ids)
 
         lm_output = self.language_model(
-            input_ids,
-            position_ids,
-            extended_attention_mask,
-            tokentype_ids=tokentype_ids
+            input_ids, position_ids, extended_attention_mask, tokentype_ids=tokentype_ids
         )
         if self.post_process:
             _, pooled_output = lm_output
@@ -84,29 +75,31 @@ class MultipleChoice(MegatronModule):
             return multichoice_logits
         return lm_output
 
-    def state_dict_for_save_checkpoint(self, prefix='', keep_vars=False):
+    def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
         """For easy load when model is combined with other heads,
         add an extra key."""
 
         state_dict_ = {}
-        state_dict_[self._language_model_key] \
-            = self.language_model.state_dict_for_save_checkpoint(prefix=prefix,
-                                                                 keep_vars=keep_vars)
+        state_dict_[self._language_model_key] = self.language_model.state_dict_for_save_checkpoint(
+            prefix=prefix, keep_vars=keep_vars
+        )
         if self.post_process:
-            state_dict_[self._multichoice_head_key] \
-                = self.multichoice_head.state_dict(prefix=prefix, keep_vars=keep_vars)
+            state_dict_[self._multichoice_head_key] = self.multichoice_head.state_dict(
+                prefix=prefix, keep_vars=keep_vars
+            )
         return state_dict_
 
     def load_state_dict(self, state_dict, strict=True):
         """Customized load."""
 
-        self.language_model.load_state_dict(
-            state_dict[self._language_model_key], strict=strict)
+        self.language_model.load_state_dict(state_dict[self._language_model_key], strict=strict)
         if self.post_process:
             if self._multichoice_head_key in state_dict:
                 self.multichoice_head.load_state_dict(
-                    state_dict[self._multichoice_head_key], strict=strict)
+                    state_dict[self._multichoice_head_key], strict=strict
+                )
             else:
-                print_rank_last('***WARNING*** could not find {} in the checkpoint, '
-                                'initializing to random'.format(
-                                    self._multichoice_head_key))
+                print_rank_last(
+                    "***WARNING*** could not find {} in the checkpoint, "
+                    "initializing to random".format(self._multichoice_head_key)
+                )

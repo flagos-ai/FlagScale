@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Computes theoretical memory footprint for model training referring to megatron.
 Reference: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/training/theoretical_memory_usage.py
@@ -354,7 +368,8 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
     )
 
     sparse_mlp_params_per_ep_rank_noddp = (
-        2 * args.hidden_size
+        2
+        * args.hidden_size
         # Shared MoE mlp
         * (shared_expert_ffn_hidden_size * gated_linear_multiplier)
         # gate

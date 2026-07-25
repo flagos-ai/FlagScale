@@ -1,5 +1,6 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 """Pretrain or SFT multimodal."""
+
 from copy import deepcopy
 from functools import partial
 import os
@@ -8,14 +9,19 @@ import warnings
 
 import torch
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                             os.path.pardir, os.path.pardir)))
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
+)
 
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.core import mpu, tensor_parallel
 from megatron.core.enums import ModelType
-from examples.multimodal.config import get_language_model_config, get_vision_model_config, get_vision_projection_config
+from examples.multimodal.config import (
+    get_language_model_config,
+    get_vision_model_config,
+    get_vision_projection_config,
+)
 from megatron.core.models.multimodal.llava_model import LLaVAModel
 from examples.multimodal.layer_specs import get_layer_spec, get_mlp_module_spec, get_layer_spec_te
 from megatron.training.utils import average_losses_across_data_parallel_group
@@ -23,11 +29,13 @@ from examples.multimodal.dataloader_provider import train_valid_test_dataloaders
 from megatron.training.training import pretrain
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
+
 def model_provider(
-    pre_process=True, post_process=True, add_encoder=True, add_decoder=True,
-    parallel_output=True) -> LLaVAModel:
+    pre_process=True, post_process=True, add_encoder=True, add_decoder=True, parallel_output=True
+) -> LLaVAModel:
     """Builds the model.
 
     Args:
@@ -46,7 +54,7 @@ def model_provider(
 
     use_te = args.use_te
 
-    print_rank_0('building a multimodal model ...')
+    print_rank_0("building a multimodal model ...")
 
     num_image_tokens = get_image_token_count()
 
@@ -54,11 +62,15 @@ def model_provider(
     args.decoder_seq_length = args.seq_length + num_image_tokens
     args.seq_length = num_image_tokens
     if torch.distributed.get_rank() == 0:
-        warnings.warn("Changed decoder_seq_length to num_image_tokens ({num_image_tokens}) + user-specified seq_length ({old_seq_length}).")
+        warnings.warn(
+            "Changed decoder_seq_length to num_image_tokens ({num_image_tokens}) + user-specified seq_length ({old_seq_length})."
+        )
 
     if args.decoder_seq_length > args.max_position_embeddings:
         args.max_position_embeddings = args.decoder_seq_length
-        warnings.warn("Expanded max_position_embeddings to {args.max_position_embeddings} to accommodate the full sequence of vit output + llm output.")
+        warnings.warn(
+            "Expanded max_position_embeddings to {args.max_position_embeddings} to accommodate the full sequence of vit output + llm output."
+        )
 
     base_config = core_transformer_config_from_args(get_args())
     base_config.language_model_type = args.language_model_type
@@ -72,7 +84,9 @@ def model_provider(
         language_transformer_layer_spec = get_layer_spec(is_vit=False)
 
     vision_config = deepcopy(base_config)
-    vision_config = get_vision_model_config(vision_config, apply_query_key_layer_scaling=args.apply_query_key_layer_scaling)
+    vision_config = get_vision_model_config(
+        vision_config, apply_query_key_layer_scaling=args.apply_query_key_layer_scaling
+    )
 
     if use_te:
         vision_transformer_layer_spec = get_layer_spec_te(is_vit=True)
@@ -80,15 +94,23 @@ def model_provider(
         vision_transformer_layer_spec = get_layer_spec(is_vit=True)
 
     vision_projection_config = deepcopy(base_config)
-    vision_projection_config = get_vision_projection_config(vision_projection_config, language_config.hidden_size)
+    vision_projection_config = get_vision_projection_config(
+        vision_projection_config, language_config.hidden_size
+    )
 
     if args.encoder_pipeline_model_parallel_size > 0:
-        assert args.encoder_pipeline_model_parallel_size == 1, "ViT can only live on 1 pipeline stage."
+        assert args.encoder_pipeline_model_parallel_size == 1, (
+            "ViT can only live on 1 pipeline stage."
+        )
         vision_config.pipeline_model_parallel_size = args.encoder_pipeline_model_parallel_size
-        vision_projection_config.pipeline_model_parallel_size = args.encoder_pipeline_model_parallel_size
+        vision_projection_config.pipeline_model_parallel_size = (
+            args.encoder_pipeline_model_parallel_size
+        )
         if args.encoder_tensor_model_parallel_size > 0:
             vision_config.tensor_model_parallel_size = args.encoder_tensor_model_parallel_size
-            vision_projection_config.tensor_model_parallel_size = args.encoder_tensor_model_parallel_size
+            vision_projection_config.tensor_model_parallel_size = (
+                args.encoder_tensor_model_parallel_size
+            )
 
     vision_projection_layer_spec = get_mlp_module_spec(use_te=use_te).submodules
 
@@ -117,7 +139,11 @@ def model_provider(
         language_rotary_base=args.rotary_base,
     )
 
-    model.freeze(freeze_language_model=args.freeze_LM, freeze_vision_model=args.freeze_ViT, freeze_vision_projection=False)
+    model.freeze(
+        freeze_language_model=args.freeze_LM,
+        freeze_vision_model=args.freeze_ViT,
+        freeze_vision_projection=False,
+    )
 
     return model
 
@@ -148,28 +174,30 @@ def get_batch(data_iterator):
 
     tokens_ = data_text.long()
 
-    img_raw = data_img['img'].reshape(-1, 3, args.img_h, args.img_w)
+    img_raw = data_img["img"].reshape(-1, 3, args.img_h, args.img_w)
 
     cur_platform.range_push("index tokens")
     tokenizer = get_tokenizer()
     text_length = args.decoder_seq_length - args.seq_length
     tokens = tokens_[:, :text_length].contiguous()
-    labels = tokens_[:, 1:text_length+1].contiguous()
+    labels = tokens_[:, 1 : text_length + 1].contiguous()
 
     assert tokens.shape == labels.shape, f"tokens: {tokens.shape} != labels: {labels.shape}"
     cur_platform.range_pop()
 
     cur_platform.range_push("get_ltor_masks_and_position_ids")
-    if hasattr(tokenizer, 'eod'):
+    if hasattr(tokenizer, "eod"):
         eod_token = tokenizer.eod
-    elif hasattr(tokenizer, 'eos_id'):
+    elif hasattr(tokenizer, "eos_id"):
         eod_token = tokenizer.eos_id
-    attention_mask, loss_mask, position_ids = \
-        get_ltor_masks_and_position_ids(tokens, eod_token,
-                                        args.reset_position_ids,
-                                        args.reset_attention_mask,
-                                        args.eod_mask_loss,
-                                        question_length=prompt_len)
+    attention_mask, loss_mask, position_ids = get_ltor_masks_and_position_ids(
+        tokens,
+        eod_token,
+        args.reset_position_ids,
+        args.reset_attention_mask,
+        args.eod_mask_loss,
+        question_length=prompt_len,
+    )
     cur_platform.range_pop()
 
     return tokens, labels, loss_mask, attention_mask, position_ids, img_raw
@@ -188,13 +216,15 @@ def get_image_token_count():
     return num_image_tokens
 
 
-def get_ltor_masks_and_position_ids(data,
-                                    eod_token,
-                                    reset_position_ids,
-                                    reset_attention_mask,
-                                    eod_mask_loss,
-                                    question_length=None,
-                                    weights=None):
+def get_ltor_masks_and_position_ids(
+    data,
+    eod_token,
+    reset_position_ids,
+    reset_attention_mask,
+    eod_mask_loss,
+    question_length=None,
+    weights=None,
+):
     """Build masks and position id for left to right model."""
 
     # Extract batch size and sequence length.
@@ -205,9 +235,9 @@ def get_ltor_masks_and_position_ids(data,
         att_mask_batch = micro_batch_size
     else:
         att_mask_batch = 1
-    attention_mask = torch.tril(torch.ones(
-        (att_mask_batch, seq_length, seq_length), device=data.device)).view(
-            att_mask_batch, 1, seq_length, seq_length)
+    attention_mask = torch.tril(
+        torch.ones((att_mask_batch, seq_length, seq_length), device=data.device)
+    ).view(att_mask_batch, 1, seq_length, seq_length)
 
     # Loss mask.
     loss_mask = torch.ones(data.size(), dtype=torch.float, device=data.device)
@@ -215,22 +245,19 @@ def get_ltor_masks_and_position_ids(data,
         loss_mask[data == eod_token] = 0.0
 
     # Position ids.
-    position_ids = torch.arange(seq_length, dtype=torch.long,
-                                device=data.device)
+    position_ids = torch.arange(seq_length, dtype=torch.long, device=data.device)
     position_ids = position_ids.unsqueeze(0).expand_as(data)
     # We need to clone as the ids will be modifed based on batch index.
     if reset_position_ids:
         position_ids = position_ids.clone()
 
-
     if question_length is not None:
         for b in range(micro_batch_size):
-            loss_mask[b, :max(0, question_length[b].item())] = 0.0
+            loss_mask[b, : max(0, question_length[b].item())] = 0.0
 
     if reset_position_ids or reset_attention_mask:
         # Loop through the batches:
         for b in range(micro_batch_size):
-
             # Find indecies where EOD token is.
             eod_index = position_ids[b, data[b] == eod_token]
             # Detach indecies from positions if going to modify positions.
@@ -243,14 +270,14 @@ def get_ltor_masks_and_position_ids(data,
                 i = eod_index[j]
                 # Mask attention loss.
                 if reset_attention_mask:
-                    attention_mask[b, 0, (i + 1):, :(i + 1)] = 0
+                    attention_mask[b, 0, (i + 1) :, : (i + 1)] = 0
                 # Reset positions.
                 if reset_position_ids:
-                    position_ids[b, (i + 1):] -= (i + 1 - prev_index)
+                    position_ids[b, (i + 1) :] -= i + 1 - prev_index
                     prev_index = i + 1
 
     # Convert attention mask to binary:
-    attention_mask = (attention_mask < 0.5)
+    attention_mask = attention_mask < 0.5
     if weights is not None:
         loss_mask = loss_mask * weights
 
@@ -261,15 +288,14 @@ def loss_func(loss_mask, output_tensor):
     losses = output_tensor.float()
     if loss_mask is not None:
         loss_mask = loss_mask.view(-1).float()
-        loss = torch.sum(losses.view(-1) * loss_mask) / max( 1,loss_mask.sum() )
+        loss = torch.sum(losses.view(-1) * loss_mask) / max(1, loss_mask.sum())
     else:
         loss = torch.mean(losses)
 
     # Reduce loss for logging.
     averaged_loss = average_losses_across_data_parallel_group([loss])
 
-    return loss, {'lm loss': averaged_loss[0]}
-
+    return loss, {"lm loss": averaged_loss[0]}
 
 
 def forward_step(data_iterator, model: LLaVAModel):
@@ -287,31 +313,42 @@ def forward_step(data_iterator, model: LLaVAModel):
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    timers("batch-generator", log_level=2).start()
     tokens, labels, loss_mask, attention_mask, position_ids, images = get_batch(data_iterator)
-    timers('batch-generator').stop()
+    timers("batch-generator").stop()
 
-    output_tensor, loss_mask = model(images, tokens, position_ids, attention_mask, labels, loss_mask)
+    output_tensor, loss_mask = model(
+        images, tokens, position_ids, attention_mask, labels, loss_mask
+    )
 
     return output_tensor, partial(loss_func, loss_mask)
 
+
 def add_multimodal_extra_args(parser):
     """Extra arguments."""
-    group = parser.add_argument_group(title='multimodal arguments')
-    group.add_argument('--valid-path', nargs='*', default=None,
-                       help='Path to the training dataset. Accepted format:'
-                       '1) a single data path, 2) multiple datasets in the'
-                       'form: dataset1-weight dataset1-path dataset2-weight '
-                       'dataset2-path ...')
-    group.add_argument('--dataset-config', type=str, default=None)
+    group = parser.add_argument_group(title="multimodal arguments")
+    group.add_argument(
+        "--valid-path",
+        nargs="*",
+        default=None,
+        help="Path to the training dataset. Accepted format:"
+        "1) a single data path, 2) multiple datasets in the"
+        "form: dataset1-weight dataset1-path dataset2-weight "
+        "dataset2-path ...",
+    )
+    group.add_argument("--dataset-config", type=str, default=None)
     group.add_argument("--prompt-path", type=str, default=None)
-    group.add_argument('--freeze-LM', action='store_true', default=False)
-    group.add_argument('--freeze-ViT', action='store_true', default=False)
-    group.add_argument('--language-model-type', type=str, required=True)
+    group.add_argument("--freeze-LM", action="store_true", default=False)
+    group.add_argument("--freeze-ViT", action="store_true", default=False)
+    group.add_argument("--language-model-type", type=str, required=True)
     group.add_argument("--disable-vision-class-token", action="store_true", default=False)
-    group.add_argument("--allow-missing-vision-projection-checkpoint", action="store_true", default=False)
+    group.add_argument(
+        "--allow-missing-vision-projection-checkpoint", action="store_true", default=False
+    )
     group.add_argument("--use-te", action="store_true", default=False)
-    group.add_argument("--dataloader-save", type=str, default=None, help="Energon dataloader state save path")
+    group.add_argument(
+        "--dataloader-save", type=str, default=None, help="Energon dataloader state save path"
+    )
     return parser
 
 
@@ -357,7 +394,7 @@ if __name__ == "__main__":
         model_provider,
         ModelType.encoder_and_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
+        args_defaults={"tokenizer_type": "GPT2BPETokenizer"},
         extra_args_provider=add_multimodal_extra_args,
         get_embedding_ranks=llava_embedding_ranks,
         get_position_embedding_ranks=llava_position_embedding_ranks,

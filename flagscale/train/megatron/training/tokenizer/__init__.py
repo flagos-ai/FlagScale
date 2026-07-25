@@ -10,4 +10,4 @@ megatron.core.tokenizers.utils.build_tokenizer.
 
 from .tokenizer import build_tokenizer, register_tokenizer_factory
 
-__all__ = ['build_tokenizer', 'register_tokenizer_factory']
+__all__ = ["build_tokenizer", "register_tokenizer_factory"]

@@ -64,7 +64,9 @@ _NUM_WARMUP_ITERS = 1  # Will be set by --ft-num-warmup-iters (default: 5)
 _MIN_ITERS_FOR_STEP_TIMEOUT_UPDATE = 16
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
+
 
 def get_rank_monitor_client() -> Optional[Any]:
     """Returns the underlying fault tolerance client instance
@@ -95,7 +97,7 @@ def setup() -> None:
 
     cli = RankMonitorClient()
     global _GLOBAL_RANK_MONITOR_CLIENT
-    global_vars._ensure_var_is_not_initialized(_GLOBAL_RANK_MONITOR_CLIENT, 'rank monitor client')
+    global_vars._ensure_var_is_not_initialized(_GLOBAL_RANK_MONITOR_CLIENT, "rank monitor client")
     _GLOBAL_RANK_MONITOR_CLIENT = cli
 
     global _ft_state_path
@@ -283,7 +285,7 @@ def _maybe_update_timeouts(is_closing_ft=False):
     if is_closing_ft:
         # with async checkpointing, "checkpointing" section is not updated,
         # but still we want to see some checkpointing to ensure that is was a complete run
-        if {'setup', 'step'}.issubset(sections_to_update) and _seen_checkpoints_cnt > 0:
+        if {"setup", "step"}.issubset(sections_to_update) and _seen_checkpoints_cnt > 0:
             update_out_of_section = True
         else:
             print_rank_0(
@@ -306,13 +308,13 @@ def maybe_setup_simulated_fault() -> None:
     NOTE: This if for FT testing only
     """
 
-    simulated_fault_desc = os.environ.get('FT_SIM_FAULT_DESC', None)
+    simulated_fault_desc = os.environ.get("FT_SIM_FAULT_DESC", None)
     if not simulated_fault_desc:
         return
     fault_type: Any  # silence mypy
     rank_to_fail: Any  # silence mypy
     base_delay: Any  # silence mypy
-    fault_type, rank_to_fail, base_delay = simulated_fault_desc.split(';')
+    fault_type, rank_to_fail, base_delay = simulated_fault_desc.split(";")
     fault_type = fault_type.strip()
     rank_to_fail = rank_to_fail.strip()
     rank_to_fail = int(rank_to_fail) if rank_to_fail else None
@@ -338,12 +340,12 @@ def maybe_setup_simulated_fault() -> None:
         # this rank is not going to simulate a fault, nothing more to do
         return
 
-    if fault_type == 'random':
-        fault_type = rng.choice(['rank_killed', 'rank_hung'])
+    if fault_type == "random":
+        fault_type = rng.choice(["rank_killed", "rank_hung"])
 
-    if fault_type == 'rank_killed':
+    if fault_type == "rank_killed":
         target_pid = os.getpid()
-    elif fault_type == 'rank_hung':
+    elif fault_type == "rank_hung":
         target_pid = os.getpid()
     else:
         raise Exception(f"Unknown fault type {fault_type} expected one of: rank_killed, rank_hung.")
@@ -361,7 +363,7 @@ def maybe_setup_simulated_fault() -> None:
                 file=of,
                 flush=True,
             )
-        if fault_type == 'rank_hung':
+        if fault_type == "rank_hung":
             os.kill(target_pid, signal.SIGSTOP)
         else:
             os.kill(target_pid, signal.SIGKILL)

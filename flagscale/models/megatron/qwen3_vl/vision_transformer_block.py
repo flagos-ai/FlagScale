@@ -24,6 +24,7 @@ from megatron.core.utils import (
 )
 from megatron.core.models.vision.multimodal_projector import MultimodalProjector
 from megatron.core.transformer.spec_utils import ModuleSpec, build_module
+
 try:
     import transformer_engine.pytorch as te  # pylint: disable=unused-import
 
@@ -77,7 +78,10 @@ class VisionTransformerBlock(TransformerBlock):
         if self.final_layernorm != None:
             # NOTE(lizhiyu): replace final layernorm with TENorm if using TE
             self.final_layernorm = None
-            self.final_layernorm = torch.nn.LayerNorm(normalized_shape=self.config.hidden_size, eps=self.config.layernorm_epsilon,)
+            self.final_layernorm = torch.nn.LayerNorm(
+                normalized_shape=self.config.hidden_size,
+                eps=self.config.layernorm_epsilon,
+            )
 
         # NOTE: DeepStack
         self.deepstack_visual_indexes = self.config.deepstack_visual_indexes
@@ -87,7 +91,7 @@ class VisionTransformerBlock(TransformerBlock):
                     projection_config,
                     projection_layer_spec,
                     projection_type,
-                    projection_config.ffn_hidden_size
+                    projection_config.ffn_hidden_size,
                 )
                 for _ in range(len(self.config.deepstack_visual_indexes))
             ]
@@ -102,7 +106,10 @@ class VisionTransformerBlock(TransformerBlock):
                 #     eps=self.config.layernorm_epsilon,
                 # ),
                 # NOTE(lizhiyu): replace with torch LayerNorm
-                torch.nn.LayerNorm(normalized_shape = projection_config.ffn_hidden_size, eps = self.config.layernorm_epsilon,)
+                torch.nn.LayerNorm(
+                    normalized_shape=projection_config.ffn_hidden_size,
+                    eps=self.config.layernorm_epsilon,
+                )
                 for _ in range(len(self.config.deepstack_visual_indexes))
             ]
         )
@@ -185,7 +192,7 @@ class VisionTransformerBlock(TransformerBlock):
                     rotary_pos_emb,
                 )
 
-        if self.config.recompute_method == 'uniform':
+        if self.config.recompute_method == "uniform":
             # Uniformly divide the total number of Transformer layers and checkpoint
             # the input activation of each divided chunk.
             # A method to further reduce memory usage reducing checkpoints.
@@ -216,7 +223,7 @@ class VisionTransformerBlock(TransformerBlock):
 
                 layer_idx += self.config.recompute_num_layers
 
-        elif self.config.recompute_method == 'block':
+        elif self.config.recompute_method == "block":
             # Checkpoint the input activation of only a set number of individual
             # Transformer layers and skip the rest.
             # A method fully use the device memory removing redundant re-computation.
@@ -243,6 +250,7 @@ class VisionTransformerBlock(TransformerBlock):
         return hidden_states
 
     """Transformer class."""
+
     def forward(
         self,
         hidden_states: Union[Tensor, WrappedTensor],
@@ -344,9 +352,13 @@ class VisionTransformerBlock(TransformerBlock):
 
         with rng_context, outer_quantization_context:
             # Forward pass.
-            if self.config.recompute_granularity == 'full' and self.training:
-                assert self.config.recompute_method == 'uniform' and self.config.recompute_num_layers == 1, \
+            if self.config.recompute_granularity == "full" and self.training:
+                assert (
+                    self.config.recompute_method == "uniform"
+                    and self.config.recompute_num_layers == 1
+                ), (
                     f"Only uniform recompute with recompute_num_layers=1 is supported for full recompute in Qwen3-VL."
+                )
                 hidden_states = self._checkpointed_forward(
                     hidden_states=hidden_states,
                     attention_mask=attention_mask,
@@ -356,7 +368,7 @@ class VisionTransformerBlock(TransformerBlock):
                     attention_bias=attention_bias,
                     packed_seq_params=packed_seq_params,
                     use_inner_quantization_context=use_inner_quantization_context,
-                    deepstack_feature_lists = deepstack_feature_lists,  # Note: DeepStack
+                    deepstack_feature_lists=deepstack_feature_lists,  # Note: DeepStack
                 )
             else:
                 for l_no, layer in enumerate(self.layers):

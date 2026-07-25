@@ -2,7 +2,10 @@
 import os
 
 import torch
-from flagscale.models.megatron.llava_onevision.dataset_helpers import print_error_handler, AnyResTaskEncoder
+from flagscale.models.megatron.llava_onevision.dataset_helpers import (
+    print_error_handler,
+    AnyResTaskEncoder,
+)
 
 from megatron.core import mpu
 from megatron.energon import (
@@ -100,15 +103,13 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples):
             )
             if os.path.exists(data_save_name):
                 try:
-                    dataset_state_dict = torch.load(data_save_name, map_location="cpu", weights_only=False)
-                    train_dataloader.restore_state_rank(
-                        dataset_state_dict["dataloader_state_dict"]
+                    dataset_state_dict = torch.load(
+                        data_save_name, map_location="cpu", weights_only=False
                     )
+                    train_dataloader.restore_state_rank(dataset_state_dict["dataloader_state_dict"])
                     print_rank_0(f"restored dataset state from {data_save_name}")
                 except Exception as e:
-                    print_rank_0(
-                        "loading dataloader checkpoint failed. Skipping. " + str(e)
-                    )
+                    print_rank_0("loading dataloader checkpoint failed. Skipping. " + str(e))
     if args.training_dataset_only:
         return (
             EnergonDataloader(train_dataloader),

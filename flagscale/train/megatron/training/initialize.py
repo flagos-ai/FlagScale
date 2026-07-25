@@ -1,6 +1,7 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
 """Megatron initialization."""
+
 import logging
 import os
 import random
@@ -22,7 +23,9 @@ from megatron.core.rerun_state_machine import (
     RerunMode,
     initialize_rerun_state_machine,
 )
-from megatron.core.transformer.custom_layers.batch_invariant_kernels import enable_batch_invariant_mode
+from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
+    enable_batch_invariant_mode,
+)
 from megatron.core.utils import get_te_version, is_te_min_version, is_torch_min_version
 from megatron.training import get_adlr_autoresume, get_args, get_tensorboard_writer
 from megatron.training.utils import print_rank_0, warn_rank_0
@@ -42,7 +45,9 @@ from megatron.plugin.decorators import overridable
 logger = logging.getLogger(__name__)
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
+
 
 def initialize_megatron(
     extra_args_provider=None,
@@ -80,13 +85,15 @@ def initialize_megatron(
         args.exit_on_missing_checkpoint = True
 
     if args.use_checkpoint_args or args_defaults.get("use_checkpoint_args", False):
-        assert args.load is not None or args.pretrained_checkpoint is not None, "--use-checkpoint-args requires --load or --pretrained-checkpoint argument"
+        assert args.load is not None or args.pretrained_checkpoint is not None, (
+            "--use-checkpoint-args requires --load or --pretrained-checkpoint argument"
+        )
         assert args.non_persistent_ckpt_type != "local", (
             "--use-checkpoint-args is not supported with --non_persistent_ckpt_type=local. "
             "Two-stage checkpoint loading is not implemented, and all arguments must be defined "
             "before initializing LocalCheckpointManager."
         )
-        load_args_from_checkpoint(args, load_arg='pretrained_checkpoint')
+        load_args_from_checkpoint(args, load_arg="pretrained_checkpoint")
         load_args_from_checkpoint(args)
 
     ## FlagScale Begin: Pre Validate Arguments ##
@@ -113,15 +120,15 @@ def initialize_megatron(
     setup_logging()
 
     if args.async_save and args.use_persistent_ckpt_worker:
-        init_persistent_async_worker(args.rank, 'forkserver')
+        init_persistent_async_worker(args.rank, "forkserver")
 
     # init rerun state
     def state_save_func():
-        return {'rng_tracker_states': tensor_parallel.get_cuda_rng_tracker().get_states()}
+        return {"rng_tracker_states": tensor_parallel.get_cuda_rng_tracker().get_states()}
 
     def state_restore_func(state_dict):
-        if state_dict['rng_tracker_states']:
-            tensor_parallel.get_cuda_rng_tracker().set_states(state_dict['rng_tracker_states'])
+        if state_dict["rng_tracker_states"]:
+            tensor_parallel.get_cuda_rng_tracker().set_states(state_dict["rng_tracker_states"])
 
     args = get_args()
     initialize_rerun_state_machine(
@@ -157,7 +164,6 @@ def initialize_megatron(
             args.inference_rng_tracker,
             use_cudagraphable_rng=args.cuda_graph_impl != "none",
         )
-
 
         # Setup MoE aux loss scale value.
         if args.num_experts is not None:
@@ -199,9 +205,9 @@ def initialize_megatron(
         # No continuation function
         return None
 
+
 @overridable
 def _compile_dependencies():
-
     args = get_args()
 
     # =========================
@@ -209,6 +215,7 @@ def _compile_dependencies():
     # =========================
     # TODO: move this to ninja
     from megatron.plugin.utils import is_built_on_zero_rank
+
     if is_built_on_zero_rank():
         start_time = time.time()
         print("> compiling dataset index builder ...")
@@ -216,12 +223,14 @@ def _compile_dependencies():
 
         compile_helpers()
         print(
-            ">>> done with dataset index builder. Compilation time: {:.3f} "
-            "seconds".format(time.time() - start_time),
+            ">>> done with dataset index builder. Compilation time: {:.3f} seconds".format(
+                time.time() - start_time
+            ),
             flush=True,
         )
 
     torch.distributed.barrier()
+
 
 def _initialize_tp_communicators():
     """initializing the communicators with user buffers for high-performance tensor-model-parallel
@@ -246,7 +255,7 @@ def _initialize_tp_communicators():
     else:
         ub_cfgs = {}
 
-    if getattr(args, 'decoder_tp_comm_overlap', False):
+    if getattr(args, "decoder_tp_comm_overlap", False):
         input_shape = [
             (args.decoder_seq_length * args.micro_batch_size) // args.context_parallel_size,
             args.hidden_size,
@@ -257,11 +266,16 @@ def _initialize_tp_communicators():
             args.hidden_size,
         ]
 
-
     if is_te_min_version("2.7.0"):
         UserBufferQuantizationMode = te_module.base.UserBufferQuantizationMode
-        quantization_modes = [UserBufferQuantizationMode.FP8 if args.fp8 else UserBufferQuantizationMode.NONE]
-        if args.fp8 is not None and args.first_last_layers_bf16 and (args.num_layers_at_start_in_bf16 > 0 or args.num_layers_at_end_in_bf16 > 0):
+        quantization_modes = [
+            UserBufferQuantizationMode.FP8 if args.fp8 else UserBufferQuantizationMode.NONE
+        ]
+        if (
+            args.fp8 is not None
+            and args.first_last_layers_bf16
+            and (args.num_layers_at_start_in_bf16 > 0 or args.num_layers_at_end_in_bf16 > 0)
+        ):
             quantization_modes.append(UserBufferQuantizationMode.NONE)
         # The process group with the target bootstrap backend is created in Transformer Engine.
         te_module.base.initialize_ub(
@@ -281,12 +295,12 @@ def _initialize_tp_communicators():
             bootstrap_backend=args.tp_comm_bootstrap_backend,
         )
     else:
-        if args.tp_comm_bootstrap_backend != 'mpi':
+        if args.tp_comm_bootstrap_backend != "mpi":
             warnings.warn(
                 f"Transformer Engine v{get_te_version()} supports only MPI bootstrap backend."
             )
         # Create a MPI process group to help with TP communication overlap bootstrap.
-        create_group(backend='mpi', group_desc='TP_BOOTSTRAP_GROUP_MPI')
+        create_group(backend="mpi", group_desc="TP_BOOTSTRAP_GROUP_MPI")
 
         te_module.base.initialize_ub(
             shape=input_shape,
@@ -302,13 +316,11 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
 
     device_count = cur_platform.device_count()
     if torch.distributed.is_initialized():
-
         print_rank_0("torch distributed is already initialized, skipping initialization ...")
         args.rank = torch.distributed.get_rank()
         args.world_size = torch.distributed.get_world_size()
 
     else:
-
         print_rank_0("> initializing torch distributed ...")
         # Manually set the device ids.
         if device_count > 0:
@@ -330,26 +342,26 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
         # so that the remaining defaults are applied consistently.
         _fr_path = (
             args.flight_recorder_dump_path
-            or os.environ.get('TORCH_FR_DUMP_TEMP_FILE')
-            or os.environ.get('TORCH_NCCL_DEBUG_INFO_TEMP_FILE')
+            or os.environ.get("TORCH_FR_DUMP_TEMP_FILE")
+            or os.environ.get("TORCH_NCCL_DEBUG_INFO_TEMP_FILE")
         )
         if _fr_path is not None:
             _fr_dump_prefix = _fr_path
             if os.path.isdir(_fr_path):
-                _fr_dump_prefix = os.path.join(_fr_path, '_dump_')
+                _fr_dump_prefix = os.path.join(_fr_path, "_dump_")
                 warn_rank_0(
                     "Flight recorder: using directory "
                     f"'{_fr_path}' for dump path, appending per-rank prefix "
                     f"'{_fr_dump_prefix}'."
                 )
             _fr_env_defaults = {
-                'TORCH_FR_DUMP_TEMP_FILE': _fr_dump_prefix,
-                'TORCH_NCCL_DEBUG_INFO_TEMP_FILE': _fr_dump_prefix,
-                'TORCH_NCCL_TRACE_BUFFER_SIZE': str(args.flight_recorder_trace_buffer_size),
-                'TORCH_NCCL_DUMP_ON_TIMEOUT': str(int(args.flight_recorder_dump_on_timeout)),
-                'TORCH_INCLUDE_STACK_TRACE': str(int(args.flight_recorder_include_stack_trace)),
-                'TORCH_INCLUDE_ONLY_ACTIVE': str(int(args.flight_recorder_include_only_active)),
-                'TORCH_NCCL_EXTRA_DUMP_ON_EXEC': str(int(args.flight_recorder_extra_dump_on_exec)),
+                "TORCH_FR_DUMP_TEMP_FILE": _fr_dump_prefix,
+                "TORCH_NCCL_DEBUG_INFO_TEMP_FILE": _fr_dump_prefix,
+                "TORCH_NCCL_TRACE_BUFFER_SIZE": str(args.flight_recorder_trace_buffer_size),
+                "TORCH_NCCL_DUMP_ON_TIMEOUT": str(int(args.flight_recorder_dump_on_timeout)),
+                "TORCH_INCLUDE_STACK_TRACE": str(int(args.flight_recorder_include_stack_trace)),
+                "TORCH_INCLUDE_ONLY_ACTIVE": str(int(args.flight_recorder_include_only_active)),
+                "TORCH_NCCL_EXTRA_DUMP_ON_EXEC": str(int(args.flight_recorder_extra_dump_on_exec)),
             }
             for _var, _default in _fr_env_defaults.items():
                 if _var in os.environ:
@@ -366,26 +378,29 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
 
         # Call the init process
         init_process_group_kwargs = {
-            'backend': args.distributed_backend,
-            'store': store,
-            'world_size': args.world_size,
-            'rank': args.rank,
-            'timeout': timedelta(minutes=args.distributed_timeout_minutes),
+            "backend": args.distributed_backend,
+            "store": store,
+            "world_size": args.world_size,
+            "rank": args.rank,
+            "timeout": timedelta(minutes=args.distributed_timeout_minutes),
         }
         if args.enable_hetero and args.hetero_use_cpu_communication:
             # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
             #     init_process_group_kwargs['backend'] = 'gloo'
-            init_process_group_kwargs['backend'] = "cpu:gloo"
+            init_process_group_kwargs["backend"] = "cpu:gloo"
         # TODO: @aoyulong the init_process_group will be hanging if the device_id is set
         # if packaging.version.Version(torch.__version__) >= packaging.version.Version("2.3.0"):
         #     init_process_group_kwargs['device_id'] = device_id
 
         if args.fake_process_group:
-            assert is_torch_min_version("2.3.0"), "Fake process group is only supported with PyTorch 2.3.0 and above."
+            assert is_torch_min_version("2.3.0"), (
+                "Fake process group is only supported with PyTorch 2.3.0 and above."
+            )
             from torch.testing._internal.distributed.fake_pg import FakeStore
+
             store = FakeStore()
-            init_process_group_kwargs['backend'] = 'fake'
-            init_process_group_kwargs['store'] = store
+            init_process_group_kwargs["backend"] = "fake"
+            init_process_group_kwargs["store"] = store
 
         torch.distributed.init_process_group(**init_process_group_kwargs)
         inprocess_restart.maybe_force_nccl_backend_init(device_id)
@@ -416,7 +431,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
                 engram_embedding_parallel_size=args.engram_embedding_parallel_size,
                 distributed_timeout_minutes=args.distributed_timeout_minutes,
                 nccl_communicator_config_path=args.nccl_communicator_config_path,
-                order='tp-cp-ep-dp-pp' if not args.use_tp_pp_dp_mapping else 'tp-cp-ep-pp-dp',
+                order="tp-cp-ep-dp-pp" if not args.use_tp_pp_dp_mapping else "tp-cp-ep-pp-dp",
                 get_embedding_ranks=get_embedding_ranks,
                 get_position_embedding_ranks=get_position_embedding_ranks,
                 create_gloo_process_groups=args.use_gloo_process_groups,
@@ -514,7 +529,9 @@ def _warmup_jit_function():
 
     # Warmup fused bias+gelu
     bias = torch.rand(
-        args.ffn_hidden_size // args.tensor_model_parallel_size, dtype=dtype, device=cur_platform.device_name()
+        args.ffn_hidden_size // args.tensor_model_parallel_size,
+        dtype=dtype,
+        device=cur_platform.device_name(),
     )
     input = torch.rand(
         (
@@ -551,7 +568,9 @@ def _warmup_jit_function():
         dtype=dtype,
         device=cur_platform.device_name(),
     )
-    bias = torch.rand((args.hidden_size), dtype=dtype, device=cur_platform.device_name()).expand_as(residual)
+    bias = torch.rand((args.hidden_size), dtype=dtype, device=cur_platform.device_name()).expand_as(
+        residual
+    )
     dropout_rate = 0.1
     # Warmup JIT fusions with the input grad_enable state of both forward
     # prop and recomputation
@@ -577,7 +596,7 @@ def setup_logging() -> None:
     """
     args = get_args()
     logging_level = None
-    env_logging_level = os.getenv('MEGATRON_LOGGING_LEVEL', None)
+    env_logging_level = os.getenv("MEGATRON_LOGGING_LEVEL", None)
     if env_logging_level is not None:
         logging_level = int(env_logging_level)
     if args.logging_level is not None:
@@ -585,5 +604,5 @@ def setup_logging() -> None:
 
     if logging_level is not None:
         if is_rank0():
-            logger.info(f'Setting logging level to {logging_level}')
+            logger.info(f"Setting logging level to {logging_level}")
         logging.getLogger().setLevel(logging_level)

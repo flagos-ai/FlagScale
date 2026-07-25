@@ -45,7 +45,7 @@ def build_tokenizer(args, **kwargs):
     from megatron.training.utils import print_rank_0
 
     if args.tokenizer_type in _TOKENIZER_FACTORY_REGISTRY:
-        print_rank_0(f'> building {args.tokenizer_type} tokenizer ...')
+        print_rank_0(f"> building {args.tokenizer_type} tokenizer ...")
         tokenizer = _TOKENIZER_FACTORY_REGISTRY[args.tokenizer_type](args, **kwargs)
     else:
         tokenizer = _upstream_build_tokenizer(args, **kwargs)
@@ -87,12 +87,13 @@ class _AquilaTokenizerFS(_FlagScaleTokenizerBase):
         super().__init__(path=vocab_file)
         special_tokens = []
         if special_tokens_file:
-            special_tokens = open(special_tokens_file, encoding='utf-8').read().split('\n')[:-1]
-        self.tokenizer = AquilaTokenizer(vocab_file, merge_file, errors='replace',
-                                         special_tokens=special_tokens, max_len=None)
-        self.eod_id = self.tokenizer.encoder['</s>']
-        self.cls_id = self.tokenizer.encoder['[CLS]']
-        self.pad_id = self.tokenizer.encoder['<|endoftext|>']
+            special_tokens = open(special_tokens_file, encoding="utf-8").read().split("\n")[:-1]
+        self.tokenizer = AquilaTokenizer(
+            vocab_file, merge_file, errors="replace", special_tokens=special_tokens, max_len=None
+        )
+        self.eod_id = self.tokenizer.encoder["</s>"]
+        self.cls_id = self.tokenizer.encoder["[CLS]"]
+        self.pad_id = self.tokenizer.encoder["<|endoftext|>"]
 
     @property
     def vocab_size(self):
@@ -131,6 +132,7 @@ class _HFTokenizerFS(_FlagScaleTokenizerBase):
     def __init__(self, tokenizer_path):
         super().__init__(path=tokenizer_path)
         from transformers import AutoTokenizer
+
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
         self.eod_id = self.tokenizer.eos_token_id
         self.cls_id = self.tokenizer.bos_token_id
@@ -183,9 +185,9 @@ class _QwenTokenizerFS(_HFTokenizerFS):
 
     def __init__(self, tokenizer_path):
         super().__init__(tokenizer_path)
-        self.eod_id = self.tokenizer.encode('<|extra_204|>')[0]
-        self.cls_id = self.tokenizer.encode('<|extra_203|>')[0]
-        self.pad_id = self.tokenizer.encode('<|endoftext|>')[0]
+        self.eod_id = self.tokenizer.encode("<|extra_204|>")[0]
+        self.cls_id = self.tokenizer.encode("<|extra_203|>")[0]
+        self.pad_id = self.tokenizer.encode("<|endoftext|>")[0]
 
 
 class _HFTokenizersTokenizerFS(_FlagScaleTokenizerBase):
@@ -194,6 +196,7 @@ class _HFTokenizersTokenizerFS(_FlagScaleTokenizerBase):
     def __init__(self, json_file):
         super().__init__(path=json_file)
         from tokenizers import Tokenizer
+
         self.tokenizer = Tokenizer.from_file(json_file)
         print(f"Vocab size: {self.tokenizer.get_vocab_size()}")
         self.eod_id = self.tokenizer.token_to_id("<|endoftext|>")
@@ -234,9 +237,9 @@ class _Qwen2TokenizerFS(_HFTokenizerFS):
 
     def __init__(self, tokenizer_path, args):
         super().__init__(tokenizer_path)
-        self.eod_id = self.tokenizer.encode('<|extra_204|>')[0]
-        self.cls_id = self.tokenizer.encode('<|extra_203|>')[0]
-        self.pad_id = self.tokenizer.encode('<|endoftext|>')[0]
+        self.eod_id = self.tokenizer.encode("<|extra_204|>")[0]
+        self.cls_id = self.tokenizer.encode("<|extra_203|>")[0]
+        self.pad_id = self.tokenizer.encode("<|endoftext|>")[0]
         assert args.vocab_size is not None
         self._vocab_size = args.vocab_size
 
@@ -249,41 +252,59 @@ class _Qwen2VLTokenizer(_FlagScaleTokenizerBase):
     def __init__(self, tokenizer_path, extra_vocab_size):
         super().__init__(tokenizer_path)
         from transformers import AutoTokenizer
+
         self.tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_path,
             padding_side="right",
             use_fast=True,
             split_special_tokens=False,
             trust_remote_code=True,
-            revision = "main",
-            token = None,
+            revision="main",
+            token=None,
         )
         self.extra_vocab_size = extra_vocab_size
-        self.special_tokens_map = {k:v for k, v in zip(self.tokenizer.all_special_tokens, self.tokenizer.all_special_ids)}
-        self.image_token = '<|image_pad|>'
-        self.video_token = '<|video_pad|>'
-        self.vision_start_token = '<|vision_start|>'
-        self.vision_end_token = '<|vision_end|>'
+        self.special_tokens_map = {
+            k: v for k, v in zip(self.tokenizer.all_special_tokens, self.tokenizer.all_special_ids)
+        }
+        self.image_token = "<|image_pad|>"
+        self.video_token = "<|video_pad|>"
+        self.vision_start_token = "<|vision_start|>"
+        self.vision_end_token = "<|vision_end|>"
 
         from transformers import AutoProcessor
+
         self.processor = AutoProcessor.from_pretrained(
             tokenizer_path,
-            revision = "main",
-            token = None,
+            revision="main",
+            token=None,
         )
         # NOTE: In Qwen2-VL, template in chat_template.json is same within tokenizer_config.json and both can be used.
         # However, in Qwen 2.5-VL, the two templates are different and only the one in chat_template.json is OK.
         self.chat_template = self.processor.chat_template
 
-    def __call__(self, text, return_tensors=None,
-                    padding=None, max_length=None, truncation=None, add_special_tokens=None):
+    def __call__(
+        self,
+        text,
+        return_tensors=None,
+        padding=None,
+        max_length=None,
+        truncation=None,
+        add_special_tokens=None,
+    ):
+        return self.tokenizer(
+            text,
+            return_tensors=return_tensors,
+            padding=padding,
+            max_length=max_length,
+            truncation=truncation,
+            add_special_tokens=add_special_tokens,
+        )
 
-        return self.tokenizer(text, return_tensors=return_tensors, padding=padding,
-                max_length=max_length, truncation=truncation, add_special_tokens=add_special_tokens)
+    def apply_chat_template(self, conversations, tokenize: bool = True, **kwargs):
+        return self.tokenizer.apply_chat_template(
+            conversations, tokenize=tokenize, chat_template=self.chat_template, **kwargs
+        )
 
-    def apply_chat_template(self, conversations, tokenize:bool=True, **kwargs):
-        return self.tokenizer.apply_chat_template(conversations, tokenize=tokenize, chat_template=self.chat_template, **kwargs)
-    
     @property
     def vocab_size(self):
         return self.tokenizer.vocab_size + self.extra_vocab_size
@@ -317,25 +338,26 @@ class _Qwen2VLTokenizer(_FlagScaleTokenizerBase):
     @property
     def eos_token_id(self):
         return self.tokenizer.eos_token_id
-    
+
     @property
     def image_token_id(self):
         return self.special_tokens_map[self.image_token]
-    
+
     @property
     def video_token_id(self):
         return self.special_tokens_map[self.video_token]
-    
+
     @property
     def vision_start_token_id(self):
         return self.special_tokens_map[self.vision_start_token]
-    
+
     @property
     def vision_end_token_id(self):
         return self.special_tokens_map[self.vision_end_token]
-    
+
     def encode(self, x):
         return self.tokenizer.encode(x)
+
 
 class _RWKVTokenizerFS(_FlagScaleTokenizerBase):
     """RWKV Trie-based tokenizer."""
@@ -370,6 +392,7 @@ class _RWKVTokenizerFS(_FlagScaleTokenizerBase):
 # ---------------------------------------------------------------------------
 # Factory functions and registration
 # ---------------------------------------------------------------------------
+
 
 def _build_aquila(args, **kwargs):
     assert args.vocab_file and args.merge_file and args.special_tokens_file
@@ -413,11 +436,11 @@ def _build_rwkv(args, **kwargs):
     return _RWKVTokenizerFS(args.tokenizer_path)
 
 
-register_tokenizer_factory('AquilaTokenizerFS', _build_aquila)
-register_tokenizer_factory('HFTokenizerFS', _build_hf)
-register_tokenizer_factory('Llama3TokenizerFS', _build_llama3)
-register_tokenizer_factory('QwenTokenizerFS', _build_qwen)
-register_tokenizer_factory('HFTokenizersTokenizerFS', _build_hftokenizers)
-register_tokenizer_factory('Qwen2TokenizerFS', _build_qwen2)
-register_tokenizer_factory('Qwen2VLTokenizer', _build_qwen2vl)
-register_tokenizer_factory('RWKVTokenizer', _build_rwkv)
+register_tokenizer_factory("AquilaTokenizerFS", _build_aquila)
+register_tokenizer_factory("HFTokenizerFS", _build_hf)
+register_tokenizer_factory("Llama3TokenizerFS", _build_llama3)
+register_tokenizer_factory("QwenTokenizerFS", _build_qwen)
+register_tokenizer_factory("HFTokenizersTokenizerFS", _build_hftokenizers)
+register_tokenizer_factory("Qwen2TokenizerFS", _build_qwen2)
+register_tokenizer_factory("Qwen2VLTokenizer", _build_qwen2vl)
+register_tokenizer_factory("RWKVTokenizer", _build_rwkv)
