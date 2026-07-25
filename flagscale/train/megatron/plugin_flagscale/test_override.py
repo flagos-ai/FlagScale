@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 Test override of get_device in plugin_flagscale.
 
@@ -8,15 +22,14 @@ Run from Megatron-LM-FL root with FlagScale in PYTHONPATH:
 Or standalone:
     python megatron/plugin_flagscale/test_override.py
 """
+
 import sys
 import os
 import unittest
 from unittest.mock import patch, MagicMock
 
 # Ensure both Megatron-LM-FL and FlagScale's megatron paths are importable
-MEGATRON_LM_FL_ROOT = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..")
-)
+MEGATRON_LM_FL_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 if MEGATRON_LM_FL_ROOT not in sys.path:
     sys.path.insert(0, MEGATRON_LM_FL_ROOT)
 
@@ -61,14 +74,16 @@ class TestGetDeviceOverride(unittest.TestCase):
         @overridable
         def get_device(local_rank=None):
             import torch
+
             # Simulate original logic
             if local_rank is None:
                 return torch.device(mock_platform.device_name())
             else:
-                return torch.device(f'{mock_platform.device_name()}:{local_rank}')
+                return torch.device(f"{mock_platform.device_name()}:{local_rank}")
 
         with patch("torch.distributed.get_backend", return_value="nccl"):
             import torch
+
             device = get_device()
             self.assertEqual(device, torch.device("cuda"))
 
@@ -83,6 +98,7 @@ class TestGetDeviceOverride(unittest.TestCase):
         @overridable
         def get_device(local_rank=None):
             import torch
+
             # Original: hardcoded cuda
             if local_rank is None:
                 return torch.device("cuda")
@@ -96,11 +112,11 @@ class TestGetDeviceOverride(unittest.TestCase):
             if local_rank is None:
                 return mock_platform.device_name()
             else:
-                return f'{mock_platform.device_name()}:{local_rank}'
+                return f"{mock_platform.device_name()}:{local_rank}"
 
         # The method_key for module-level function is "module_basename.func_name"
         # Since get_device is defined in this test, module is __main__ or test file
-        module_parts = get_device.__module__.split('.')
+        module_parts = get_device.__module__.split(".")
         module_name = module_parts[-1]
         register_override_method(f"{module_name}.get_device", get_device_override)
 
@@ -134,7 +150,7 @@ class TestGetDeviceOverride(unittest.TestCase):
             if local_rank is None:
                 return mock_platform.device_name()
             else:
-                return f'{mock_platform.device_name()}:{local_rank}'
+                return f"{mock_platform.device_name()}:{local_rank}"
 
         plugin_mod.get_device = get_device_plugin
         sys.modules["megatron.plugin_flagscale._test_get_device"] = plugin_mod
@@ -168,10 +184,10 @@ class TestGetDeviceOverride(unittest.TestCase):
 
         def get_device_plugin(local_rank=None):
             backend = torch.distributed.get_backend()
-            if backend == 'nccl':
+            if backend == "nccl":
                 return torch.device("cuda")
-            elif backend == 'gloo':
-                return torch.device('cpu')
+            elif backend == "gloo":
+                return torch.device("cpu")
             else:
                 raise RuntimeError
 
@@ -179,7 +195,7 @@ class TestGetDeviceOverride(unittest.TestCase):
         def get_device(local_rank=None):
             return torch.device("cuda")  # dummy original
 
-        module_parts = get_device.__module__.split('.')
+        module_parts = get_device.__module__.split(".")
         module_name = module_parts[-1]
         register_override_method(f"{module_name}.get_device", get_device_plugin)
 
@@ -193,10 +209,10 @@ class TestGetDeviceOverride(unittest.TestCase):
 
         def get_device_plugin(local_rank=None):
             backend = torch.distributed.get_backend()
-            if backend == 'nccl':
+            if backend == "nccl":
                 return torch.device("cuda")
-            elif backend == 'gloo':
-                return torch.device('cpu')
+            elif backend == "gloo":
+                return torch.device("cpu")
             else:
                 raise RuntimeError(f"Unsupported backend: {backend}")
 
@@ -204,7 +220,7 @@ class TestGetDeviceOverride(unittest.TestCase):
         def get_device(local_rank=None):
             return torch.device("cuda")
 
-        module_parts = get_device.__module__.split('.')
+        module_parts = get_device.__module__.split(".")
         module_name = module_parts[-1]
         register_override_method(f"{module_name}.get_device", get_device_plugin)
 

@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 
 from functools import partial
@@ -106,7 +120,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, "modelopt_enabled", False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     # Reshape output tensor to 1D for element-wise multiplication.
@@ -148,7 +162,7 @@ def loss_func(
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
     reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
 
-    return (loss, num_tokens, {'lm loss': reporting_loss})
+    return (loss, num_tokens, {"lm loss": reporting_loss})
 
 
 def forward_step(data_iterator, model: RWKVModel, return_schedule_plan: bool = False):
@@ -163,11 +177,11 @@ def forward_step(data_iterator, model: RWKVModel, return_schedule_plan: bool = F
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    timers("batch-generator", log_level=2).start()
     global stimer
     with stimer(bdata=True):
         tokens, labels, loss_mask, attention_mask, position_ids = get_batch(data_iterator)
-    timers('batch-generator').stop()
+    timers("batch-generator").stop()
 
     # Safety check for pipeline parallel intermediate stages
     if tokens is None:
@@ -179,9 +193,9 @@ def forward_step(data_iterator, model: RWKVModel, return_schedule_plan: bool = F
             output_tensor = model(tokens, labels=labels)
         else:
             if return_schedule_plan:
-                assert (
-                    args.overlap_moe_expert_parallel_comm
-                ), "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
+                assert args.overlap_moe_expert_parallel_comm, (
+                    "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
+                )
                 schedule_plan = model.build_schedule_plan(
                     tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
                 )
@@ -256,7 +270,6 @@ def is_dataset_built_on_rank():
 
 
 if __name__ == "__main__":
-
     # Temporary for transition to core datasets
     train_valid_test_datasets_provider.is_distributed = True
 
@@ -268,6 +281,6 @@ if __name__ == "__main__":
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'RWKVTokenizer'},
+        args_defaults={"tokenizer_type": "RWKVTokenizer"},
         store=store,
     )

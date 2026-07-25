@@ -1,0 +1,41 @@
+# FP8 -> W8A8 Quantization Config
+# Usage:
+#   cd /path/to/FlagScale
+#   python run.py --config-path examples/robobrain/conf --config-name compress_fp8toint8 \
+#       experiment.envs.MODEL_ID=./models \
+#       experiment.envs.SAVE_DIR=./outputs
+#
+# Only MODEL_ID and SAVE_DIR are required overrides. Other envs have sensible defaults.
+
+defaults:
+  - _self_
+
+compress:
+  system:
+    save_dir: outputs/fp8toint8_compress
+    logging:
+      log_interval: 1
+
+experiment:
+  exp_name: fp8toint8_example
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: compress
+    entrypoint: flagscale/compress/fp8toint8.py
+  runner:
+    hostfile: null
+    deploy:
+      use_fs_serve: false
+  cmds:
+    before_start: "conda activate flagscale_env"
+  envs:
+    MODEL_ID: ./models
+    SAVE_DIR: ./outputs
+    DEVICE: "auto"
+    MAX_WORKERS: "8"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

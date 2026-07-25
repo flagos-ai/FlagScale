@@ -11,6 +11,7 @@ from megatron.core import mpu, tensor_parallel
 
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
 _FLOAT_TYPES = (torch.FloatTensor, cur_platform.FloatTensor)
@@ -27,7 +28,7 @@ class MegatronModule(torch.nn.Module):
         self.config = config
         self.share_embeddings_and_output_weights = share_embeddings_and_output_weights
 
-    def state_dict_for_save_checkpoint(self, prefix='', keep_vars=False):
+    def state_dict_for_save_checkpoint(self, prefix="", keep_vars=False):
         """Use this function to override the state dict for
         saving checkpoints."""
         return self.state_dict(prefix=prefix, keep_vars=keep_vars)
@@ -38,8 +39,8 @@ class MegatronModule(torch.nn.Module):
         else:
             if not self.share_embeddings_and_output_weights:
                 raise Exception(
-                    'shared_embedding_or_output_weight() called for last '
-                    'stage, but share_embeddings_and_output_weights is false'
+                    "shared_embedding_or_output_weight() called for last "
+                    "stage, but share_embeddings_and_output_weights is false"
                 )
             return self.word_embeddings.weight
 
@@ -47,8 +48,8 @@ class MegatronModule(torch.nn.Module):
         args = get_args()
         if not self.share_embeddings_and_output_weights:
             raise Exception(
-                'initialize_word_embeddings() was called but '
-                'share_embeddings_and_output_weights is false'
+                "initialize_word_embeddings() was called but "
+                "share_embeddings_and_output_weights is false"
             )
 
         # This function just initializes the word embeddings in the final stage
@@ -82,7 +83,7 @@ class MegatronModule(torch.nn.Module):
         #    update is the same on both stages.
         if mpu.is_pipeline_last_stage(ignore_virtual=False) and not self.pre_process:
             assert not mpu.is_pipeline_first_stage(ignore_virtual=False)
-            self._word_embeddings_for_head_key = 'word_embeddings_for_head'
+            self._word_embeddings_for_head_key = "word_embeddings_for_head"
             # set word_embeddings weights to 0 here, then copy first
             # stage's weights using all_reduce below.
             self.word_embeddings = tensor_parallel.VocabParallelEmbedding(

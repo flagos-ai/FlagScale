@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 import sys
 import json
@@ -10,30 +24,35 @@ from utils import print_memory_usage
 
 
 def add_arguments(parser):
-    group = parser.add_argument_group(title='Megatron loader')
+    group = parser.add_argument_group(title="Megatron loader")
 
-    group.add_argument('--true-vocab-size', type=int, default=None,
-                       help='original size of vocab, if specified will trim padding from embedding table.')
-    group.add_argument('--megatron-path', type=str, default=None,
-                       help='Base directory of megatron repository')
-    group.add_argument('--position-embedding-type',
-                       type=str,
-                       default='learned_absolute',
-                       choices=['learned_absolute', 'rope'],
-                       help='Position embedding type.')
+    group.add_argument(
+        "--true-vocab-size",
+        type=int,
+        default=None,
+        help="original size of vocab, if specified will trim padding from embedding table.",
+    )
+    group.add_argument(
+        "--megatron-path", type=str, default=None, help="Base directory of megatron repository"
+    )
+    group.add_argument(
+        "--position-embedding-type",
+        type=str,
+        default="learned_absolute",
+        choices=["learned_absolute", "rope"],
+        help="Position embedding type.",
+    )
 
 
 def _load_checkpoint(queue, args):
-
     """
     prepare import module
     """
 
     # Search in directory above this
     root_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__),
-                     os.path.pardir,
-                     os.path.pardir))
+        os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
+    )
     sys.path.insert(0, root_path)
     sys.path.insert(0, os.path.join(root_path, "flagscale/train"))
 
@@ -47,9 +66,11 @@ def _load_checkpoint(queue, args):
         from megatron.legacy.model import module
         from megatron.core import mpu
         from megatron.core.tensor_parallel.random import (
-                get_cuda_rng_tracker, _DATA_PARALLEL_RNG_TRACKER_NAME,
-                _EXPERT_PARALLEL_RNG_TRACKER_NAME, _MODEL_PARALLEL_RNG_TRACKER_NAME
-            )
+            get_cuda_rng_tracker,
+            _DATA_PARALLEL_RNG_TRACKER_NAME,
+            _EXPERT_PARALLEL_RNG_TRACKER_NAME,
+            _MODEL_PARALLEL_RNG_TRACKER_NAME,
+        )
         from tools.checkpoint.utils import (
             _ConverterFakeProcessGroup,
             get_expert_model_parallel_rank,
@@ -59,7 +80,9 @@ def _load_checkpoint(queue, args):
             validate_mcore_parallel_size,
         )
     except ModuleNotFoundError:
-        print("Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting.")
+        print(
+            "Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting."
+        )
         queue.put("exit")
         exit(1)
 
@@ -80,23 +103,26 @@ def _load_checkpoint(queue, args):
 
     # We want all arguments to come from us.
     sys.argv = [
-        'script.py',
-        '--no-masked-softmax-fusion',
-        '--no-bias-gelu-fusion',
-        '--no-bias-dropout-fusion',
-        '--use-cpu-initialization',
-        '--micro-batch-size', '1',
-        '--no-load-optim',
-        '--no-load-rng',
-        '--no-save-optim',
-        '--no-save-rng',
-        '--no-initialization',
-        '--mock-data', # To pass the "blend data checks" in arguments.py
-        '--transformer-impl', 'transformer_engine',
-        '--load', args.load_dir,
-        '--exit-on-missing-checkpoint',
-        '--use-mp-args-from-checkpoint-args',
-        '--no-one-logger',
+        "script.py",
+        "--no-masked-softmax-fusion",
+        "--no-bias-gelu-fusion",
+        "--no-bias-dropout-fusion",
+        "--use-cpu-initialization",
+        "--micro-batch-size",
+        "1",
+        "--no-load-optim",
+        "--no-load-rng",
+        "--no-save-optim",
+        "--no-save-rng",
+        "--no-initialization",
+        "--mock-data",  # To pass the "blend data checks" in arguments.py
+        "--transformer-impl",
+        "transformer_engine",
+        "--load",
+        args.load_dir,
+        "--exit-on-missing-checkpoint",
+        "--use-mp-args-from-checkpoint-args",
+        "--no-one-logger",
     ]
 
     margs = parse_args()
@@ -174,13 +200,13 @@ def _load_checkpoint(queue, args):
     os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
 
     # Layernorm has bias; RMSNorm does not.
-    if hasattr(checkpoint_args, 'normalization'):
+    if hasattr(checkpoint_args, "normalization"):
         margs.norm_has_bias = checkpoint_args.normalization == "LayerNorm"
     else:
         # older models only supported LayerNorm
         margs.norm_has_bias = True
 
-    print("*"*20 + "validate loader arguments" + "*"*20)
+    print("*" * 20 + "validate loader arguments" + "*" * 20)
     margs = validate_args(margs)
     validate_mcore_parallel_size(margs)
 
@@ -194,22 +220,22 @@ def _load_checkpoint(queue, args):
                 queue.put("exit")
                 exit(1)
 
-    check_for_arg('tensor_model_parallel_size')
-    check_for_arg('pipeline_model_parallel_size')
-    check_for_arg('expert_model_parallel_size')
-    check_for_arg('num_layers')
-    check_for_arg('hidden_size')
-    check_for_arg('seq_length')
-    check_for_arg('num_attention_heads')
-    check_for_arg('max_position_embeddings')
-    check_for_arg('position_embedding_type')
-    check_for_arg('tokenizer_type')
-    check_for_arg('iteration')
-    check_for_arg('bert_binary_head')
-    check_for_arg('params_dtype')
-    check_for_arg('swiglu', False)
-    check_for_arg('disable_bias_linear', not getattr(margs, "add_bias_linear", False))
-    check_for_arg('add_qkv_bias', getattr(margs, "add_bias_linear_qkv", False))
+    check_for_arg("tensor_model_parallel_size")
+    check_for_arg("pipeline_model_parallel_size")
+    check_for_arg("expert_model_parallel_size")
+    check_for_arg("num_layers")
+    check_for_arg("hidden_size")
+    check_for_arg("seq_length")
+    check_for_arg("num_attention_heads")
+    check_for_arg("max_position_embeddings")
+    check_for_arg("position_embedding_type")
+    check_for_arg("tokenizer_type")
+    check_for_arg("iteration")
+    check_for_arg("bert_binary_head")
+    check_for_arg("params_dtype")
+    check_for_arg("swiglu", False)
+    check_for_arg("disable_bias_linear", not getattr(margs, "add_bias_linear", False))
+    check_for_arg("add_qkv_bias", getattr(margs, "add_bias_linear_qkv", False))
 
     # Determine how to make our models.
     margs.model_type = model_plugin.model_type
@@ -265,7 +291,9 @@ def _load_checkpoint(queue, args):
     edp_parallel_size = mcore_model_parallel_size // (etp_size * ep_size)
     fake_edp_group = _ConverterFakeProcessGroup(size=edp_parallel_size)
     fake_etp_ep_group = _ConverterFakeProcessGroup(size=etp_size * ep_size)
-    fake_tcp_group = _ConverterFakeProcessGroup(size=margs.tensor_model_parallel_size*margs.context_parallel_size)
+    fake_tcp_group = _ConverterFakeProcessGroup(
+        size=margs.tensor_model_parallel_size * margs.context_parallel_size
+    )
     mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
     mpu._CONTEXT_PARALLEL_GROUP = fake_cp_group
     mpu._DATA_PARALLEL_GROUP = fake_dp_group
@@ -309,12 +337,13 @@ def _load_checkpoint(queue, args):
     md.previous_expert_parallel_size = margs.expert_model_parallel_size
     md.previous_expert_tensor_parallel_size = margs.expert_tensor_parallel_size
     md.previous_decoder_first_pipeline_num_layers = margs.decoder_first_pipeline_num_layers
-    md.true_vocab_size = args.true_vocab_size # true (non-padded) vocab size
+    md.true_vocab_size = args.true_vocab_size  # true (non-padded) vocab size
     md.make_vocab_size_divisible_by = margs.make_vocab_size_divisible_by
     md.checkpoint_args = checkpoint_args
 
     consumed_train_samples = None
     consumed_valid_samples = None
+
     def get_models(count, dtype):
         # for one pp stage
         nonlocal consumed_train_samples
@@ -355,12 +384,12 @@ def _load_checkpoint(queue, args):
             load_checkpoint(model_, None, None)
 
             if consumed_train_samples is not None:
-                assert(margs.consumed_train_samples == consumed_train_samples)
+                assert margs.consumed_train_samples == consumed_train_samples
             else:
                 consumed_train_samples = margs.consumed_train_samples
 
             if consumed_valid_samples is not None:
-                assert(margs.consumed_valid_samples == consumed_valid_samples)
+                assert margs.consumed_valid_samples == consumed_valid_samples
             else:
                 consumed_valid_samples = margs.consumed_valid_samples
 
@@ -377,7 +406,7 @@ def _load_checkpoint(queue, args):
     fake_pp_group = _ConverterFakeProcessGroup(rank=0, size=pp_size)
     mpu._PIPELINE_MODEL_PARALLEL_GROUP = fake_pp_group
     all_models = [get_models(mcore_model_parallel_size, margs.params_dtype)]
-    models = all_models[0][0] # pp0vpp0
+    models = all_models[0][0]  # pp0vpp0
 
     md.consumed_train_samples = consumed_train_samples
     md.consumed_valid_samples = consumed_valid_samples
@@ -409,7 +438,7 @@ def _load_checkpoint(queue, args):
                 message = dict()
                 margs.total_layer_num = total_layer_num
 
-                engram_layer_id  = total_layer_num # get_global_layer_id
+                engram_layer_id = total_layer_num  # get_global_layer_id
                 if getattr(margs, "use_engram", False) and engram_layer_id in getattr(
                     margs, "engram_layer_ids", []
                 ):

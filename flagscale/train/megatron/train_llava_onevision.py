@@ -1,5 +1,6 @@
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 """Pretrain or SFT LLaVA-NeXT model."""
+
 from copy import deepcopy
 from functools import partial
 import os
@@ -9,9 +10,7 @@ import warnings
 import torch
 
 sys.path.append(
-    os.path.abspath(
-        os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
-    )
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
 )
 
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
@@ -40,6 +39,7 @@ from flagscale.models.megatron.llava_onevision.dataloader_provider import (
 from megatron.training.training import pretrain
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
 
@@ -103,9 +103,7 @@ def model_provider(
     if use_te:
         vision_transformer_layer_spec = get_layer_spec_te(is_vit=True)
     else:
-        vision_transformer_layer_spec = get_layer_spec(
-            is_vit=True, normalization="LayerNorm"
-        )
+        vision_transformer_layer_spec = get_layer_spec(is_vit=True, normalization="LayerNorm")
 
     vision_projection_config = deepcopy(base_config)
     vision_projection_config = get_vision_projection_config(
@@ -113,19 +111,15 @@ def model_provider(
     )
 
     if args.encoder_pipeline_model_parallel_size > 0:
-        assert (
-            args.encoder_pipeline_model_parallel_size == 1
-        ), "ViT can only live on 1 pipeline stage."
-        vision_config.pipeline_model_parallel_size = (
-            args.encoder_pipeline_model_parallel_size
+        assert args.encoder_pipeline_model_parallel_size == 1, (
+            "ViT can only live on 1 pipeline stage."
         )
+        vision_config.pipeline_model_parallel_size = args.encoder_pipeline_model_parallel_size
         vision_projection_config.pipeline_model_parallel_size = (
             args.encoder_pipeline_model_parallel_size
         )
         if args.encoder_tensor_model_parallel_size > 0:
-            vision_config.tensor_model_parallel_size = (
-                args.encoder_tensor_model_parallel_size
-            )
+            vision_config.tensor_model_parallel_size = args.encoder_tensor_model_parallel_size
             vision_projection_config.tensor_model_parallel_size = (
                 args.encoder_tensor_model_parallel_size
             )
@@ -184,26 +178,20 @@ def get_batch(data_iterator):
     else:
         data = None
 
-    input_ids = tensor_parallel.broadcast_data(["input_ids"], data, torch.int64)[
-        "input_ids"
+    input_ids = tensor_parallel.broadcast_data(["input_ids"], data, torch.int64)["input_ids"]
+    input_ids_shape = tensor_parallel.broadcast_data(["input_ids_shape"], data, torch.int64)[
+        "input_ids_shape"
     ]
-    input_ids_shape = tensor_parallel.broadcast_data(
-        ["input_ids_shape"], data, torch.int64
-    )["input_ids_shape"]
     labels = tensor_parallel.broadcast_data(["labels"], data, torch.int64)["labels"]
     labels_shape = tensor_parallel.broadcast_data(["labels_shape"], data, torch.int64)[
         "labels_shape"
     ]
     images = tensor_parallel.broadcast_data(["images"], data, torch.float32)["images"]
-    split_image_sizes = tensor_parallel.broadcast_data(
-        ["split_image_sizes"], data, torch.int64
-    )["split_image_sizes"]
-    image_sizes = tensor_parallel.broadcast_data(["image_sizes"], data, torch.int64)[
-        "image_sizes"
+    split_image_sizes = tensor_parallel.broadcast_data(["split_image_sizes"], data, torch.int64)[
+        "split_image_sizes"
     ]
-    modalities = tensor_parallel.broadcast_data(["modalities"], data, torch.int64)[
-        "modalities"
-    ]
+    image_sizes = tensor_parallel.broadcast_data(["image_sizes"], data, torch.int64)["image_sizes"]
+    modalities = tensor_parallel.broadcast_data(["modalities"], data, torch.int64)["modalities"]
 
     # Convert to list
     # input_ids to list
@@ -211,9 +199,7 @@ def get_batch(data_iterator):
     start_idx = 0
     for shape in input_ids_shape:
         num_elements = torch.prod(shape).item()
-        sub_tensor = input_ids[start_idx : start_idx + num_elements].reshape(
-            shape.tolist()
-        )
+        sub_tensor = input_ids[start_idx : start_idx + num_elements].reshape(shape.tolist())
         input_ids_list.append(sub_tensor)
         start_idx += num_elements
     assert start_idx == input_ids.numel()
@@ -224,9 +210,7 @@ def get_batch(data_iterator):
     start_idx = 0
     for shape in labels_shape:
         num_elements = torch.prod(shape).item()
-        sub_tensor = labels[start_idx : start_idx + num_elements].reshape(
-            shape.tolist()
-        )
+        sub_tensor = labels[start_idx : start_idx + num_elements].reshape(shape.tolist())
         labels_list.append(sub_tensor)
         start_idx += num_elements
     assert start_idx == labels.numel()
@@ -237,9 +221,7 @@ def get_batch(data_iterator):
     start_idx = 0
     for shape in split_image_sizes:
         num_elements = torch.prod(shape).item()
-        sub_tensor = images[start_idx : start_idx + num_elements].reshape(
-            shape.tolist()
-        )
+        sub_tensor = images[start_idx : start_idx + num_elements].reshape(shape.tolist())
         images_list.append(sub_tensor)
         start_idx += num_elements
     assert start_idx == images.numel()
@@ -284,9 +266,7 @@ def get_batch(data_iterator):
         padding_value=tokenizer.pad_token_id,
         tokenizer=tokenizer,
     )
-    labels = pad_sequence(
-        labels, batch_first=True, padding_value=IGNORE_INDEX, tokenizer=tokenizer
-    )
+    labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX, tokenizer=tokenizer)
     # Attention mask same as LLaVA-NeXT
     attention_mask = input_ids.ne(tokenizer.pad_token_id)
     cur_platform.range_pop()
@@ -325,9 +305,7 @@ def loss_func(labels: torch.Tensor, loss_mask: torch.Tensor, logits: torch.Tenso
 
     shift_logits = logits[:-1, :, :].contiguous()
     shift_labels = labels[1:, ...].contiguous()
-    losses = tensor_parallel.vocab_parallel_cross_entropy(
-        shift_logits.float(), shift_labels
-    )
+    losses = tensor_parallel.vocab_parallel_cross_entropy(shift_logits.float(), shift_labels)
     losses = losses.transpose(0, 1).contiguous().float()
     if loss_mask is not None:
         loss_mask = loss_mask[..., 1:].contiguous()
@@ -357,13 +335,9 @@ def forward_step(data_iterator, model: LLaVAOneVisionModel):
 
     # Get the batch.
     timers("batch-generator", log_level=2).start()
-    input_ids, labels, attention_mask, images, image_sizes, modalities = get_batch(
-        data_iterator
-    )
+    input_ids, labels, attention_mask, images, image_sizes, modalities = get_batch(data_iterator)
     if "text" in modalities and ("image" in modalities or "video" in modalities):
-        raise ValueError(
-            "Both text and other modalities are present in the same batch."
-        )
+        raise ValueError("Both text and other modalities are present in the same batch.")
     timers("batch-generator").stop()
 
     output_tensor, labels, loss_mask = model(
@@ -390,9 +364,7 @@ def add_multimodal_extra_args(parser):
     group.add_argument("--freeze-LM", action="store_true", default=False)
     group.add_argument("--freeze-ViT", action="store_true", default=False)
     group.add_argument("--language-model-type", type=str, required=True)
-    group.add_argument(
-        "--disable-vision-class-token", action="store_true", default=False
-    )
+    group.add_argument("--disable-vision-class-token", action="store_true", default=False)
     group.add_argument(
         "--allow-missing-vision-projection-checkpoint",
         action="store_true",
@@ -441,15 +413,11 @@ def add_multimodal_extra_args(parser):
     group.add_argument(
         "--pos-skipping-range", type=int, default=4096, help="Position skipping range"
     )
-    group.add_argument(
-        "--add-faster-video", default=False, help="Whetehr add fatser video token"
-    )
+    group.add_argument("--add-faster-video", default=False, help="Whetehr add fatser video token")
     group.add_argument(
         "--mm-spatial-pool-mode", type=str, default="bilinear", help="Spatial pool mode"
     )
-    group.add_argument(
-        "--mm-newline-position", type=str, default="grid", help="Newline position."
-    )
+    group.add_argument("--mm-newline-position", type=str, default="grid", help="Newline position.")
     return parser
 
 

@@ -33,6 +33,7 @@ from .language_transformer_block import LanguageTransformerBlock
 
 from flagscale.models.megatron.qwen2_5_vl.language_module import QwenVLLanguageModelEmbedding
 
+
 ######### New Impl for Qwen3-VL Language Model #########
 # reference from https://github.com/huggingface/transformers/blob/d08b98b965176ea9cf8c8e8b24995c955b7e2ec9/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L278
 class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
@@ -96,8 +97,8 @@ class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
         """
         freqs_t = freqs[0]  # just overwrite the first dimension T
         for dim, offset in enumerate((1, 2), start=1):  # H, W
-            length = mrope_section[dim] * 3 # 20 * 3 = 60
-            idx = slice(offset, length, 3) # 1, 4, 7, ..., 59 for H; 2, 5, 8, ..., 59 for W
+            length = mrope_section[dim] * 3  # 20 * 3 = 60
+            idx = slice(offset, length, 3)  # 1, 4, 7, ..., 59 for H; 2, 5, 8, ..., 59 for W
             freqs_t[..., idx] = freqs[dim, ..., idx]
         return freqs_t
 
@@ -112,13 +113,17 @@ class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
         Returns:
             Tensor: Embeddings after applying RoPE.
         """
-        seq = position_ids.to(device=self.inv_freq.device, dtype=torch.float32)  # shape (3, bs, seq_length)
+        seq = position_ids.to(
+            device=self.inv_freq.device, dtype=torch.float32
+        )  # shape (3, bs, seq_length)
 
         if self.seq_len_interpolation_factor is not None:
             seq *= 1 / self.seq_len_interpolation_factor
 
         # shape (3, bs, dim, 1)
-        inv_freq_expanded = self.inv_freq[None, None, :, None].float().expand(3, seq.shape[1], -1, 1)
+        inv_freq_expanded = (
+            self.inv_freq[None, None, :, None].float().expand(3, seq.shape[1], -1, 1)
+        )
         # shape (3, bs, 1, seq_length)
         seq_expanded = seq[:, :, None, :].float()
         # shape (3, bs, seq_length, dim)
@@ -145,6 +150,7 @@ class Qwen3VLLanguageRotaryEmbedding(torch.nn.Module):
             # CP rank
             emb = get_pos_emb_on_this_cp_rank(emb, 0, cp_group)
         return emb
+
 
 class Qwen3VLLanguageModule(GPTModel):
     """Qwen3-VL Language Module.
@@ -177,8 +183,8 @@ class Qwen3VLLanguageModule(GPTModel):
         parallel_output: bool = True,
         share_embeddings_and_output_weights: bool = False,
         position_embedding_type: Literal[
-            'learned_absolute', 'rope', 'mrope', 'none'
-        ] = 'learned_absolute',
+            "learned_absolute", "rope", "mrope", "none"
+        ] = "learned_absolute",
         rotary_percent: float = 1.0,
         rotary_base: int = 10000,
         rope_scaling: bool = False,
@@ -204,7 +210,7 @@ class Qwen3VLLanguageModule(GPTModel):
         self.share_embeddings_and_output_weights = share_embeddings_and_output_weights
         self.vp_stage = vp_stage
 
-        if hasattr(self.config, 'position_embedding_type'):
+        if hasattr(self.config, "position_embedding_type"):
             self.position_embedding_type = self.config.position_embedding_type
         else:
             self.position_embedding_type = position_embedding_type
@@ -217,7 +223,7 @@ class Qwen3VLLanguageModule(GPTModel):
         self.max_position_embeddings = max_sequence_length
         self.rotary_percent = rotary_percent
 
-        if hasattr(self.config, 'rotary_base'):
+        if hasattr(self.config, "rotary_base"):
             self.rotary_base = self.config.rotary_base
         else:
             self.rotary_base = rotary_base
@@ -233,7 +239,7 @@ class Qwen3VLLanguageModule(GPTModel):
                 position_embedding_type=position_embedding_type,
                 tp_group=self.pg_collection.tp,
             )
-        if self.position_embedding_type == 'mrope' and not self.config.multi_latent_attention:
+        if self.position_embedding_type == "mrope" and not self.config.multi_latent_attention:
             self.rotary_pos_emb = Qwen3VLLanguageRotaryEmbedding(
                 kv_channels=self.config.kv_channels,
                 rotary_percent=rotary_percent,
@@ -242,10 +248,9 @@ class Qwen3VLLanguageModule(GPTModel):
                 rotary_base=rotary_base,
             )
             self.mrope_section = self.config.mrope_section
-            assert (
-                self.mrope_section is not None
-            ), "mrope require mrope_section setting, but we got None from TransformerConfig"
-
+            assert self.mrope_section is not None, (
+                "mrope require mrope_section setting, but we got None from TransformerConfig"
+            )
 
         # Cache for RoPE tensors which do not change between iterations.
         self.rotary_pos_emb_cache = {}
@@ -267,7 +272,6 @@ class Qwen3VLLanguageModule(GPTModel):
 
         # Output
         if self.post_process:
-
             if self.config.defer_embedding_wgrad_compute:
                 # The embedding activation buffer preserves a reference to the input activations
                 # of the final embedding projection layer GEMM. It will hold the activations for
@@ -303,10 +307,10 @@ class Qwen3VLLanguageModule(GPTModel):
 
         if has_config_logger_enabled(self.config):
             log_config_to_disk(
-                self.config, self.state_dict(), prefix=f'{type(self).__name__}_init_ckpt'
+                self.config, self.state_dict(), prefix=f"{type(self).__name__}_init_ckpt"
             )
         for name, module in self.named_modules():
-            if hasattr(module, 'finish_init'):
+            if hasattr(module, "finish_init"):
                 quant_config = get_quant_config_or_none(name, self.config.quant_recipe)
                 module.finish_init(quant_config)
 

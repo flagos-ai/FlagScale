@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 import sys
 import types
@@ -7,37 +21,43 @@ from utils import print_memory_usage
 
 
 def add_arguments(parser):
-    group = parser.add_argument_group(title='Transformers loader')
+    group = parser.add_argument_group(title="Transformers loader")
 
-    group.add_argument('--true-vocab-size', type=int, default=None,
-                       help='original size of vocab, if specified will trim padding from embedding table.')
-    group.add_argument('--megatron-path', type=str, default=None,
-                       help='Base directory of megatron repository')
-    group.add_argument('--position-embedding-type',
-                       type=str,
-                       default='learned_absolute',
-                       choices=['learned_absolute', 'rope'],
-                       help='Position embedding type.')
+    group.add_argument(
+        "--true-vocab-size",
+        type=int,
+        default=None,
+        help="original size of vocab, if specified will trim padding from embedding table.",
+    )
+    group.add_argument(
+        "--megatron-path", type=str, default=None, help="Base directory of megatron repository"
+    )
+    group.add_argument(
+        "--position-embedding-type",
+        type=str,
+        default="learned_absolute",
+        choices=["learned_absolute", "rope"],
+        help="Position embedding type.",
+    )
 
 
 def _load_checkpoint(queue, args):
-
     """
     prepare import module
     """
 
     try:
         import transformers
-        major, minor, _ = map(int, transformers.__version__.split('.'))
+
+        major, minor, _ = map(int, transformers.__version__.split("."))
         assert major >= 4 and minor >= 36
     except:
         raise ImportError("transformers version >= 4.36.0 ")
 
     # Search in directory above this.
     root_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__),
-                     os.path.pardir,
-                     os.path.pardir))
+        os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
+    )
     sys.path.insert(0, root_path)
     sys.path.insert(0, os.path.join(root_path, "flagscale/train"))
 
@@ -47,7 +67,9 @@ def _load_checkpoint(queue, args):
     try:
         from megatron.training.arguments import parse_args, validate_args
     except ModuleNotFoundError:
-        print("Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting.")
+        print(
+            "Unable to import Megatron, please specify the path to Megatron using --megatron-path. Exiting."
+        )
         queue.put("exit")
         exit(1)
 
@@ -69,32 +91,39 @@ def _load_checkpoint(queue, args):
 
     # We want all arguments to come from us.
     sys.argv = [
-        'script.py',
-        '--no-masked-softmax-fusion',
-        '--no-bias-gelu-fusion',
-        '--no-bias-dropout-fusion',
-        '--use-cpu-initialization',
-        '--micro-batch-size', '1',
-        '--no-load-optim',
-        '--no-load-rng',
-        '--no-save-optim',
-        '--no-save-rng',
-        '--no-initialization',
-        '--mock-data', # To pass the "blend data checks" in arguments.py
-        '--use-mcore-models',
-        '--transformer-impl', 'transformer_engine',
-        '--load', args.load_dir,
-        '--exit-on-missing-checkpoint',
-        '--use-mp-args-from-checkpoint-args',
-        '--no-one-logger',
+        "script.py",
+        "--no-masked-softmax-fusion",
+        "--no-bias-gelu-fusion",
+        "--no-bias-dropout-fusion",
+        "--use-cpu-initialization",
+        "--micro-batch-size",
+        "1",
+        "--no-load-optim",
+        "--no-load-rng",
+        "--no-save-optim",
+        "--no-save-rng",
+        "--no-initialization",
+        "--mock-data",  # To pass the "blend data checks" in arguments.py
+        "--use-mcore-models",
+        "--transformer-impl",
+        "transformer_engine",
+        "--load",
+        args.load_dir,
+        "--exit-on-missing-checkpoint",
+        "--use-mp-args-from-checkpoint-args",
+        "--no-one-logger",
     ]
 
     margs = parse_args()
     args_plugin.load_args_hf2mg(margs)
 
-    print("*"*20 + "validate loader arguments" + "*"*20)
+    print("*" * 20 + "validate loader arguments" + "*" * 20)
     margs = validate_args(margs)
-    margs.world_size = margs.tensor_model_parallel_size * margs.pipeline_model_parallel_size * margs.expert_model_parallel_size
+    margs.world_size = (
+        margs.tensor_model_parallel_size
+        * margs.pipeline_model_parallel_size
+        * margs.expert_model_parallel_size
+    )
 
     def check_for_arg(arg_name, default=None):
         if getattr(margs, arg_name, None) is None:
@@ -106,23 +135,23 @@ def _load_checkpoint(queue, args):
                 queue.put("exit")
                 exit(1)
 
-    check_for_arg('tensor_model_parallel_size')
-    check_for_arg('pipeline_model_parallel_size')
-    check_for_arg('expert_model_parallel_size')
-    check_for_arg('num_layers')
-    check_for_arg('hidden_size')
-    check_for_arg('seq_length')
-    check_for_arg('num_attention_heads')
-    check_for_arg('max_position_embeddings')
-    check_for_arg('position_embedding_type')
-    check_for_arg('tokenizer_type')
-    check_for_arg('iteration')
-    check_for_arg('bert_binary_head')
-    check_for_arg('params_dtype')
-    check_for_arg('swiglu', False)
-    check_for_arg('disable_bias_linear', not getattr(margs, "add_bias_linear", False))
-    check_for_arg('add_qkv_bias', getattr(margs, "add_bias_linear_qkv", False))
-    check_for_arg('qk_layernorm', getattr(margs, "qk_layernorm", False))
+    check_for_arg("tensor_model_parallel_size")
+    check_for_arg("pipeline_model_parallel_size")
+    check_for_arg("expert_model_parallel_size")
+    check_for_arg("num_layers")
+    check_for_arg("hidden_size")
+    check_for_arg("seq_length")
+    check_for_arg("num_attention_heads")
+    check_for_arg("max_position_embeddings")
+    check_for_arg("position_embedding_type")
+    check_for_arg("tokenizer_type")
+    check_for_arg("iteration")
+    check_for_arg("bert_binary_head")
+    check_for_arg("params_dtype")
+    check_for_arg("swiglu", False)
+    check_for_arg("disable_bias_linear", not getattr(margs, "add_bias_linear", False))
+    check_for_arg("add_qkv_bias", getattr(margs, "add_bias_linear_qkv", False))
+    check_for_arg("qk_layernorm", getattr(margs, "qk_layernorm", False))
 
     """
     use megatron args build object and init env
@@ -169,7 +198,7 @@ def _load_checkpoint(queue, args):
 
     # Send embeddings.
     message = dict()
-    message["word embeddings"]= hf_model.model.embed_tokens.weight
+    message["word embeddings"] = hf_model.model.embed_tokens.weight
     queue_put("embeddings", message)
 
     # Send transformer layers

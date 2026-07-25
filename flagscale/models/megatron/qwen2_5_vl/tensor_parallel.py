@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Adopted from https://github.com/alibaba/Pai-Megatron-Patch/blob/8949a6647cbf6b39837ad3dd911fa4aa0726895b/megatron_patch/tensor_parallel.py
 
 # NOTE: we slightly modify this file to support zero-size tensor, such as [0, 128] when we don't have video data
@@ -19,10 +33,10 @@ _MAX_DATA_DIM = 5
 def _check_data_types(keys, data, target_dtype):
     """Check that all the keys have the same target data type."""
     for key in keys:
-        assert (
-            data[key].dtype == target_dtype
-        ), '{} has data type {} which ' 'is different than {}'.format(
-            key, data[key].dtype, target_dtype
+        assert data[key].dtype == target_dtype, (
+            "{} has data type {} which is different than {}".format(
+                key, data[key].dtype, target_dtype
+            )
         )
 
 
@@ -36,14 +50,14 @@ def _build_key_size_numel_dictionaries(keys, data):
     if get_tensor_model_parallel_rank() == 0:
         offset = 0
         for key in keys:
-            assert data[key].dim() < max_dim, 'you should increase MAX_DATA_DIM'
+            assert data[key].dim() < max_dim, "you should increase MAX_DATA_DIM"
             size = data[key].size()
             for i, s in enumerate(size):
                 sizes[i + offset] = s
             offset += max_dim
 
     # Move to GPU and broadcast.
-    sizes_cuda = torch.tensor(sizes, dtype=torch.long, device='cuda')
+    sizes_cuda = torch.tensor(sizes, dtype=torch.long, device="cuda")
     torch.distributed.broadcast(
         sizes_cuda, get_tensor_model_parallel_src_rank(), group=get_tensor_model_parallel_group()
     )
@@ -93,7 +107,9 @@ def broadcast_data(keys, data, datatype):
         # Flatten the data associated with the keys
         flatten_data = torch.cat([data[key].contiguous().view(-1) for key in keys], dim=0).cuda()
     else:
-        flatten_data = torch.empty(total_numel, device=cur_platform.current_device(), dtype=datatype)
+        flatten_data = torch.empty(
+            total_numel, device=cur_platform.current_device(), dtype=datatype
+        )
 
     # Broadcast
     torch.distributed.broadcast(

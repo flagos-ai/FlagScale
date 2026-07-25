@@ -20,7 +20,7 @@ from megatron.core.extensions.transformer_engine import (
     TELayerNormColumnParallelLinear,
     TENorm,
     TERowParallelLinear,
-    TEColumnParallelLinear
+    TEColumnParallelLinear,
 )
 
 from megatron.core.transformer.enums import AttnMaskType
@@ -30,17 +30,14 @@ from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
 
 from megatron.core.transformer.mlp import MLP, MLPSubmodules
-from megatron.core.transformer.attention import (SelfAttentionSubmodules, SelfAttention)
+from megatron.core.transformer.attention import SelfAttentionSubmodules, SelfAttention
 
 from .vision_attention import SelfAttentionVision
 
+
 # Use this spec to use lower level Transformer Engine modules (required for fp8 training)
-def get_gpt_layer_with_transformer_engine_spec(
-    qk_layernorm: bool = False
-) -> ModuleSpec:
-    mlp = get_mlp_module_spec(
-        use_te=True, num_experts=None, moe_grouped_gemm=False
-    )
+def get_gpt_layer_with_transformer_engine_spec(qk_layernorm: bool = False) -> ModuleSpec:
+    mlp = get_mlp_module_spec(use_te=True, num_experts=None, moe_grouped_gemm=False)
     return ModuleSpec(
         module=TransformerLayer,
         submodules=TransformerLayerSubmodules(
@@ -62,10 +59,9 @@ def get_gpt_layer_with_transformer_engine_spec(
         ),
     )
 
-def get_qwen2vl_vision_model_spec(
-    is_vit=False
-) -> ModuleSpec:
-    attn_mask_type = AttnMaskType.no_mask # THD --> causal_pad
+
+def get_qwen2vl_vision_model_spec(is_vit=False) -> ModuleSpec:
+    attn_mask_type = AttnMaskType.no_mask  # THD --> causal_pad
 
     mlp = ModuleSpec(
         module=MLP,
@@ -98,7 +94,10 @@ def get_qwen2vl_vision_model_spec(
 
 # Helper function to get module spec for MLP/MoE
 def get_mlp_module_spec(
-    use_te: bool = True, num_experts: int = None, moe_grouped_gemm: bool = False, add_norm: bool = True
+    use_te: bool = True,
+    num_experts: int = None,
+    moe_grouped_gemm: bool = False,
+    add_norm: bool = True,
 ) -> ModuleSpec:
     if num_experts is None:
         # Dense MLP w/ or w/o TE modules.

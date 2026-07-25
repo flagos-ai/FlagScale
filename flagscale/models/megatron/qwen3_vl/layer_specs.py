@@ -25,7 +25,7 @@ from megatron.core.extensions.transformer_engine import (
     TERowParallelLinear,
     TEColumnParallelLinear,
     TEColumnParallelGroupedLinear,
-    TERowParallelGroupedLinear
+    TERowParallelGroupedLinear,
 )
 
 from megatron.core.transformer.enums import AttnMaskType
@@ -45,11 +45,13 @@ from megatron.core.transformer.mlp import MLPSubmodules
 from megatron.core.transformer.moe.experts import TEGroupedMLP
 
 from flagscale.models.megatron.qwen3_vl.vision_attention import VisionSelfAttention
+
+
 # Use this spec to use lower level Transformer Engine modules (required for fp8 training)
 def get_gpt_layer_with_transformer_engine_spec(
     num_experts: Optional[int] = None,
     moe_grouped_gemm: Optional[bool] = False,
-    qk_layernorm: bool = False
+    qk_layernorm: bool = False,
 ) -> ModuleSpec:
     mlp = get_mlp_module_spec(
         use_te=True, num_experts=num_experts, moe_grouped_gemm=moe_grouped_gemm
@@ -75,10 +77,9 @@ def get_gpt_layer_with_transformer_engine_spec(
         ),
     )
 
-def get_qwen3vl_vision_model_spec(
-    is_vit=True
-) -> ModuleSpec:
-    attn_mask_type = AttnMaskType.no_mask # THD full attention
+
+def get_qwen3vl_vision_model_spec(is_vit=True) -> ModuleSpec:
+    attn_mask_type = AttnMaskType.no_mask  # THD full attention
 
     mlp = ModuleSpec(
         module=MLP,
@@ -111,7 +112,10 @@ def get_qwen3vl_vision_model_spec(
 
 # Helper function to get module spec for MLP/MoE
 def get_mlp_module_spec(
-    use_te: bool = True, num_experts: int = None, moe_grouped_gemm: bool = False, add_norm: bool = True
+    use_te: bool = True,
+    num_experts: int = None,
+    moe_grouped_gemm: bool = False,
+    add_norm: bool = True,
 ) -> ModuleSpec:
     assert use_te, "Only Transformer Engine backend is supported"
     if num_experts is None:
@@ -141,8 +145,9 @@ def get_mlp_module_spec(
                 experts=ModuleSpec(
                     module=TEGroupedMLP,
                     submodules=MLPSubmodules(
-                        linear_fc1=TEColumnParallelGroupedLinear, linear_fc2=TERowParallelGroupedLinear
-                    )
+                        linear_fc1=TEColumnParallelGroupedLinear,
+                        linear_fc2=TERowParallelGroupedLinear,
+                    ),
                 ),
-            )
+            ),
         )

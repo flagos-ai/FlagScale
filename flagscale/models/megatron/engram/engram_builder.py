@@ -1,3 +1,17 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # ruff: noqa: TC001
 # ruff: noqa: F401
 ## built-in
@@ -6,34 +20,42 @@ from typing import Optional
 
 from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.models.backends import BackendSpecProvider
+
 ## megatron-core
 from megatron.core.models.gpt.gpt_layer_specs import (
-    get_gpt_decoder_block_spec, get_gpt_layer_local_spec,
+    get_gpt_decoder_block_spec,
+    get_gpt_layer_local_spec,
     get_gpt_layer_with_inference_spec,
-    get_gpt_layer_with_transformer_engine_spec, get_gpt_mtp_block_spec,
-    get_mlp_module_spec_for_backend)
+    get_gpt_layer_with_transformer_engine_spec,
+    get_gpt_mtp_block_spec,
+    get_mlp_module_spec_for_backend,
+)
 from megatron.core.models.gpt.gpt_model import GPTModel
-from megatron.core.transformer.attention import (SelfAttention,
-                                                 SelfAttentionSubmodules)
+from megatron.core.transformer.attention import SelfAttention, SelfAttentionSubmodules
 from megatron.core.transformer.enums import AttnMaskType, LayerType
 from megatron.core.transformer.identity_op import IdentityOp
 from megatron.core.transformer.multi_latent_attention import (
-    MLASelfAttention, MLASelfAttentionSubmodules)
+    MLASelfAttention,
+    MLASelfAttentionSubmodules,
+)
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.torch_norm import L2Norm
 from megatron.core.transformer.transformer_block import (
-    TransformerBlockSubmodules, get_num_layers_to_build)
+    TransformerBlockSubmodules,
+    get_num_layers_to_build,
+)
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import (
-    TransformerLayerSubmodules, get_transformer_layer_offset)
+    TransformerLayerSubmodules,
+    get_transformer_layer_offset,
+)
 from megatron.training import get_args, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 
 try:
     import transformer_engine as te  # pylint: disable=unused-import
     from megatron.core.extensions.transformer_engine import TENorm
-    from megatron.core.extensions.transformer_engine_spec_provider import \
-        TESpecProvider
+    from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
 
     HAVE_TE = True
 except ImportError:
@@ -126,13 +148,9 @@ def get_engram_transformer_layer_spec(
         assert HAVE_KITCHEN
         backend: BackendSpecProvider = KitchenSpecProvider(fallback=TESpecProvider())
         if use_te_op_fuser:
-            raise AssertionError(
-                "use_te_op_fuser not compatible with using kitchen in mlp."
-            )
+            raise AssertionError("use_te_op_fuser not compatible with using kitchen in mlp.")
         if use_te_activation_func:
-            raise AssertionError(
-                "use_te_activation_func not compatible with using kitchen."
-            )
+            raise AssertionError("use_te_activation_func not compatible with using kitchen.")
     else:
         backend = TESpecProvider()
 
@@ -194,14 +212,10 @@ def get_engram_transformer_layer_spec(
                         core_attention=backend.core_attention(),
                         linear_proj=backend.row_parallel_linear(),
                         q_layernorm=(
-                            L2Norm
-                            if qk_l2_norm
-                            else (qk_norm if qk_layernorm else IdentityOp)
+                            L2Norm if qk_l2_norm else (qk_norm if qk_layernorm else IdentityOp)
                         ),
                         k_layernorm=(
-                            L2Norm
-                            if qk_l2_norm
-                            else (qk_norm if qk_layernorm else IdentityOp)
+                            L2Norm if qk_l2_norm else (qk_norm if qk_layernorm else IdentityOp)
                         ),
                     ),
                 ),
@@ -279,8 +293,7 @@ def get_engram_decoder_block_spec(
     if use_moe:
         if isinstance(config.moe_layer_freq, int):
             moe_layer_pattern = [
-                1 if (i % config.moe_layer_freq == 0) else 0
-                for i in range(config.num_layers)
+                1 if (i % config.moe_layer_freq == 0) else 0 for i in range(config.num_layers)
             ]
         elif isinstance(config.moe_layer_freq, list):
             moe_layer_pattern = config.moe_layer_freq
@@ -301,9 +314,7 @@ def get_engram_decoder_block_spec(
     for layer_number in range(config.num_layers):
         is_engram_layer = True if layer_number in config.engram_layer_ids else False
         if moe_layer_pattern[layer_number] == 1:
-            layer_specs.append(
-                moe_engram_layer_spec if is_engram_layer else moe_orig_layer_spec
-            )
+            layer_specs.append(moe_engram_layer_spec if is_engram_layer else moe_orig_layer_spec)
         elif moe_layer_pattern[layer_number] == 0:
             layer_specs.append(
                 dense_engram_layer_spec if is_engram_layer else dense_orig_layer_spec
@@ -346,9 +357,7 @@ def get_engram_decoder_block_spec(
     return block_spec
 
 
-def engram_builder(
-    args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None
-):
+def engram_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None):
     print_rank_0("building Engram model ...")
 
     config = core_transformer_config_from_args(args)

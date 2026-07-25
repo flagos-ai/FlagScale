@@ -61,9 +61,7 @@ class CLIPViTModel(VisionModule):
         self.add_class_token = add_class_token
         self.class_token_len = class_token_len
 
-        self.seq_length = self.num_patches + (
-            self.class_token_len if self.add_class_token else 0
-        )
+        self.seq_length = self.num_patches + (self.class_token_len if self.add_class_token else 0)
 
         # siglip same as LLaVA-NeXT
         args = get_args()
@@ -86,9 +84,7 @@ class CLIPViTModel(VisionModule):
             )
         self.position_ids = torch.arange(self.seq_length).expand(1, -1).cuda()
 
-        self.position_embeddings = torch.nn.Embedding(
-            self.seq_length, self.visual_hidden_size
-        )
+        self.position_embeddings = torch.nn.Embedding(self.seq_length, self.visual_hidden_size)
 
         self.add_class_token = add_class_token
         if self.add_class_token:
@@ -179,17 +175,13 @@ class CLIPViTModel(VisionModule):
         return x
 
 
-def get_num_image_embeddings(
-    img_h, img_w, patch_dim, disable_vision_class_token, class_token_len
-):
+def get_num_image_embeddings(img_h, img_w, patch_dim, disable_vision_class_token, class_token_len):
     """Get the number of image embeddings per image tile."""
     add_class_token = not disable_vision_class_token
 
     num_patches_per_dim_h = img_h // patch_dim
     num_patches_per_dim_w = img_w // patch_dim
     num_patches = num_patches_per_dim_h * num_patches_per_dim_w
-    num_image_embeddings_per_tile = num_patches + (
-        class_token_len if add_class_token else 0
-    )
+    num_image_embeddings_per_tile = num_patches + (class_token_len if add_class_token else 0)
 
     return num_image_embeddings_per_tile

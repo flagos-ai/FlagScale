@@ -13,7 +13,6 @@ def convert(input_path, output_path, tensor_parallel_size):
     new_state_dicts = [{"model": dict()} for _ in range(tensor_parallel_size)]
 
     for name, tensor in state_dict.items():
-
         # Map parameter names to ones used in megatron.
         new_name = ""
         new_tensor = tensor
@@ -73,5 +72,3 @@ python mlp_converter.py --input /some/input/folder/mm_projector.bin --output /so
     convert(args.input, args.output, args.tensor_parallel_size)
 
     print("done.")
-
-

@@ -36,12 +36,12 @@ except ImportError:
 
 
 __all__ = [
-    'apply_rotary_pos_emb',
-    'apply_rotary_emb_flash',
-    'apply_rotary_pos_emb_with_cos_sin',
-    'fused_apply_rotary_pos_emb',
-    'fused_apply_rotary_pos_emb_thd',
-    'get_pos_emb_on_this_cp_rank',
+    "apply_rotary_pos_emb",
+    "apply_rotary_emb_flash",
+    "apply_rotary_pos_emb_with_cos_sin",
+    "fused_apply_rotary_pos_emb",
+    "fused_apply_rotary_pos_emb_thd",
+    "get_pos_emb_on_this_cp_rank",
 ]
 
 
@@ -87,6 +87,7 @@ def _rotate_half(x: Tensor, rotary_interleaved: bool) -> Tensor:
         x2 = x[:, :, :, 1::2]
         x_new = torch.stack((-x2, x1), dim=-1)
         return x_new.view(x_new.shape[0], x_new.shape[1], x_new.shape[2], -1)
+
 
 # NOTE(lizhiyu): The difference from the original _apply_rotary_pos_emb_bshd is that we use float not half.
 def _apply_rotary_pos_emb_bshd(

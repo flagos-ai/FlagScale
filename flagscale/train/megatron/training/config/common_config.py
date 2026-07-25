@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 import os
 
+
 @dataclass(kw_only=True)
 class RNGConfig:
     """Configuration settings for random number generation."""
@@ -25,7 +26,9 @@ class RNGConfig:
 class ProfilingConfig:
     """Configuration settings for profiling the training process."""
 
-    use_nsys_profiler: bool = field(default=False, metadata={"argparse_meta": {"arg_names": ["--profile"], "dest": "profile"}})
+    use_nsys_profiler: bool = field(
+        default=False, metadata={"argparse_meta": {"arg_names": ["--profile"], "dest": "profile"}}
+    )
     """Enable nsys profiling. When using this option, nsys options should be specified in
     commandline. An example nsys commandline is
     `nsys profile -s none -t nvtx,cuda -o <path/to/output_file> --force-overwrite true
@@ -43,11 +46,11 @@ class ProfilingConfig:
 
     pytorch_profiler_collect_shapes: bool = False
     """Collect tensor shape in pytorch profiler."""
-  
+
     pytorch_profiler_collect_callstack: bool = False
     """Collect callstack in pytorch profiler."""
-  
-    pytorch_profiler_collect_chakra: bool = False                
+
+    pytorch_profiler_collect_chakra: bool = False
     """Collect chakra trace in pytorch profiler."""
 
     profile_ranks: list[int] = field(default_factory=lambda: [])
@@ -106,7 +109,9 @@ class DistributedInitConfig:
     """If set, distributed ranks initialize order is changed from tp-cp-ep-dp-pp to tp-cp-ep-pp-dp.
     """
 
-    use_gloo_process_groups: bool = field(default=True, metadata={"argparse_meta": {"arg_names": ["--disable-gloo-process-groups"]}})
+    use_gloo_process_groups: bool = field(
+        default=True, metadata={"argparse_meta": {"arg_names": ["--disable-gloo-process-groups"]}}
+    )
     """If enabled, create Gloo process groups for communications."""
 
     use_sharp: bool = False
