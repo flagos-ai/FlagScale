@@ -499,7 +499,10 @@ def set_jit_fusion_options():
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
 
-    _warmup_jit_function()
+    try:
+        _warmup_jit_function()
+    except Exception as e:
+        print_rank_0(f"WARNING: JIT fusion warmup failed ({e}). Skipping fused kernel warmup.")
 
 
 def _warmup_jit_function():

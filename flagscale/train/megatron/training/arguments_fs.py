@@ -80,7 +80,7 @@ class FSTrainArguments:
                 "timeout": timedelta(minutes=args.distributed_timeout_minutes),
             }
             if args.distributed_backend == "flagcx":
-                init_process_group_kwargs["backend"] = "cpu:gloo,cuda:flagcx"
+                init_process_group_kwargs["backend"] = "cpu:gloo,cuda:flagcx,txda:flagcx"
             # for communication based cpu
             if args.enable_hetero and args.hetero_use_cpu_communication:
                 # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
