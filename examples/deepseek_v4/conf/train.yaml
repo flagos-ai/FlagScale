@@ -1,0 +1,32 @@
+defaults:
+  - _self_
+  - train: tp1_pp2_ep2_v4
+
+experiment:
+  exp_name: DeepSeek-V4
+  seed: 42
+  save_steps: 10000
+  load: null
+  exp_dir: /share/project/lixianduo/context_parallel/${experiment.exp_name}
+  ckpt_format: torch
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_deepseek_v4.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    hostfile: null
+  cmds:
+    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate /share/project/lixianduo/envs/fl-train-base
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
