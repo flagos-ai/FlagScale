@@ -37,7 +37,7 @@ from megatron.core.utils import (
     deprecate_inference_params,
     make_viewless_tensor,
 )
-from megatron.core.transformer.engram import EngramModule 
+from megatron.core.transformer.engram import EngramModule
 
 
 class EngramTransformerLayer(TransformerLayer):
@@ -91,14 +91,16 @@ class EngramTransformerLayer(TransformerLayer):
             sequence_len_offset=sequence_len_offset,
             inference_params=inference_params,
         )
-    
+
     def pre_compute_embedding(self, hash_input_ids: Tensor):
         self.engram.pre_compute_embedding(hash_input_ids)
 
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
-        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)
+        return super().sharded_state_dict(
+            prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata
+        )
 
 
 class EngramTransformerBlock(TransformerBlock):
@@ -354,7 +356,7 @@ class EngramTransformerBlock(TransformerBlock):
             hidden_states = hidden_states.clone()
 
         return hidden_states
-    
+
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
@@ -364,4 +366,6 @@ class EngramTransformerBlock(TransformerBlock):
         # If the flag is set to True, the sharded_state_dict will use layer_number to generate different keys for different layer, which is same to models has dense layer leading and moe layer following.
         # Actually, engram really causes the layers to be non-homogeneous.
         metadata["non_homogeneous_layers"] = True
-        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)
+        return super().sharded_state_dict(
+            prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata
+        )

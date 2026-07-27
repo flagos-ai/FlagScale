@@ -23,31 +23,33 @@ def get_vision_model_config(args, config):
 
     # mlp: hidden_size -> intermediate_size -> embed_dim, silu
     # NOTE: here we provide a workaround to solve the wrong layer amount when VPP of decoder is on
-    if config.num_layers in[28, 36]:
-        config.ffn_hidden_size = 3420 # 7B 72B
+    if config.num_layers in [28, 36]:
+        config.ffn_hidden_size = 3420  # 7B 72B
     else:
-        config.ffn_hidden_size = 3456 # 32B
+        config.ffn_hidden_size = 3456  # 32B
 
     if parallel_state.get_virtual_pipeline_model_parallel_world_size() is not None:
-        config.num_layers = 32 * parallel_state.get_virtual_pipeline_model_parallel_world_size() # depth
+        config.num_layers = (
+            32 * parallel_state.get_virtual_pipeline_model_parallel_world_size()
+        )  # depth
     else:
-        config.num_layers = 32 # depth
-    config.num_attention_heads = 16 # num_heads
-    config.add_bias_linear = True # all nn.Linear has bias (MLP, attn)
-    config.add_qkv_bias = True # qkv_proj in attn has bias
-    config.hidden_size = 1280 # hidden_size
+        config.num_layers = 32  # depth
+    config.num_attention_heads = 16  # num_heads
+    config.add_bias_linear = True  # all nn.Linear has bias (MLP, attn)
+    config.add_qkv_bias = True  # qkv_proj in attn has bias
+    config.hidden_size = 1280  # hidden_size
     config.hidden_dropout = 0.0
     config.attention_dropout = 0.0
 
     # config.gated_linear_unit = False # no gated
     # config.activation_func = quick_gelu # hidden_act
     config.kv_channels = config.hidden_size // config.num_attention_heads
-    config.num_query_groups = config.num_attention_heads # no GQA
-    config.layernorm_zero_centered_gamma = False # False
-    config.apply_query_key_layer_scaling = False # factor=math.sqrt(head_dim)
-    config.bias_activation_fusion = False # no swiglu, set false
-    config.bias_dropout_fusion = False # no dropout, set false
-    config.attention_softmax_in_fp32 = True # use True
+    config.num_query_groups = config.num_attention_heads  # no GQA
+    config.layernorm_zero_centered_gamma = False  # False
+    config.apply_query_key_layer_scaling = False  # factor=math.sqrt(head_dim)
+    config.bias_activation_fusion = False  # no swiglu, set false
+    config.bias_dropout_fusion = False  # no dropout, set false
+    config.attention_softmax_in_fp32 = True  # use True
     # config.normalization = 'LayerNorm' # use RMSNorm
     config.seq_length = args.seq_length
 
@@ -68,9 +70,9 @@ def get_vision_model_config(args, config):
     config.num_layers_in_first_pipeline_stage = None
     config.num_layers_in_last_pipeline_stage = None
     if args.vision_recompute_layer_steps != 0:
-        config.recompute_method="uniform"
-        config.recompute_granularity="full"
-        config.recompute_num_layers=args.vision_recompute_layer_steps # 16 for 32B
+        config.recompute_method = "uniform"
+        config.recompute_granularity = "full"
+        config.recompute_num_layers = args.vision_recompute_layer_steps  # 16 for 32B
     return config
 
 
@@ -85,7 +87,7 @@ def get_vision_projection_config(config, embed_dim, spatial_merge_size):
     config.gated_linear_unit = False
     config.bias_activation_fusion = False
     config.add_bias_linear = True
-    config.ffn_hidden_size = embed_dim * (spatial_merge_size ** 2)
+    config.ffn_hidden_size = embed_dim * (spatial_merge_size**2)
     config.activation_func = torch.nn.functional.gelu
     config.tp_comm_overlap = False
     config.sequence_parallel = False

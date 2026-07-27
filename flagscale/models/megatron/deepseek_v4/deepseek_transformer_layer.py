@@ -52,7 +52,10 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
             self.engram = None
         self._deepseek_engram_hash_input_ids = None
         self._mhc_recompute_manager = None
-        if self.config.engram_layer_ids is not None and self.layer_number - 1 in self.config.engram_layer_ids:
+        if (
+            self.config.engram_layer_ids is not None
+            and self.layer_number - 1 in self.config.engram_layer_ids
+        ):
             self.is_engram_layer = True
         else:
             self.is_engram_layer = False
@@ -102,7 +105,7 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
         sequence_len_offset: Optional[Tensor] = None,
         padding_mask: Optional[Tensor] = None,
         input_ids: Optional[Tensor] = None,
-        mhc_recompute_manager = None,
+        mhc_recompute_manager=None,
         *,
         inference_params: Optional[Any] = None,
     ):
@@ -131,7 +134,9 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
         )
 
     def pre_compute_embedding(self, engram_hash_input_ids):
-        if isinstance(self.engram, IdentityOp) or (self.layer_number not in self.config.engram_layer_ids):
+        if isinstance(self.engram, IdentityOp) or (
+            self.layer_number not in self.config.engram_layer_ids
+        ):
             return
         hash_input_ids = engram_hash_input_ids[self.layer_number - 1]
         self.engram.pre_compute_embedding(hash_input_ids)

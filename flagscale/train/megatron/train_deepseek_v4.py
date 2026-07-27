@@ -43,7 +43,6 @@ stimer = StragglerDetector()
 
 
 def get_batch_on_this_tp_rank(data_iterator):
-
     args = get_args()
 
     def _broadcast(item):
@@ -55,54 +54,52 @@ def get_batch_on_this_tp_rank(data_iterator):
             )
 
     if mpu.get_tensor_model_parallel_rank() == 0:
-
         assert data_iterator is not None
         data = next(data_iterator)
         batch = {
-            'tokens': data["tokens"].cuda(non_blocking=True),
-            'labels': data["labels"].cuda(non_blocking=True),
-            'loss_mask': data["loss_mask"].cuda(non_blocking=True),
-            'attention_mask': (
+            "tokens": data["tokens"].cuda(non_blocking=True),
+            "labels": data["labels"].cuda(non_blocking=True),
+            "loss_mask": data["loss_mask"].cuda(non_blocking=True),
+            "attention_mask": (
                 None
                 if "attention_mask" not in data
                 else data["attention_mask"].cuda(non_blocking=True)
             ),
-            'position_ids': data["position_ids"].cuda(non_blocking=True),
+            "position_ids": data["position_ids"].cuda(non_blocking=True),
         }
 
         if args.pipeline_model_parallel_size == 1:
-            _broadcast(batch['tokens'])
-            _broadcast(batch['labels'])
-            _broadcast(batch['loss_mask'])
-            _broadcast(batch['attention_mask'])
-            _broadcast(batch['position_ids'])
+            _broadcast(batch["tokens"])
+            _broadcast(batch["labels"])
+            _broadcast(batch["loss_mask"])
+            _broadcast(batch["attention_mask"])
+            _broadcast(batch["position_ids"])
 
         elif mpu.is_pipeline_first_stage():
-           _broadcast(batch['tokens'])
-           _broadcast(batch['attention_mask'])
-           _broadcast(batch['position_ids'])
+            _broadcast(batch["tokens"])
+            _broadcast(batch["attention_mask"])
+            _broadcast(batch["position_ids"])
             ######### FlagScale Begin ########
-           if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
-                _broadcast(batch['loss_mask'])
-                _broadcast(batch['labels'])
+            if mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None:
+                _broadcast(batch["loss_mask"])
+                _broadcast(batch["labels"])
             ######### FlagScale End ########
 
         elif mpu.is_pipeline_last_stage():
             # Multi-Token Prediction (MTP) layers need tokens and position_ids to calculate embedding.
             # Currently the Multi-Token Prediction (MTP) layers is fixed on the last stage, so we need
             # to broadcast tokens and position_ids to all of the tensor parallel ranks on the last stage.
-            _broadcast(batch['tokens'])
+            _broadcast(batch["tokens"])
             if args.mtp_num_layers is not None:
-                _broadcast(batch['position_ids'])
-            _broadcast(batch['labels'])
-            _broadcast(batch['loss_mask'])
-            _broadcast(batch['attention_mask'])
+                _broadcast(batch["position_ids"])
+            _broadcast(batch["labels"])
+            _broadcast(batch["loss_mask"])
+            _broadcast(batch["attention_mask"])
 
         else:
-            _broadcast(batch['tokens'])
+            _broadcast(batch["tokens"])
 
     else:
-
         tokens = torch.empty(
             (args.micro_batch_size, args.seq_length),
             dtype=torch.int64,
@@ -169,11 +166,11 @@ def get_batch_on_this_tp_rank(data_iterator):
             _broadcast(tokens)
 
         batch = {
-            'tokens': tokens,
-            'labels': labels,
-            'loss_mask': loss_mask,
-            'attention_mask': attention_mask,
-            'position_ids': position_ids,
+            "tokens": tokens,
+            "labels": labels,
+            "loss_mask": loss_mask,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
         }
 
     return batch
@@ -257,7 +254,7 @@ def loss_func(
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
     reporting_loss = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
 
-    return (loss, num_tokens, {'lm loss': reporting_loss})
+    return (loss, num_tokens, {"lm loss": reporting_loss})
 
 
 def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = False):
@@ -272,21 +269,22 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    timers("batch-generator", log_level=2).start()
     global stimer
     with stimer(bdata=True):
         vp_stage = get_attr_wrapped_model(model, "vp_stage")
         tokens, labels, loss_mask, attention_mask, position_ids = get_batch(data_iterator, vp_stage)
         # print(f"in train_engram, rank: {torch.distributed.get_rank()}, {tokens=}")
-    timers('batch-generator').stop()
+    timers("batch-generator").stop()
 
     with stimer:
         if args.use_legacy_models:
             output_tensor = model(tokens, position_ids, attention_mask, labels=labels)
         else:
             if return_schedule_plan:
-                assert args.overlap_moe_expert_parallel_comm, \
+                assert args.overlap_moe_expert_parallel_comm, (
                     "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
+                )
                 schedule_plan = model.build_schedule_plan(
                     tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
                 )
@@ -362,7 +360,10 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
     print_rank_0("> building train, validation, and test datasets for GPT ...")
 
     train_ds, valid_ds, test_ds = BlendedMegatronDatasetBuilder(
-        dataset_type, train_val_test_num_samples, partial(is_dataset_built_on_rank, vp_stage=vp_stage), config
+        dataset_type,
+        train_val_test_num_samples,
+        partial(is_dataset_built_on_rank, vp_stage=vp_stage),
+        config,
     ).build()
 
     print_rank_0("> finished creating GPT datasets ...")
@@ -371,22 +372,21 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
 
 
 if __name__ == "__main__":
-
     # Temporary for transition to core datasets
     train_valid_test_datasets_provider.is_distributed = True
 
     # Optionally enable inprocess restart on pretrain
     pretrain, store = inprocess_restart.maybe_wrap_for_inprocess_restart(pretrain)
 
-    extra_valid_datasets_provider.is_distributed = True ######## FlagScale ########
+    extra_valid_datasets_provider.is_distributed = True  ######## FlagScale ########
 
     pretrain(
         train_valid_test_datasets_provider,
         partial(model_provider, deepseek_builder),
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
+        args_defaults={"tokenizer_type": "GPT2BPETokenizer"},
         extra_args_provider=add_modelopt_args if has_nvidia_modelopt else None,
         store=store,
-        extra_valid_dataset_provider=extra_valid_datasets_provider
+        extra_valid_dataset_provider=extra_valid_datasets_provider,
     )

@@ -1,4 +1,3 @@
-
 # Copyright (c) 2025, BAAI. All rights reserved.
 #
 # Adopted from https://github.com/alibaba/Pai-Megatron-Patch/blob/main/megatron_patch/model/qwen3_vl/transformer_config.py
@@ -27,8 +26,7 @@ from megatron.core import parallel_state
 
 @dataclass
 class Qwen3VLTransformerConfig(TransformerConfig):
-
-    transformer_impl: str = 'transformer_engine'
+    transformer_impl: str = "transformer_engine"
     rotary_base: int = None
     rotary_scaling_factor: int = None
     max_position_embeddings: int = None
@@ -47,7 +45,6 @@ class Qwen3VLTransformerConfig(TransformerConfig):
     # add_qkv_bias = True
 
 
-
 def get_vision_model_config(args, config):
     # Given a Transformer Config from decoder, build vision encoder config
     # diff: out_hidden_size & intermediate_size
@@ -56,35 +53,37 @@ def get_vision_model_config(args, config):
     assert parallel_state.get_virtual_pipeline_model_parallel_world_size() is None, "NotSupported"
     if args.num_layers == 36 and args.hidden_size == 2560:
         # 4B
-        config.num_layers = 24 # depth
-        config.hidden_size = 1024 # hidden_size
+        config.num_layers = 24  # depth
+        config.hidden_size = 1024  # hidden_size
         config.ffn_hidden_size = 4096
-        config.deepstack_visual_indexes=[5, 11, 17]
+        config.deepstack_visual_indexes = [5, 11, 17]
 
     else:
         # 8B, 32B, 30BA3B, 235BA22B
-        config.num_layers = 27 # depth
-        config.hidden_size = 1152 # hidden_size
+        config.num_layers = 27  # depth
+        config.hidden_size = 1152  # hidden_size
         config.ffn_hidden_size = 4304
-        config.deepstack_visual_indexes=[8, 16, 24]
+        config.deepstack_visual_indexes = [8, 16, 24]
 
-    config.num_attention_heads = 16 # num_heads
-    config.add_bias_linear = True # all nn.Linear has bias (MLP, attn)
-    config.add_qkv_bias = True # qkv_proj in attn has bias
+    config.num_attention_heads = 16  # num_heads
+    config.add_bias_linear = True  # all nn.Linear has bias (MLP, attn)
+    config.add_qkv_bias = True  # qkv_proj in attn has bias
     config.hidden_dropout = 0.0
     config.attention_dropout = 0.0
 
-    config.gated_linear_unit = False # no gated
+    config.gated_linear_unit = False  # no gated
     # NOTE(lizhyu): different from Qwen2.5-VL, use GELU here vs "gelu_pytorch_tanh" in huggingface implementation.
-    config.activation_func = functools.partial(torch.nn.functional.gelu, approximate="tanh") # Using GELU activation not SiLU
+    config.activation_func = functools.partial(
+        torch.nn.functional.gelu, approximate="tanh"
+    )  # Using GELU activation not SiLU
     config.kv_channels = config.hidden_size // config.num_attention_heads
-    config.num_query_groups = config.num_attention_heads # no GQA
-    config.layernorm_zero_centered_gamma = False # False
-    config.apply_query_key_layer_scaling = False # factor=math.sqrt(head_dim)
-    config.bias_activation_fusion = False # no swiglu, set false
-    config.bias_dropout_fusion = False # no dropout, set false
-    config.attention_softmax_in_fp32 = True # use True
-    config.normalization = 'LayerNorm' # use LayerNorm
+    config.num_query_groups = config.num_attention_heads  # no GQA
+    config.layernorm_zero_centered_gamma = False  # False
+    config.apply_query_key_layer_scaling = False  # factor=math.sqrt(head_dim)
+    config.bias_activation_fusion = False  # no swiglu, set false
+    config.bias_dropout_fusion = False  # no dropout, set false
+    config.attention_softmax_in_fp32 = True  # use True
+    config.normalization = "LayerNorm"  # use LayerNorm
     config.seq_length = args.seq_length
 
     config.tp_comm_overlap = False
@@ -103,8 +102,8 @@ def get_vision_model_config(args, config):
 
     # Reset recompute settings for vision encoder, otherwise it may use the language's settings.
     if args.vision_recompute_activations:
-        config.recompute_granularity = 'full'
-        config.recompute_method = 'uniform'
+        config.recompute_granularity = "full"
+        config.recompute_method = "uniform"
         config.recompute_num_layers = 1
 
     return config
@@ -122,8 +121,8 @@ def get_vision_projection_config(config, embed_dim, spatial_merge_size):
     config.gated_linear_unit = False
     config.bias_activation_fusion = False
     config.add_bias_linear = True
-    config.ffn_hidden_size = embed_dim * (spatial_merge_size ** 2)
-    config.activation_func = torch.nn.GELU() # Using GELU activation not SiLU
+    config.ffn_hidden_size = embed_dim * (spatial_merge_size**2)
+    config.activation_func = torch.nn.GELU()  # Using GELU activation not SiLU
     config.tp_comm_overlap = False
     config.sequence_parallel = False
     return config

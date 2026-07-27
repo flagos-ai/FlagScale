@@ -122,7 +122,9 @@ FIRST_MAX_PADDING_FLAG = True
 LAST_LARGE_IMG = False
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
+
 
 def model_provider(
     pre_process=True, post_process=True, add_encoder=True, add_decoder=True
@@ -562,7 +564,7 @@ def loss_func(
     """
     args = get_args()
 
-    if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
+    if has_nvidia_modelopt and getattr(args, "modelopt_enabled", False):  # [ModelOpt]
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()

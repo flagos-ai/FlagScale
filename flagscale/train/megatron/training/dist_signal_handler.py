@@ -4,13 +4,14 @@ import signal
 import torch
 
 SIGNAL_MAP = {
-    'SIGTERM': signal.SIGTERM,
-    'SIGINT': signal.SIGINT,
-    'SIGUSR1': signal.SIGUSR1,
-    'SIGUSR2': signal.SIGUSR2
+    "SIGTERM": signal.SIGTERM,
+    "SIGINT": signal.SIGINT,
+    "SIGUSR1": signal.SIGUSR1,
+    "SIGUSR2": signal.SIGUSR2,
 }
 
 from megatron.plugin.platform import get_platform
+
 cur_platform = get_platform()
 
 from megatron.plugin.decorators import overridable
@@ -27,21 +28,20 @@ def get_world_size():
 @overridable
 def get_device(local_rank=None):
     backend = torch.distributed.get_backend()
-    if backend == 'nccl':
+    if backend == "nccl":
         if local_rank is None:
             device = torch.device(cur_platform.device_name())
         else:
-            device = torch.device(f'{cur_platform.device_name()}:{local_rank}')
-    elif backend == 'gloo':
-        device = torch.device('cpu')
+            device = torch.device(f"{cur_platform.device_name()}:{local_rank}")
+    elif backend == "gloo":
+        device = torch.device("cpu")
     else:
         raise RuntimeError
     return device
 
 
 def all_gather_item(item, dtype, group=None, async_op=False, local_rank=None):
-    if not torch.distributed.is_available() or \
-       not torch.distributed.is_initialized():
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
         return [item]
 
     device = get_device(local_rank)
@@ -53,8 +53,7 @@ def all_gather_item(item, dtype, group=None, async_op=False, local_rank=None):
 
     tensor = torch.tensor([item], device=device, dtype=dtype)
     output_tensors = [
-        torch.zeros(1, dtype=tensor.dtype, device=tensor.device)
-        for _ in range(group_size)
+        torch.zeros(1, dtype=tensor.dtype, device=tensor.device) for _ in range(group_size)
     ]
     torch.distributed.all_gather(output_tensors, tensor, group, async_op)
     output = [elem.item() for elem in output_tensors]
@@ -62,13 +61,11 @@ def all_gather_item(item, dtype, group=None, async_op=False, local_rank=None):
 
 
 class DistributedSignalHandler:
-    def __init__(self, sig: str = 'SIGTERM'):
+    def __init__(self, sig: str = "SIGTERM"):
         self.sig = SIGNAL_MAP.get(sig, signal.SIGTERM)
 
     def signals_received(self):
-        all_received = all_gather_item(
-            self._signal_received, dtype=torch.int32
-        )
+        all_received = all_gather_item(self._signal_received, dtype=torch.int32)
         return all_received
 
     def __enter__(self):

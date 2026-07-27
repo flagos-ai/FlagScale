@@ -23,3 +23,11 @@ def register_platforms() -> None:
     platform_musa = PlatformMUSA()
     if platform_musa.is_available():
         PLATFORMS["musa"] = platform_musa
+
+    from .platform_txda import PlatformTXDA
+
+    platform_txda = PlatformTXDA()
+    if platform_txda.is_available():
+        PLATFORMS["txda"] = platform_txda
+
+

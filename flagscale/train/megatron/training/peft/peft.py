@@ -71,7 +71,7 @@ class PEFT(ABC):
 
     def apply_transform(self, model: nn.Module):
         for full_name, module in model.named_modules():
-            prefix, name = full_name.rsplit('.', 1) if '.' in full_name else ('', full_name)
+            prefix, name = full_name.rsplit(".", 1) if "." in full_name else ("", full_name)
             replaced_module = self.transform(module, name, prefix)
             if replaced_module == module:
                 continue
@@ -116,9 +116,9 @@ class AdapterWrapper(nn.Module):
         layernorm_output is different from input x only when linear layer is LayerNormColumnParallelLinear.
         """
         linear_output = self.to_wrap(x, *args, **kwargs)
-        assert isinstance(
-            linear_output, tuple
-        ), f"{self.to_wrap} should return a tuple but instead returns {linear_output}"
+        assert isinstance(linear_output, tuple), (
+            f"{self.to_wrap} should return a tuple but instead returns {linear_output}"
+        )
         """ Four cases for the wrapped module's return values
         1. nothing: (out, None)
         2. return_bias: (out, bias)
@@ -136,7 +136,7 @@ class AdapterWrapper(nn.Module):
 
         return linear_output, bias, layernorm_output
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
+    def state_dict(self, destination=None, prefix="", keep_vars=False):
         """Retrieve the state dictionary of the wrapped module and adapter.
 
         This method overrides the default state_dict behavior to include both
@@ -160,6 +160,6 @@ class AdapterWrapper(nn.Module):
         self.to_wrap.state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
         # Store adapter state dict under the "adapter" prefix in the destination dict
         self.adapter.state_dict(
-            destination=destination, prefix=f'{prefix}adapter.', keep_vars=keep_vars
+            destination=destination, prefix=f"{prefix}adapter.", keep_vars=keep_vars
         )
         return destination

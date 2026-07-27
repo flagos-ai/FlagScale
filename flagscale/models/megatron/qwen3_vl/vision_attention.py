@@ -121,7 +121,7 @@ class VisionSelfAttention(Attention):
             bias=self.config.add_bias_linear or self.config.add_qkv_bias,
             skip_bias_add=False,
             is_expert=False,
-            tp_comm_buffer_name='qkv',
+            tp_comm_buffer_name="qkv",
             tp_group=self.pg_collection.tp,
         )
 
@@ -135,9 +135,9 @@ class VisionSelfAttention(Attention):
                 )
             else:
                 tp_world_size = get_tensor_model_parallel_world_size()
-                assert (
-                    tp_world_size <= 1
-                ), "TP world size must be less than 1 for qk_layernorm_hidden_dim"
+                assert tp_world_size <= 1, (
+                    "TP world size must be less than 1 for qk_layernorm_hidden_dim"
+                )
                 # nums_head_cur_rank = divide(self.config.num_attention_heads, tp_world_size)
                 self.q_layernorm = build_module(
                     submodules.q_layernorm,
@@ -158,9 +158,9 @@ class VisionSelfAttention(Attention):
                 )
             else:
                 tp_world_size = get_tensor_model_parallel_world_size()
-                assert (
-                    tp_world_size <= 1
-                ), "TP world size must be less than 1 for qk_layernorm_hidden_dim"
+                assert tp_world_size <= 1, (
+                    "TP world size must be less than 1 for qk_layernorm_hidden_dim"
+                )
                 # nums_head_cur_rank = divide(self.config.num_attention_heads, tp_world_size)
                 self.k_layernorm = build_module(
                     submodules.k_layernorm,
@@ -270,12 +270,10 @@ class VisionSelfAttention(Attention):
         ]
 
         if SplitAlongDim is not None:
-
             # [sq, b, ng, (np/ng + 2) * hn]
             # --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
             (query, key, value) = SplitAlongDim(mixed_qkv, 3, split_arg_list)
         else:
-
             # [sq, b, ng, (np/ng + 2) * hn]
             # --> [sq, b, ng, np/ng * hn], [sq, b, ng, hn], [sq, b, ng, hn]
             (query, key, value) = torch.split(mixed_qkv, split_arg_list, dim=3)
@@ -357,9 +355,9 @@ class VisionSelfAttention(Attention):
         inference_context = deprecate_inference_params(inference_context, inference_params)
 
         if inference_context and inference_context.is_dynamic_batching():
-            assert HAVE_FA3 or is_fa_min_version(
-                "2.7.3"
-            ), "flash attn verion v2.7.3 and above is required for dynamic batching."
+            assert HAVE_FA3 or is_fa_min_version("2.7.3"), (
+                "flash attn verion v2.7.3 and above is required for dynamic batching."
+            )
 
         # hidden_states: [sq, b, h]
         if self.config.flash_decode and not self.training and inference_context is not None:
@@ -535,9 +533,9 @@ class VisionSelfAttention(Attention):
                     kv_lengths,
                     block_table,
                 )
-                core_attn_out = rearrange(core_attn_out, 's b h d -> s b (h d)')
+                core_attn_out = rearrange(core_attn_out, "s b h d -> s b (h d)")
 
-        if packed_seq_params is not None and packed_seq_params.qkv_format == 'thd':
+        if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":
             # reshape to same output shape as unpacked case
             # (t, np, hn) -> (t, b=1, h=np*hn)
             # t is the pack size = sum (sq_i)

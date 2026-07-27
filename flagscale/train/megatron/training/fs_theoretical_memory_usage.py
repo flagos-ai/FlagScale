@@ -368,7 +368,8 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
     )
 
     sparse_mlp_params_per_ep_rank_noddp = (
-        2 * args.hidden_size
+        2
+        * args.hidden_size
         # Shared MoE mlp
         * (shared_expert_ffn_hidden_size * gated_linear_multiplier)
         # gate
