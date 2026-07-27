@@ -86,6 +86,16 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
                 # Get the decoder layer spec explicitly if no decoder layer in the last stage,
                 # Only happens with block spec (TransformerBlockSubmodules) when using MoE.
                 transformer_layer_spec_for_mtp = _get_transformer_layer_spec(use_te, config)
+            ##### FlagScale Begin #####
+            elif (
+                hasattr(transformer_layer_spec, 'layer_specs')
+                and len(transformer_layer_spec.layer_specs) > 0
+                and args.experimental_attention_variant == "dsa"
+            ):
+                # Reuse the last layer spec from the decoder block directly, so that
+                # experimental attention variants (e.g. DSA) are preserved for MTP.
+                transformer_layer_spec_for_mtp = transformer_layer_spec.layer_specs[-1]
+            ##### FlagScale End #####
             else:
                 # Define the decoder block spec
                 decoder_layer_specs = get_gpt_decoder_layer_specs(
@@ -120,7 +130,6 @@ def gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_
             pg_collection=pg_collection,
             dualpipev_stage=dualpipev_stage,
         )
-
     return model
 
 
