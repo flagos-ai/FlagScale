@@ -36,7 +36,7 @@ class LazyHashInputIds:
         self.input_ids = input_ids
         self.hash_stream = hash_stream
         self._result = None
-        self._is_async_pending = False
+        self._is_async_pending = False        
         # Async
         if self.hash_stream is not None:
             # self.hash_stream.wait_stream(torch.cuda.current_stream())
@@ -64,11 +64,11 @@ class LazyHashInputIds:
             torch.cuda.current_stream().wait_stream(self.hash_stream)
             self._is_async_pending = False  # Async finish
             self._record_current_stream()
-
+            
         # Case 2: Sync but no compute -> start compute
         elif self._result is None:
             self._result = self.hash_mapping.hash(self.input_ids)
-
+            
         # Case 3: Async or sync compute is finished.
         # print(f"[rank{torch.distributed.get_rank()}]: LazyHashInputIds result = {self._result}")
         return self._result[key]
@@ -146,24 +146,19 @@ class DeepSeekModel(GPTModel):
             padding_mask=padding_mask,
         )
 
-        (
-            decoder_input,
-            rotary_pos_emb,
-            rotary_pos_cos,
-            rotary_pos_sin,
-            sequence_len_offset,
-            padding_mask,
-        ) = preproc_output[:6]
+        (decoder_input, rotary_pos_emb, rotary_pos_cos, rotary_pos_sin, sequence_len_offset, padding_mask) = (
+            preproc_output[:6]
+        )
 
         rotary_pos_cos_sin = preproc_output[6] if len(preproc_output) == 7 else None
 
         # Pass input_ids to decoder for hash-based MoE routing
         decoder_extra_block_kwargs = extra_block_kwargs or {}
         if self.config.moe_n_hash_layers > 0 and input_ids is not None:
-            decoder_extra_block_kwargs["input_ids"] = input_ids
+            decoder_extra_block_kwargs['input_ids'] = input_ids
         if self.config.use_engram:
-            decoder_extra_block_kwargs["engram_hash_input_ids"] = engram_hash_input_ids
-
+            decoder_extra_block_kwargs['engram_hash_input_ids'] = engram_hash_input_ids
+        
         # Run decoder
         decoder_output = self.decoder(
             hidden_states=decoder_input,
@@ -242,9 +237,9 @@ class DeepSeekModel(GPTModel):
             decoder_input,
             labels=labels,
             loss_mask=loss_mask,
-            extra_block_kwargs=extra_block_kwargs,
+            extra_block_kwargs=extra_block_kwargs
         )
-
+    
     def sharded_state_dict(
         self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
     ):
@@ -253,6 +248,4 @@ class DeepSeekModel(GPTModel):
         if metadata is None:
             metadata = {}
         metadata["non_homogeneous_layers"] = True
-        return super().sharded_state_dict(
-            prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata
-        )
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)

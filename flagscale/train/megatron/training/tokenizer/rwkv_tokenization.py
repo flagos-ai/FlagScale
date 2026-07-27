@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import sys
 import json
@@ -164,4 +165,4 @@ class RWKVTokenizer:
 
     @property
     def vocab_size(self):
-        return len(self.idx2token) + len(getattr(self, "special_tokens", {}))
+        return len(self.idx2token) + len(getattr(self, 'special_tokens', {}))

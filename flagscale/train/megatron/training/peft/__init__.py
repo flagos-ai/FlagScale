@@ -21,4 +21,4 @@ large language models efficiently.
 from megatron.training.peft.peft import PEFT, AdapterWrapper
 from megatron.training.peft.lora import LoRA
 
-__all__ = ["PEFT", "AdapterWrapper", "LoRA"]
+__all__ = ['PEFT', 'AdapterWrapper', 'LoRA']
