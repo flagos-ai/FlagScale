@@ -146,3 +146,18 @@ python convert.py \
     --target-expert-parallel-size 1 \
     --target-params-dtype bf16 \
     --true-vocab-size 151936 \
+
+
+python convert.py \
+    --model-type glm5 \
+    --loader transformers \
+    --saver mcore \
+    --load-dir $loaddir \
+    --save-dir $outputs \
+    --target-tensor-parallel-size 2 \
+    --target-pipeline-parallel-size 2 \
+    --target-expert-parallel-size 2 \
+    --target-params-dtype bf16 \
+    --true-vocab-size 154880 \
+    --skip-mtp \
+    2>&1 | tee "convert.log"
