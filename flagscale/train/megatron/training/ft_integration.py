@@ -45,10 +45,8 @@ from typing import Any, Optional
 
 import torch
 
-from flagscale.train import gpu_heartbeat
-
-from . import arguments
-from . import global_vars
+from ... import gpu_heartbeat
+from . import arguments, global_vars
 from .utils import is_rank0, print_rank_0
 
 _GLOBAL_RANK_MONITOR_CLIENT = None
