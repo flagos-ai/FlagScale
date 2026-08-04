@@ -343,7 +343,12 @@ def test_indexed_p2p_calls_do_not_accumulate_resolved_history():
 
 
 def test_unique_p2p_parameter_mismatch_is_confirmed():
-    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        p2p_timeout_s=5,
+        p2p_match_window_s=2,
+        missing_exit_timeout_s=5,
+    )
     _ingest(
         analyzer,
         _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
@@ -369,7 +374,12 @@ def test_unique_p2p_parameter_mismatch_is_confirmed():
 
 
 def test_missing_p2p_counterpart_is_only_suspected():
-    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        p2p_timeout_s=5,
+        p2p_match_window_s=2,
+        missing_exit_timeout_s=5,
+    )
     _ingest(
         analyzer,
         _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
@@ -531,3 +541,207 @@ def test_missing_enter_is_downgraded_when_probe_dropped_events():
 
     assert findings[0].details["reason"] == "probe_event_loss_possible"
     assert findings[0].details["confidence"] == "suspected"
+
+
+def test_single_nccl_call_enter_without_exit_is_reported():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, missing_exit_timeout_s=2)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+        ),
+        observed=1,
+    )
+
+    findings = analyzer.scan(now_monotonic_s=4, now_unix_ns=4_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["nccl_missing_exit"]
+    assert findings[0].details["evidence"] == "api_enter_without_exit"
+    assert findings[0].details["kernel_execution_status"] == "unknown"
+    assert findings[0].details["root_cause_status"] == "unknown"
+
+
+def test_collective_missing_exit_is_aggregated_by_communicator_round():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, missing_exit_timeout_s=2)
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1)
+    _ingest(analyzer, _event("nccl_call", rank=1, pid=11, comm_rank=1), observed=1)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            phase="exit",
+            rank=0,
+            comm_rank=0,
+            result_name="ncclSuccess",
+        ),
+        observed=1.1,
+    )
+
+    findings = analyzer.scan(now_monotonic_s=4, now_unix_ns=4_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["collective_missing_exit"]
+    assert findings[0].details["entered_comm_ranks"] == [0, 1]
+    assert findings[0].details["exited_comm_ranks"] == [0]
+    assert findings[0].details["missing_exit_comm_ranks"] == [1]
+    assert findings[0].details["stuck_scope"] == "partial_ranks"
+
+
+def test_collective_all_ranks_stuck_is_distinguished():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, missing_exit_timeout_s=2)
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1)
+    _ingest(analyzer, _event("nccl_call", rank=1, pid=11, comm_rank=1), observed=1)
+
+    findings = analyzer.scan(now_monotonic_s=4, now_unix_ns=4_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["collective_all_ranks_stuck"]
+    assert findings[0].details["missing_exit_comm_ranks"] == [0, 1]
+    assert findings[0].details["stuck_scope"] == "all_ranks"
+
+
+def test_missing_enter_suppresses_downstream_missing_exit():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        collective_timeout_s=2,
+        missing_exit_timeout_s=2,
+    )
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1)
+
+    findings = analyzer.scan(now_monotonic_s=4, now_unix_ns=4_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["collective_missing_enter"]
+
+
+def test_nccl_error_exit_is_categorized():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, missing_exit_timeout_s=2)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            phase="exit",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+            result=3,
+            result_name="ncclInternalError",
+        ),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=2, now_unix_ns=2_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["nccl_error_exit"]
+    assert findings[0].details["result_name"] == "ncclInternalError"
+    assert findings[0].details["error_category"] == "nccl_internal_error"
+
+
+def test_nccl_in_progress_is_not_reported_as_an_error():
+    analyzer = TraceAnalyzer(run_id=RUN_ID)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            phase="exit",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+            result=7,
+            result_name="ncclInProgress",
+        ),
+    )
+
+    assert analyzer.scan(now_monotonic_s=100, now_unix_ns=100_000_000_000) == []
+
+
+def test_correlated_gpu_health_is_supporting_hardware_evidence():
+    class UnhealthyGpu:
+        def for_rank(self, _event):
+            return {
+                "gpu_device_health": "unhealthy",
+                "gpu_hardware": {"uuid": "GPU-1", "status": "unhealthy"},
+            }
+
+    analyzer = TraceAnalyzer(run_id=RUN_ID, missing_exit_timeout_s=2)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+        ),
+        observed=1,
+    )
+
+    findings = analyzer.scan(
+        now_monotonic_s=4,
+        now_unix_ns=4_000_000_000,
+        hardware_health=UnhealthyGpu(),
+    )
+
+    assert [finding.hang_type for finding in findings] == [
+        "nccl_missing_exit",
+        "hardware_suspected",
+    ]
+    assert findings[0].details["gpu_device_health"] == "unhealthy"
+    assert findings[1].details["evidence_strength"] == "supporting"
+    assert findings[1].details["root_cause_status"] == "suspected"
+
+
+def test_unique_inspector_completion_is_only_positive_completion_evidence():
+    class CompletedInspector:
+        def for_call(self, _event):
+            return {
+                "inspector_correlation": "unique",
+                "inspector_kernel_status": "completed",
+                "kernel_execution_status": "completed",
+                "inspector_completion": {"timing_source": "kernel_gpu"},
+            }
+
+    analyzer = TraceAnalyzer(run_id=RUN_ID, missing_exit_timeout_s=2)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclGroupEnd",
+            comm_uid_hash="",
+            comm_rank=-1,
+            comm_nranks=0,
+        ),
+        observed=1,
+    )
+
+    findings = analyzer.scan(
+        now_monotonic_s=4,
+        now_unix_ns=4_000_000_000,
+        inspector=CompletedInspector(),
+    )
+
+    assert findings[0].details["inspector_correlation"] == "unique"
+    assert findings[0].details["kernel_execution_status"] == "completed"
+    assert findings[0].details["root_cause_status"] == "unknown"

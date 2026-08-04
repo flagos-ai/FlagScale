@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from omegaconf import OmegaConf
@@ -52,11 +53,25 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
             "collective_timeout_s": 12,
             "p2p_timeout_s": 12,
             "p2p_match_window_s": 4,
-            "failure_grace_period_s": 12,
+            "missing_exit_timeout_s": 20,
+            "failure_grace_period_s": 20,
+            "inspector": {
+                "enabled": True,
+                "plugin_library": str(tmp_path / "inspector.so"),
+                "dump_interval_us": 500,
+                "min_size_bytes": 0,
+            },
         },
     )
 
-    resolved = prepare_trace_launch_config(config, "run-123")
+    heartbeat = SimpleNamespace(
+        enabled=True,
+        heartbeat_dir=str(tmp_path / "heartbeat"),
+        process_timeout_s=30,
+        hardware_health_enabled=True,
+        hardware_health_stale_after_s=180,
+    )
+    resolved = prepare_trace_launch_config(config, "run-123", heartbeat)
     shell = "\n".join(resolved.shell_setup_lines(0))
 
     assert resolved.enabled is True
@@ -67,6 +82,15 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
     assert "flagscale.runner.tracing.monitor" in shell
     assert "--p2p-timeout 12" in shell
     assert "--p2p-match-window 4" in shell
+    assert "--missing-exit-timeout 20" in shell
+    assert "--hardware-health" in shell
+    assert "--hardware-health-stale-after 180" in shell
+    assert "NCCL_PROFILER_PLUGIN=" in shell
+    assert "NCCL_INSPECTOR_ENABLE=1" in shell
+    assert "NCCL_INSPECTOR_DUMP_VERBOSE=1" in shell
+    assert "NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500" in shell
+    assert "NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES=0" in shell
+    assert "--inspector-dir" in shell
     assert "rc=\\$?" in resolved.command_body(0)
     assert resolved.shell_setup_lines(1)
     assert "flagscale.runner.tracing.monitor" not in "\n".join(resolved.shell_setup_lines(1))
@@ -94,6 +118,19 @@ def test_p2p_match_window_cannot_exceed_timeout(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="p2p_match_window_s"):
+        prepare_trace_launch_config(config, "run")
+
+
+def test_inspector_requires_an_explicit_plugin_library(tmp_path, monkeypatch):
+    monkeypatch.delenv("NCCL_PROFILER_PLUGIN", raising=False)
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "inspector": {"enabled": True},
+        },
+    )
+    with pytest.raises(ValueError, match="plugin_library"):
         prepare_trace_launch_config(config, "run")
 
 

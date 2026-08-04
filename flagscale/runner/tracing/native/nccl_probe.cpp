@@ -68,6 +68,7 @@ struct Event {
   char api[32] = {};
   char phase[8] = {};
   char comm_uid_hash[17] = {};
+  char result_name[32] = {};
 };
 
 uint64_t clock_ns(clockid_t clock_id) {
@@ -125,6 +126,23 @@ std::string json_string(const char* value) {
   }
   output.push_back('"');
   return output;
+}
+
+const char* result_name(ncclResult_t result) {
+  // NCCL keeps these public result values stable across the versions supported
+  // by FlagScale. Avoid a direct ncclGetErrorString reference here because
+  // PyTorch may load its bundled NCCL with RTLD_LOCAL.
+  switch (static_cast<int>(result)) {
+    case 0: return "ncclSuccess";
+    case 1: return "ncclUnhandledCudaError";
+    case 2: return "ncclSystemError";
+    case 3: return "ncclInternalError";
+    case 4: return "ncclInvalidArgument";
+    case 5: return "ncclInvalidUsage";
+    case 6: return "ncclRemoteError";
+    case 7: return "ncclInProgress";
+    default: return "ncclUnknownError";
+  }
 }
 
 uint64_t hash_unique_id(const ncclUniqueId& unique_id) {
@@ -417,6 +435,7 @@ class Runtime {
         line += ",\"p2p_op_index_scope\":\"peer_direction\"";
       }
       line += ",\"result\":" + std::to_string(event.result);
+      line += ",\"result_name\":" + json_string(event.result_name);
     }
     line += "}\n";
     WriteAll(fd, line);
@@ -532,6 +551,7 @@ void EndCall(const char* api, const CallContext& context, ncclResult_t result,
     event.peer = peer;
     event.stream = reinterpret_cast<uintptr_t>(stream);
     event.result = static_cast<int>(result);
+    copy_text(event.result_name, sizeof(event.result_name), result_name(result));
     runtime.Enqueue(event);
   } catch (...) {
   }
@@ -546,6 +566,7 @@ void RecordCommInit(const char* api, ncclComm_t comm, int nranks,
     event.comm_rank = comm_rank;
     event.comm_nranks = nranks;
     event.result = static_cast<int>(result);
+    copy_text(event.result_name, sizeof(event.result_name), result_name(result));
     format_hash(hash_unique_id(unique_id), event.comm_uid_hash);
     if (result == ncclSuccess && comm != nullptr) {
       runtime.comms().Register(comm, comm_rank, nranks, unique_id);
@@ -631,6 +652,9 @@ FLAGSCALE_EXPORT ncclResult_t ncclCommDestroy(ncclComm_t comm) {
     auto* state = Runtime::Instance().comms().Find(comm);
     Event event = MakeBaseEvent(EventKind::kCommDestroy, "ncclCommDestroy", "exit");
     event.result = static_cast<int>(result);
+    flagscale::tracing::copy_text(
+        event.result_name, sizeof(event.result_name),
+        flagscale::tracing::result_name(result));
     if (state != nullptr) {
       event.comm_rank = state->rank;
       event.comm_nranks = state->nranks;

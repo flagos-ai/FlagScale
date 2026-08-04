@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import TextIO
 
 from .analyzer import Finding, TraceAnalyzer
+from .inspector import InspectorReader
+from flagscale.runner.heartbeat.health_reader import HardwareHealthReader
 
 logger = logging.getLogger("flagscale.tracing")
 
@@ -112,10 +114,22 @@ def run_monitor(args: argparse.Namespace) -> int:
         delayed_enter_threshold_s=args.delayed_enter_threshold,
         p2p_timeout_s=args.p2p_timeout,
         p2p_match_window_s=args.p2p_match_window,
+        missing_exit_timeout_s=args.missing_exit_timeout,
     )
     tailers = [JsonlTailer(trace_dir)]
     if args.heartbeat_dir:
         tailers.append(JsonlTailer(Path(args.heartbeat_dir)))
+    hardware_reader = HardwareHealthReader(
+        Path(args.heartbeat_dir) if args.heartbeat_dir else trace_dir,
+        args.run_id,
+        args.hardware_health,
+        args.hardware_health_stale_after,
+    )
+    inspector_reader = InspectorReader(
+        Path(args.inspector_dir) if args.inspector_dir else trace_dir / "inspector",
+        enabled=bool(args.inspector_dir),
+        correlation_window_s=args.inspector_correlation_window,
+    )
     stopping = False
     failed_completion_seen_monotonic_s: float | None = None
 
@@ -138,9 +152,14 @@ def run_monitor(args: argparse.Namespace) -> int:
                         observed_unix_ns=observed_unix_ns,
                     )
 
+            scan_unix_ns = time.time_ns()
+            hardware_health, _hardware_findings = hardware_reader.poll(scan_unix_ns)
+            inspector = inspector_reader.poll()
             findings = analyzer.scan(
                 now_monotonic_s=time.monotonic(),
-                now_unix_ns=time.time_ns(),
+                now_unix_ns=scan_unix_ns,
+                hardware_health=hardware_health,
+                inspector=inspector,
             )
             _append_findings(output, findings)
 
@@ -170,11 +189,15 @@ def run_monitor(args: argparse.Namespace) -> int:
                             observed_monotonic_s=time.monotonic(),
                             observed_unix_ns=time.time_ns(),
                         )
+                final_unix_ns = time.time_ns()
+                final_hardware_health, _hardware_findings = hardware_reader.poll(final_unix_ns)
                 _append_findings(
                     output,
                     analyzer.scan(
                         now_monotonic_s=time.monotonic(),
-                        now_unix_ns=time.time_ns(),
+                        now_unix_ns=final_unix_ns,
+                        hardware_health=final_hardware_health,
+                        inspector=inspector_reader.poll(),
                     ),
                 )
                 break
@@ -192,11 +215,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--delayed-enter-threshold", type=float, default=30.0)
     parser.add_argument("--p2p-timeout", type=float, default=60.0)
     parser.add_argument("--p2p-match-window", type=float, default=30.0)
+    parser.add_argument("--missing-exit-timeout", type=float, default=60.0)
     parser.add_argument("--failure-grace-period", type=float, default=60.0)
     parser.add_argument("--scan-interval", type=float, default=1.0)
     parser.add_argument("--completion-file")
     parser.add_argument("--report-file", required=True)
     parser.add_argument("--nice", type=int, default=10)
+    parser.add_argument("--hardware-health", action="store_true")
+    parser.add_argument("--hardware-health-stale-after", type=float, default=180.0)
+    parser.add_argument("--inspector-dir")
+    parser.add_argument("--inspector-correlation-window", type=float, default=5.0)
     return parser
 
 
@@ -212,8 +240,11 @@ def main() -> int:
         "delayed_enter_threshold",
         "p2p_timeout",
         "p2p_match_window",
+        "missing_exit_timeout",
         "failure_grace_period",
         "scan_interval",
+        "hardware_health_stale_after",
+        "inspector_correlation_window",
     ):
         if getattr(args, name) <= 0:
             raise SystemExit(f"--{name.replace('_', '-')} must be greater than zero")

@@ -49,6 +49,16 @@ def _bool(value: Any, name: str) -> bool:
     raise ValueError(f"tracing.{name} must be a boolean, got {value!r}")
 
 
+def _non_negative_int(value: Any, name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"tracing.{name} must be a non-negative integer") from exc
+    if parsed < 0:
+        raise ValueError(f"tracing.{name} must be a non-negative integer")
+    return parsed
+
+
 @dataclass(frozen=True)
 class TraceLaunchConfig:
     """Resolved launch-time settings for one trace run."""
@@ -63,9 +73,19 @@ class TraceLaunchConfig:
     delayed_enter_threshold_s: float = 30.0
     p2p_timeout_s: float = 60.0
     p2p_match_window_s: float = 30.0
+    missing_exit_timeout_s: float = 60.0
     failure_grace_period_s: float = 60.0
     scan_interval_s: float = 1.0
     monitor_nice: int = 10
+    hardware_health_enabled: bool = False
+    hardware_health_stale_after_s: float = 180.0
+    inspector_enabled: bool = False
+    inspector_plugin_library: str = ""
+    inspector_dump_dir: str = ""
+    inspector_dump_interval_us: int = 500_000
+    inspector_min_size_bytes: int = 8192
+    inspector_require_kernel_timing: bool = True
+    inspector_correlation_window_s: float = 5.0
 
     @property
     def completion_file(self) -> str:
@@ -106,6 +126,38 @@ class TraceLaunchConfig:
             f"export FLAGSCALE_TRACE_DIR={qdir}",
             f'export LD_PRELOAD={qlib}"${{LD_PRELOAD:+:$LD_PRELOAD}}"',
         ]
+        if self.inspector_enabled:
+            inspector_library = shlex.quote(self.inspector_plugin_library)
+            inspector_dir = shlex.quote(self.inspector_dump_dir)
+            lines.extend(
+                [
+                    f"if [ ! -r {inspector_library} ]; then",
+                    (
+                        "  echo "
+                        + shlex.quote(
+                            "NCCL Inspector plugin not found or unreadable: "
+                            f"{self.inspector_plugin_library}"
+                        )
+                        + " >&2"
+                    ),
+                    "  exit 1",
+                    "fi",
+                    f"mkdir -p {inspector_dir}",
+                    f"export NCCL_PROFILER_PLUGIN={inspector_library}",
+                    "export NCCL_INSPECTOR_ENABLE=1",
+                    "export NCCL_INSPECTOR_DUMP_VERBOSE=1",
+                    f"export NCCL_INSPECTOR_DUMP_DIR={inspector_dir}",
+                    (
+                        "export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS="
+                        f"{self.inspector_dump_interval_us}"
+                    ),
+                    (f"export NCCL_INSPECTOR_DUMP_MIN_SIZE_BYTES={self.inspector_min_size_bytes}"),
+                    (
+                        "export NCCL_INSPECTOR_REQUIRE_KERNEL_TIMING="
+                        f"{int(self.inspector_require_kernel_timing)}"
+                    ),
+                ]
+            )
 
         # With a shared trace directory, a single analyzer on node zero sees all ranks.
         if node_rank == 0:
@@ -125,6 +177,8 @@ class TraceLaunchConfig:
                 f"{self.p2p_timeout_s:g}",
                 "--p2p-match-window",
                 f"{self.p2p_match_window_s:g}",
+                "--missing-exit-timeout",
+                f"{self.missing_exit_timeout_s:g}",
                 "--failure-grace-period",
                 f"{self.failure_grace_period_s:g}",
                 "--scan-interval",
@@ -143,6 +197,19 @@ class TraceLaunchConfig:
                         self.heartbeat_dir,
                         "--heartbeat-timeout",
                         f"{self.heartbeat_timeout_s:g}",
+                        "--hardware-health-stale-after",
+                        f"{self.hardware_health_stale_after_s:g}",
+                    ]
+                )
+                if self.hardware_health_enabled:
+                    monitor_cmd.append("--hardware-health")
+            if self.inspector_enabled:
+                monitor_cmd.extend(
+                    [
+                        "--inspector-dir",
+                        self.inspector_dump_dir,
+                        "--inspector-correlation-window",
+                        f"{self.inspector_correlation_window_s:g}",
                     ]
                 )
             lines.extend(
@@ -253,15 +320,50 @@ def prepare_trace_launch_config(
         raw_dict.get("p2p_match_window_s", min(30.0, p2p_timeout_s)),
         "p2p_match_window_s",
     )
+    missing_exit_timeout_s = _positive_float(
+        raw_dict.get("missing_exit_timeout_s", collective_timeout_s),
+        "missing_exit_timeout_s",
+    )
     failure_grace_period_s = _positive_float(
         raw_dict.get(
             "failure_grace_period_s",
             max(
                 collective_timeout_s,
                 p2p_timeout_s,
+                missing_exit_timeout_s,
             ),
         ),
         "failure_grace_period_s",
+    )
+    inspector = raw_dict.get("inspector", {})
+    if not isinstance(inspector, dict):
+        raise ValueError("tracing.inspector must be a mapping")
+    inspector_enabled = _bool(inspector.get("enabled", False), "inspector.enabled")
+    inspector_plugin_library = str(
+        inspector.get("plugin_library") or os.getenv("NCCL_PROFILER_PLUGIN") or ""
+    )
+    if inspector_enabled and not inspector_plugin_library:
+        raise ValueError("tracing.inspector.plugin_library is required when Inspector is enabled")
+    if inspector_plugin_library:
+        inspector_plugin_library = os.path.abspath(os.path.expanduser(inspector_plugin_library))
+    inspector_dump_dir = os.path.abspath(
+        os.path.expanduser(str(inspector.get("dump_dir") or os.path.join(trace_dir, "inspector")))
+    )
+    inspector_dump_interval_us = _non_negative_int(
+        inspector.get("dump_interval_us", 500_000),
+        "inspector.dump_interval_us",
+    )
+    inspector_min_size_bytes = _non_negative_int(
+        inspector.get("min_size_bytes", 8192),
+        "inspector.min_size_bytes",
+    )
+    inspector_require_kernel_timing = _bool(
+        inspector.get("require_kernel_timing", True),
+        "inspector.require_kernel_timing",
+    )
+    inspector_correlation_window_s = _positive_float(
+        inspector.get("correlation_window_s", 5.0),
+        "inspector.correlation_window_s",
     )
 
     resolved = TraceLaunchConfig(
@@ -286,9 +388,27 @@ def prepare_trace_launch_config(
         ),
         p2p_timeout_s=p2p_timeout_s,
         p2p_match_window_s=p2p_match_window_s,
+        missing_exit_timeout_s=missing_exit_timeout_s,
         failure_grace_period_s=failure_grace_period_s,
         scan_interval_s=_positive_float(raw_dict.get("scan_interval_s", 1.0), "scan_interval_s"),
         monitor_nice=monitor_nice,
+        hardware_health_enabled=bool(
+            heartbeat_config is not None
+            and heartbeat_config.enabled
+            and heartbeat_config.hardware_health_enabled
+        ),
+        hardware_health_stale_after_s=(
+            heartbeat_config.hardware_health_stale_after_s
+            if heartbeat_config is not None and heartbeat_config.enabled
+            else 180.0
+        ),
+        inspector_enabled=inspector_enabled,
+        inspector_plugin_library=inspector_plugin_library,
+        inspector_dump_dir=inspector_dump_dir,
+        inspector_dump_interval_us=inspector_dump_interval_us,
+        inspector_min_size_bytes=inspector_min_size_bytes,
+        inspector_require_kernel_timing=inspector_require_kernel_timing,
+        inspector_correlation_window_s=inspector_correlation_window_s,
     )
 
     if resolved.p2p_match_window_s > resolved.p2p_timeout_s:
@@ -296,6 +416,7 @@ def prepare_trace_launch_config(
     minimum_failure_grace = max(
         resolved.collective_timeout_s,
         resolved.p2p_timeout_s,
+        resolved.missing_exit_timeout_s,
     )
     if resolved.failure_grace_period_s < minimum_failure_grace:
         raise ValueError(

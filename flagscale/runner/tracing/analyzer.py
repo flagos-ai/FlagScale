@@ -30,6 +30,7 @@ _COLLECTIVE_APIS = {
     "ncclBroadcast",
     "ncclReduce",
 }
+_NCCL_IN_PROGRESS_RESULT = 7
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,13 @@ class _CollectiveRound:
     expected_nranks: int
     first_seen_monotonic_s: float
     enters: dict[int, dict[str, Any]] = field(default_factory=dict)
+    exits: dict[int, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class _CallState:
+    enter: dict[str, Any]
+    effective_seen_monotonic_s: float
 
 
 @dataclass
@@ -83,7 +91,7 @@ class _P2PDirection:
 
 
 class TraceAnalyzer:
-    """Detect Not-Entered-Hang and collective Inconsistent-Hang facts."""
+    """Detect H1, H2, and CPU-observable H3 NCCL communication facts."""
 
     def __init__(
         self,
@@ -95,6 +103,7 @@ class TraceAnalyzer:
         delayed_enter_threshold_s: float = 30.0,
         p2p_timeout_s: float = 60.0,
         p2p_match_window_s: float = 30.0,
+        missing_exit_timeout_s: float = 60.0,
         detect_heartbeat_timeouts: bool = False,
     ) -> None:
         self.run_id = run_id
@@ -108,6 +117,7 @@ class TraceAnalyzer:
         self.delayed_enter_threshold_s = float(delayed_enter_threshold_s)
         self.p2p_timeout_s = float(p2p_timeout_s)
         self.p2p_match_window_s = float(p2p_match_window_s)
+        self.missing_exit_timeout_s = float(missing_exit_timeout_s)
         self.detect_heartbeat_timeouts = detect_heartbeat_timeouts
 
         self._processes: dict[int, _ProcessStart] = {}
@@ -115,10 +125,13 @@ class TraceAnalyzer:
         self._probe_status: dict[int, dict[str, Any]] = {}
         self._comm_members: dict[tuple[str, str], dict[int, int]] = {}
         self._rounds: dict[tuple[str, str, int], _CollectiveRound] = {}
+        self._open_calls: dict[tuple[int, int, int], _CallState] = {}
+        self._error_exits: dict[tuple[int, int, int], dict[str, Any]] = {}
         self._p2p_calls: dict[tuple[str, str, int, int], _P2PDirection] = {}
         self._seen_p2p_ids: set[tuple[Any, ...]] = set()
         self._resolved_p2p_ids: set[tuple[Any, ...]] = set()
         self._reported_missing_p2p_until: dict[tuple[Any, ...], float] = {}
+        self._h2_suppressed_calls: set[tuple[int, int, int]] = set()
         self._reported: set[tuple[Any, ...]] = set()
 
     def ingest(
@@ -186,8 +199,25 @@ class TraceAnalyzer:
                 self._comm_members.setdefault((self.run_id, comm_hash), {})[comm_rank] = global_rank
             return True
 
-        if event_type != "nccl_call" or event.get("phase") != "enter":
-            return event_type in {"process_start", "comm_destroy", "nccl_call"}
+        if event_type != "nccl_call":
+            return event_type in {"process_start", "comm_destroy"}
+
+        phase = str(event.get("phase", ""))
+        if phase == "exit":
+            return self._ingest_exit(event)
+        if phase != "enter":
+            return False
+
+        call_key = _call_key(event)
+        self._open_calls.setdefault(
+            call_key,
+            _CallState(
+                enter=event,
+                # Missing-exit age uses the monitor's receipt clock. It must not
+                # depend on wall-clock synchronization between hosts.
+                effective_seen_monotonic_s=observed_monotonic_s,
+            ),
+        )
 
         api = str(event.get("api", ""))
         if api in {"ncclSend", "ncclRecv"}:
@@ -228,11 +258,35 @@ class TraceAnalyzer:
             self._comm_members.setdefault((self.run_id, comm_hash), {})[comm_rank] = global_rank
         return True
 
+    def _ingest_exit(self, event: dict[str, Any]) -> bool:
+        call_key = _call_key(event)
+        self._open_calls.pop(call_key, None)
+        self._h2_suppressed_calls.discard(call_key)
+
+        result = _as_int(event.get("result"), default=0)
+        if result != 0 and not _is_nccl_in_progress(event):
+            self._error_exits.setdefault(call_key, event)
+
+        api = str(event.get("api", ""))
+        if api not in _COLLECTIVE_APIS:
+            return True
+        comm_hash = str(event.get("comm_uid_hash", ""))
+        comm_seq = _as_int(event.get("comm_seq"), default=-1)
+        comm_rank = _as_int(event.get("comm_rank"), default=-1)
+        if not comm_hash or comm_seq < 0 or comm_rank < 0:
+            return True
+        collective = self._rounds.get((self.run_id, comm_hash, comm_seq))
+        if collective is not None:
+            collective.exits.setdefault(comm_rank, event)
+        return True
+
     def scan(
         self,
         *,
         now_monotonic_s: float,
         now_unix_ns: int,
+        hardware_health: Any | None = None,
+        inspector: Any | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
         if self.detect_heartbeat_timeouts:
@@ -241,6 +295,12 @@ class TraceAnalyzer:
                 now_unix_ns=now_unix_ns,
                 output=findings,
             )
+        self._scan_error_exits(
+            now_unix_ns=now_unix_ns,
+            hardware_health=hardware_health,
+            inspector=inspector,
+            output=findings,
+        )
         completed_rounds: list[tuple[str, str, int]] = []
         for key, collective in list(self._rounds.items()):
             mismatch = self._detect_signature_mismatch(collective, now_unix_ns)
@@ -249,6 +309,7 @@ class TraceAnalyzer:
                 if len(collective.enters) >= collective.expected_nranks:
                     # Every rank entered, so the signature mismatch fully explains
                     # this round and there is no missing-enter condition to report.
+                    self._discard_round_open_calls(collective)
                     completed_rounds.append(key)
                     continue
                 # A mismatch among the observed ranks does not explain ranks that
@@ -257,7 +318,25 @@ class TraceAnalyzer:
             if len(collective.enters) >= collective.expected_nranks:
                 delayed = self._detect_delayed_enter(collective, now_unix_ns)
                 self._emit_once(("delayed_collective_enter", *key), delayed, findings)
-                completed_rounds.append(key)
+                missing_exit = self._detect_collective_missing_exit(
+                    collective,
+                    now_monotonic_s=now_monotonic_s,
+                    now_unix_ns=now_unix_ns,
+                    hardware_health=hardware_health,
+                    inspector=inspector,
+                )
+                emitted = self._emit_once(
+                    (
+                        missing_exit.hang_type if missing_exit is not None else "",
+                        *key,
+                    ),
+                    missing_exit,
+                    findings,
+                )
+                if emitted and missing_exit is not None:
+                    self._emit_hardware_hypothesis(missing_exit, findings)
+                if len(collective.exits) >= collective.expected_nranks:
+                    completed_rounds.append(key)
                 continue
 
             elapsed_s = now_monotonic_s - collective.first_seen_monotonic_s
@@ -279,7 +358,296 @@ class TraceAnalyzer:
             now_unix_ns=now_unix_ns,
             output=findings,
         )
+        self._scan_single_missing_exits(
+            now_monotonic_s=now_monotonic_s,
+            now_unix_ns=now_unix_ns,
+            hardware_health=hardware_health,
+            inspector=inspector,
+            output=findings,
+        )
         return findings
+
+    def _scan_error_exits(
+        self,
+        *,
+        now_unix_ns: int,
+        hardware_health: Any | None,
+        inspector: Any | None,
+        output: list[Finding],
+    ) -> None:
+        for call_key, event in list(self._error_exits.items()):
+            result = _as_int(event.get("result"), default=-1)
+            result_name = _result_name(event)
+            hardware = self._hardware_for_event(hardware_health, event)
+            inspector_evidence = self._inspector_for_event(inspector, event)
+            finding = Finding(
+                hang_type="nccl_error_exit",
+                run_id=self.run_id,
+                comm_uid_hash=str(event.get("comm_uid_hash", "")),
+                comm_seq=_as_int(event.get("comm_seq"), default=-1),
+                detected_at_unix_ns=now_unix_ns,
+                details={
+                    "rank": _as_int(event.get("rank"), default=-1),
+                    "pid": _as_int(event.get("pid"), default=-1),
+                    "api": event.get("api"),
+                    "call_seq": _as_int(event.get("call_seq"), default=-1),
+                    "result": result,
+                    "result_name": result_name,
+                    "error_category": _categorize_nccl_error(result, result_name),
+                    "reason": "nccl_api_returned_error",
+                    "confidence": "observed",
+                    **hardware,
+                    **inspector_evidence,
+                },
+            )
+            emitted = self._emit_once(("nccl_error_exit", *call_key), finding, output)
+            if emitted:
+                self._emit_hardware_hypothesis(finding, output)
+            self._error_exits.pop(call_key, None)
+
+    def _detect_collective_missing_exit(
+        self,
+        collective: _CollectiveRound,
+        *,
+        now_monotonic_s: float,
+        now_unix_ns: int,
+        hardware_health: Any | None,
+        inspector: Any | None,
+    ) -> Finding | None:
+        missing_ranks = sorted(set(collective.enters) - set(collective.exits))
+        if not missing_ranks:
+            return None
+
+        ages: dict[int, float] = {}
+        for comm_rank in missing_ranks:
+            event = collective.enters[comm_rank]
+            call = self._open_calls.get(_call_key(event))
+            seen_s = (
+                call.effective_seen_monotonic_s
+                if call is not None
+                else collective.first_seen_monotonic_s
+            )
+            ages[comm_rank] = max(0.0, now_monotonic_s - seen_s)
+        if min(ages.values()) < self.missing_exit_timeout_s:
+            return None
+
+        root_comm_rank = max(ages, key=ages.get)
+        root_event = collective.enters[root_comm_rank]
+        inspector_by_rank = {
+            str(comm_rank): self._inspector_for_event(inspector, collective.enters[comm_rank])
+            for comm_rank in missing_ranks
+        }
+        root_inspector = inspector_by_rank[str(root_comm_rank)]
+        hardware_by_rank = {
+            str(comm_rank): self._hardware_for_event(hardware_health, collective.enters[comm_rank])
+            for comm_rank in missing_ranks
+        }
+        health = _worst_gpu_health(
+            [
+                str(evidence.get("gpu_device_health", "not_collected"))
+                for evidence in hardware_by_rank.values()
+            ]
+        )
+        all_stuck = len(missing_ranks) >= collective.expected_nranks and not collective.exits
+        return Finding(
+            hang_type=("collective_all_ranks_stuck" if all_stuck else "collective_missing_exit"),
+            run_id=collective.run_id,
+            comm_uid_hash=collective.comm_uid_hash,
+            comm_seq=collective.comm_seq,
+            detected_at_unix_ns=now_unix_ns,
+            details={
+                "evidence": "api_enter_without_exit",
+                "api": root_event.get("api"),
+                "expected_nranks": collective.expected_nranks,
+                "entered_comm_ranks": sorted(collective.enters),
+                "exited_comm_ranks": sorted(collective.exits),
+                "missing_exit_comm_ranks": missing_ranks,
+                "stuck_scope": "all_ranks" if all_stuck else "partial_ranks",
+                "root_rank": _as_int(root_event.get("rank"), default=-1),
+                "root_comm_rank": root_comm_rank,
+                "root_api": root_event.get("api"),
+                "root_seq": _as_int(root_event.get("call_seq"), default=-1),
+                "enter_timestamp_unix_ns": _as_int(root_event.get("timestamp_unix_ns"), default=0),
+                "stuck_duration_s": ages[root_comm_rank],
+                "stuck_duration_by_comm_rank": {
+                    str(rank): age for rank, age in sorted(ages.items())
+                },
+                "last_records_by_rank": {
+                    str(rank): {
+                        "enter": _call_summary(collective.enters[rank]),
+                        "exit": (
+                            _call_summary(collective.exits[rank])
+                            if rank in collective.exits
+                            else None
+                        ),
+                    }
+                    for rank in sorted(collective.enters)
+                },
+                "process_liveness": self._process_liveness(root_event, now_monotonic_s),
+                "gpu_device_health": health,
+                "gpu_hardware_by_comm_rank": hardware_by_rank,
+                "inspector_evidence_by_comm_rank": inspector_by_rank,
+                **root_inspector,
+                "reason": "nccl_api_entered_but_did_not_return",
+                "confidence": "observed",
+                "root_cause_status": "unknown",
+            },
+        )
+
+    def _scan_single_missing_exits(
+        self,
+        *,
+        now_monotonic_s: float,
+        now_unix_ns: int,
+        hardware_health: Any | None,
+        inspector: Any | None,
+        output: list[Finding],
+    ) -> None:
+        for call_key, call in list(self._open_calls.items()):
+            event = call.enter
+            if call_key in self._h2_suppressed_calls:
+                continue
+            api = str(event.get("api", ""))
+            comm_hash = str(event.get("comm_uid_hash", ""))
+            comm_seq = _as_int(event.get("comm_seq"), default=-1)
+            if (
+                api in _COLLECTIVE_APIS
+                and comm_hash
+                and (self.run_id, comm_hash, comm_seq) in self._rounds
+            ):
+                # Collective-level priority prevents a downstream missing-exit
+                # finding from obscuring a stronger H1 or H2 fact.
+                continue
+            age_s = now_monotonic_s - call.effective_seen_monotonic_s
+            if age_s < self.missing_exit_timeout_s:
+                continue
+            hardware = self._hardware_for_event(hardware_health, event)
+            inspector_evidence = self._inspector_for_event(inspector, event)
+            finding = Finding(
+                hang_type="nccl_missing_exit",
+                run_id=self.run_id,
+                comm_uid_hash=comm_hash,
+                comm_seq=comm_seq,
+                detected_at_unix_ns=now_unix_ns,
+                details={
+                    "evidence": "api_enter_without_exit",
+                    "rank": _as_int(event.get("rank"), default=-1),
+                    "pid": _as_int(event.get("pid"), default=-1),
+                    "api": api,
+                    "call_seq": _as_int(event.get("call_seq"), default=-1),
+                    "phase": event.get("phase"),
+                    "enter_timestamp_unix_ns": _as_int(event.get("timestamp_unix_ns"), default=0),
+                    "stuck_duration_s": max(0.0, age_s),
+                    "last_record": _call_summary(event),
+                    "process_liveness": self._process_liveness(event, now_monotonic_s),
+                    "reason": "nccl_api_entered_but_did_not_return",
+                    "confidence": "observed",
+                    "root_cause_status": "unknown",
+                    **hardware,
+                    **inspector_evidence,
+                },
+            )
+            emitted = self._emit_once(("nccl_missing_exit", *call_key), finding, output)
+            if emitted:
+                self._emit_hardware_hypothesis(finding, output)
+
+    def _hardware_for_event(
+        self, hardware_health: Any | None, event: dict[str, Any]
+    ) -> dict[str, Any]:
+        if hardware_health is None:
+            return {"gpu_device_health": "not_collected"}
+        rank = _as_int(event.get("rank"), default=-1)
+        heartbeat = self._heartbeats.get(rank)
+        rank_event = dict(event)
+        if heartbeat is not None:
+            rank_event.update(heartbeat.event)
+            rank_event.setdefault("hostname", event.get("hostname"))
+            rank_event.setdefault("local_rank", event.get("local_rank"))
+        try:
+            evidence = hardware_health.for_rank(rank_event)
+        except (AttributeError, TypeError, ValueError):
+            return {"gpu_device_health": "unavailable"}
+        return (
+            dict(evidence) if isinstance(evidence, dict) else {"gpu_device_health": "unavailable"}
+        )
+
+    def _inspector_for_event(self, inspector: Any | None, event: dict[str, Any]) -> dict[str, Any]:
+        if inspector is None:
+            return {
+                "inspector_correlation": "not_collected",
+                "inspector_kernel_status": "not_collected",
+                "kernel_execution_status": "unknown",
+            }
+        try:
+            evidence = inspector.for_call(event)
+        except (AttributeError, TypeError, ValueError):
+            return {
+                "inspector_correlation": "none",
+                "inspector_kernel_status": "unknown",
+                "kernel_execution_status": "unknown",
+            }
+        return (
+            dict(evidence)
+            if isinstance(evidence, dict)
+            else {
+                "inspector_correlation": "none",
+                "inspector_kernel_status": "unknown",
+                "kernel_execution_status": "unknown",
+            }
+        )
+
+    def _process_liveness(self, event: dict[str, Any], now_monotonic_s: float) -> str:
+        rank = _as_int(event.get("rank"), default=-1)
+        heartbeat = self._heartbeats.get(rank)
+        if heartbeat is None:
+            return "unknown"
+        event_pid = _as_int(event.get("pid"), default=-1)
+        heartbeat_pid = _as_int(heartbeat.event.get("pid"), default=-2)
+        if event_pid >= 0 and event_pid != heartbeat_pid:
+            return "unknown"
+        age_s = now_monotonic_s - heartbeat.effective_seen_monotonic_s
+        return "alive" if age_s <= self.heartbeat_timeout_s else "stale"
+
+    def _emit_hardware_hypothesis(self, source: Finding, output: list[Finding]) -> None:
+        health = str(source.details.get("gpu_device_health", "not_collected"))
+        if health not in {"warning", "unhealthy"}:
+            return
+        rank = _as_int(source.details.get("rank"), default=-1)
+        if rank < 0:
+            rank = _as_int(source.details.get("root_rank"), default=-1)
+        finding = Finding(
+            hang_type="hardware_suspected",
+            run_id=source.run_id,
+            comm_uid_hash=source.comm_uid_hash,
+            comm_seq=source.comm_seq,
+            detected_at_unix_ns=source.detected_at_unix_ns,
+            details={
+                "source_hang_type": source.hang_type,
+                "rank": rank,
+                "gpu_device_health": health,
+                "gpu_hardware": source.details.get("gpu_hardware"),
+                "gpu_hardware_by_comm_rank": source.details.get("gpu_hardware_by_comm_rank"),
+                "reason": "nccl_anomaly_with_correlated_gpu_health_evidence",
+                "evidence_strength": "supporting",
+                "confidence": "medium",
+                "root_cause_status": "suspected",
+            },
+        )
+        self._emit_once(
+            (
+                "hardware_suspected",
+                source.hang_type,
+                source.comm_uid_hash,
+                source.comm_seq,
+                rank,
+            ),
+            finding,
+            output,
+        )
+
+    def _discard_round_open_calls(self, collective: _CollectiveRound) -> None:
+        for event in collective.enters.values():
+            self._open_calls.pop(_call_key(event), None)
 
     def _ingest_p2p(
         self,
@@ -411,6 +779,7 @@ class TraceAnalyzer:
                         },
                     )
                     self._emit_once(("p2p_missing_counterpart", event_id), finding, output)
+                    self._h2_suppressed_calls.add(_call_key(event))
                     # Keep the reported call for one bounded grace period. A peer's
                     # trace file may be polled later even though the counterpart was
                     # issued within the matching window.
@@ -455,6 +824,7 @@ class TraceAnalyzer:
                         )
                     )
                     self._emit_once(("p2p_call_mismatch", *pair_ids), finding, output)
+                    self._h2_suppressed_calls.update((_call_key(event), _call_key(candidate.event)))
                     self._resolve_p2p_calls(key, call, candidate)
                     continue
 
@@ -878,6 +1248,88 @@ class TraceAnalyzer:
         self._reported.add(dedupe_key)
         output.append(finding)
         return True
+
+
+def _call_key(event: dict[str, Any]) -> tuple[int, int, int]:
+    return (
+        _as_int(event.get("rank"), default=-1),
+        _as_int(event.get("pid"), default=-1),
+        _as_int(event.get("call_seq"), default=-1),
+    )
+
+
+def _result_name(event: dict[str, Any]) -> str:
+    value = str(event.get("result_name") or "")
+    if value:
+        return value
+    return {
+        0: "ncclSuccess",
+        1: "ncclUnhandledCudaError",
+        2: "ncclSystemError",
+        3: "ncclInternalError",
+        4: "ncclInvalidArgument",
+        5: "ncclInvalidUsage",
+        6: "ncclRemoteError",
+        7: "ncclInProgress",
+    }.get(_as_int(event.get("result"), default=-1), "ncclUnknownError")
+
+
+def _is_nccl_in_progress(event: dict[str, Any]) -> bool:
+    result = _as_int(event.get("result"), default=0)
+    normalized = "".join(
+        character for character in _result_name(event).lower() if character.isalnum()
+    )
+    return result == _NCCL_IN_PROGRESS_RESULT or normalized == "ncclinprogress"
+
+
+def _categorize_nccl_error(result: int, result_name: str) -> str:
+    normalized = "".join(character for character in result_name.lower() if character.isalnum())
+    by_name = {
+        "ncclunhandledcudaerror": "cuda_error",
+        "ncclsystemerror": "system_or_rdma_error",
+        "ncclinternalerror": "nccl_internal_error",
+        "ncclinvalidargument": "invalid_argument",
+        "ncclinvalidusage": "invalid_usage",
+        "ncclremoteerror": "remote_error",
+        "ncclinprogress": "async_in_progress",
+    }
+    if normalized in by_name:
+        return by_name[normalized]
+    return {
+        1: "cuda_error",
+        2: "system_or_rdma_error",
+        3: "nccl_internal_error",
+        4: "invalid_argument",
+        5: "invalid_usage",
+        6: "remote_error",
+        7: "async_in_progress",
+    }.get(result, "unknown_error")
+
+
+def _call_summary(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rank": _as_int(event.get("rank"), default=-1),
+        "pid": _as_int(event.get("pid"), default=-1),
+        "comm_rank": _as_int(event.get("comm_rank"), default=-1),
+        "call_seq": _as_int(event.get("call_seq"), default=-1),
+        "api": event.get("api"),
+        "phase": event.get("phase"),
+        "timestamp_unix_ns": _as_int(event.get("timestamp_unix_ns"), default=0),
+        "result": _as_int(event.get("result"), default=0),
+        "result_name": _result_name(event) if event.get("phase") == "exit" else None,
+    }
+
+
+def _worst_gpu_health(statuses: list[str]) -> str:
+    priority = {
+        "not_collected": 0,
+        "healthy": 1,
+        "unavailable": 2,
+        "stale": 3,
+        "warning": 4,
+        "unhealthy": 5,
+    }
+    return max(statuses, key=lambda item: priority.get(item, -1), default="not_collected")
 
 
 def _as_int(value: Any, *, default: int) -> int:
