@@ -44,10 +44,12 @@ class SchedulerConfig(BaseModel):
       Uses warmup_steps, scheduler_kwargs.
 
     For backward compatibility with pi0/pi0.5, the legacy fields (decay_steps, decay_lr) are kept.
+    warmup_ratio takes precedence over warmup_steps if both are set.
     """
 
     name: str | None = None
     warmup_steps: int = 1000
+    warmup_ratio: float | None = None  # If set, overrides warmup_steps as ratio * train_steps
     scheduler_kwargs: dict[str, Any] | None = None
 
     # Used by cosine_decay_with_warmup and legacy pi0/pi0.5
@@ -241,7 +243,7 @@ class ModelConfig(BaseModel):
     @field_validator("model_name")
     @classmethod
     def validate_model_name(cls, v):
-        valid_names = {"pi0", "pi0.5", "qwen_gr00t", "gr00t_n1_5"}
+        valid_names = {"pi0", "pi0.5", "qwen_gr00t", "gr00t_n1_5", "dreamzero"}
         if v not in valid_names:
             raise ValueError(f"Invalid model_name: {v}. Must be one of {valid_names}")
         return v

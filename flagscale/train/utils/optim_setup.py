@@ -409,12 +409,18 @@ def setup_scheduler(
     if scheduler_config.name is None:
         raise ValueError("scheduler_config.name must be specified to use setup_scheduler")
 
+    # Resolve warmup_steps: warmup_ratio takes precedence if set
+    warmup_steps = scheduler_config.warmup_steps
+    if scheduler_config.warmup_ratio is not None:
+        warmup_steps = int(scheduler_config.warmup_ratio * num_training_steps)
+        logger.info(f"Scheduler: warmup_ratio={scheduler_config.warmup_ratio} → warmup_steps={warmup_steps} (of {num_training_steps} total)")
+
     if scheduler_config.name == "cosine_decay_with_warmup":
         peak_lr = scheduler_config.peak_lr
         if peak_lr is None:
             peak_lr = optimizer.defaults.get("lr", optimizer.param_groups[0]["lr"])
         config = CosineDecayWithWarmupSchedulerConfig(
-            num_warmup_steps=scheduler_config.warmup_steps,
+            num_warmup_steps=warmup_steps,
             num_decay_steps=scheduler_config.decay_steps,
             peak_lr=peak_lr,
             decay_lr=scheduler_config.decay_lr,
@@ -424,7 +430,7 @@ def setup_scheduler(
     return get_scheduler(
         name=scheduler_config.name,
         optimizer=optimizer,
-        num_warmup_steps=scheduler_config.warmup_steps,
+        num_warmup_steps=warmup_steps,
         num_training_steps=num_training_steps,
         scheduler_specific_kwargs=scheduler_config.scheduler_kwargs,
     )
