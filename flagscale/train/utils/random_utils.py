@@ -27,6 +27,7 @@ from megatron.plugin.platform import get_platform
 from flagscale.models.utils.constants import RNG_STATE
 from flagscale.train.datasets.utils import flatten_dict, unflatten_dict
 
+cur_platform = get_platform()
 
 def serialize_python_rng_state() -> dict[str, torch.Tensor]:
     """
