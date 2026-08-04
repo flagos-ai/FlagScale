@@ -22,19 +22,7 @@ import numpy as np
 import torch
 from safetensors.torch import load_file, save_file
 
-try:
-    from megatron.plugin.platform import get_platform
-    cur_platform = get_platform()
-except (ImportError, ModuleNotFoundError):
-    # Fallback for native backend without Megatron
-    class _CUDAPlatform:
-        def is_available(self):
-            return torch.cuda.is_available()
-        def get_rng_state(self):
-            return torch.cuda.get_rng_state()
-        def set_rng_state(self, state):
-            torch.cuda.set_rng_state(state)
-    cur_platform = _CUDAPlatform()
+from megatron.plugin.platform import get_platform
 
 from flagscale.models.utils.constants import RNG_STATE
 from flagscale.train.datasets.utils import flatten_dict, unflatten_dict
