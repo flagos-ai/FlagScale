@@ -46,8 +46,11 @@ class ProfilingConfig:
   
     pytorch_profiler_collect_callstack: bool = False
     """Collect callstack in pytorch profiler."""
-  
-    pytorch_profiler_collect_chakra: bool = False                
+
+    pytorch_profiler_collect_memory: bool = False
+    """Collect memory allocation/deallocation events in pytorch profiler."""
+
+    pytorch_profiler_collect_chakra: bool = False
     """Collect chakra trace in pytorch profiler."""
 
     profile_ranks: list[int] = field(default_factory=lambda: [])

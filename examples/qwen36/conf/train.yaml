@@ -1,0 +1,45 @@
+defaults:
+  - _self_
+  - train: 35b_a3b_llm
+
+experiment:
+  exp_name: EXP-TRAIN-1-Qwen-36-35B-A3B-LLM-BACKBONE-FLASH
+  exp_dir: /share/project/lixianduo/exps/${experiment.exp_name}
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/megatron/train_qwen35.py
+  runner:
+    no_shared_fs: false
+    per_node_task: false
+    rdzv_backend: static
+    nnodes: 8
+    nproc_per_node: 8
+    ssh_port: 3232 # use your ssh port
+    hostfile: /share/project/lixianduo/envs/8nodes_hostfile
+    # nnodes: 4
+    # nproc_per_node: 8
+    # ssh_port: 3232 # use your ssh port
+    # hostfile: /share/project/lixianduo/envs/4nodes_hostfile
+    # nnodes: 1
+    # nproc_per_node: 8
+    # nsys_bin_path:  /share/project/lixianduo/tools/nsys/bin/nsys
+    # nsys_rep_file_path: /share/project/lixianduo/profile-1/
+  cmds:
+    before_start: ulimit -n 1048576 && source /root/miniconda3/bin/activate /share/project/lixianduo/envs/fsa-train
+  envs:
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+    # NCCL_NVLS_ENABLE: 0
+    NCCL_SOCKET_IFNAME: bond0
+    GLOO_SOCKET_IFNAME: bond0
+    NCCL_IB_HCA: "mlx5_100,mlx5_101,mlx5_102,mlx5_103,mlx5_104,mlx5_105,mlx5_106,mlx5_107"
+    NCCL_IB_DISABLE: 0
+    NCCL_IB_GID_INDEX: 3
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

@@ -16,6 +16,7 @@
 
 from einops import rearrange
 from torch import Tensor
+from typing import Optional
 
 from megatron.core.transformer.attention import (
     HAVE_FA3,
@@ -25,6 +26,7 @@ from megatron.core.transformer.attention import (
     deprecate_inference_params,
     is_fa_min_version,
 )
+from megatron.core.transformer.enums import AttnBackend, AttnMaskType
 
 from .rope import apply_rotary_pos_emb_absolute
 
@@ -182,7 +184,15 @@ class Qwen35SelfAttention(SelfAttention):
                 )
 
         # Core attention computation
-        if self.checkpoint_core_attention and self.training:
+        if self.config.attention_backend == AttnBackend.fsa:
+            core_attn_out = self._flash_sparse_attention(
+                query,
+                key,
+                value,
+                attn_mask_type=attn_mask_type if attn_mask_type is not None else self.attn_mask_type,
+                packed_seq_params=packed_seq_params,
+            )
+        elif self.checkpoint_core_attention and self.training:
             core_attn_out = self._checkpointed_attention_forward(
                 query,
                 key,
@@ -209,19 +219,30 @@ class Qwen35SelfAttention(SelfAttention):
                 cu_kv_lengths, kv_lengths, kv_lengths_decode_only, max_seqlen_k = (
                     inference_context.cu_kv_lengths()
                 )
-
-                core_attn_out = self.flash_decode_and_prefill(
-                    q,
-                    k,
-                    v,
-                    max_seqlen_q,
-                    max_seqlen_k,
-                    cu_query_lengths,
-                    cu_kv_lengths,
-                    kv_lengths,
-                    kv_lengths_decode_only,
-                    block_table,
-                )
+                if self.config.attention_backend == AttnBackend.fsa:
+                    core_attn_out = self.flash_sparse_decode_and_prefill(
+                        q,
+                        k,
+                        v,
+                        max_seqlen_q,
+                        max_seqlen_k,
+                        cu_query_lengths,
+                        cu_kv_lengths,
+                        kv_lengths,
+                    )
+                else:
+                    core_attn_out = self.flash_decode_and_prefill(
+                        q,
+                        k,
+                        v,
+                        max_seqlen_q,
+                        max_seqlen_k,
+                        cu_query_lengths,
+                        cu_kv_lengths,
+                        kv_lengths,
+                        kv_lengths_decode_only,
+                        block_table,
+                    )
                 core_attn_out = rearrange(core_attn_out, "s b h d -> s b (h d)")
 
         if packed_seq_params is not None and packed_seq_params.qkv_format == "thd":

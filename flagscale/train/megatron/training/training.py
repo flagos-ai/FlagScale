@@ -3260,8 +3260,12 @@ def train(
         energy_monitor.setup()
         energy_monitor.resume()
 
-    timers('interval-time', log_level=0).start(barrier=True)
-    print_datetime('before the start of training step')
+    # Release reserved memory from checkpoint loading before training starts.
+    torch.cuda.empty_cache()
+
+    timers("interval-time", log_level=0).start(barrier=True)
+    print_datetime("before the start of training step")
+
     report_memory_flag = True
     perf_callback = initialize_perf_monitor(args)
     pre_hook_enabled = False
@@ -3421,6 +3425,7 @@ def train(
             ),
             on_trace_ready=trace_handler,
             record_shapes=args.pytorch_profiler_collect_shapes,
+            profile_memory=args.pytorch_profiler_collect_memory,
             with_stack=args.pytorch_profiler_collect_callstack,
             execution_trace_observer=et,
         )

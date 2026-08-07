@@ -314,9 +314,15 @@ class LanguageTransformerBlock(TransformerBlock):
 
         with rng_context, outer_quantization_context:
             # Forward pass.
-            if self.config.recompute_granularity == 'full' and self.training:
-                assert self.config.recompute_method == 'uniform' and self.config.recompute_num_layers == 1, \
-                    f"Only uniform recompute with recompute_num_layers=1 is supported for full recompute in Qwen3-VL."
+            if self.config.recompute_granularity == "full" and self.training:
+                if visual_pos_masks is not None or deepstack_visual_embeds is not None:
+                    assert (
+                        self.config.recompute_method == "uniform"
+                        and self.config.recompute_num_layers == 1
+                    ), (
+                        f"Only uniform recompute with recompute_num_layers=1 is supported "
+                        f"for full recompute when deepstack is enabled."
+                    )
                 hidden_states = self._checkpointed_forward(
                     hidden_states=hidden_states,
                     attention_mask=attention_mask,

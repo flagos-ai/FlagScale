@@ -282,7 +282,24 @@ class _Qwen2VLTokenizer(_FlagScaleTokenizerBase):
                 max_length=max_length, truncation=truncation, add_special_tokens=add_special_tokens)
 
     def apply_chat_template(self, conversations, tokenize:bool=True, **kwargs):
-        return self.tokenizer.apply_chat_template(conversations, tokenize=tokenize, chat_template=self.chat_template, **kwargs)
+        result = self.tokenizer.apply_chat_template(conversations, tokenize=tokenize, chat_template=self.chat_template, **kwargs)
+        # transformers >= 5.x returns BatchEncoding instead of list/ndarray.
+        # Restore the legacy behavior expected by downstream code.
+        if tokenize and hasattr(result, "keys") and "input_ids" in result:
+            return_tensors = kwargs.get("return_tensors", None)
+            if return_tensors == "np":
+                import numpy as np
+                ids = result["input_ids"]
+                # BatchEncoding with return_tensors="np" gives a 2-d ndarray
+                if not isinstance(ids, np.ndarray):
+                    ids = np.array(ids)
+                if ids.ndim == 1:
+                    ids = ids[np.newaxis, :]
+                return ids
+            else:
+                # No return_tensors: return a plain list of token ids
+                return result["input_ids"]
+        return result
     
     @property
     def vocab_size(self):
