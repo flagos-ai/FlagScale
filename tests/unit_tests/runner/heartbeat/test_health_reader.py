@@ -17,8 +17,8 @@ import json
 from flagscale.runner.heartbeat.health_reader import HardwareHealthReader
 
 
-def _snapshot(status="warning"):
-    return {
+def _snapshot(status="warning", **overrides):
+    payload = {
         "run_id": "run",
         "node_rank": 0,
         "hostname": "host-a",
@@ -35,6 +35,8 @@ def _snapshot(status="warning"):
             },
         ],
     }
+    payload.update(overrides)
+    return payload
 
 
 def test_reader_correlates_cuda_visible_devices_and_deduplicates_findings(tmp_path):
@@ -74,3 +76,63 @@ def test_stale_snapshot_is_not_reported_as_hardware_failure(tmp_path):
 
     assert index.overall_status == "stale"
     assert findings == []
+
+
+def test_missing_node_snapshot_is_reported_after_startup_grace(tmp_path):
+    node_zero = tmp_path / "gpu_health_node_0.json"
+    node_zero.write_text(json.dumps(_snapshot("healthy")), encoding="utf-8")
+    reader = HardwareHealthReader(
+        tmp_path,
+        "run",
+        True,
+        stale_after_s=30,
+        expected_node_count=2,
+        monitor_started_unix_ns=0,
+    )
+
+    initial_index, initial_findings = reader.poll(now_unix_ns=20_000_000_000)
+    assert initial_index.overall_status == "healthy"
+    assert initial_index.missing_node_ranks == ()
+    assert initial_findings == []
+
+    missing_index, missing_findings = reader.poll(now_unix_ns=31_000_000_000)
+    assert missing_index.overall_status == "unavailable"
+    assert missing_index.missing_node_ranks == (1,)
+    assert missing_index.summary()["nodes"][1] == {
+        "node_rank": 1,
+        "hostname": None,
+        "status": "unavailable",
+        "sample_age_s": None,
+        "source": None,
+        "error": "gpu_health_snapshot_not_generated",
+        "gpus": [],
+    }
+    assert [finding["finding_type"] for finding in missing_findings] == [
+        "gpu_health_snapshot_missing"
+    ]
+    assert missing_findings[0]["node_rank"] == 1
+    assert missing_findings[0]["expected_file"] == "gpu_health_node_1.json"
+    assert reader.poll(now_unix_ns=32_000_000_000)[1] == []
+
+    node_one = tmp_path / "gpu_health_node_1.json"
+    node_one.write_text(
+        json.dumps(
+            _snapshot(
+                "healthy",
+                node_rank=1,
+                hostname="host-b",
+                collected_at_unix_ns=32_000_000_000,
+            )
+        ),
+        encoding="utf-8",
+    )
+    recovered_index, recovered_findings = reader.poll(now_unix_ns=33_000_000_000)
+    assert recovered_index.overall_status == "healthy"
+    assert recovered_index.missing_node_ranks == ()
+    assert recovered_findings == []
+
+    node_one.unlink()
+    repeated_findings = reader.poll(now_unix_ns=34_000_000_000)[1]
+    assert [finding["finding_type"] for finding in repeated_findings] == [
+        "gpu_health_snapshot_missing"
+    ]

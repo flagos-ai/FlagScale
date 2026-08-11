@@ -392,6 +392,8 @@ def run_monitor(args: argparse.Namespace) -> int:
         except (AttributeError, OSError):
             logger.debug("Could not adjust heartbeat monitor niceness", exc_info=True)
 
+    monitor_started_s = time.monotonic()
+    monitor_started_unix_ns = time.time_ns()
     analyzer = HeartbeatAnalyzer(
         args.run_id,
         args.initial_process_timeout,
@@ -400,7 +402,7 @@ def run_monitor(args: argparse.Namespace) -> int:
         args.progress_timeout,
         args.checkpoint_timeout,
         expected_world_size=args.expected_world_size,
-        monitor_started_s=time.monotonic(),
+        monitor_started_s=monitor_started_s,
     )
     tailer = JsonlTailer(heartbeat_dir)
     hardware_reader = HardwareHealthReader(
@@ -408,6 +410,8 @@ def run_monitor(args: argparse.Namespace) -> int:
         args.run_id,
         args.hardware_health_enabled,
         args.hardware_health_stale_after,
+        expected_node_count=args.expected_node_count,
+        monitor_started_unix_ns=monitor_started_unix_ns,
     )
     stopping = False
     failed_seen_s: float | None = None
@@ -446,6 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--heartbeat-dir", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--expected-world-size", type=int, default=0)
+    parser.add_argument("--expected-node-count", type=int, default=0)
     parser.add_argument("--initial-process-timeout", type=float, default=30.0)
     parser.add_argument("--process-timeout", type=float, default=30.0)
     parser.add_argument("--initial-progress-timeout", type=float, default=600.0)
@@ -469,6 +474,8 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.expected_world_size < 0:
         raise SystemExit("--expected-world-size must be non-negative")
+    if args.expected_node_count < 0:
+        raise SystemExit("--expected-node-count must be non-negative")
     for name in (
         "initial_process_timeout",
         "process_timeout",

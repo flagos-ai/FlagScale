@@ -76,27 +76,28 @@ def test_enabled_gpu_progress_heartbeat_has_no_preload_or_nccl_dependency(tmp_pa
 
 
 def test_optional_hardware_health_starts_one_node_local_cpu_collector(tmp_path):
-    resolved = prepare_heartbeat_launch_config(
-        _config(
-            tmp_path,
-            {
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "hardware_health": {
                 "enabled": True,
-                "hardware_health": {
-                    "enabled": True,
-                    "interval_s": 60,
-                    "command_timeout_s": 10,
-                    "stale_after_s": 180,
-                },
+                "interval_s": 60,
+                "command_timeout_s": 10,
+                "stale_after_s": 180,
             },
-        ),
-        "run",
+        },
     )
+    config.experiment.runner.nnodes = 2
+    resolved = prepare_heartbeat_launch_config(config, "run")
     node_zero = "\n".join(resolved.shell_setup_lines(0))
     node_one = "\n".join(resolved.shell_setup_lines(1))
 
     assert "flagscale.runner.heartbeat.gpu_health" in node_zero
     assert "gpu_health_node_0.json" in node_zero
     assert "--hardware-health-enabled" in node_zero
+    assert "--expected-node-count 2" in node_zero
+    assert resolved.expected_node_count == 2
     assert "flagscale.runner.heartbeat.gpu_health" in node_one
     assert "gpu_health_node_1.json" in node_one
     assert "flagscale.runner.heartbeat.monitor" not in node_one

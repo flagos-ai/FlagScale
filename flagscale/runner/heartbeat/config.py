@@ -63,6 +63,7 @@ class HeartbeatLaunchConfig:
     scan_interval_s: float = 1.0
     monitor_nice: int = 10
     expected_world_size: int = 0
+    expected_node_count: int = 0
     hardware_health_enabled: bool = False
     hardware_health_interval_s: float = 60.0
     hardware_health_command_timeout_s: float = 10.0
@@ -193,6 +194,8 @@ class HeartbeatLaunchConfig:
                 monitor_cmd.extend(
                     [
                         "--hardware-health-enabled",
+                        "--expected-node-count",
+                        str(self.expected_node_count),
                         "--hardware-health-stale-after",
                         f"{self.hardware_health_stale_after_s:g}",
                     ]
@@ -239,6 +242,14 @@ def _infer_world_size(runner: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return nnodes * nproc_per_node if nnodes > 0 and nproc_per_node > 0 else 0
+
+
+def _infer_node_count(runner: Any) -> int:
+    try:
+        nnodes = int(runner.get("nnodes", 1))
+    except (TypeError, ValueError):
+        return 0
+    return nnodes if nnodes > 0 else 0
 
 
 def prepare_heartbeat_launch_config(config: DictConfig, run_id: str) -> HeartbeatLaunchConfig:
@@ -333,6 +344,7 @@ def prepare_heartbeat_launch_config(config: DictConfig, run_id: str) -> Heartbea
         raise ValueError("heartbeat.expected_world_size must be a non-negative integer") from exc
     if expected_world_size < 0:
         raise ValueError("heartbeat.expected_world_size must be a non-negative integer")
+    expected_node_count = _infer_node_count(config.experiment.runner)
 
     hardware_health = raw_dict.get("hardware_health", {})
     if not isinstance(hardware_health, dict):
@@ -370,6 +382,7 @@ def prepare_heartbeat_launch_config(config: DictConfig, run_id: str) -> Heartbea
         scan_interval_s=_positive_float(raw_dict.get("scan_interval_s", 1.0), "scan_interval_s"),
         monitor_nice=monitor_nice,
         expected_world_size=expected_world_size,
+        expected_node_count=expected_node_count,
         hardware_health_enabled=hardware_health_enabled,
         hardware_health_interval_s=hardware_health_interval_s,
         hardware_health_command_timeout_s=hardware_health_command_timeout_s,

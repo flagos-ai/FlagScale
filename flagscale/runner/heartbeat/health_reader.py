@@ -43,12 +43,14 @@ class HardwareHealthIndex:
     now_unix_ns: int
     stale_after_s: float
     snapshots: tuple[dict[str, Any], ...] = ()
+    missing_node_ranks: tuple[int, ...] = ()
 
     @property
     def overall_status(self) -> str:
         if not self.enabled:
             return "not_collected"
         statuses = [self._snapshot_status(snapshot) for snapshot in self.snapshots]
+        statuses.extend("unavailable" for _ in self.missing_node_ranks)
         return _worst_status(statuses, "unavailable")
 
     def _snapshot_age_s(self, snapshot: dict[str, Any]) -> float | None:
@@ -78,6 +80,18 @@ class HardwareHealthIndex:
                     "source": snapshot.get("source"),
                     "error": snapshot.get("error"),
                     "gpus": snapshot.get("gpus", []),
+                }
+            )
+        for node_rank in self.missing_node_ranks:
+            nodes.append(
+                {
+                    "node_rank": node_rank,
+                    "hostname": None,
+                    "status": "unavailable",
+                    "sample_age_s": None,
+                    "source": None,
+                    "error": "gpu_health_snapshot_not_generated",
+                    "gpus": [],
                 }
             )
         return {"enabled": True, "status": self.overall_status, "nodes": nodes}
@@ -145,13 +159,22 @@ def _match_rank_gpu(
 
 class HardwareHealthReader:
     def __init__(
-        self, heartbeat_dir: Path, run_id: str, enabled: bool, stale_after_s: float
+        self,
+        heartbeat_dir: Path,
+        run_id: str,
+        enabled: bool,
+        stale_after_s: float,
+        expected_node_count: int = 0,
+        monitor_started_unix_ns: int = 0,
     ) -> None:
         self.heartbeat_dir = heartbeat_dir
         self.run_id = run_id
         self.enabled = enabled
         self.stale_after_s = stale_after_s
+        self.expected_node_count = expected_node_count
+        self.monitor_started_unix_ns = monitor_started_unix_ns
         self._reported: set[tuple[str, str, tuple[str, ...]]] = set()
+        self._reported_missing_nodes: set[int] = set()
 
     def poll(self, now_unix_ns: int) -> tuple[HardwareHealthIndex, list[dict[str, Any]]]:
         if not self.enabled:
@@ -164,8 +187,67 @@ class HardwareHealthReader:
                 continue
             if isinstance(payload, dict) and payload.get("run_id") == self.run_id:
                 snapshots.append(payload)
-        index = HardwareHealthIndex(True, now_unix_ns, self.stale_after_s, tuple(snapshots))
-        return index, self._new_findings(index, now_unix_ns)
+        missing_node_ranks = self._missing_node_ranks(snapshots, now_unix_ns)
+        index = HardwareHealthIndex(
+            True,
+            now_unix_ns,
+            self.stale_after_s,
+            tuple(snapshots),
+            missing_node_ranks,
+        )
+        findings = self._new_findings(index, now_unix_ns)
+        findings.extend(self._new_missing_findings(index, now_unix_ns))
+        return index, findings
+
+    def _missing_node_ranks(
+        self, snapshots: list[dict[str, Any]], now_unix_ns: int
+    ) -> tuple[int, ...]:
+        if self.expected_node_count <= 0:
+            return ()
+        monitor_age_s = max(
+            0.0,
+            (now_unix_ns - self.monitor_started_unix_ns) / 1_000_000_000,
+        )
+        if monitor_age_s <= self.stale_after_s:
+            return ()
+        observed_node_ranks: set[int] = set()
+        for snapshot in snapshots:
+            try:
+                node_rank = int(snapshot.get("node_rank"))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= node_rank < self.expected_node_count:
+                observed_node_ranks.add(node_rank)
+        return tuple(
+            node_rank
+            for node_rank in range(self.expected_node_count)
+            if node_rank not in observed_node_ranks
+        )
+
+    def _new_missing_findings(
+        self, index: HardwareHealthIndex, now_unix_ns: int
+    ) -> list[dict[str, Any]]:
+        missing_node_ranks = set(index.missing_node_ranks)
+        self._reported_missing_nodes.intersection_update(missing_node_ranks)
+        findings: list[dict[str, Any]] = []
+        for node_rank in index.missing_node_ranks:
+            if node_rank in self._reported_missing_nodes:
+                continue
+            self._reported_missing_nodes.add(node_rank)
+            findings.append(
+                {
+                    "finding_type": "gpu_health_snapshot_missing",
+                    "run_id": self.run_id,
+                    "detected_at_unix_ns": now_unix_ns,
+                    "node_rank": node_rank,
+                    "hostname": None,
+                    "gpu_device_health": "unavailable",
+                    "expected_file": f"gpu_health_node_{node_rank}.json",
+                    "reason": "gpu_health_snapshot_not_generated",
+                    "confidence": "observed",
+                }
+            )
+        return findings
 
     def _new_findings(self, index: HardwareHealthIndex, now_unix_ns: int) -> list[dict[str, Any]]:
         findings: list[dict[str, Any]] = []
