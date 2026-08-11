@@ -120,6 +120,68 @@ def test_live_process_with_unchanged_progress_reports_gpu_stall_once():
     assert analyzer.scan(now_s=6.0, now_unix_ns=6_000_000_000) == []
 
 
+def test_process_heartbeat_timeout_is_reported_again_after_recovery():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start"), observed_s=1.0)
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=1, iteration=1, phase="train"),
+        observed_s=1.5,
+    )
+
+    first_findings = analyzer.scan(now_s=5.0, now_unix_ns=5_000_000_000)
+    assert [finding["finding_type"] for finding in first_findings] == [
+        "rank_process_heartbeat_timeout"
+    ]
+    assert first_findings[0]["pid"] == 42
+    assert first_findings[0]["timeout_type"] == "subsequent_process_heartbeat"
+
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=2, iteration=2, phase="train"),
+        observed_s=5.5,
+    )
+    assert analyzer.scan(now_s=6.0, now_unix_ns=6_000_000_000) == []
+
+    second_findings = analyzer.scan(now_s=9.0, now_unix_ns=9_000_000_000)
+    assert [finding["finding_type"] for finding in second_findings] == [
+        "rank_process_heartbeat_timeout"
+    ]
+    assert second_findings[0]["pid"] == 42
+    assert second_findings[0]["timeout_type"] == "subsequent_process_heartbeat"
+
+
+def test_gpu_progress_timeout_is_reported_again_after_recovery():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start"), observed_s=1.0)
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=1, iteration=1, phase="train"),
+        observed_s=1.5,
+    )
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=1, iteration=1, phase="train"),
+        observed_s=5.0,
+    )
+
+    first_findings = analyzer.scan(now_s=5.0, now_unix_ns=5_000_000_000)
+    assert [finding["finding_type"] for finding in first_findings] == ["gpu_progress_timeout"]
+    assert first_findings[0]["pid"] == 42
+    assert first_findings[0]["timeout_type"] == "subsequent_gpu_progress"
+
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=2, iteration=2, phase="train"),
+        observed_s=5.5,
+    )
+    assert analyzer.scan(now_s=6.0, now_unix_ns=6_000_000_000) == []
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=2, iteration=2, phase="train"),
+        observed_s=9.0,
+    )
+
+    second_findings = analyzer.scan(now_s=9.0, now_unix_ns=9_000_000_000)
+    assert [finding["finding_type"] for finding in second_findings] == ["gpu_progress_timeout"]
+    assert second_findings[0]["pid"] == 42
+    assert second_findings[0]["timeout_type"] == "subsequent_gpu_progress"
+
+
 def test_stale_process_suppresses_secondary_gpu_progress_finding():
     analyzer = _analyzer()
     analyzer.ingest(_event("process_start"), observed_s=1.0)

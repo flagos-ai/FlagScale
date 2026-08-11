@@ -103,6 +103,8 @@ class HeartbeatAnalyzer:
         self.expected_world_size = expected_world_size
         self.monitor_started_s = monitor_started_s
         self.ranks: dict[int, RankState] = {}
+        # In-memory deduplication for active timeout episodes. Persisted findings
+        # remain in findings.jsonl after their keys are cleared on recovery.
         self._reported: set[tuple[int, int, str]] = set()
 
     def ingest(self, event: dict[str, Any], observed_s: float) -> None:
@@ -114,6 +116,7 @@ class HeartbeatAnalyzer:
             return
         state = self.ranks.get(rank)
         if state is None or _as_int(state.start.get("pid"), -2) != pid:
+            self._reported = {key for key in self._reported if key[0] != rank}
             state = RankState(start=event, start_seen_s=observed_s)
             self.ranks[rank] = state
 
@@ -125,6 +128,8 @@ class HeartbeatAnalyzer:
         elif event_type == "heartbeat":
             state.heartbeat = event
             state.heartbeat_seen_s = observed_s
+            self._reported.discard((rank, pid, "initial_process_heartbeat"))
+            self._reported.discard((rank, pid, "subsequent_process_heartbeat"))
         elif event_type == "process_end":
             state.heartbeat = event
             state.heartbeat_seen_s = observed_s
@@ -135,6 +140,8 @@ class HeartbeatAnalyzer:
             state.progress_seq = progress_seq
             state.progress = event
             state.progress_seen_s = observed_s
+            self._reported.discard((rank, pid, "initial_gpu_progress"))
+            self._reported.discard((rank, pid, "subsequent_gpu_progress"))
 
     def _process_age(self, state: RankState, now_s: float) -> tuple[float, str]:
         if state.heartbeat_seen_s is None:
