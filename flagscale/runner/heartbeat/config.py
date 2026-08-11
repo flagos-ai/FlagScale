@@ -254,9 +254,7 @@ def prepare_heartbeat_launch_config(config: DictConfig, run_id: str) -> Heartbea
         return HeartbeatLaunchConfig(enabled=False)
     runner_type = str(config.experiment.runner.get("type", "ssh")).lower()
     if runner_type == "cloud":
-        raise NotImplementedError(
-            "GPU progress heartbeat is not supported by CloudTrainRunner"
-        )
+        raise NotImplementedError("GPU progress heartbeat is not supported by CloudTrainRunner")
     if config.experiment.runner.get("no_shared_fs", False):
         raise ValueError(
             "GPU progress heartbeat currently requires a shared filesystem for cross-node "
