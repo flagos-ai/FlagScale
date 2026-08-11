@@ -35,6 +35,14 @@ def test_disabled_heartbeat_is_a_noop(tmp_path):
     assert resolved.shell_setup_lines(0) == []
 
 
+def test_cloud_runner_rejects_enabled_heartbeat(tmp_path):
+    config = _config(tmp_path, {"enabled": True})
+    config.experiment.runner.type = "cloud"
+
+    with pytest.raises(NotImplementedError, match="CloudTrainRunner"):
+        prepare_heartbeat_launch_config(config, "run")
+
+
 def test_enabled_gpu_progress_heartbeat_has_no_preload_or_nccl_dependency(tmp_path):
     resolved = prepare_heartbeat_launch_config(
         _config(
