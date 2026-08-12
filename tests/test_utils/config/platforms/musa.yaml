@@ -1,0 +1,48 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Moore Threads S5000 platform configuration.
+
+device_types:
+  - s5000
+
+s5000:
+  name: "s5000"
+  tests:
+    functional:
+      train:
+        qwen3: ["0_6b_musa"]
+      hetero_train: {}
+      benchmark: {}
+      inference:
+        qwen3: ["4b_tp2_musa"]
+      serve:
+        qwen2_5: ["0.5b_musa"]
+      rl: {}
+    unit:
+      nproc_per_node: 2
+      include: "*"
+      exclude:
+        - tests/unit_tests/runner/test_parse_hostfile.py
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_check_exists_warns_on_missing
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_check_exists_no_warning_for_existing
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_check_exists_false_does_not_warn_on_missing
+        - tests/unit_tests/runner/test_path_utils.py::TestResolvePath::test_default_config_key_is_empty
+        - tests/unit_tests/runner/elastic/test_diagnostic.py::TestDiagnostic::test_generate_diagnostic_report_file_output
+        - tests/unit_tests/runner/elastic/test_gpu_health_check.py::TestGPUHealthCheck::test_check_computation
+        - tests/unit_tests/test_cli.py::TestResolveConfig::test_from_model_name_aquila
+        - tests/unit_tests/test_init.py::test_get_version_from_importlib_metadata
+        - tests/unit_tests/test_init.py::test_get_version_fallback_to_pyproject
+        - tests/unit_tests/test_init.py::test_get_version_fallback_to_default
+        - tests/unit_tests/test_parallel_context.py::test_parallel_config

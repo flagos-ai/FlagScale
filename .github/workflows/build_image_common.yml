@@ -1,0 +1,211 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Common image build
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: Platform directory below docker/
+        required: true
+        type: string
+      runs_on:
+        description: JSON array containing the runner scale-set label
+        required: true
+        type: string
+      matrix:
+        description: JSON task matrix, for example {"task":["train","inference","all"]}
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      build_images:
+        required: true
+        type: boolean
+      no_cache:
+        required: false
+        default: false
+        type: boolean
+      push:
+        required: false
+        default: false
+        type: boolean
+      registry:
+        required: true
+        type: string
+      train_image:
+        required: true
+        type: string
+      inference_image:
+        required: true
+        type: string
+      all_image:
+        required: true
+        type: string
+      base_image:
+        required: true
+        type: string
+      build_args:
+        description: Vendor-specific Docker build arguments
+        required: false
+        default: ''
+        type: string
+    secrets:
+      REGISTRY_USERNAME:
+        required: false
+      CONTAINER_REGISTRY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ inputs.platform }} ${{ matrix.task }}
+    if: inputs.build_images
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+    steps:
+      - name: Clean workspace
+        run: sudo rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.[!.]* 2>/dev/null || true
+
+      - name: Checkout source (attempt 1)
+        id: checkout_attempt_1
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout source (attempt 2)
+        id: checkout_attempt_2
+        if: steps.checkout_attempt_1.outcome == 'failure'
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout source (attempt 3)
+        if: steps.checkout_attempt_2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Detect runner proxy
+        id: proxy
+        shell: bash
+        run: |
+          echo "http_proxy=${http_proxy:-${HTTP_PROXY:-}}" >> "$GITHUB_OUTPUT"
+          echo "https_proxy=${https_proxy:-${HTTPS_PROXY:-}}" >> "$GITHUB_OUTPUT"
+          echo "no_proxy=${no_proxy:-${NO_PROXY:-}}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - name: Log in to registry
+        if: inputs.push
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.CONTAINER_REGISTRY }}
+
+      - name: Select image tag
+        id: image
+        shell: bash
+        run: |
+          case "${{ matrix.task }}" in
+            train) echo "tag=${{ inputs.train_image }}" >> "$GITHUB_OUTPUT" ;;
+            inference) echo "tag=${{ inputs.inference_image }}" >> "$GITHUB_OUTPUT" ;;
+            all) echo "tag=${{ inputs.all_image }}" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unsupported image task: ${{ matrix.task }}" >&2; exit 1 ;;
+          esac
+
+      - name: Build image (attempt 1)
+        id: build_attempt_1
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ inputs.platform }}/Dockerfile.${{ matrix.task }}
+          target: ${{ inputs.target }}
+          load: true
+          tags: ${{ steps.image.outputs.tag }}
+          no-cache: ${{ inputs.no_cache }}
+          build-args: |
+            ${{ inputs.build_args }}
+            HTTP_PROXY=${{ steps.proxy.outputs.http_proxy }}
+            HTTPS_PROXY=${{ steps.proxy.outputs.https_proxy }}
+            NO_PROXY=${{ steps.proxy.outputs.no_proxy }}
+            http_proxy=${{ steps.proxy.outputs.http_proxy }}
+            https_proxy=${{ steps.proxy.outputs.https_proxy }}
+            no_proxy=${{ steps.proxy.outputs.no_proxy }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
+            org.opencontainers.image.base.name=${{ inputs.base_image }}
+
+      - name: Wait before build retry
+        if: steps.build_attempt_1.outcome == 'failure'
+        shell: bash
+        run: sleep 15
+
+      - name: Build image (attempt 2)
+        if: steps.build_attempt_1.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ inputs.platform }}/Dockerfile.${{ matrix.task }}
+          target: ${{ inputs.target }}
+          load: true
+          tags: ${{ steps.image.outputs.tag }}
+          no-cache: ${{ inputs.no_cache }}
+          build-args: |
+            ${{ inputs.build_args }}
+            HTTP_PROXY=${{ steps.proxy.outputs.http_proxy }}
+            HTTPS_PROXY=${{ steps.proxy.outputs.https_proxy }}
+            NO_PROXY=${{ steps.proxy.outputs.no_proxy }}
+            http_proxy=${{ steps.proxy.outputs.http_proxy }}
+            https_proxy=${{ steps.proxy.outputs.https_proxy }}
+            no_proxy=${{ steps.proxy.outputs.no_proxy }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
+            org.opencontainers.image.base.name=${{ inputs.base_image }}
+
+      - name: Push image with retry
+        if: inputs.push
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if docker push "${{ steps.image.outputs.tag }}"; then
+              exit 0
+            fi
+            [ "$attempt" -eq 3 ] && break
+            sleep $((attempt * 15))
+          done
+          echo "::error::Failed to push image after 3 attempts"
+          exit 1

@@ -43,8 +43,10 @@ elif command -v mx-smi &>/dev/null; then
     mx-smi
 elif command -v npu-smi &>/dev/null; then
     npu-smi info || true
+elif command -v mthreads-gmi &>/dev/null; then
+    mthreads-gmi || true
 else
-    log_info "No GPU management tool found (nvidia-smi / mx-smi / npu-smi)"
+    log_info "No accelerator management tool found"
 fi
 
 # Show key CPU topology fields; non-fatal if lscpu is unavailable.

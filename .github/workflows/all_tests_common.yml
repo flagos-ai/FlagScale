@@ -62,6 +62,8 @@ jobs:
       serve_test_matrix: ${{ steps.config.outputs.serve_test_matrix }}
       rl_test_matrix: ${{ steps.config.outputs.rl_test_matrix }}
       benchmark_test_matrix: ${{ steps.config.outputs.benchmark_test_matrix }}
+      inference_timeout_minutes: ${{ steps.config.outputs.inference_timeout_minutes }}
+      serve_ready_timeout_seconds: ${{ steps.config.outputs.serve_ready_timeout_seconds }}
       pkg_mgr: ${{ steps.config.outputs.pkg_mgr }}
       env_path: ${{ steps.config.outputs.env_path }}
       env_name_train: ${{ steps.config.outputs.env_name_train }}
@@ -258,6 +260,7 @@ jobs:
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      timeout_minutes: ${{ fromJSON(needs.checkout_and_config.outputs.inference_timeout_minutes) }}
 
   functional_tests_serve:
     needs:
@@ -276,6 +279,7 @@ jobs:
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      ready_timeout_seconds: ${{ fromJSON(needs.checkout_and_config.outputs.serve_ready_timeout_seconds) }}
 
   # NOTE: rl functional tests are temporarily disabled
   # functional_tests_rl:

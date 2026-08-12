@@ -170,7 +170,7 @@ run_test() {
             serve_port=$(grep -oP 'port:\s*\K[0-9]+' "$config_file" | head -1)
 
             local max_wait=600   # ascend: 10 min
-            [ "$PLATFORM" != "ascend" ] && max_wait=180   # others: 1 min
+            [ "$PLATFORM" != "ascend" ] && max_wait="${FS_SERVE_READY_TIMEOUT:-180}"
             local interval=10
             local elapsed=0
             local ready=0
@@ -204,12 +204,22 @@ run_test() {
 
             if [ $ready -eq 0 ]; then
                 log_error "Service did not become ready within ${max_wait}s on port $serve_port"
+                local serve_log
+                for serve_log in "$exp_dir"/serve_logs/host*.output; do
+                    [ -f "$serve_log" ] || continue
+                    log_error "Serve output: $serve_log"
+                    tail -n 200 "$serve_log" || true
+                done
+                flagscale serve "$model" --config "$config_file" --stop || true
                 return 1
             fi
         fi
 
         if ! "${validator_cmd[@]}"; then
             log_error "Validation failed for $task/$model/$config"
+            if [ "$task" = "serve" ]; then
+                flagscale serve "$model" --config "$config_file" --stop || true
+            fi
             return 1
         fi
 

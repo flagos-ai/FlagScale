@@ -55,6 +55,11 @@ on:
         type: string
         description: Environment path (venv path for uv, conda installation path for conda)
         default: "/opt/venv"
+      timeout_minutes:
+        required: false
+        type: number
+        description: Maximum duration for one inference functional test
+        default: 15
 
 jobs:
   functional_test_inference:
@@ -213,6 +218,40 @@ jobs:
           echo "✅ Environment ready for inference tests"
         timeout-minutes: 15
 
+      - name: Ensure FlagScale CLI is available
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_ROOT"
+
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          source ./tools/install/utils/pyenv_utils.sh
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH"
+              fi
+              ;;
+            pip)
+              ;;
+            *)
+              echo "Unsupported package manager: $PKG_MGR" >&2
+              exit 1
+              ;;
+          esac
+
+          if ! command -v flagscale >/dev/null 2>&1; then
+            python -m pip install . --no-build-isolation --root-user-action=ignore
+          fi
+          command -v flagscale
+
       - name: Run functional tests
         id: functional_test
         run: |
@@ -281,7 +320,7 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 15
+        timeout-minutes: ${{ inputs.timeout_minutes }}
 
       - name: Upload Functional Test Logs
         if: always() && steps.functional_test.outcome == 'failure'

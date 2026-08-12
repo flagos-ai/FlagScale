@@ -49,7 +49,7 @@ def get_platform_config(platform, device=None):
     """
     if not platform:
         raise ValueError(
-            "Platform must be specified. Available platforms: cuda, ascend. See template.yaml for creating new platforms."
+            "Platform must be specified. Available platforms: cuda, ascend, metax, musa. See template.yaml for creating new platforms."
         )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -64,12 +64,9 @@ def get_platform_config(platform, device=None):
         "ascend910": "ascend.yaml",
         "metax": "metax.yaml",
         "c550": "metax.yaml",
+        "musa": "musa.yaml",
+        "s5000": "musa.yaml",
     }
-
-    # If platform is a device type (a100, a800, h100) and no device specified
-    if platform in ["a100", "a800", "h100"] and device is None:
-        device = platform
-        platform = "cuda"
 
     yaml_file = platform_file_map.get(platform, f"{platform}.yaml")
     config_file = os.path.join(script_dir, "../config/platforms", yaml_file)
@@ -88,11 +85,14 @@ def get_platform_config(platform, device=None):
 
     config = load_yaml(config_file)
 
-    # If device not specified, use first device type from config
+    # A device alias such as s5000 resolves to the same config file as its
+    # platform. Prefer that alias when it is declared by the config itself.
     if device is None:
-        if config.get("device_types"):
-            # Use first device type as default
-            device = config["device_types"][0]
+        device_types = config.get("device_types", [])
+        if platform in device_types:
+            device = platform
+        elif device_types:
+            device = device_types[0]
         else:
             device = platform
 
@@ -128,13 +128,16 @@ def get_device_types(platform):
         ValueError: If platform is not specified
     """
     if not platform:
-        raise ValueError("Platform must be specified. Available platforms: cuda, ascend")
+        raise ValueError(
+            "Platform must be specified. Available platforms: cuda, ascend, metax, musa"
+        )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     platform_file_map = {
         "cuda": "cuda.yaml",
         "ascend": "ascend.yaml",
         "metax": "metax.yaml",
+        "musa": "musa.yaml",
     }
 
     yaml_file = platform_file_map.get(platform, f"{platform}.yaml")
@@ -168,7 +171,7 @@ def get_unit_tests_config(platform, device=None):
         device: Device type (e.g., 'a100', 'a800')
 
     Returns:
-        Dict with 'include' and 'exclude' patterns
+        Dict with unit test selection and process count settings
 
     Raises:
         ValueError: If platform is not specified
@@ -180,10 +183,14 @@ def get_unit_tests_config(platform, device=None):
         config, device = get_platform_config(platform, device)
         platform_data = get_platform_data(config, device)
         unit_tests = platform_data.get("tests", {}).get("unit", {})
-        return {"include": unit_tests.get("include", "*"), "exclude": unit_tests.get("exclude", [])}
+        return {
+            "include": unit_tests.get("include", "*"),
+            "exclude": unit_tests.get("exclude", []),
+            "nproc_per_node": unit_tests.get("nproc_per_node"),
+        }
     except Exception as e:
         print(f"Error getting unit test config: {e}", file=sys.stderr)
-        return {"include": "*", "exclude": []}
+        return {"include": "*", "exclude": [], "nproc_per_node": None}
 
 
 def get_functional_tests(platform, device=None, task=None, model=None, test_list=None):
