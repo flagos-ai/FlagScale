@@ -238,11 +238,13 @@ class TraceAnalyzer:
             mismatch = self._detect_signature_mismatch(collective, now_unix_ns)
             if mismatch is not None:
                 self._emit_once(("collective_signature_mismatch", *key), mismatch, findings)
-                # A confirmed signature mismatch is the stronger upstream fact. Avoid
-                # also labeling the same split round as missing-enter.
                 if len(collective.enters) >= collective.expected_nranks:
+                    # Every rank entered, so the signature mismatch fully explains
+                    # this round and there is no missing-enter condition to report.
                     completed_rounds.append(key)
-                continue
+                    continue
+                # A mismatch among the observed ranks does not explain ranks that
+                # never entered. Keep evaluating the incomplete round for H1.
 
             if len(collective.enters) >= collective.expected_nranks:
                 delayed = self._detect_delayed_enter(collective, now_unix_ns)

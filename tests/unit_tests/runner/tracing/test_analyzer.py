@@ -101,7 +101,7 @@ def test_missing_enter_correlates_a_stale_heartbeat_as_suspected_crash():
     assert findings[0].details["confidence"] == "suspected"
 
 
-def test_api_mismatch_is_reported_and_suppresses_missing_enter():
+def test_api_mismatch_is_reported_without_missing_enter_when_all_ranks_enter():
     analyzer = TraceAnalyzer(run_id=RUN_ID, collective_timeout_s=1)
     _ingest(analyzer, _event("nccl_call", comm_rank=0, rank=0), observed=1.0)
     _ingest(
@@ -115,6 +115,36 @@ def test_api_mismatch_is_reported_and_suppresses_missing_enter():
     assert findings[0].details["mismatch_type"] == "api_mismatch"
 
     assert analyzer.scan(now_monotonic_s=10.0, now_unix_ns=10_000_000_000) == []
+
+
+def test_api_mismatch_does_not_hide_a_rank_that_never_enters():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, collective_timeout_s=1)
+    _ingest(
+        analyzer,
+        _event("nccl_call", comm_rank=0, rank=0, comm_nranks=3),
+        observed=1.0,
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            comm_rank=1,
+            rank=1,
+            comm_nranks=3,
+            api="ncclBroadcast",
+            root=0,
+        ),
+        observed=1.0,
+    )
+
+    findings = analyzer.scan(now_monotonic_s=3.0, now_unix_ns=3_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == [
+        "collective_signature_mismatch",
+        "collective_missing_enter",
+    ]
+    assert findings[1].details["entered_comm_ranks"] == [0, 1]
+    assert findings[1].details["missing_comm_ranks"] == [2]
 
 
 def test_parameter_and_root_mismatch_are_distinguished():
