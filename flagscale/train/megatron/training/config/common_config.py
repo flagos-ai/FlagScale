@@ -41,6 +41,11 @@ class ProfilingConfig:
     use_pytorch_profiler: bool = False
     """Use the built-in pytorch profiler. Useful if you wish to view profiles in tensorboard."""
 
+    use_hipprof_profiler: bool = False
+    """Use hipprof session control for profiling. Configure the hipprof executable and output
+    directory under experiment.runner.
+    """
+
     pytorch_profiler_collect_shapes: bool = False
     """Collect tensor shape in pytorch profiler."""
 

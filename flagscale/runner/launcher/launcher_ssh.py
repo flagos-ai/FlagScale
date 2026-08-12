@@ -25,6 +25,10 @@ from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.elastic.monitor_service import MonitorService
 from flagscale.runner.launcher.launcher_base import LauncherBase
+from flagscale.runner.profiling import (
+    configure_hipprof_env,
+    remove_launcher_profiling_args,
+)
 from flagscale.runner.utils import (
     JobStatus,
     add_decive_extra_config,
@@ -124,10 +128,7 @@ def _get_runner_cmd_train(
     if "enable_gpu_health_check" in runner_args:
         del runner_args["enable_gpu_health_check"]
     # Profiling options are consumed by launcher; torchrun doesn't accept them.
-    if "nsys_bin_path" in runner_args:
-        del runner_args["nsys_bin_path"]
-    if "nsys_rep_file_path" in runner_args:
-        del runner_args["nsys_rep_file_path"]
+    remove_launcher_profiling_args(runner_args)
     if "deploy" in runner_args:
         del runner_args["deploy"]
     if "enable_perf_monitor" in runner_args:
@@ -244,6 +245,13 @@ class SshLauncher(LauncherBase):
         cur_envs=None,
         enable_monitoring=False,
     ):
+        if self.task_type == "train":
+            cur_envs = configure_hipprof_env(
+                self.config.experiment.runner,
+                self.config.train.model,
+                cur_envs,
+            )
+
         export_cmd = []
         if cur_envs:
             for k, v in cur_envs.items():

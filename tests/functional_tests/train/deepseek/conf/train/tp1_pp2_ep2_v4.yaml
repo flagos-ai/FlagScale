@@ -149,6 +149,13 @@ model:
   # tensorboard_dir: ${experiment.exp_dir}/tensorboard
   # pytorch_profiler_collect_callstack: true
 
+  # hipprof profile args ==============
+  # profile: true
+  # use_hipprof_profiler: true
+  # profile_step_start: 4
+  # profile_step_end: 5
+  # profile_ranks: [0]
+
   optimizer:
     clip_grad: 1.0
     weight_decay: 0.1
