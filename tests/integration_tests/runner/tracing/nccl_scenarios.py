@@ -81,6 +81,24 @@ def run(scenario: str) -> None:
             time.sleep(30.0)
         return
 
+    if scenario == "p2p_multi_target":
+        if rank == 0:
+            operations = [
+                dist.P2POp(dist.isend, tensor, 1),
+                dist.P2POp(dist.isend, tensor, 2),
+            ]
+        else:
+            tensor.zero_()
+            operations = [dist.P2POp(dist.irecv, tensor, 0)]
+        for request in dist.batch_isend_irecv(operations):
+            request.wait()
+        expected = torch.full_like(tensor, float(dist.get_world_size()))
+        if rank != 0 and not torch.equal(tensor, expected):
+            raise AssertionError(f"unexpected P2P result on rank {rank}: {tensor}")
+        dist.barrier()
+        dist.destroy_process_group()
+        return
+
     raise ValueError(f"unknown scenario: {scenario}")
 
 
@@ -95,6 +113,7 @@ def main() -> int:
             "api_mismatch",
             "parameter_mismatch",
             "p2p_missing",
+            "p2p_multi_target",
         ),
     )
     gpu_heartbeat.initialize_from_env()

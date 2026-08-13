@@ -55,6 +55,23 @@ def _read_jsonl(path: Path) -> list[dict]:
     return records
 
 
+def _p2p_enter_counts(paths: list[Path]) -> tuple[int, int]:
+    records = [record for path in paths for record in _read_jsonl(path)]
+    sends = sum(
+        record.get("event") == "nccl_call"
+        and record.get("phase") == "enter"
+        and record.get("api") == "ncclSend"
+        for record in records
+    )
+    recvs = sum(
+        record.get("event") == "nccl_call"
+        and record.get("phase") == "enter"
+        and record.get("api") == "ncclRecv"
+        for record in records
+    )
+    return sends, recvs
+
+
 def run_scenario(scenario: str, timeout_s: float) -> int:
     repo = Path(__file__).resolve().parents[4]
     probe = repo / "flagscale/runner/tracing/native/libflagscale_nccl_probe.so"
@@ -103,7 +120,7 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
         "-m",
         "torch.distributed.run",
         "--standalone",
-        "--nproc-per-node=2",
+        "--nproc-per-node=3" if scenario == "p2p_multi_target" else "--nproc-per-node=2",
         str(workload),
         "--scenario",
         scenario,
@@ -167,6 +184,7 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
     findings = _read_jsonl(findings_path)
     finding_types = [str(finding.get("hang_type")) for finding in findings]
     raw_files = sorted(trace_dir.glob("rank_*_pid_*.jsonl"))
+    p2p_sends, p2p_recvs = _p2p_enter_counts(raw_files)
 
     result = {
         "scenario": scenario,
@@ -174,12 +192,23 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
         "timed_out": timed_out,
         "finding_types": finding_types,
         "raw_trace_files": len(raw_files),
+        "p2p_sends": p2p_sends,
+        "p2p_recvs": p2p_recvs,
         "trace_dir": str(trace_dir),
     }
     print(json.dumps(result, sort_keys=True))
 
     if scenario == "sanity":
         return 0 if return_code == 0 and not findings else 1
+    if scenario == "p2p_multi_target":
+        valid = (
+            return_code == 0
+            and not findings
+            and len(raw_files) == 3
+            and p2p_sends == 2
+            and p2p_recvs == 2
+        )
+        return 0 if valid else 1
 
     expected = EXPECTED_FINDING[scenario]
     if expected not in finding_types:
@@ -194,7 +223,7 @@ def main() -> int:
     parser.add_argument(
         "--scenario",
         required=True,
-        choices=("sanity", *EXPECTED_FINDING),
+        choices=("sanity", "p2p_multi_target", *EXPECTED_FINDING),
     )
     parser.add_argument("--timeout", type=float, default=10.0)
     args = parser.parse_args()

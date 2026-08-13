@@ -231,6 +231,71 @@ def test_unique_p2p_send_recv_pair_is_resolved_without_a_finding():
     assert analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000) == []
 
 
+def test_p2p_calls_to_different_destination_ranks_are_matched_independently():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_nranks=3,
+            comm_rank=0,
+            peer=1,
+            call_seq=1,
+            p2p_op_index=0,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_nranks=3,
+            comm_rank=0,
+            peer=2,
+            call_seq=2,
+            p2p_op_index=1,
+        ),
+    )
+
+    assert set(analyzer._p2p_calls) == {
+        (RUN_ID, COMM, 0, 1),
+        (RUN_ID, COMM, 0, 2),
+    }
+
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=1,
+            pid=11,
+            comm_nranks=3,
+            comm_rank=1,
+            peer=0,
+            call_seq=1,
+            p2p_op_index=0,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=2,
+            pid=12,
+            comm_nranks=3,
+            comm_rank=2,
+            peer=0,
+            call_seq=1,
+            p2p_op_index=0,
+        ),
+    )
+
+    assert analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000) == []
+    assert analyzer._p2p_calls == {}
+
+
 def test_unique_p2p_parameter_mismatch_is_confirmed():
     analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
     _ingest(
