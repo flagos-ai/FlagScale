@@ -18,4 +18,10 @@
 sentencepiece==0.2.1
 transformers==4.57.6
 tiktoken==0.12.0
+
+# for robotics
+peft==0.18.1
+torchcodec==0.8.1
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+
 megatron_core @ https://resource.flagos.net/repository/flagos-pypi-hosted/packages/megatron-core/0.16.0rc0/megatron_core-0.16.0rc0-cp312-cp312-linux_x86_64.whl

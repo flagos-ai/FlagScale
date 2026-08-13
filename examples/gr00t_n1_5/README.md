@@ -24,8 +24,28 @@ Install FlagScale and robotics dependencies:
 
 ```sh
 cd FlagScale/
-# replace "[cuda-train]" with "[ascend-train]" on Huawei Ascend, or "[musa-train]" on Moore Threads MUSA
+# For NVIDIA CUDA training
 pip install ".[cuda-train]" --verbose
+
+# For NVIDIA CUDA serving
+pip install ".[cuda-serve]" --verbose
+
+# Replace [cuda-train] in the training command above with [ascend-train]
+# on Huawei Ascend, or [musa-train] on Moore Threads MUSA.
+```
+
+GR00T N1.5 requires FFmpeg runtime libraries for `torchcodec`.
+Install FFmpeg before running training or dataset preprocessing.
+
+Install FFmpeg using one of the following options:
+
+```sh
+# Using conda
+conda install -c conda-forge ffmpeg
+
+# Or on Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y ffmpeg
 ```
 
 Install additional dependencies for downloading models/datasets:
