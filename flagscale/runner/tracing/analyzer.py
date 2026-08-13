@@ -111,6 +111,7 @@ class TraceAnalyzer:
         self._p2p_calls: dict[tuple[str, str, int, int], list[_P2PCall]] = {}
         self._seen_p2p_ids: set[tuple[Any, ...]] = set()
         self._resolved_p2p_ids: set[tuple[Any, ...]] = set()
+        self._reported_missing_p2p_until: dict[tuple[Any, ...], float] = {}
         self._reported: set[tuple[Any, ...]] = set()
 
     def ingest(
@@ -373,6 +374,14 @@ class TraceAnalyzer:
 
                 src_rank, dst_rank = key[2], key[3]
                 if not candidates:
+                    retain_until = self._reported_missing_p2p_until.get(event_id)
+                    if retain_until is not None:
+                        if now_monotonic_s < retain_until:
+                            continue
+                        self._reported_missing_p2p_until.pop(event_id, None)
+                        self._resolved_p2p_ids.add(event_id)
+                        continue
+
                     finding = Finding(
                         hang_type="p2p_missing_counterpart",
                         run_id=self.run_id,
@@ -396,7 +405,12 @@ class TraceAnalyzer:
                         },
                     )
                     self._emit_once(("p2p_missing_counterpart", event_id), finding, output)
-                    self._resolved_p2p_ids.add(event_id)
+                    # Keep the reported call for one bounded grace period. A peer's
+                    # trace file may be polled later even though the counterpart was
+                    # issued within the matching window.
+                    self._reported_missing_p2p_until[event_id] = (
+                        now_monotonic_s + self.p2p_timeout_s
+                    )
                     continue
 
                 reverse_candidates: list[_P2PCall] = []
@@ -467,8 +481,7 @@ class TraceAnalyzer:
                     },
                 )
                 self._emit_once(("ambiguous_p2p_match", *ambiguous_ids), finding, output)
-                for item in ambiguous_calls:
-                    self._resolved_p2p_ids.add(_p2p_event_id(item.event))
+                self._resolve_p2p_calls(*ambiguous_calls)
 
             retained: list[_P2PCall] = []
             for call in calls:
@@ -485,7 +498,9 @@ class TraceAnalyzer:
 
     def _resolve_p2p_calls(self, *calls: _P2PCall) -> None:
         for call in calls:
-            self._resolved_p2p_ids.add(_p2p_event_id(call.event))
+            event_id = _p2p_event_id(call.event)
+            self._reported_missing_p2p_until.pop(event_id, None)
+            self._resolved_p2p_ids.add(event_id)
 
     def _p2p_candidates(
         self,

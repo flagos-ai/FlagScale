@@ -270,6 +270,57 @@ def test_missing_p2p_counterpart_is_only_suspected():
     assert findings[0].details["confidence"] == "suspected"
 
 
+def test_late_p2p_counterpart_is_absorbed_without_reverse_missing_report():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        p2p_timeout_s=5,
+        p2p_match_window_s=2,
+    )
+    _ingest(
+        analyzer,
+        _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
+    )
+
+    first_findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+    assert [finding.hang_type for finding in first_findings] == ["p2p_missing_counterpart"]
+
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            rank=1,
+            pid=11,
+            comm_rank=1,
+            peer=0,
+            call_seq=2,
+        ),
+        observed=11,
+        unix_ns=11_000_000_000,
+    )
+
+    assert analyzer.scan(now_monotonic_s=20, now_unix_ns=20_000_000_000) == []
+
+
+def test_reported_missing_p2p_call_is_cleaned_after_grace_period():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    _ingest(
+        analyzer,
+        _event("nccl_call", api="ncclSend", comm_rank=0, peer=1, call_seq=1),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+    assert [finding.hang_type for finding in findings] == ["p2p_missing_counterpart"]
+    assert analyzer._p2p_calls
+
+    assert analyzer.scan(now_monotonic_s=14, now_unix_ns=14_000_000_000) == []
+    assert analyzer._p2p_calls
+
+    assert analyzer.scan(now_monotonic_s=15, now_unix_ns=15_000_000_000) == []
+    assert analyzer._p2p_calls == {}
+    assert analyzer._reported_missing_p2p_until == {}
+
+
 def test_multiple_p2p_candidates_are_reported_as_ambiguous():
     analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
     for call_seq in (1, 2):
