@@ -75,6 +75,13 @@ class _P2PCall:
     effective_seen_monotonic_s: float
 
 
+@dataclass
+class _P2PDirection:
+    calls: dict[tuple[Any, ...], _P2PCall] = field(default_factory=dict)
+    by_operation: dict[tuple[str, int], set[tuple[Any, ...]]] = field(default_factory=dict)
+    by_time_bucket: dict[tuple[str, int], set[tuple[Any, ...]]] = field(default_factory=dict)
+
+
 class TraceAnalyzer:
     """Detect Not-Entered-Hang and collective Inconsistent-Hang facts."""
 
@@ -108,7 +115,7 @@ class TraceAnalyzer:
         self._probe_status: dict[int, dict[str, Any]] = {}
         self._comm_members: dict[tuple[str, str], dict[int, int]] = {}
         self._rounds: dict[tuple[str, str, int], _CollectiveRound] = {}
-        self._p2p_calls: dict[tuple[str, str, int, int], list[_P2PCall]] = {}
+        self._p2p_calls: dict[tuple[str, str, int, int], _P2PDirection] = {}
         self._seen_p2p_ids: set[tuple[Any, ...]] = set()
         self._resolved_p2p_ids: set[tuple[Any, ...]] = set()
         self._reported_missing_p2p_until: dict[tuple[Any, ...], float] = {}
@@ -304,12 +311,12 @@ class TraceAnalyzer:
                 observed_unix_ns=observed_unix_ns,
             ),
         )
-        calls = self._p2p_calls.setdefault(key, [])
-        calls.append(call)
+        direction = self._p2p_calls.setdefault(key, _P2PDirection())
+        self._add_p2p_call(direction, call)
 
         opposite_api = "ncclRecv" if api == "ncclSend" else "ncclSend"
         exact_candidates = self._p2p_candidates(
-            calls,
+            direction,
             event,
             expected_api=opposite_api,
             require_same_signature=True,
@@ -319,13 +326,13 @@ class TraceAnalyzer:
         if len(exact_candidates) == 1:
             candidate = exact_candidates[0]
             reverse_candidates = self._p2p_candidates(
-                calls,
+                direction,
                 candidate.event,
                 expected_api=api,
                 require_same_signature=True,
             )
             if len(reverse_candidates) == 1:
-                self._resolve_p2p_calls(call, candidate)
+                self._resolve_p2p_calls(key, call, candidate)
         return True
 
     def _scan_p2p(
@@ -335,11 +342,11 @@ class TraceAnalyzer:
         now_unix_ns: int,
         output: list[Finding],
     ) -> None:
-        for key, calls in list(self._p2p_calls.items()):
-            for call in calls:
+        for key, direction in list(self._p2p_calls.items()):
+            for call in list(direction.calls.values()):
                 event = call.event
                 event_id = _p2p_event_id(event)
-                if event_id in self._resolved_p2p_ids:
+                if event_id not in direction.calls:
                     continue
                 age_s = now_monotonic_s - call.effective_seen_monotonic_s
                 if age_s < self.p2p_timeout_s:
@@ -348,13 +355,13 @@ class TraceAnalyzer:
                 api = str(event.get("api", ""))
                 opposite_api = "ncclRecv" if api == "ncclSend" else "ncclSend"
                 candidates = self._p2p_candidates(
-                    calls,
+                    direction,
                     event,
                     expected_api=opposite_api,
                     require_same_signature=False,
                 )
                 exact_candidates = self._p2p_candidates(
-                    calls,
+                    direction,
                     event,
                     expected_api=opposite_api,
                     require_same_signature=True,
@@ -363,13 +370,13 @@ class TraceAnalyzer:
 
                 if len(exact_candidates) == 1:
                     reverse_exact_candidates = self._p2p_candidates(
-                        calls,
+                        direction,
                         exact_candidates[0].event,
                         expected_api=api,
                         require_same_signature=True,
                     )
                     if len(reverse_exact_candidates) == 1:
-                        self._resolve_p2p_calls(call, exact_candidates[0])
+                        self._resolve_p2p_calls(key, call, exact_candidates[0])
                         continue
 
                 src_rank, dst_rank = key[2], key[3]
@@ -378,8 +385,7 @@ class TraceAnalyzer:
                     if retain_until is not None:
                         if now_monotonic_s < retain_until:
                             continue
-                        self._reported_missing_p2p_until.pop(event_id, None)
-                        self._resolved_p2p_ids.add(event_id)
+                        self._resolve_p2p_calls(key, call)
                         continue
 
                     finding = Finding(
@@ -416,7 +422,7 @@ class TraceAnalyzer:
                 reverse_candidates: list[_P2PCall] = []
                 if len(candidates) == 1:
                     reverse_candidates = self._p2p_candidates(
-                        calls,
+                        direction,
                         candidates[0].event,
                         expected_api=api,
                         require_same_signature=False,
@@ -449,7 +455,7 @@ class TraceAnalyzer:
                         )
                     )
                     self._emit_once(("p2p_call_mismatch", *pair_ids), finding, output)
-                    self._resolve_p2p_calls(call, candidate)
+                    self._resolve_p2p_calls(key, call, candidate)
                     continue
 
                 ambiguous_by_id = {
@@ -481,54 +487,128 @@ class TraceAnalyzer:
                     },
                 )
                 self._emit_once(("ambiguous_p2p_match", *ambiguous_ids), finding, output)
-                self._resolve_p2p_calls(*ambiguous_calls)
+                self._resolve_p2p_calls(key, *ambiguous_calls)
 
-            retained: list[_P2PCall] = []
-            for call in calls:
-                event_id = _p2p_event_id(call.event)
-                if event_id in self._resolved_p2p_ids:
-                    self._resolved_p2p_ids.discard(event_id)
-                    self._seen_p2p_ids.discard(event_id)
-                else:
-                    retained.append(call)
-            if retained:
-                self._p2p_calls[key] = retained
-            else:
+            if not direction.calls:
                 self._p2p_calls.pop(key, None)
 
-    def _resolve_p2p_calls(self, *calls: _P2PCall) -> None:
+        # Keep resolved IDs until the next scan so a replayed record from the same
+        # polling batch remains deduplicated, without retaining its call payload in
+        # the candidate indexes.
+        self._seen_p2p_ids.difference_update(self._resolved_p2p_ids)
+        self._resolved_p2p_ids.clear()
+
+    def _add_p2p_call(self, direction: _P2PDirection, call: _P2PCall) -> None:
+        event = call.event
+        event_id = _p2p_event_id(event)
+        direction.calls[event_id] = call
+
+        api = str(event.get("api", ""))
+        operation_index = _as_int(event.get("p2p_op_index"), default=-1)
+        if operation_index >= 0:
+            direction.by_operation.setdefault((api, operation_index), set()).add(event_id)
+
+        bucket = self._p2p_time_bucket(event)
+        if bucket is not None:
+            direction.by_time_bucket.setdefault((api, bucket), set()).add(event_id)
+
+    def _resolve_p2p_calls(
+        self,
+        key: tuple[str, str, int, int],
+        *calls: _P2PCall,
+    ) -> None:
+        direction = self._p2p_calls.get(key)
+        if direction is None:
+            return
         for call in calls:
-            event_id = _p2p_event_id(call.event)
+            event = call.event
+            event_id = _p2p_event_id(event)
+            if direction.calls.pop(event_id, None) is None:
+                continue
             self._reported_missing_p2p_until.pop(event_id, None)
             self._resolved_p2p_ids.add(event_id)
 
+            api = str(event.get("api", ""))
+            operation_index = _as_int(event.get("p2p_op_index"), default=-1)
+            if operation_index >= 0:
+                self._discard_p2p_index(
+                    direction.by_operation,
+                    (api, operation_index),
+                    event_id,
+                )
+
+            bucket = self._p2p_time_bucket(event)
+            if bucket is not None:
+                self._discard_p2p_index(
+                    direction.by_time_bucket,
+                    (api, bucket),
+                    event_id,
+                )
+
+        if not direction.calls:
+            self._p2p_calls.pop(key, None)
+
+    @staticmethod
+    def _discard_p2p_index(
+        index: dict[tuple[str, int], set[tuple[Any, ...]]],
+        key: tuple[str, int],
+        event_id: tuple[Any, ...],
+    ) -> None:
+        event_ids = index.get(key)
+        if event_ids is None:
+            return
+        event_ids.discard(event_id)
+        if not event_ids:
+            index.pop(key, None)
+
+    def _p2p_time_bucket(self, event: dict[str, Any]) -> int | None:
+        timestamp_ns = _as_int(event.get("timestamp_unix_ns"), default=0)
+        if timestamp_ns <= 0:
+            return None
+        bucket_width_ns = max(1, int(self.p2p_match_window_s * 1_000_000_000))
+        return timestamp_ns // bucket_width_ns
+
     def _p2p_candidates(
         self,
-        calls: list[_P2PCall],
+        direction: _P2PDirection,
         event: dict[str, Any],
         *,
         expected_api: str,
         require_same_signature: bool,
     ) -> list[_P2PCall]:
-        candidates = [
-            candidate
-            for candidate in calls
-            if str(candidate.event.get("api", "")) == expected_api
-            and _p2p_event_id(candidate.event) not in self._resolved_p2p_ids
-            and (
-                not require_same_signature
-                or _p2p_signature(candidate.event) == _p2p_signature(event)
-            )
-            and _within_p2p_window(
-                candidate.event,
-                event,
-                window_s=self.p2p_match_window_s,
-            )
-        ]
-        # Files are polled rank by rank, so two sends can be observed before their
-        # corresponding receive. Prefer the per-communicator P2P sequence when both
-        # sides expose it; otherwise retain the conservative time-window behavior.
         operation_index = _as_int(event.get("p2p_op_index"), default=-1)
+        if operation_index >= 0:
+            indexed_event_ids = direction.by_operation.get((expected_api, operation_index), set())
+            indexed_candidates = self._p2p_calls_from_ids(
+                direction,
+                indexed_event_ids,
+                event,
+                require_same_signature=require_same_signature,
+            )
+            if indexed_candidates or event.get("p2p_op_index_scope") == "peer_direction":
+                # New probe events use an authoritative per-peer/direction index.
+                # An empty exact-signature result must reach the mismatch or missing
+                # path rather than being replaced by a nearby operation.
+                return indexed_candidates
+
+        # Older traces use a communicator-wide P2P index, which can differ between
+        # peers, and partial traces may not have a usable index. Search only the
+        # neighboring time buckets instead of rescanning the full direction history.
+        bucket = self._p2p_time_bucket(event)
+        if bucket is None:
+            return []
+        event_ids: set[tuple[Any, ...]] = set()
+        for candidate_bucket in (bucket - 1, bucket, bucket + 1):
+            event_ids.update(direction.by_time_bucket.get((expected_api, candidate_bucket), set()))
+        candidates = self._p2p_calls_from_ids(
+            direction,
+            event_ids,
+            event,
+            require_same_signature=require_same_signature,
+        )
+
+        # Preserve the old-trace sequence hint when it happens to align. New probe
+        # events normally return from the direct operation-index lookup above.
         if operation_index >= 0:
             indexed_candidates = [
                 candidate
@@ -537,6 +617,30 @@ class TraceAnalyzer:
             ]
             if indexed_candidates:
                 return indexed_candidates
+        return candidates
+
+    def _p2p_calls_from_ids(
+        self,
+        direction: _P2PDirection,
+        event_ids: set[tuple[Any, ...]],
+        event: dict[str, Any],
+        *,
+        require_same_signature: bool,
+    ) -> list[_P2PCall]:
+        candidates: list[_P2PCall] = []
+        for event_id in sorted(event_ids, key=repr):
+            candidate = direction.calls.get(event_id)
+            if candidate is None:
+                continue
+            if require_same_signature and _p2p_signature(candidate.event) != _p2p_signature(event):
+                continue
+            if not _within_p2p_window(
+                candidate.event,
+                event,
+                window_s=self.p2p_match_window_s,
+            ):
+                continue
+            candidates.append(candidate)
         return candidates
 
     def _scan_heartbeats(

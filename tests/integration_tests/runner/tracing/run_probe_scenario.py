@@ -55,21 +55,21 @@ def _read_jsonl(path: Path) -> list[dict]:
     return records
 
 
-def _p2p_enter_counts(paths: list[Path]) -> tuple[int, int]:
+def _p2p_enter_summaries(paths: list[Path]) -> list[tuple[str, int, int, int, str]]:
     records = [record for path in paths for record in _read_jsonl(path)]
-    sends = sum(
-        record.get("event") == "nccl_call"
-        and record.get("phase") == "enter"
-        and record.get("api") == "ncclSend"
+    return sorted(
+        (
+            str(record.get("api")),
+            int(record.get("comm_rank", -1)),
+            int(record.get("peer", -1)),
+            int(record.get("p2p_op_index", -1)),
+            str(record.get("p2p_op_index_scope", "")),
+        )
         for record in records
-    )
-    recvs = sum(
-        record.get("event") == "nccl_call"
+        if record.get("event") == "nccl_call"
         and record.get("phase") == "enter"
-        and record.get("api") == "ncclRecv"
-        for record in records
+        and record.get("api") in {"ncclSend", "ncclRecv"}
     )
-    return sends, recvs
 
 
 def run_scenario(scenario: str, timeout_s: float) -> int:
@@ -184,7 +184,9 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
     findings = _read_jsonl(findings_path)
     finding_types = [str(finding.get("hang_type")) for finding in findings]
     raw_files = sorted(trace_dir.glob("rank_*_pid_*.jsonl"))
-    p2p_sends, p2p_recvs = _p2p_enter_counts(raw_files)
+    p2p_enters = _p2p_enter_summaries(raw_files)
+    p2p_sends = sum(summary[0] == "ncclSend" for summary in p2p_enters)
+    p2p_recvs = sum(summary[0] == "ncclRecv" for summary in p2p_enters)
 
     result = {
         "scenario": scenario,
@@ -194,6 +196,7 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
         "raw_trace_files": len(raw_files),
         "p2p_sends": p2p_sends,
         "p2p_recvs": p2p_recvs,
+        "p2p_enters": p2p_enters,
         "trace_dir": str(trace_dir),
     }
     print(json.dumps(result, sort_keys=True))
@@ -201,12 +204,17 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
     if scenario == "sanity":
         return 0 if return_code == 0 and not findings else 1
     if scenario == "p2p_multi_target":
+        expected_p2p_enters = [
+            ("ncclRecv", 1, 0, 0, "peer_direction"),
+            ("ncclRecv", 2, 0, 0, "peer_direction"),
+            ("ncclSend", 0, 1, 0, "peer_direction"),
+            ("ncclSend", 0, 2, 0, "peer_direction"),
+        ]
         valid = (
             return_code == 0
             and not findings
             and len(raw_files) == 3
-            and p2p_sends == 2
-            and p2p_recvs == 2
+            and p2p_enters == expected_p2p_enters
         )
         return 0 if valid else 1
 

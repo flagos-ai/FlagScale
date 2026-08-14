@@ -152,6 +152,8 @@ struct CommState {
   // collective sequence used for cross-rank collective alignment.
   std::atomic<uint64_t> next_collective_sequence{0};
   std::atomic<uint64_t> next_p2p_sequence{0};
+  std::unique_ptr<std::atomic<uint64_t>[]> next_send_sequences;
+  std::unique_ptr<std::atomic<uint64_t>[]> next_recv_sequences;
   std::atomic<bool> active{true};
 };
 
@@ -163,6 +165,14 @@ class CommRegistry {
     state->handle = reinterpret_cast<uintptr_t>(comm);
     state->rank = rank;
     state->nranks = nranks;
+    if (nranks > 0) {
+      state->next_send_sequences = std::make_unique<std::atomic<uint64_t>[]>(nranks);
+      state->next_recv_sequences = std::make_unique<std::atomic<uint64_t>[]>(nranks);
+      for (int peer = 0; peer < nranks; ++peer) {
+        state->next_send_sequences[peer].store(0);
+        state->next_recv_sequences[peer].store(0);
+      }
+    }
     format_hash(hash_unique_id(unique_id), state->uid_hash);
     CommState* pointer = state.get();
     std::lock_guard<std::mutex> lock(mutex_);
@@ -402,6 +412,10 @@ class Runtime {
       line += ",\"group_id\":" + std::to_string(event.group_id);
       line += ",\"group_op_index\":" + std::to_string(event.group_op_index);
       line += ",\"p2p_op_index\":" + std::to_string(event.p2p_op_index);
+      if (std::strcmp(event.api, "ncclSend") == 0 ||
+          std::strcmp(event.api, "ncclRecv") == 0) {
+        line += ",\"p2p_op_index_scope\":\"peer_direction\"";
+      }
       line += ",\"result\":" + std::to_string(event.result);
     }
     line += "}\n";
@@ -473,6 +487,12 @@ CallContext BeginCall(const char* api, ncclComm_t comm, std::size_t count,
     }
     if (is_p2p) {
       event.p2p_op_index = event.comm_seq;
+      if (state != nullptr && peer >= 0 && peer < state->nranks) {
+        auto& peer_sequence = std::strcmp(api, "ncclSend") == 0
+                                  ? state->next_send_sequences[peer]
+                                  : state->next_recv_sequences[peer];
+        event.p2p_op_index = peer_sequence.fetch_add(1);
+      }
       if (current_group_id != 0) event.group_op_index = current_group_op_index++;
     }
     event.count = static_cast<uint64_t>(count);
