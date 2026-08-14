@@ -110,6 +110,7 @@ def run_monitor(args: argparse.Namespace) -> int:
         heartbeat_timeout_s=args.heartbeat_timeout,
         collective_timeout_s=args.collective_timeout,
         delayed_enter_threshold_s=args.delayed_enter_threshold,
+        checkpoint_timeout_s=args.checkpoint_timeout,
     )
     tailers = [JsonlTailer(trace_dir)]
     if args.heartbeat_dir:
@@ -188,6 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--heartbeat-timeout", type=float, default=30.0)
     parser.add_argument("--collective-timeout", type=float, default=60.0)
     parser.add_argument("--delayed-enter-threshold", type=float, default=30.0)
+    parser.add_argument("--checkpoint-timeout", type=float, default=1800.0)
     parser.add_argument("--failure-grace-period", type=float, default=60.0)
     parser.add_argument("--scan-interval", type=float, default=1.0)
     parser.add_argument("--completion-file")
@@ -206,6 +208,7 @@ def main() -> int:
         "heartbeat_timeout",
         "collective_timeout",
         "delayed_enter_threshold",
+        "checkpoint_timeout",
         "failure_grace_period",
         "scan_interval",
     ):

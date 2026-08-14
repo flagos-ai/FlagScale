@@ -61,6 +61,7 @@ class TraceLaunchConfig:
     heartbeat_timeout_s: float = 30.0
     collective_timeout_s: float = 60.0
     delayed_enter_threshold_s: float = 30.0
+    checkpoint_timeout_s: float = 1800.0
     failure_grace_period_s: float = 60.0
     scan_interval_s: float = 1.0
     monitor_nice: int = 10
@@ -119,6 +120,8 @@ class TraceLaunchConfig:
                 f"{self.collective_timeout_s:g}",
                 "--delayed-enter-threshold",
                 f"{self.delayed_enter_threshold_s:g}",
+                "--checkpoint-timeout",
+                f"{self.checkpoint_timeout_s:g}",
                 "--failure-grace-period",
                 f"{self.failure_grace_period_s:g}",
                 "--scan-interval",
@@ -240,6 +243,19 @@ def prepare_trace_launch_config(
     collective_timeout_s = _positive_float(
         raw_dict.get("collective_timeout_s", 60.0), "collective_timeout_s"
     )
+    delayed_enter_threshold_s = _positive_float(
+        raw_dict.get("delayed_enter_threshold_s", 30.0),
+        "delayed_enter_threshold_s",
+    )
+    inherited_checkpoint_timeout_s = (
+        getattr(heartbeat_config, "checkpoint_timeout_s", 1800.0)
+        if heartbeat_config is not None and heartbeat_config.enabled
+        else 1800.0
+    )
+    checkpoint_timeout_s = _positive_float(
+        raw_dict.get("checkpoint_timeout_s", inherited_checkpoint_timeout_s),
+        "checkpoint_timeout_s",
+    )
     failure_grace_period_s = _positive_float(
         raw_dict.get("failure_grace_period_s", collective_timeout_s),
         "failure_grace_period_s",
@@ -261,10 +277,8 @@ def prepare_trace_launch_config(
             else 30.0
         ),
         collective_timeout_s=collective_timeout_s,
-        delayed_enter_threshold_s=_positive_float(
-            raw_dict.get("delayed_enter_threshold_s", 30.0),
-            "delayed_enter_threshold_s",
-        ),
+        delayed_enter_threshold_s=delayed_enter_threshold_s,
+        checkpoint_timeout_s=checkpoint_timeout_s,
         failure_grace_period_s=failure_grace_period_s,
         scan_interval_s=_positive_float(raw_dict.get("scan_interval_s", 1.0), "scan_interval_s"),
         monitor_nice=monitor_nice,
@@ -273,6 +287,14 @@ def prepare_trace_launch_config(
     if resolved.failure_grace_period_s < resolved.collective_timeout_s:
         raise ValueError(
             "tracing.failure_grace_period_s must be at least the largest enabled detection timeout"
+        )
+    if resolved.checkpoint_timeout_s < max(
+        resolved.collective_timeout_s,
+        resolved.delayed_enter_threshold_s,
+    ):
+        raise ValueError(
+            "tracing.checkpoint_timeout_s must be greater than or equal to the normal "
+            "collective thresholds"
         )
 
     return resolved
