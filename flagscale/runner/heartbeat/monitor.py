@@ -143,10 +143,25 @@ class HeartbeatAnalyzer:
             self._reported.discard((rank, pid, "initial_gpu_progress"))
             self._reported.discard((rank, pid, "subsequent_gpu_progress"))
 
-    def _process_age(self, state: RankState, now_s: float) -> tuple[float, str]:
+    def _process_status(self, state: RankState, now_s: float) -> tuple[float, str, str, float]:
+        source = state.heartbeat or state.progress or state.start
+        phase = str(source.get("phase") or "setup")
         if state.heartbeat_seen_s is None:
-            return now_s - state.start_seen_s, "initial_process_heartbeat"
-        return now_s - state.heartbeat_seen_s, "subsequent_process_heartbeat"
+            return (
+                now_s - state.start_seen_s,
+                "initial_process_heartbeat",
+                phase,
+                self.initial_process_timeout_s,
+            )
+        timeout_s = (
+            self.checkpoint_timeout_s if phase == "checkpointing" else self.process_timeout_s
+        )
+        return (
+            now_s - state.heartbeat_seen_s,
+            "subsequent_process_heartbeat",
+            phase,
+            timeout_s,
+        )
 
     def _progress_age(self, state: RankState, now_s: float) -> tuple[float, str, float]:
         source = state.heartbeat or state.progress or state.start
@@ -192,12 +207,12 @@ class HeartbeatAnalyzer:
             if state.ended:
                 continue
             pid = _as_int(state.start.get("pid"), -1)
-            process_age_s, process_timeout_type = self._process_age(state, now_s)
-            process_timeout_s = (
-                self.initial_process_timeout_s
-                if state.heartbeat_seen_s is None
-                else self.process_timeout_s
-            )
+            (
+                process_age_s,
+                process_timeout_type,
+                process_phase,
+                process_timeout_s,
+            ) = self._process_status(state, now_s)
             process_alive = process_age_s <= process_timeout_s
             process_key = (rank, pid, process_timeout_type)
             if not process_alive and process_key not in self._reported:
@@ -210,7 +225,9 @@ class HeartbeatAnalyzer:
                         "rank": rank,
                         "pid": pid,
                         "hostname": state.start.get("hostname"),
+                        "phase": process_phase,
                         "timeout_type": process_timeout_type,
+                        "timeout_s": process_timeout_s,
                         "heartbeat_age_s": max(0.0, process_age_s),
                         "reason": "rank_process_or_heartbeat_thread_unresponsive",
                         "confidence": "suspected",
@@ -285,12 +302,7 @@ class HeartbeatAnalyzer:
                 )
 
         for rank, state in sorted(self.ranks.items()):
-            process_age_s, _ = self._process_age(state, now_s)
-            process_timeout_s = (
-                self.initial_process_timeout_s
-                if state.heartbeat_seen_s is None
-                else self.process_timeout_s
-            )
+            process_age_s, _, _, process_timeout_s = self._process_status(state, now_s)
             process_alive = process_age_s <= process_timeout_s
             progress_age_s, phase, progress_timeout_s = self._progress_age(state, now_s)
             if state.progress_seen_s is None:

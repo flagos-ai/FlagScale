@@ -134,6 +134,8 @@ def test_process_heartbeat_timeout_is_reported_again_after_recovery():
     ]
     assert first_findings[0]["pid"] == 42
     assert first_findings[0]["timeout_type"] == "subsequent_process_heartbeat"
+    assert first_findings[0]["phase"] == "train"
+    assert first_findings[0]["timeout_s"] == 3
 
     analyzer.ingest(
         _event("heartbeat", progress_seq=2, iteration=2, phase="train"),
@@ -215,6 +217,50 @@ def test_checkpoint_phase_uses_longer_progress_timeout():
     analyzer.ingest(_event("heartbeat", progress_seq=1, phase="checkpointing"), observed_s=10.0)
 
     assert analyzer.scan(now_s=10.0, now_unix_ns=10_000_000_000) == []
+
+
+def test_checkpoint_phase_uses_longer_process_timeout():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start"), observed_s=1.0)
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=1, phase="checkpointing"),
+        observed_s=1.5,
+    )
+
+    assert analyzer.scan(now_s=5.0, now_unix_ns=5_000_000_000) == []
+    rank = analyzer.snapshot(5.0, 5_000_000_000)["ranks"][0]
+    assert rank["phase"] == "checkpointing"
+    assert rank["process_liveness"] == "alive"
+
+
+def test_checkpoint_process_timeout_is_reported_after_checkpoint_threshold():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start"), observed_s=1.0)
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=1, phase="checkpointing"),
+        observed_s=1.5,
+    )
+
+    findings = analyzer.scan(now_s=22.0, now_unix_ns=22_000_000_000)
+
+    assert [finding["finding_type"] for finding in findings] == ["rank_process_heartbeat_timeout"]
+    assert findings[0]["phase"] == "checkpointing"
+    assert findings[0]["timeout_s"] == 20
+    assert findings[0]["heartbeat_age_s"] == 20.5
+    rank = analyzer.snapshot(22.0, 22_000_000_000)["ranks"][0]
+    assert rank["process_liveness"] == "stale"
+
+
+def test_checkpoint_phase_does_not_extend_initial_process_timeout():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start", phase="checkpointing"), observed_s=1.0)
+
+    findings = analyzer.scan(now_s=4.0, now_unix_ns=4_000_000_000)
+
+    assert [finding["finding_type"] for finding in findings] == ["rank_process_heartbeat_timeout"]
+    assert findings[0]["timeout_type"] == "initial_process_heartbeat"
+    assert findings[0]["phase"] == "checkpointing"
+    assert findings[0]["timeout_s"] == 2
 
 
 def test_rank_that_never_started_is_detected_from_expected_world_size():
