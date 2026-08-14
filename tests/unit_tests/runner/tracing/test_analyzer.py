@@ -185,6 +185,84 @@ def test_delayed_enter_is_reported_after_every_rank_enters():
     assert findings[0].details["enter_spread_s"] == 7.0
 
 
+def test_checkpoint_missing_enter_uses_checkpoint_timeout_and_still_reports_hang():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        collective_timeout_s=5,
+        checkpoint_timeout_s=20,
+    )
+    _ingest(analyzer, _event("comm_init", rank=0, comm_rank=0))
+    _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest(
+        analyzer,
+        _event("heartbeat", rank=1, phase="checkpointing"),
+        observed=1.0,
+    )
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1.0)
+
+    assert analyzer.scan(now_monotonic_s=8.0, now_unix_ns=8_000_000_000) == []
+
+    findings = analyzer.scan(now_monotonic_s=22.0, now_unix_ns=22_000_000_000)
+    assert [finding.hang_type for finding in findings] == ["collective_missing_enter"]
+    assert findings[0].details["detection_phase"] == "checkpointing"
+    assert findings[0].details["detection_threshold_s"] == 20
+    assert findings[0].details["threshold_reason"] == "heartbeat_phase_checkpointing"
+
+
+def test_training_missing_enter_keeps_normal_timeout():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        collective_timeout_s=5,
+        checkpoint_timeout_s=20,
+    )
+    _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest(analyzer, _event("heartbeat", rank=1, phase="train"), observed=1.0)
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1.0)
+
+    findings = analyzer.scan(now_monotonic_s=8.0, now_unix_ns=8_000_000_000)
+    assert [finding.hang_type for finding in findings] == ["collective_missing_enter"]
+    assert findings[0].details["detection_phase"] == "train"
+    assert findings[0].details["detection_threshold_s"] == 5
+    assert findings[0].details["threshold_reason"] == "normal_collective_phase"
+
+
+def test_checkpoint_delayed_enter_keeps_phase_after_heartbeat_returns_to_train():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        delayed_enter_threshold_s=5,
+        checkpoint_timeout_s=20,
+    )
+    _ingest(
+        analyzer,
+        _event("heartbeat", rank=0, phase="checkpointing"),
+        observed=1.0,
+    )
+    _ingest(
+        analyzer,
+        _event("nccl_call", rank=0, comm_rank=0, timestamp_unix_ns=1_000_000_000),
+        observed=1.0,
+    )
+    assert analyzer.scan(now_monotonic_s=2.0, now_unix_ns=2_000_000_000) == []
+
+    _ingest(
+        analyzer,
+        _event(
+            "heartbeat",
+            rank=0,
+            phase="train",
+            timestamp_unix_ns=3_000_000_000,
+        ),
+        observed=3.0,
+    )
+    _ingest(
+        analyzer,
+        _event("nccl_call", comm_rank=1, rank=1, timestamp_unix_ns=8_000_000_000),
+        observed=8.0,
+    )
+
+    assert analyzer.scan(now_monotonic_s=9.0, now_unix_ns=9_000_000_000) == []
+
+
 def test_events_from_other_runs_are_ignored():
     analyzer = TraceAnalyzer(run_id=RUN_ID)
     accepted = _ingest(analyzer, _event("nccl_call", run_id="other-run"))

@@ -110,6 +110,7 @@ def run_monitor(args: argparse.Namespace) -> int:
         heartbeat_timeout_s=args.heartbeat_timeout,
         collective_timeout_s=args.collective_timeout,
         delayed_enter_threshold_s=args.delayed_enter_threshold,
+        checkpoint_timeout_s=args.checkpoint_timeout,
         p2p_timeout_s=args.p2p_timeout,
         p2p_match_window_s=args.p2p_match_window,
     )
@@ -190,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--heartbeat-timeout", type=float, default=30.0)
     parser.add_argument("--collective-timeout", type=float, default=60.0)
     parser.add_argument("--delayed-enter-threshold", type=float, default=30.0)
+    parser.add_argument("--checkpoint-timeout", type=float, default=1800.0)
     parser.add_argument("--p2p-timeout", type=float, default=60.0)
     parser.add_argument("--p2p-match-window", type=float, default=30.0)
     parser.add_argument("--failure-grace-period", type=float, default=60.0)
@@ -210,6 +212,7 @@ def main() -> int:
         "heartbeat_timeout",
         "collective_timeout",
         "delayed_enter_threshold",
+        "checkpoint_timeout",
         "p2p_timeout",
         "p2p_match_window",
         "failure_grace_period",

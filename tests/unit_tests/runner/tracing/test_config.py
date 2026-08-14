@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from omegaconf import OmegaConf
@@ -56,7 +57,13 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
         },
     )
 
-    resolved = prepare_trace_launch_config(config, "run-123")
+    heartbeat = SimpleNamespace(
+        enabled=True,
+        heartbeat_dir=str(tmp_path / "heartbeat"),
+        process_timeout_s=30,
+        checkpoint_timeout_s=600,
+    )
+    resolved = prepare_trace_launch_config(config, "run-123", heartbeat)
     shell = "\n".join(resolved.shell_setup_lines(0))
 
     assert resolved.enabled is True
@@ -67,6 +74,8 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
     assert "flagscale.runner.tracing.monitor" in shell
     assert "--p2p-timeout 12" in shell
     assert "--p2p-match-window 4" in shell
+    assert "--checkpoint-timeout 600" in shell
+    assert resolved.checkpoint_timeout_s == 600
     assert "rc=\\$?" in resolved.command_body(0)
     assert resolved.shell_setup_lines(1)
     assert "flagscale.runner.tracing.monitor" not in "\n".join(resolved.shell_setup_lines(1))
@@ -94,6 +103,20 @@ def test_p2p_match_window_cannot_exceed_timeout(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="p2p_match_window_s"):
+        prepare_trace_launch_config(config, "run")
+
+
+def test_checkpoint_timeout_cannot_be_shorter_than_normal_thresholds(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "collective_timeout_s": 10,
+            "delayed_enter_threshold_s": 5,
+            "checkpoint_timeout_s": 9,
+        },
+    )
+    with pytest.raises(ValueError, match="checkpoint_timeout_s"):
         prepare_trace_launch_config(config, "run")
 
 
