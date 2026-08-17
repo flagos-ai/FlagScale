@@ -2,75 +2,22 @@
 
 """Per-module DDP and optimizer helpers for colocated MIMO deployment."""
 
-import dataclasses
 import inspect
 import os
-import types
-from contextlib import ExitStack
 
 import torch
 
 import megatron.core.parallel_state as mpu
-from megatron.core.distributed import DistributedDataParallel as DDP, DistributedDataParallelConfig
+from megatron.core.dist_checkpointing.utils import (
+    add_prefix_for_sharding,
+    replace_prefix_for_sharding,
+)
+from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.optimizer import get_megatron_optimizer
-from megatron.training.utils import print_rank_0, unwrap_model
+from megatron.core.utils import unwrap_model
 
+from ..ddp_utils import build_mimo_ddp_config, get_mimo_ddp_wrappers, patch_mimo_model_chunk
 from .parallel_state_ctx import switch_parallel_state
-
-
-def build_mimo_ddp_config(
-    args, model, dp_world_size: int | None = None
-) -> DistributedDataParallelConfig:
-    """Build a ``DistributedDataParallelConfig`` matching Megatron's default path.
-
-    The implementation is kept in sync with ``megatron.training.training.get_model``
-    so that MIMO modules see the same DDP behavior as a non-MIMO model.
-
-    ``dp_world_size`` overrides the default bucket-size heuristic; use it when the
-    module's data-parallel size differs from the global default.
-    """
-    kwargs = {}
-    num_parameters = sum(p.nelement() for p in model.parameters())
-    for f in dataclasses.fields(DistributedDataParallelConfig):
-        if hasattr(args, f.name):
-            kwargs[f.name] = getattr(args, f.name)
-
-    kwargs["grad_reduce_in_fp32"] = args.accumulate_allreduce_grads_in_fp32
-    kwargs["check_for_nan_in_grad"] = args.check_for_nan_in_loss_and_grad
-    kwargs["check_for_large_grads"] = args.check_for_large_grads
-
-    if args.ddp_num_buckets is not None:
-        assert args.ddp_bucket_size is None, (
-            "Cannot specify both --ddp-num-buckets and --ddp-bucket-size"
-        )
-        assert args.ddp_num_buckets > 0, "--ddp-num-buckets must be greater than 0"
-        kwargs["bucket_size"] = num_parameters // args.ddp_num_buckets
-    else:
-        kwargs["bucket_size"] = args.ddp_bucket_size
-
-    kwargs["pad_buckets_for_high_nccl_busbw"] = args.ddp_pad_buckets_for_high_nccl_busbw
-    kwargs["reduce_scatter_with_fp32_accumulation"] = args.ddp_reduce_scatter_with_fp32_accumulation
-    kwargs["param_name_patterns_for_fp32_local_accumulation"] = tuple(
-        args.ddp_param_name_patterns_for_fp32_local_accumulation
-    )
-    kwargs["average_in_collective"] = args.ddp_average_in_collective
-    kwargs["megatron_fsdp_main_params_dtype"] = args.megatron_fsdp_main_params_dtype
-    kwargs["megatron_fsdp_main_grads_dtype"] = args.megatron_fsdp_main_grads_dtype
-    kwargs["megatron_fsdp_grad_comm_dtype"] = args.megatron_fsdp_grad_comm_dtype
-
-    ddp_config = DistributedDataParallelConfig(**kwargs)
-
-    # Use a sane default bucket size when the user did not provide one.
-    if ddp_config.bucket_size is None:
-        effective_dp = dp_world_size
-        if effective_dp is None:
-            effective_dp = mpu.get_data_parallel_world_size(with_context_parallel=True)
-        ddp_config.bucket_size = max(40000000, 1000000 * effective_dp)
-    # Disable bucketing when gradient overlap is not requested.
-    if not ddp_config.overlap_grad_reduce:
-        ddp_config.bucket_size = None
-
-    return ddp_config
 
 
 def wrap_mimo_ddp(mimo_model, args) -> None:
@@ -90,6 +37,7 @@ def wrap_mimo_ddp(mimo_model, args) -> None:
     assert mimo_model.vision_pg is not None, "vision_pg must be set"
     assert mimo_model.language_pg is not None, "language_pg must be set"
 
+    module_to_ddp = {}
     if mimo_model.vision_model is not None:
         with switch_parallel_state(mimo_model.vision_pg):
             vision_dp_size = mpu.get_data_parallel_world_size(with_context_parallel=True)
@@ -101,6 +49,7 @@ def wrap_mimo_ddp(mimo_model, args) -> None:
                 ddp_config=vision_ddp_config,
                 module=mimo_model.vision_model,
             )
+            module_to_ddp["vision"] = mimo_model.vision_ddp
 
     with switch_parallel_state(mimo_model.language_pg):
         language_dp_size = mpu.get_data_parallel_world_size(with_context_parallel=True)
@@ -112,78 +61,8 @@ def wrap_mimo_ddp(mimo_model, args) -> None:
             ddp_config=language_ddp_config,
             module=mimo_model.language_model,
         )
-
-
-def get_mimo_ddp_wrappers(model_chunk):
-    """Return the per-module DDP wrappers inside a MIMO model chunk."""
-    unwrapped = unwrap_model(model_chunk)
-    ddps = []
-    for attr in ("vision_ddp", "language_ddp"):
-        ddp = getattr(unwrapped, attr, None)
-        if ddp is not None:
-            ddps.append(ddp)
-    return ddps
-
-
-def patch_mimo_model_chunk(model_chunk):
-    """Bind DDP-like grad-sync and param-sync methods on the outer Float16Module wrapper.
-
-    MIMO skips the outer DDP wrapper, so the training loop / Megatron
-    helpers that call ``model_chunk.finish_grad_sync()`` etc. would otherwise
-    fail.  The methods are delegated to the inner vision/language DDP modules.
-    """
-    ddp_wrappers = get_mimo_ddp_wrappers(model_chunk)
-    if ddp_wrappers:
-        # Use the language DDP config as the representative config; vision uses
-        # the same settings.
-        model_chunk.ddp_config = ddp_wrappers[-1].ddp_config
-        # Megatron overlap code checks this attribute before registering hooks.
-        model_chunk.remove_forward_pre_hook_handles = []
-
-    for method_name in (
-        "finish_grad_sync",
-        "start_grad_sync",
-        "zero_grad_buffer",
-        "scale_gradients",
-        "enable_forward_pre_hook",
-        "disable_forward_pre_hook",
-        "start_param_sync",
-    ):
-
-        def make_method(name):
-            def method(self, *args, **kwargs):
-                for ddp in get_mimo_ddp_wrappers(self):
-                    fn = getattr(ddp, name, None)
-                    if fn is not None:
-                        fn(*args, **kwargs)
-
-            return method
-
-        setattr(
-            model_chunk,
-            method_name,
-            types.MethodType(make_method(method_name), model_chunk),
-        )
-
-    # no_sync is a context manager on DDP; combine all inner DDP no_sync contexts.
-    def _no_sync(self):
-        stack = ExitStack()
-        for ddp in get_mimo_ddp_wrappers(self):
-            if hasattr(ddp, "no_sync"):
-                stack.enter_context(ddp.no_sync())
-        return stack
-
-    model_chunk.no_sync = types.MethodType(_no_sync, model_chunk)
-
-    # Expose the exit-time training-state cleanup on the outer wrapper so the
-    # training loop's duck-typed pre-save cleanup (hasattr checks in
-    # ``training.py``) can call it before checkpoint saves.  Bound by plain
-    # attribute assignment (not ``types.MethodType``) so ``self`` stays the
-    # unwrapped model, which owns ``self.scheduler``.
-    unwrapped = unwrap_model(model_chunk)
-    for name in ("release_training_state", "drop_completed_macros"):
-        if hasattr(unwrapped, name):
-            setattr(model_chunk, name, getattr(unwrapped, name))
+        module_to_ddp["language"] = mimo_model.language_ddp
+    object.__setattr__(mimo_model, "module_to_ddp", module_to_ddp)
 
 
 def setup_mimo_ddp(model, args, wrap_with_ddp: bool = True):
@@ -207,6 +86,12 @@ def setup_mimo_ddp(model, args, wrap_with_ddp: bool = True):
     )
     if not is_mimo:
         return False, None
+
+    # Lazy import at the call site: ``megatron.training`` is only needed at
+    # training time, and importing it eagerly would drag the whole training
+    # stack into ``flagscale.models.mimo`` at package-import time (breaking
+    # unit-test import isolation).
+    from megatron.training.utils import print_rank_0
 
     print_rank_0("Colocated MIMO: wrapping vision/language modules with per-module DDP.")
     wrap_mimo_ddp(mimo_model, args)
@@ -303,17 +188,37 @@ class ChainedOptimizer:
         ]
 
     def sharded_state_dict(self, state_dict=None, **kwargs):
-        """Return sharded state dict for distributed checkpoint formats."""
-        return [opt.sharded_state_dict(state_dict, **kwargs) for opt in self.optimizers]
+        """Return sharded state dict for distributed checkpoint formats.
+
+        The wrapped module optimizers live in different data-parallel groups,
+        but each one's ``DistributedOptimizer`` emits the same shard keys
+        (``optimizer.distributed.dp_group_idx_<mp_rank>....``), so the
+        per-module state dicts would collide in the global torch_dist
+        checkpoint.  Prefix every shard key with ``chained_<idx>.`` (matching
+        Megatron's own ``ChainedOptimizer`` prefix hook) and strip the prefix
+        again in :meth:`load_state_dict`.
+        """
+        sharded_state_dicts = [
+            None
+            if getattr(opt, "is_stub_optimizer", False)
+            else opt.sharded_state_dict(state_dict, **kwargs)
+            for opt in self.optimizers
+        ]
+        for idx, opt_sd in enumerate(sharded_state_dicts):
+            if opt_sd is not None:
+                add_prefix_for_sharding(opt_sd, f"chained_{idx}.")
+        return sharded_state_dicts
 
     def load_state_dict(self, state_dicts: list):
         assert len(state_dicts) == len(self.optimizers), (
             f"expected {len(self.optimizers)} optimizer state dicts, got {len(state_dicts)}"
         )
-        for opt, sd in zip(self.optimizers, state_dicts):
+        for idx, (opt, sd) in enumerate(zip(self.optimizers, state_dicts)):
             if getattr(opt, "is_stub_optimizer", False):
                 # Stub: nothing was saved for it (None placeholder).
                 continue
+            if sd is not None:
+                replace_prefix_for_sharding(sd, f"chained_{idx}.", "")
             opt.load_state_dict(sd)
 
     def load_state_dict_from_file(self, checkpoint_name: str):

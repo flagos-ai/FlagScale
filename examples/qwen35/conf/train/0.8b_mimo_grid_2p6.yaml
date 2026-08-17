@@ -1,0 +1,165 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Qwen3.5-0.8B non-colocated grid MIMO (world 8, images ranks [0,2), language
+# [2,8)) — memory-safe smoke variant of 4b_mimo_grid_2p6: same grid path /
+# batch contract / checkpoint contract, 0.8B model dimensions (≈2.2GiB params
+# vs ≈9GiB for 4B) so the full grid family matrix fits comfortably in 8x A100
+# 40GB even with recompute off.  Model dimensions follow 0.8b.yaml; all grid /
+# system / data / batch / checkpoint settings follow 4b_mimo_grid_2p6.yaml.
+#
+# Family 1: Vision TP2/DP1 + Language TP1/PP1/DP6.
+# Batch contract: micro_batch_size (6) divisible by every module DP (1, 6);
+# global_batch_size = micro_batch_size * num_microbatches (grid mode runs the
+# num-microbatches calculator with data_parallel_size == 1).  global_batch_size
+# 48 is also divisible by every parse-time *derived* data parallel size
+# (world / (tp * pp) for the language layout) so argument validation passes
+# for all 8 supported families.
+#
+# The global parallel state is forced to TP=1/PP=1/DP=1 by the grid path; the
+# per-module layouts come from `mimo_module_specs`.
+
+system:
+  use_mimo: true
+  mimo_layout: grid
+  mimo_module_specs: "images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2"
+
+  num_workers: 1
+  calculate_per_token_loss: true
+  tensor_model_parallel_size: 2   # language module TP (see mimo_module_specs)
+  pipeline_model_parallel_size: 1 # language module PP
+  context_parallel_size: 1
+  use_flash_attn: True
+  use_distributed_optimizer: True
+  sequence_parallel: True
+  tp_comm_overlap: False
+  overlap_grad_reduce: False
+  overlap_param_gather: False
+  use_mcore_models: True
+  transformer_impl: transformer_engine
+  use_te: True
+  precision:
+    bf16: True
+    attention_softmax_in_fp32: True
+  logging:
+    log_interval: 1
+  checkpoint:
+    save_interval: 10000
+    # The grid path saves/loads via MCore sharded state dicts (MimoModel /
+    # MimoOptimizer); torch_dist is mandatory (fail-fast otherwise).
+    ckpt_format: torch_dist
+
+model:
+  # Qwen3.5-0.8B architecture parameters (from 0.8b.yaml)
+  kv_channels: 256
+  qk_layernorm: True
+  attention_backend: flash
+  disable_bias_linear: True
+  num_layers: 24
+  hidden_size: 1024
+  ffn_hidden_size: 3584
+  num_attention_heads: 8
+  num_query_groups: 2
+  seq_length: 2048
+  max_padding_length: 2048
+  enable_variable_seq_lengths: True
+  max_position_embeddings: 262144
+  swiglu: True
+  normalization: RMSNorm
+  norm_epsilon: 1e-6
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_iters: 5000
+  eval_iters: 0
+  eval_interval: 1000
+  # Grid batch contract: micro_batch_size must be divisible by every module's
+  # DP (6 for the language module here); global_batch_size =
+  # micro_batch_size * num_microbatches (8 microbatches below).
+  micro_batch_size: 6
+  global_batch_size: 48
+  allow_missing_vision_projection_checkpoint: False
+  apply_layernorm_1p: False
+  group_query_attention: True
+  no_masked_softmax_fusion: True
+  untie_embeddings_and_output_weights: False
+
+  # Position embedding: Qwen3.5 uses mRoPE with partial rotary
+  position_embedding_type: mrope
+  rotary_percent: 0.25
+  rotary_base: 10000000
+  rotary_seq_len_interpolation_factor: 1
+  no_rope_fusion: False
+  mrope_section: [11, 11, 10]
+  eod_mask_loss: False
+
+  # Vision model
+  patch_size: 16
+  freeze_LM: False
+  freeze_ViT: False
+  disable_vision_class_token: True
+
+  # mtp (disabled for the grid path in this stage: the MCore MimoModel does
+  # not forward loss_mask into the language forward, so MTP loss is unsupported)
+  mtp_num_layers: 0
+
+  # Recompute
+  vision_recompute_activations: True
+  recompute:
+    recompute_granularity: 'full'
+    recompute_method: 'uniform'
+    recompute_num_layers: 1
+
+  seed: 42
+
+  # Gated DeltaNet (GDN) parameters (0.8b.yaml values)
+  experimental_attention_variant: gated_delta_net
+  linear_attention_freq: 4
+  linear_conv_kernel_dim: 4
+  linear_key_head_dim: 128
+  linear_value_head_dim: 128
+  linear_num_key_heads: 16
+  linear_num_value_heads: 16
+  layernorm_zero_centered_gamma: True
+  attention_output_gate: True
+
+  # Vision encoder parameters (0.8b.yaml values)
+  vision_num_layers: 12
+  vision_hidden_size: 768
+  vision_ffn_hidden_size: 3072
+  vision_num_attention_heads: 12
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.999
+    lr_scheduler:
+      lr: 1.0e-5
+      min_lr: 1.0e-6
+      lr_warmup_fraction: .03
+      lr_decay_style: cosine
+
+data:
+  no_use_system_prompt: True
+  vocab_size: 248320
+  data_path: /workspace/data/qwen/qwen_wds/wds-1
+  vision_root: /
+  dataloader_type: external
+  split: 100,0,0
+  tokenizer:
+    tokenizer_type: Qwen2VLTokenizer
+    tokenizer_path: /workspace/data/qwen/qwen2vl_tokenizer
+    extra_vocab_size: 0
+    make_vocab_size_divisible_by: 64
