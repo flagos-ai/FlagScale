@@ -487,16 +487,15 @@ class TestGridNumMicrobatchesCalculator(unittest.TestCase):
     def test_grid_contract_fails_at_parse_time_then_passes_after_reconfigure(self):
         # Reproduces the reported GPU failure: the grid batch contract sees
         # the parse-time microbatches (2) and rejects 2*6 != 48; after the
-        # DP=1 reconfigure it sees 8 and passes (family 1: language DP 6).
+        # DP=1 reconfigure it sees 8 and passes (2+6 layout: language DP 6).
         self._init_parse_time()
         from megatron.core.num_microbatches_calculator import get_num_microbatches
 
-        config, family_index = build_qwen35_grid_config_from_args(
+        config = build_qwen35_grid_config_from_args(
             "images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2",
             8,
             num_layers=32,
         )
-        self.assertEqual(family_index, 1)
         with self.assertRaises(ValueError):
             qwen35_grid_data_contract(
                 config,
@@ -568,7 +567,7 @@ class TestGridRuntimeContracts(unittest.TestCase):
 class TestGridStateLifecycle(unittest.TestCase):
     def test_destroy_all_is_idempotent(self):
         infra = mock.Mock()
-        state = training.GridTrainingState(infra=infra, family_index=1)
+        state = training.GridTrainingState(infra=infra)
         training._GRID_TRAINING_STATES.append(state)
         with mock.patch.object(
             training.BridgeCommunicator, "destroy_broadcast_pgs"

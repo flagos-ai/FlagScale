@@ -21,8 +21,8 @@ Module map:
 - ``data``: rank-role-aware sampling and module-local DP batch slicing.
 - ``training``: grid training wiring (per-module DDP, multimodule
   communicator, grid optimizer, checkpoint state).
-- ``recipe/qwen35``: Qwen3.5 2+6 grid recipe contract (supported layout
-  families, fail-fast validation, data contract).
+- ``recipe/qwen35``: Qwen3.5 grid recipe contract (predicate-validated
+  capability boundary, fail-fast validation, data contract).
 - ``providers/qwen35``: ``Qwen35GridMIMOModel`` provider on MCore
   ``MimoModel``.
 """
@@ -58,9 +58,8 @@ from .parallelism import (
 )
 from .recipe.qwen35 import (
     IMAGES_MODULE_NAME,
-    QWEN35_GRID_SUPPORTED_FAMILIES,
-    QWEN35_GRID_WORLD_SIZE,
     build_qwen35_grid_config_from_args,
+    describe_qwen35_grid_modules,
     qwen35_grid_data_contract,
     validate_qwen35_grid_config,
 )
@@ -130,10 +129,9 @@ __all__ = [
     "prepare_batch_for_module",
     # recipe (Qwen3.5 grid contract)
     "IMAGES_MODULE_NAME",
-    "QWEN35_GRID_WORLD_SIZE",
-    "QWEN35_GRID_SUPPORTED_FAMILIES",
     "validate_qwen35_grid_config",
     "build_qwen35_grid_config_from_args",
+    "describe_qwen35_grid_modules",
     "qwen35_grid_data_contract",
     # training
     "GridTrainingState",
