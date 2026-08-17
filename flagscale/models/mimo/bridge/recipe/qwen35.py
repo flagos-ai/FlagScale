@@ -6,31 +6,32 @@ This module defines the *training-time* contract of the non-colocated grid
 path on top of the dependency-free layout layer in
 :mod:`flagscale.models.mimo.bridge.parallelism`:
 
-- The exact set of supported dense 2+6 layouts (world size 8, images on
-  ``[0, 2)``, language on ``[2, 8)``) as canonical module configs.
 - A fail-fast validator (:func:`validate_qwen35_grid_config`) that rejects
-  anything outside this stage's scope with an explicit error: non-exact
-  tiling, non-8 world, CP > 1, EP/ETP > 1, vision PP > 1, vision DP > language
-  DP (variable visual tokens need fan-out, not fan-in), or a layout that is
-  not one of the supported families.
+  anything outside this stage's capability boundary with an explicit error.
 - A builder (:func:`build_qwen35_grid_config_from_args`) that turns the
   repeatable ``--mimo-module-specs`` string into a finalized, validated
   :class:`MIMOParallelismConfig`.
 
-Supported families (world = 8, images ranks ``[0, 2)``):
+Capability boundary of this stage — any layout satisfying ALL of the
+following predicates is accepted; the validator checks mechanism support,
+not a list of previously tested combinations:
 
-1.  Vision TP2/DP1 + Language TP1/PP1/DP6
-2.  Vision TP2/DP1 + Language TP1/PP2/DP3
-3.  Vision TP2/DP1 + Language TP1/PP3/DP2
-4.  Vision TP2/DP1 + Language TP1/PP6/DP1
-5.  Vision TP2/DP1 + Language TP2/PP1/DP3
-6.  Vision TP2/DP1 + Language TP2/PP3/DP1
-7.  Vision TP1/DP2 + Language TP1/PP1/DP6
-8.  Vision TP1/DP2 + Language TP1/PP3/DP2
-
-Every family has vision DP <= language DP (variable visual tokens fan out
-from the encoder to the language DP replicas; fan-in of variable per-sample
-visual token counts is not supported by the MCore bridge).
+1. Exactly two modules: the images (vision) module and the language
+   module (the Qwen3.5 grid adapter's scope this stage).
+2. The generic invariants of :meth:`MIMOParallelismConfig.finalize`:
+   NON_COLOCATED exact tiling (no gaps / no overlaps / full-world
+   coverage), TP sizes are powers of two, DP sizes pairwise divisible,
+   modality-side EP=ETP=1.
+3. Dense scope: both modules use CP=1, EP=1, ETP=1.
+4. The vision module is not pipelined (PP=1).
+5. Vision DP <= language DP (variable visual tokens fan out from the
+   encoder to the language DP replicas; fan-in of variable per-sample
+   visual token counts is not supported by the MCore bridge).
+6. ``num_layers`` >= language PP (at least one layer per pipeline stage;
+   non-divisible counts are handled by MCore's uneven pipeline
+   allocation, which the grid provider encodes via
+   ``num_layers_in_first/last_pipeline_stage``).
+7. ``num_mtp_layers`` == 0 (the grid path has no MTP wiring).
 
 Sequence parallelism is conservatively disabled for BOTH modules in this
 grid path (:func:`compute_qwen35_grid_sequence_parallel`): the grid language
@@ -40,7 +41,7 @@ SP-enabled TP2 language module would all-gather the full sequence at the
 first column-parallel qkv (dim0 2x tokens) against full-length freqs - the
 4096-vs-2048 shape corruption.  The vision encoder has the same packed-seq
 limitation.  Requested global SP therefore resolves to per-module False for
-every supported family; tensor parallelism itself is unaffected.
+every accepted layout; tensor parallelism itself is unaffected.
 
 The module keeps the pure-stdlib dependency rule of
 ``mimo_parallelism_config``: it imports only that module plus stdlib, so the
@@ -54,133 +55,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from ..parallelism import ModuleParallelismConfig
+
 from ..parallelism import (
     LANGUAGE_MODULE_NAME,
     MIMOLayout,
     MIMOParallelismConfig,
-    ModuleParallelismConfig,
     parse_module_parallelisms,
 )
-
-#: Fixed world size of the supported 2+6 non-colocated family.
-QWEN35_GRID_WORLD_SIZE = 8
 
 #: Images module name used in the grid specs (the MIMO modality key, matching
 #: ``qwen35_grid_mimo_model.VISION_MODALITY_NAME``).
 IMAGES_MODULE_NAME = "images"
-
-#: Canonical supported families: ``(images_config, language_config)`` pairs.
-#: Only dense (EP=ETP=1, CP=1) TP/PP/DP layouts are supported this stage.
-QWEN35_GRID_SUPPORTED_FAMILIES: list[tuple[ModuleParallelismConfig, ModuleParallelismConfig]] = [
-    # 1. V TP2 DP1 + L TP1 PP1 DP6
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=2, data_parallel_size=1),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=1,
-            pipeline_model_parallel_size=1,
-            data_parallel_size=6,
-            rank_offset=2,
-        ),
-    ),
-    # 2. V TP2 DP1 + L TP1 PP2 DP3
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=2, data_parallel_size=1),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=1,
-            pipeline_model_parallel_size=2,
-            data_parallel_size=3,
-            rank_offset=2,
-        ),
-    ),
-    # 3. V TP2 DP1 + L TP1 PP3 DP2
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=2, data_parallel_size=1),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=1,
-            pipeline_model_parallel_size=3,
-            data_parallel_size=2,
-            rank_offset=2,
-        ),
-    ),
-    # 4. V TP2 DP1 + L TP1 PP6 DP1
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=2, data_parallel_size=1),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=1,
-            pipeline_model_parallel_size=6,
-            data_parallel_size=1,
-            rank_offset=2,
-        ),
-    ),
-    # 5. V TP2 DP1 + L TP2 PP1 DP3
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=2, data_parallel_size=1),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=2,
-            pipeline_model_parallel_size=1,
-            data_parallel_size=3,
-            rank_offset=2,
-        ),
-    ),
-    # 6. V TP2 DP1 + L TP2 PP3 DP1
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=2, data_parallel_size=1),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=2,
-            pipeline_model_parallel_size=3,
-            data_parallel_size=1,
-            rank_offset=2,
-        ),
-    ),
-    # 7. V TP1 DP2 + L TP1 PP1 DP6
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=1, data_parallel_size=2),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=1,
-            pipeline_model_parallel_size=1,
-            data_parallel_size=6,
-            rank_offset=2,
-        ),
-    ),
-    # 8. V TP1 DP2 + L TP1 PP3 DP2
-    (
-        ModuleParallelismConfig(tensor_model_parallel_size=1, data_parallel_size=2),
-        ModuleParallelismConfig(
-            tensor_model_parallel_size=1,
-            pipeline_model_parallel_size=3,
-            data_parallel_size=2,
-            rank_offset=2,
-        ),
-    ),
-]
-
-
-def _family_signature(
-    images: ModuleParallelismConfig, language: ModuleParallelismConfig
-) -> tuple[tuple[int, int, int, int, int, int, int], tuple[int, int, int, int, int, int, int]]:
-    """Canonical signature of a (images, language) pair for family matching."""
-
-    def sig(cfg: ModuleParallelismConfig) -> tuple[int, int, int, int, int, int, int]:
-        return (
-            cfg.tensor_model_parallel_size,
-            cfg.context_parallel_size,
-            cfg.pipeline_model_parallel_size,
-            cfg.data_parallel_size,
-            cfg.expert_model_parallel_size,
-            cfg.expert_tensor_parallel_size,
-            cfg.rank_offset,
-        )
-
-    return sig(images), sig(language)
-
-
-def _family_index(images: ModuleParallelismConfig, language: ModuleParallelismConfig) -> int | None:
-    """Index of the canonical family matching ``(images, language)``, or None."""
-    signature = _family_signature(images, language)
-    for idx, (fam_images, fam_language) in enumerate(QWEN35_GRID_SUPPORTED_FAMILIES):
-        if _family_signature(fam_images, fam_language) == signature:
-            return idx + 1
-    return None
 
 
 def _require_dense(module_name: str, cfg: ModuleParallelismConfig) -> None:
@@ -212,28 +98,29 @@ def validate_qwen35_grid_config(
     images_module_name: str = IMAGES_MODULE_NAME,
     num_layers: int | None = None,
     num_mtp_layers: int | None = None,
-) -> int:
+) -> None:
     """Validate a MIMO parallelism config for the non-colocated Qwen3.5 grid path.
 
-    Fail-fast checks (in order):
+    Fail-fast predicate checks (in order):
 
-    1. The images module exists and spans exactly ``[0, 2)``; the language
-       module spans exactly ``[2, 8)``; the whole world is exactly 8 ranks.
+    1. Exactly two modules: the images module and the language module.
     2. The layout resolves to :class:`MIMOLayout.NON_COLOCATED` and the
-       module rank ranges tile ``[0, world_size)`` exactly (no gaps/overlaps).
+       module rank ranges tile ``[0, world_size)`` exactly (no
+       gaps/overlaps, full-world coverage).  ``finalize`` also enforces the
+       generic invariants: TP powers of two, pairwise-divisible DP sizes,
+       dense modality modules.
     3. CP == 1, EP == 1 and ETP == 1 for every module (dense stage scope).
     4. The vision module is not pipelined (PP == 1).
     5. Vision DP <= language DP (variable visual tokens require fan-out).
-    6. The (images, language) pair is one of the 8 supported families.
-    7. ``num_layers`` (when given) is at least the language PP (one layer per
+    6. ``num_layers`` (when given) is at least the language PP (one layer per
        pipeline stage).  Divisibility is NOT required: MCore's uneven pipeline
        allocation (set by the grid provider) gives the first stage
        ``base + remainder`` layers and the last stage ``base`` (32 layers ->
        PP3 12/10/10, PP6 7/5/5/5/5/5).
-    8. ``num_mtp_layers`` (when given) is 0: the grid path has no MTP wiring.
+    7. ``num_mtp_layers`` (when given) is 0: the grid path has no MTP wiring.
 
     Args:
-        config: The finalized MIMO parallelism config (``finalize`` is called
+        config: The MIMO parallelism config (``finalize`` is called
             internally, so a non-finalized config is accepted too).
         world_size: Distributed world size.
         images_module_name: Name of the modality module in the config.
@@ -242,19 +129,9 @@ def validate_qwen35_grid_config(
         num_mtp_layers: Language MTP layer count (``args.mtp_num_layers``);
             ``None`` skips the MTP check.
 
-    Returns:
-        The 1-based family index of the matched supported layout.
-
     Raises:
         ValueError: On any violated constraint, with an explicit message.
     """
-    if world_size != QWEN35_GRID_WORLD_SIZE:
-        raise ValueError(
-            f"Non-colocated Qwen3.5 grid targets world size "
-            f"{QWEN35_GRID_WORLD_SIZE} (images ranks [0, 2), language ranks "
-            f"[2, 8)), got world_size={world_size}. Other sizes are not "
-            "supported in this stage (fail-fast)."
-        )
     if images_module_name not in config.module_parallelisms:
         raise ValueError(
             f"Non-colocated Qwen3.5 grid requires a module named "
@@ -273,7 +150,8 @@ def validate_qwen35_grid_config(
             f"'language' modules, got {config.module_names}."
         )
 
-    # Exact tiling + layout classification (no gaps / no overlaps / full world).
+    # Exact tiling + generic invariants (no gaps / no overlaps / full world,
+    # TP powers of two, pairwise-divisible DP, dense modality modules).
     config.finalize(world_size)
     if config.layout is not MIMOLayout.NON_COLOCATED:
         raise ValueError(
@@ -284,20 +162,6 @@ def validate_qwen35_grid_config(
 
     images = config.module_parallelisms[images_module_name]
     language = config.module_parallelisms[LANGUAGE_MODULE_NAME]
-
-    # Fixed rank spans: images [0, 2), language [2, 8).
-    if (images.rank_offset, images.total_ranks) != (0, 2):
-        raise ValueError(
-            "Non-colocated Qwen3.5 grid fixes the images module to ranks "
-            f"[0, 2) (rank_offset=0, total_ranks=2), got rank_offset="
-            f"{images.rank_offset}, total_ranks={images.total_ranks}."
-        )
-    if (language.rank_offset, language.total_ranks) != (2, 6):
-        raise ValueError(
-            "Non-colocated Qwen3.5 grid fixes the language module to ranks "
-            f"[2, 8) (rank_offset=2, total_ranks=6), got rank_offset="
-            f"{language.rank_offset}, total_ranks={language.total_ranks}."
-        )
 
     # Dense stage scope: CP / EP / ETP must be 1 everywhere.
     _require_dense(images_module_name, images)
@@ -321,26 +185,7 @@ def validate_qwen35_grid_config(
             f"language DP={language.data_parallel_size} (fail-fast)."
         )
 
-    family_index = _family_index(images, language)
-    if family_index is None:
-        raise ValueError(
-            "Non-colocated Qwen3.5 grid: the requested layout "
-            f"(images tp={images.tensor_model_parallel_size} dp="
-            f"{images.data_parallel_size}; language tp="
-            f"{language.tensor_model_parallel_size} pp="
-            f"{language.pipeline_model_parallel_size} dp="
-            f"{language.data_parallel_size}) is not one of the 8 supported "
-            "families. Supported (world 8, images [0,2), language [2,8)):\n"
-            + "\n".join(
-                f"  {idx}. V TP{f.tensor_model_parallel_size}/DP{f.data_parallel_size} "
-                f"+ L TP{l.tensor_model_parallel_size}/PP{l.pipeline_model_parallel_size}"
-                f"/DP{l.data_parallel_size}"
-                for idx, (f, l) in enumerate(QWEN35_GRID_SUPPORTED_FAMILIES, start=1)
-            )
-        )
-
-    # Language layer-count bound.  The families with PP3 / PP6 are all
-    # supported for the 32-layer 4B config: MCore's uneven pipeline allocation
+    # Language layer-count bound.  MCore's uneven pipeline allocation
     # (``num_layers_in_first_pipeline_stage`` / ``num_layers_in_last_pipeline_stage``)
     # gives the first stage ``base + remainder`` layers and the last stage
     # ``base`` (32 layers -> PP3 12/10/10, PP6 7/5/5/5/5/5); the grid provider
@@ -377,7 +222,6 @@ def validate_qwen35_grid_config(
                 "supported in this stage - the MCore MimoModel grid path has "
                 "no MTP wiring. Set mtp_num_layers=0 (fail-fast)."
             )
-    return family_index
 
 
 def build_qwen35_grid_config_from_args(
@@ -386,7 +230,7 @@ def build_qwen35_grid_config_from_args(
     *,
     num_layers: int | None = None,
     num_mtp_layers: int | None = None,
-) -> tuple[MIMOParallelismConfig, int]:
+) -> MIMOParallelismConfig:
     """Build and validate the non-colocated grid config from ``--mimo-module-specs``.
 
     Args:
@@ -399,8 +243,7 @@ def build_qwen35_grid_config_from_args(
             for the MTP fail-fast check.
 
     Returns:
-        ``(config, family_index)``: the finalized, validated config and the
-        1-based family index (see :func:`validate_qwen35_grid_config`).
+        The finalized, validated config (see :func:`validate_qwen35_grid_config`).
 
     Raises:
         ValueError: On parse or validation failure (fail-fast).
@@ -409,25 +252,26 @@ def build_qwen35_grid_config_from_args(
     config = MIMOParallelismConfig(
         module_parallelisms=module_parallelisms, layout=MIMOLayout.NON_COLOCATED
     )
-    family_index = validate_qwen35_grid_config(
+    validate_qwen35_grid_config(
         config,
         world_size,
         num_layers=num_layers,
         num_mtp_layers=num_mtp_layers,
     )
-    return config, family_index
+    return config
 
 
-def describe_qwen35_grid_family(family_index: int) -> str:
-    """Human-readable description of a supported family (1-based)."""
-    fam_images, fam_language = QWEN35_GRID_SUPPORTED_FAMILIES[family_index - 1]
-    return (
-        f"family {family_index}: vision TP{fam_images.tensor_model_parallel_size}/"
-        f"DP{fam_images.data_parallel_size} + language TP"
-        f"{fam_language.tensor_model_parallel_size}/PP"
-        f"{fam_language.pipeline_model_parallel_size}/DP"
-        f"{fam_language.data_parallel_size}"
-    )
+def describe_qwen35_grid_modules(config: MIMOParallelismConfig) -> str:
+    """Human-readable per-module summary of a validated grid config."""
+    parts = []
+    for name, parallelism in config.module_parallelisms.items():
+        parts.append(
+            f"{name} tp={parallelism.tensor_model_parallel_size} "
+            f"pp={parallelism.pipeline_model_parallel_size} "
+            f"dp={parallelism.data_parallel_size} "
+            f"ranks [{parallelism.rank_offset}, {parallelism.rank_end})"
+        )
+    return "; ".join(parts)
 
 
 def compute_qwen35_pipeline_layer_split(
@@ -494,9 +338,8 @@ def compute_qwen35_grid_sequence_parallel(
     ``sp_capable_modules`` names the modules whose implementation supports
     sequence parallelism.  The default is **no module**: in this grid path
     both implementations are SP-incapable, so any requested global SP
-    resolves to per-module False for every supported family (the TP2
-    language families 5/6 included) while tensor parallelism itself is
-    untouched.
+    resolves to per-module False for every accepted layout (language TP2
+    included) while tensor parallelism itself is untouched.
 
     The language module is not SP-capable in the non-colocated grid for two
     coupled reasons:

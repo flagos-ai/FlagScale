@@ -94,6 +94,7 @@ from flagscale.models.mimo.bridge.recipe.qwen35 import (
     build_qwen35_grid_config_from_args,
     compute_qwen35_grid_sequence_parallel,
     compute_qwen35_pipeline_layer_split,
+    describe_qwen35_grid_modules,
     qwen35_grid_data_contract,
 )
 from flagscale.models.mimo.bridge.training import (
@@ -212,7 +213,7 @@ def model_provider(
                     "no MTP wiring. Set mtp_num_layers=0 (fail-fast)."
                 )
             world_size = torch.distributed.get_world_size()
-            mimo_config, family_index = build_qwen35_grid_config_from_args(
+            mimo_config = build_qwen35_grid_config_from_args(
                 args.mimo_module_specs,
                 world_size,
                 num_layers=config.num_layers,
@@ -229,8 +230,7 @@ def model_provider(
                 num_microbatches=num_microbatches,
             )
             print_rank_0(
-                f"Non-colocated grid MIMO: family {family_index} "
-                f"(images ranks [0, 2), language ranks [2, 8)), "
+                f"Non-colocated grid MIMO: {describe_qwen35_grid_modules(mimo_config)}; "
                 f"module DP: {per_module_dp}"
             )
 
@@ -294,8 +294,8 @@ def model_provider(
             # SP-enabled TP2 qkv would all-gather dim 0 to 2x the sequence (4096
             # vs freqs 2048).  The Qwen3-VL vision encoder has the same packed-seq
             # limitation (6720-vs-3360).  Requested global SP therefore resolves
-            # to per-module False for every supported family; TP itself is
-            # unaffected (families 5/6 keep language TP2).
+            # to per-module False for every accepted layout; TP itself is
+            # unaffected (language-TP2 layouts remain valid).
             requested_sp = bool(getattr(args, "mimo_sequence_parallel", False))
             per_module_sp = compute_qwen35_grid_sequence_parallel(mimo_config, requested_sp)
             config.sequence_parallel = per_module_sp[LANGUAGE_MODULE_NAME]
@@ -385,7 +385,6 @@ def model_provider(
             # module's collection for logging/checkpoint reductions.
             grid_state = GridTrainingState(
                 infra=infra,
-                family_index=family_index,
                 parallelism_config=mimo_config,
                 world_size=world_size,
             )
@@ -789,7 +788,7 @@ def _grid_prepare_batch(batch, model, grid_state) -> Dict:
 
     # Vision ranks: build_vision_forward_kwargs slices the global micro-batch
     # for the vision module's DP - the patch-packed raw modality tensors are
-    # sliced JOINTLY along per-image boundaries (family 7: vision DP 2), all
+    # sliced JOINTLY along per-image boundaries (vision DP 2 layouts), all
     # other keys by sample - and assembles ``modality_inputs``.  Videos are
     # not supported by the grid path yet - fail fast instead of producing a
     # silent embedding-count mismatch.
@@ -1275,8 +1274,8 @@ if __name__ == "__main__":
             # per module as ``requested && module TP > 1 && module SP-capable``,
             # and the grid SP policy marks BOTH modules SP-incapable for now (the
             # language forward does not shard embeddings and mRoPE freqs stay
-            # full-length), so requested SP resolves to False for every supported
-            # family - with an explicit rank-0 message at model build time.
+            # full-length), so requested SP resolves to False for every accepted
+            # layout - with an explicit rank-0 message at model build time.
             args.mimo_sequence_parallel = args.sequence_parallel
             args.sequence_parallel = False
             # The num-microbatches calculator was initialized at parse time with

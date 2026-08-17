@@ -158,7 +158,7 @@ def build_vision_forward_kwargs(
     """Assemble the exact ``Qwen35GridMIMOModel.forward`` kwargs for a vision rank.
 
     Vision ranks slice the global micro-batch for the vision module's DP
-    (e.g. family 7: vision DP 2).  The raw modality tensors are patch-packed -
+    (e.g. vision DP 2 layouts).  The raw modality tensors are patch-packed -
     ``imgs`` / ``videos`` dim 0 is the TOTAL patch count across the batch's
     images and ``image_thw_grids`` / ``video_thw_grids`` rows are the images -
     so they cannot be sliced by the sample dimension.  They are packed into
@@ -314,7 +314,6 @@ class GridTrainingState:
 
     Attributes:
         infra: The built ``MIMOInfra`` (grids + nullable PG collections).
-        family_index: 1-based index of the validated supported family.
         module_to_grid_tuple: ``(ddp_module, grid)`` pairs for the modules this
             rank participates in (gradient sync / zero-buffer helpers).
         multimodule_pg_collection: Schedule PG collection
@@ -326,7 +325,6 @@ class GridTrainingState:
     """
 
     infra: MIMOInfra
-    family_index: int
     parallelism_config: object | None = None
     module_to_grid_tuple: list[tuple] = field(default_factory=list)
     multimodule_pg_collection: MultiModuleProcessGroupCollection | None = None
