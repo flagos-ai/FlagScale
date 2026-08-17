@@ -262,6 +262,15 @@ from .activation_logging import (
     save_tokens_per_expert,
 )
 from .async_utils import maybe_finalize_async_save
+from flagscale.models.mimo.bridge import (
+    build_grid_optimizer,
+    configure_grid_model_config_hooks,
+    destroy_grid_training_states,
+    get_logical_iteration_samples,
+    grid_training_state_from_model_chunk,
+    setup_grid_mimo_ddp,
+    sync_grid_optimizer_param_group_lr,
+)
 from .dgrad_logging import disable_dgrad_logging, enable_dgrad_logging, save_dgrads
 from .global_vars import (
     destroy_global_vars,
@@ -387,6 +396,7 @@ from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 
 
 def destroy_global_state():
+    destroy_grid_training_states()
     destroy_global_vars()
     destroy_num_microbatches_calculator()
     destroy_global_memory_buffer()
@@ -2378,7 +2388,22 @@ def setup_model_and_optimizer(
         {"app_build_optimzer_start_time": one_logger_utils.get_timestamp_in_ms()}
     )
     ########## FlagScale Begin ##########
-    is_mimo, mimo_model = setup_mimo_ddp(model, args, wrap_with_ddp)
+    is_grid, grid_state = False, None
+    is_mimo, mimo_model = False, None
+    if getattr(args, "use_mimo", False):
+        # ``--mimo-layout`` is a subordinate selector of ``--use-mimo``: both
+        # layouts are first-class, explicitly named branches; anything else is
+        # a bug (argparse ``choices`` normally guarantees the value set).
+        mimo_layout = getattr(args, "mimo_layout", "colocated")
+        if mimo_layout == "colocated":
+            is_mimo, mimo_model = setup_mimo_ddp(model, args, wrap_with_ddp)
+        elif mimo_layout == "grid":
+            is_grid, grid_state = setup_grid_mimo_ddp(model, args, wrap_with_ddp)
+        else:
+            assert False, (
+                f"Unsupported --mimo-layout {mimo_layout!r}: "
+                "expected 'colocated' or 'grid'"
+            )
     ########## FlagScale End ##########
 
     if skip_optimizer:
@@ -2410,10 +2435,15 @@ def setup_model_and_optimizer(
             if mup_overrides:
                 config_overrides = {**(config_overrides or {}), **mup_overrides}
 
-        if is_mimo:
-            optimizer = build_mimo_optimizer(
-                config, config_overrides, mimo_model, args
+        if is_grid:
+            # Non-colocated grid: MCore MimoOptimizer with one inner optimizer
+            # per module, each bound to its module's process groups.
+            mimo_model_unwrapped = (
+                unwrapped_model[0] if isinstance(unwrapped_model, list) else unwrapped_model
             )
+            optimizer = build_grid_optimizer(mimo_model_unwrapped, config)
+        elif is_mimo:
+            optimizer = build_mimo_optimizer(config, config_overrides, mimo_model, args)
         else:
             optimizer = get_megatron_optimizer(
                 config,
@@ -2501,6 +2531,17 @@ def setup_model_and_optimizer(
     else:
         args.iteration = 0
         args.num_floating_point_operations_so_far = 0
+
+    # Grid MIMO resume with --override-opt-param-scheduler: the optimizer
+    # checkpoint load restores every param group's max_lr/min_lr from the
+    # saved state, and OptimizerParamScheduler.get_lr prefers the param-group
+    # values over the scheduler's own configured fields - so a configured
+    # lr/min_lr of 0 would be silently ignored after resume.  Re-sync the
+    # active module optimizers' param groups to the configured override values
+    # after the load.  No-op unless the override flag is set; the call is
+    # skipped outside grid mode entirely, preserving colocated behavior.
+    if is_grid:
+        sync_grid_optimizer_param_group_lr(optimizer, args)
 
     # Validate that the world size can accommodate the current batch size.
     # This catches the case where GPUs were scaled up mid-training but the
@@ -2825,6 +2866,23 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     if args.use_dualpipev:
         is_last_stage = mpu.is_pipeline_first_stage(ignore_virtual=True)
     ########## FlagScale End ##########
+    loss_dp_group = None
+    if getattr(args, "use_mimo", False):
+        mimo_layout = getattr(args, "mimo_layout", "colocated")
+        if mimo_layout == "colocated":
+            pass  # colocated: global-parallel last stage + global DP-CP reduction
+        elif mimo_layout == "grid":
+            # Non-colocated grid: the global parallel state is TP1/PP1 (every rank
+            # looks like a last stage), but only the language module's last PP
+            # stage produced losses.  Reduce within the language DP-CP group.
+            grid_state = grid_training_state_from_model_chunk(model[0])
+            is_last_stage = grid_state.is_language_last_stage
+            loss_dp_group = grid_state.local_pg_collection.dp_cp
+        else:
+            assert False, (
+                f"Unsupported --mimo-layout {mimo_layout!r}: "
+                "expected 'colocated' or 'grid'"
+            )
     if is_last_stage:  # FlagScale Modify
         # Average loss across microbatches.
         loss_reduced = {}
@@ -2835,10 +2893,13 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                 # there is one dict per microbatch. in new reporting, we average
                 # over the total number of tokens across the global batch.
                 val = torch.vstack(val).sum(dim=0)
-                torch.distributed.all_reduce(
-                    val,
-                    group=mpu.get_data_parallel_group(with_context_parallel=True)
-                )
+                if loss_dp_group is not None:
+                    torch.distributed.all_reduce(val, group=loss_dp_group)
+                else:
+                    torch.distributed.all_reduce(
+                        val,
+                        group=mpu.get_data_parallel_group(with_context_parallel=True)
+                    )
                 loss_reduced[key] = val[0] / val[1]
             elif val[0].numel() == 1:
                 # legacy behavior, we average over the number of microbatches
@@ -3793,6 +3854,22 @@ def train(
             config.param_sync_func = config.param_sync_func[0]
     config.finalize_model_grads_func = finalize_model_grads
 
+    if getattr(args, "use_mimo", False):
+        mimo_layout = getattr(args, "mimo_layout", "colocated")
+        if mimo_layout == "colocated":
+            pass  # colocated: grad-sync hooks live on the per-module DDP wrappers
+        elif mimo_layout == "grid":
+            # Non-colocated grid: bind the per-module gradient-sync hooks (no_sync
+            # during microbatch accumulation + per-module grad finalization).
+            grid_state = grid_training_state_from_model_chunk(model[0])
+            assert grid_state is not None, "grid mode requires mimo_grid_state on the model"
+            configure_grid_model_config_hooks(grid_state, model[0])
+        else:
+            assert False, (
+                f"Unsupported --mimo-layout {mimo_layout!r}: "
+                "expected 'colocated' or 'grid'"
+            )
+
     if args.log_energy:
         energy_monitor.setup()
         energy_monitor.resume()
@@ -3854,6 +3931,32 @@ def train(
     ########## FlagScale End ##########
     # Wrap forward_backward_func for Full iteration CUDA graph
     forward_backward_func = get_forward_backward_func()
+    if getattr(args, "use_mimo", False):
+        mimo_layout = getattr(args, "mimo_layout", "colocated")
+        if mimo_layout == "colocated":
+            pass  # colocated: standard forward_backward_func
+        elif mimo_layout == "grid":
+            # Non-colocated grid: always drive the multi-module pipeline schedule
+            # (even when every module has PP == 1): it owns the cross-module
+            # activation/gradient transport via the MultiModulePipelineCommunicator
+            # and the dict-of-modules forward/backward contract.
+            from functools import partial as _partial
+            from megatron.core.pipeline_parallel.schedules import (
+                forward_backward_pipelining_without_interleaving,
+            )
+
+            grid_state = grid_training_state_from_model_chunk(model[0])
+            assert grid_state is not None, "grid mode requires mimo_grid_state on the model"
+            forward_backward_func = _partial(
+                forward_backward_pipelining_without_interleaving,
+                p2p_communicator=grid_state.multimodule_communicator,
+                pg_collection=grid_state.multimodule_pg_collection,
+            )
+        else:
+            assert False, (
+                f"Unsupported --mimo-layout {mimo_layout!r}: "
+                "expected 'colocated' or 'grid'"
+            )
     if args.cuda_graph_impl == "full_iteration":
         forward_backward_func = FullCudaGraphWrapper(
             forward_backward_func,
@@ -4057,7 +4160,8 @@ def train(
             if iteration == start_iteration:
                 start_iteration = iteration + 1
             iteration += 1
-            batch_size = (
+            logical_samples = get_logical_iteration_samples(args, get_num_microbatches())
+            batch_size = logical_samples or (
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
             )
             args.consumed_train_samples += batch_size
@@ -4227,7 +4331,8 @@ def train(
             )
             args.consumed_train_bins += bin_count
         else:
-            batch_size = (
+            logical_samples = get_logical_iteration_samples(args, get_num_microbatches())
+            batch_size = logical_samples or (
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
             )
             iteration_sequences = batch_size
@@ -4550,7 +4655,33 @@ def evaluate(
     eval_batch_size = args.eval_global_batch_size
     eval_micro_batch_size = args.eval_micro_batch_size
     eval_num_microbatches = eval_batch_size // (eval_micro_batch_size * args.data_parallel_size)
+    grid_state = None
+    if getattr(args, "use_mimo", False):
+        mimo_layout = getattr(args, "mimo_layout", "colocated")
+        if mimo_layout == "colocated":
+            pass  # colocated: no grid state; the standard schedule is used
+        elif mimo_layout == "grid":
+            grid_state = grid_training_state_from_model_chunk(model[0])
+            assert grid_state is not None, "grid mode requires mimo_grid_state on the model"
+        else:
+            assert False, (
+                f"Unsupported --mimo-layout {mimo_layout!r}: "
+                "expected 'colocated' or 'grid'"
+            )
     forward_backward_func = get_forward_backward_func()
+    if grid_state is not None:
+        # Non-colocated grid: always drive the multi-module pipeline schedule
+        # (see train()).
+        from functools import partial as _partial
+        from megatron.core.pipeline_parallel.schedules import (
+            forward_backward_pipelining_without_interleaving,
+        )
+
+        forward_backward_func = _partial(
+            forward_backward_pipelining_without_interleaving,
+            p2p_communicator=grid_state.multimodule_communicator,
+            pg_collection=grid_state.multimodule_pg_collection,
+        )
     if args.cuda_graph_impl == "full_iteration":
         forward_backward_func = FullCudaGraphWrapper(
             forward_backward_func,
@@ -4618,7 +4749,16 @@ def evaluate(
             if args.empty_unused_memory_level >= 1:
                 cur_platform.empty_cache()  # FlagScale Modify
 
-            if mpu.is_pipeline_last_stage(ignore_virtual=True):
+            if grid_state is not None:
+                # Non-colocated grid: only the language module's last PP stage
+                # produced losses; reduce within the language DP-CP group.
+                is_eval_loss_rank = grid_state.is_language_last_stage
+                eval_dp_group = grid_state.local_pg_collection.dp_cp
+            else:
+                is_eval_loss_rank = mpu.is_pipeline_last_stage(ignore_virtual=True)
+                eval_dp_group = mpu.get_data_parallel_group(with_context_parallel=True)
+
+            if is_eval_loss_rank:
                 # Reduce across processes.
                 for key in loss_dicts[0].keys():
                     if key not in total_loss_dict:
@@ -4631,21 +4771,13 @@ def evaluate(
                             val = torch.vstack(val)
                             val = val[:, 0] / val[:, 1].clamp(min=1)
                             val = val.mean()
-                            torch.distributed.all_reduce(
-                                val,
-                                group=mpu.get_data_parallel_group(with_context_parallel=True)
-                            )
-                            val /= torch.distributed.get_world_size(
-                                group=mpu.get_data_parallel_group(with_context_parallel=True)
-                            )
+                            torch.distributed.all_reduce(val, group=eval_dp_group)
+                            val /= torch.distributed.get_world_size(group=eval_dp_group)
                             total_loss_dict[key][0] += val
                             total_loss_dict[key][1] += 1
                         else :
                             val = torch.vstack(val).sum(dim=0)
-                            torch.distributed.all_reduce(
-                                val,
-                                group=mpu.get_data_parallel_group(with_context_parallel=True)
-                            )
+                            torch.distributed.all_reduce(val, group=eval_dp_group)
                             total_loss_dict[key] += val
                     elif val[0].numel() == 1:
                         val = torch.cat(val).sum()

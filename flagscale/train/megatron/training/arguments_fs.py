@@ -1086,13 +1086,38 @@ def _add_flagscale_specific_args(parser):
         'Default to 0 to disable inference wandb logging.',
     )
 
-    # MIMO colocated training flag.  When enabled, training.py uses per-module
-    # DDP and optimizer paths instead of the single outer DDP/optimizer.
+    # MIMO training master switch.  When enabled, training.py uses per-module
+    # DDP and optimizer paths instead of the single outer DDP/optimizer; the
+    # execution layout is selected by ``--mimo-layout`` below.
     group.add_argument(
         '--use-mimo',
         action='store_true',
         default=False,
-        help='Enable FlagScale colocated MIMO training with per-module DDP/optimizer.',
+        help='Enable FlagScale MIMO training with per-module DDP/optimizer.',
+    )
+
+    # MIMO execution layout, a subordinate selector of ``--use-mimo`` (only
+    # consulted when MIMO is on).  ``colocated`` (default) runs the in-house
+    # colocated macro/micro-batch scheduler exactly; ``grid`` selects the
+    # MCore grid path (this stage: non-colocated Qwen3.5 2+6 dense TP/PP/DP
+    # layouts, see flagscale/models/mimo/bridge/recipe/qwen35.py).
+    group.add_argument(
+        '--mimo-layout',
+        type=str,
+        default='colocated',
+        choices=['colocated', 'grid'],
+        help='MIMO execution layout: colocated (in-house macro/micro-batch '
+        'scheduler, default) or grid (MCore MimoModel non-colocated path).',
+    )
+    group.add_argument(
+        '--mimo-module-specs',
+        type=str,
+        default=None,
+        help='Repeatable per-module parallelism specs for the grid path, e.g. '
+        "'images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2'. "
+        'Module names must be "images" and "language"; rank offsets tile '
+        '[0, world_size). Supported: the 8 dense 2+6 families (world 8, '
+        'images ranks [0,2), language ranks [2,8)).',
     )
 
     return parser

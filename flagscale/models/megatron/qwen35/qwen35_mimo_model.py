@@ -12,7 +12,7 @@ from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
 
 from flagscale.models.mimo import ColocatedMIMOModel, switch_parallel_state
-from flagscale.models.mimo.mimo_utils import compute_microbatch_token_counts
+from flagscale.models.mimo.colocated.mimo_utils import compute_microbatch_token_counts
 from flagscale.models.megatron.qwen35.language_model import Qwen35LanguageModule
 from flagscale.models.megatron.qwen35.rope import get_rope_index
 from flagscale.models.megatron.qwen35.transformer_config import Qwen35TransformerConfig

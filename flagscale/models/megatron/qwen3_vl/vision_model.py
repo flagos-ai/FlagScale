@@ -8,6 +8,7 @@ from torch import Tensor
 from torch.nn import functional as F
 
 from megatron.core.models.common.vision_module.vision_module import VisionModule
+from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer.enums import ModelType
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -61,9 +62,24 @@ class Qwen3VisionModel(VisionModule):
         projection_type: str = "mlp",
 
         pre_process: bool = True,
-        post_process: bool = False
+        post_process: bool = False,
+        pg_collection: Optional[ProcessGroupCollection] = None,
     ) -> None:
         super().__init__(config=transformer_config)
+
+        self.pg_collection = pg_collection
+        if pg_collection is not None:
+            # ``MegatronModule.sharded_state_dict`` derives the TP sharding /
+            # replication metadata from ``self.tp_group`` (falling back to the
+            # global parallel state when the attribute is absent).  In grid
+            # mode the global parallel state is TP=1, so without this the
+            # replicated vision params (``patch_embed.proj.*``,
+            # ``pos_embed.weight``, ...) would all be tagged
+            # ``replica_id=(0, 0, dp_rank)`` across the vision TP group, and
+            # torch_dist save-time validation would report an access count of
+            # 2 for the unsharded global tensors.  Mirror the module-local
+            # wiring of ``TransformerLayer``/``MultimodalProjector``.
+            self.tp_group = pg_collection.tp
 
         self.spatial_merge_size = transformer_config.spatial_merge_size
 
@@ -105,6 +121,7 @@ class Qwen3VisionModel(VisionModule):
             pre_process=self.pre_process,
             post_process=self.post_process,
             post_layer_norm=True,
+            pg_collection=self.pg_collection,
 
             # NOTE: for deepstack
             projection_config=projection_config,
@@ -121,7 +138,8 @@ class Qwen3VisionModel(VisionModule):
             projection_config,
             projection_layer_spec,
             projection_type,
-            projection_config.ffn_hidden_size
+            projection_config.ffn_hidden_size,
+            pg_collection=self.pg_collection,
         )
         self.input_tensor = None
 
