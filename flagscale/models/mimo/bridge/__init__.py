@@ -77,6 +77,7 @@ from .runtime import (
 )
 from .training import (
     GridTrainingState,
+    apply_grid_parse_time_contract,
     build_grid_multimodule_communicator,
     build_grid_optimizer,
     configure_grid_model_config_hooks,
@@ -142,6 +143,7 @@ __all__ = [
     "destroy_grid_training_states",
     "get_logical_iteration_samples",
     "validate_qwen35_grid_runtime_contract",
+    "apply_grid_parse_time_contract",
     "finalize_grid_training_state",
     "grid_training_state_from_model_chunk",
     "sync_grid_optimizer_param_group_lr",
