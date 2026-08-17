@@ -96,6 +96,20 @@ class FSTrainArguments:
 
     def pre_validate_args(self):
         """Pre-validate the arguments before Megatron function `validate_args`."""
+        if getattr(self.args, "use_mimo", False) and getattr(
+            self.args, "mimo_layout", "colocated"
+        ) == "grid":
+            # Grid parse-time contract: must run before Megatron validation,
+            # which would otherwise silently clamp conflicting parallel sizes
+            # (validate_yaml PP clamp) and drop sequence_parallel under the
+            # forced global TP=1.  Function-level import: keeps the module
+            # import surface unchanged for non-MIMO training paths.
+            from flagscale.models.mimo.bridge.training import (
+                apply_grid_parse_time_contract,
+            )
+
+            apply_grid_parse_time_contract(self.args)
+
         if self._rank_mapper is None:
             self._build_rank_mapper()
 

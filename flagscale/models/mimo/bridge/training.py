@@ -281,6 +281,85 @@ def get_logical_iteration_samples(args, num_microbatches: int) -> int | None:
     return None
 
 
+def _legacy_parallel_arg(args, name: str):
+    """Read a legacy parallel arg from the top-level or a nested namespace.
+
+    The FlagScale runner flattens parallel sizes to top-level CLI flags; the
+    megatron-native ``--yaml-cfg`` format nests them under
+    ``args.model_parallel`` (``load_yaml`` itself preserves whatever structure
+    the yaml declares).  Probe both shapes: top-level first, then the nested
+    ``model_parallel`` namespace -- the dual-probe behavior is correct for
+    either input shape.
+    """
+    value = getattr(args, name, None)
+    if value is None:
+        model_parallel = getattr(args, "model_parallel", None)
+        if model_parallel is not None:
+            value = getattr(model_parallel, name, None)
+    return value
+
+
+def apply_grid_parse_time_contract(args) -> None:
+    """Parse-time contract for the non-colocated grid layout (fail-fast).
+
+    Must run before Megatron's argument validation, which silently rewrites
+    conflicting values (``validate_yaml`` clamps PP via ``min``; both
+    validators force ``sequence_parallel=False`` when TP == 1), so conflicts
+    are reported against the user's actual input.
+
+    This fail-fast applies to the runner/CLI-flattened path; the experimental
+    ``load_yaml`` path is not covered and its validation rewrites are not
+    intercepted.
+
+    In grid mode the module layouts come exclusively from
+    ``--mimo-module-specs`` and the global parallel state runs with
+    TP=1/PP=1/DP=1; a non-default legacy parallel size only contradicts the
+    specs.  ``data_parallel_size`` is exempt: validation derives it from the
+    world size.
+
+    Also preserves the user's sequence-parallel intent in
+    ``args.mimo_sequence_parallel``: the forced global TP=1 makes Megatron
+    validation drop ``sequence_parallel``, while the grid path resolves SP
+    per module at model build time.
+    """
+    offenders = {}
+    for name in (
+        "tensor_model_parallel_size",
+        "pipeline_model_parallel_size",
+        "context_parallel_size",
+        "expert_model_parallel_size",
+        "expert_tensor_parallel_size",
+    ):
+        value = _legacy_parallel_arg(args, name)
+        if value is not None and value != 1:
+            offenders[name] = value
+    for name in ("virtual_pipeline_model_parallel_size",):
+        value = _legacy_parallel_arg(args, name)
+        if value is not None:
+            offenders[name] = value
+    # ``dualpipev_pipeline_model_parallel_size`` is not an argparse attribute
+    # -- it is derived from the user-facing ``--use-dualpipev`` switch in
+    # ``post_validate_args``, which runs strictly after this parse-time
+    # contract, so probe the switch itself (top-level, plus the nested
+    # ``model_parallel`` namespace for consistency with the probe above).
+    # Only truthy values are offenders: the default (False / unset) must not
+    # trip the contract.
+    use_dualpipev = getattr(args, "use_dualpipev", False)
+    if not use_dualpipev:
+        use_dualpipev = _legacy_parallel_arg(args, "use_dualpipev")
+    if use_dualpipev:
+        offenders["use_dualpipev"] = use_dualpipev
+    if offenders:
+        raise ValueError(
+            "--mimo-layout=grid expresses module layouts exclusively via "
+            "--mimo-module-specs; keep legacy parallel sizes and the "
+            "dualpipev switch at their defaults "
+            f"(1 / None / off). Offending values: {offenders}."
+        )
+
+    args.mimo_sequence_parallel = bool(_legacy_parallel_arg(args, "sequence_parallel") or False)
+
+
 def validate_qwen35_grid_runtime_contract(args) -> None:
     """Reject runtime features not supported by the Qwen3.5 grid adapter."""
     if getattr(args, "cuda_graph_impl", "none") == "full_iteration":

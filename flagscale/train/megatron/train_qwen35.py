@@ -1262,6 +1262,10 @@ if __name__ == "__main__":
                     "divisible by the language PP) is incompatible with "
                     "standalone embedding/loss stages (fail-fast)."
                 )
+            # Defensive defaults: the parse-time contract
+            # (apply_grid_parse_time_contract, run by pre_validate_args)
+            # already rejected non-default legacy parallel sizes, so these
+            # assignments only pin the forced global state.
             args.tensor_model_parallel_size = 1
             args.pipeline_model_parallel_size = 1
             args.data_parallel_size = 1
@@ -1269,14 +1273,17 @@ if __name__ == "__main__":
             args.expert_model_parallel_size = 1
             # Sequence parallelism cannot survive the forced global TP=1
             # (ModelParallelConfig rejects SP without TP: "Cannot use sequence
-            # parallelism without tensor parallelism").  Preserve the user's
-            # requested value in the grid-specific arg; model_provider resolves it
-            # per module as ``requested && module TP > 1 && module SP-capable``,
-            # and the grid SP policy marks BOTH modules SP-incapable for now (the
+            # parallelism without tensor parallelism").  The parse-time
+            # contract normally preserved the user's requested value in
+            # args.mimo_sequence_parallel; fall back to the raw value if that
+            # hook did not run.  model_provider resolves the intent per module
+            # as ``requested && module TP > 1 && module SP-capable``, and the
+            # grid SP policy marks BOTH modules SP-incapable for now (the
             # language forward does not shard embeddings and mRoPE freqs stay
             # full-length), so requested SP resolves to False for every accepted
             # layout - with an explicit rank-0 message at model build time.
-            args.mimo_sequence_parallel = args.sequence_parallel
+            if not hasattr(args, "mimo_sequence_parallel"):
+                args.mimo_sequence_parallel = args.sequence_parallel
             args.sequence_parallel = False
             # The num-microbatches calculator was initialized at parse time with
             # the YAML's global data_parallel_size (e.g. 4 for TP2 on 8 ranks),
