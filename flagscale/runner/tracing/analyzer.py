@@ -69,6 +69,7 @@ class _CollectiveRound:
     first_seen_monotonic_s: float
     enters: dict[int, dict[str, Any]] = field(default_factory=dict)
     exits: dict[int, dict[str, Any]] = field(default_factory=dict)
+    detection_phase: str = "unknown"
 
 
 @dataclass
@@ -101,6 +102,7 @@ class TraceAnalyzer:
         heartbeat_timeout_s: float = 30.0,
         collective_timeout_s: float = 60.0,
         delayed_enter_threshold_s: float = 30.0,
+        checkpoint_timeout_s: float = 1800.0,
         p2p_timeout_s: float = 60.0,
         p2p_match_window_s: float = 30.0,
         missing_exit_timeout_s: float = 60.0,
@@ -115,6 +117,7 @@ class TraceAnalyzer:
         )
         self.collective_timeout_s = float(collective_timeout_s)
         self.delayed_enter_threshold_s = float(delayed_enter_threshold_s)
+        self.checkpoint_timeout_s = float(checkpoint_timeout_s)
         self.p2p_timeout_s = float(p2p_timeout_s)
         self.p2p_match_window_s = float(p2p_match_window_s)
         self.missing_exit_timeout_s = float(missing_exit_timeout_s)
@@ -303,6 +306,8 @@ class TraceAnalyzer:
         )
         completed_rounds: list[tuple[str, str, int]] = []
         for key, collective in list(self._rounds.items()):
+            detection_phase = self._collective_detection_phase(collective)
+            checkpointing = detection_phase == "checkpointing"
             mismatch = self._detect_signature_mismatch(collective, now_unix_ns)
             if mismatch is not None:
                 self._emit_once(("collective_signature_mismatch", *key), mismatch, findings)
@@ -316,7 +321,11 @@ class TraceAnalyzer:
                 # never entered. Keep evaluating the incomplete round for H1.
 
             if len(collective.enters) >= collective.expected_nranks:
-                delayed = self._detect_delayed_enter(collective, now_unix_ns)
+                delayed = self._detect_delayed_enter(
+                    collective,
+                    now_unix_ns,
+                    detection_phase=detection_phase,
+                )
                 self._emit_once(("delayed_collective_enter", *key), delayed, findings)
                 missing_exit = self._detect_collective_missing_exit(
                     collective,
@@ -340,13 +349,16 @@ class TraceAnalyzer:
                 continue
 
             elapsed_s = now_monotonic_s - collective.first_seen_monotonic_s
-            if elapsed_s < self.collective_timeout_s:
+            timeout_s = self.checkpoint_timeout_s if checkpointing else self.collective_timeout_s
+            if elapsed_s < timeout_s:
                 continue
             missing = self._detect_missing_enter(
                 collective,
                 now_monotonic_s=now_monotonic_s,
                 now_unix_ns=now_unix_ns,
                 elapsed_s=elapsed_s,
+                detection_phase=detection_phase,
+                timeout_s=timeout_s,
             )
             self._emit_once(("collective_missing_enter", *key), missing, findings)
 
@@ -1130,7 +1142,11 @@ class TraceAnalyzer:
         )
 
     def _detect_delayed_enter(
-        self, collective: _CollectiveRound, now_unix_ns: int
+        self,
+        collective: _CollectiveRound,
+        now_unix_ns: int,
+        *,
+        detection_phase: str,
     ) -> Finding | None:
         if not collective.enters:
             return None
@@ -1143,12 +1159,17 @@ class TraceAnalyzer:
         earliest = min(timestamps.values())
         latest = max(timestamps.values())
         spread_s = (latest - earliest) / 1_000_000_000
-        if spread_s <= self.delayed_enter_threshold_s:
+        threshold_s = (
+            self.checkpoint_timeout_s
+            if detection_phase == "checkpointing"
+            else self.delayed_enter_threshold_s
+        )
+        if spread_s <= threshold_s:
             return None
         slow_ranks = sorted(
             rank
             for rank, timestamp in timestamps.items()
-            if (timestamp - earliest) / 1_000_000_000 > self.delayed_enter_threshold_s
+            if (timestamp - earliest) / 1_000_000_000 > threshold_s
         )
         return Finding(
             hang_type="delayed_collective_enter",
@@ -1161,6 +1182,10 @@ class TraceAnalyzer:
                 "api": next(iter(collective.enters.values())).get("api"),
                 "enter_spread_s": spread_s,
                 "slow_comm_ranks": slow_ranks,
+                "detection_phase": detection_phase,
+                "detection_threshold_s": threshold_s,
+                "threshold_reason": self._threshold_reason(detection_phase),
+                "reason": "collective_enter_spread_exceeded_threshold",
                 "clock_assumption": "hosts have synchronized wall clocks",
                 "confidence": "suspected",
             },
@@ -1173,6 +1198,8 @@ class TraceAnalyzer:
         now_monotonic_s: float,
         now_unix_ns: int,
         elapsed_s: float,
+        detection_phase: str,
+        timeout_s: float,
     ) -> Finding:
         entered = sorted(collective.enters)
         missing = sorted(set(range(collective.expected_nranks)) - set(entered))
@@ -1198,6 +1225,7 @@ class TraceAnalyzer:
                     {
                         "heartbeat": state,
                         "heartbeat_age_s": max(0.0, age_s),
+                        "phase": str(heartbeat.event.get("phase") or "unknown"),
                     }
                 )
                 known_states.append(state)
@@ -1231,11 +1259,48 @@ class TraceAnalyzer:
                 "missing_comm_ranks": missing,
                 "missing_rank_status": rank_status,
                 "waited_s": elapsed_s,
+                "detection_phase": detection_phase,
+                "detection_threshold_s": timeout_s,
+                "threshold_reason": self._threshold_reason(detection_phase),
                 "reason": reason,
                 "confidence": confidence,
                 "trace_event_loss_possible": trace_event_loss_possible,
             },
         )
+
+    def _collective_detection_phase(self, collective: _CollectiveRound) -> str:
+        """Return a stable phase for one collective round.
+
+        A checkpoint can block the heartbeat publisher, so a round that has once
+        been correlated with ``checkpointing`` keeps that phase until it resolves.
+        """
+        if collective.detection_phase == "checkpointing":
+            return collective.detection_phase
+
+        global_ranks = {
+            _as_int(event.get("rank"), default=-1) for event in collective.enters.values()
+        }
+        global_ranks.update(
+            self._comm_members.get((collective.run_id, collective.comm_uid_hash), {}).values()
+        )
+        phases = {
+            str(heartbeat.event.get("phase") or "unknown")
+            for rank in global_ranks
+            if rank >= 0 and (heartbeat := self._heartbeats.get(rank)) is not None
+        }
+        if "checkpointing" in phases:
+            collective.detection_phase = "checkpointing"
+        elif len(phases) == 1:
+            collective.detection_phase = next(iter(phases))
+        elif phases:
+            collective.detection_phase = "mixed"
+        return collective.detection_phase
+
+    @staticmethod
+    def _threshold_reason(detection_phase: str) -> str:
+        if detection_phase == "checkpointing":
+            return "heartbeat_phase_checkpointing"
+        return "normal_collective_phase"
 
     def _emit_once(
         self,

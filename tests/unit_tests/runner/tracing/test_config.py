@@ -68,6 +68,7 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
         enabled=True,
         heartbeat_dir=str(tmp_path / "heartbeat"),
         process_timeout_s=30,
+        checkpoint_timeout_s=300,
         hardware_health_enabled=True,
         hardware_health_stale_after_s=180,
     )
@@ -83,6 +84,8 @@ def test_enabled_tracing_renders_cpu_probe_and_analyzer_shell(tmp_path):
     assert "--p2p-timeout 12" in shell
     assert "--p2p-match-window 4" in shell
     assert "--missing-exit-timeout 20" in shell
+    assert "--checkpoint-timeout 300" in shell
+    assert resolved.checkpoint_timeout_s == 300
     assert "--hardware-health" in shell
     assert "--hardware-health-stale-after 180" in shell
     assert "NCCL_PROFILER_PLUGIN=" in shell
@@ -118,6 +121,20 @@ def test_p2p_match_window_cannot_exceed_timeout(tmp_path):
         },
     )
     with pytest.raises(ValueError, match="p2p_match_window_s"):
+        prepare_trace_launch_config(config, "run")
+
+
+def test_checkpoint_timeout_cannot_be_shorter_than_normal_thresholds(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "collective_timeout_s": 10,
+            "delayed_enter_threshold_s": 5,
+            "checkpoint_timeout_s": 9,
+        },
+    )
+    with pytest.raises(ValueError, match="checkpoint_timeout_s"):
         prepare_trace_launch_config(config, "run")
 
 
