@@ -990,10 +990,26 @@ def datasets_provider(worker_config=None):
             handler=print_error_handler,
             image_decode="pil",
         )
+        # Size the loader by what one evaluation actually consumes (evaluate()
+        # in training.py): eval_global_batch_size / (eval_micro_batch_size *
+        # data_parallel_size) micro-batches per eval iter.  Using the training
+        # microbatch count here misaligns the epoch whenever the eval batch
+        # sizes differ from the train ones, and the cyclic loader wrapper
+        # (cyclic_iter below) then silently re-reads the epoch instead of
+        # failing.
+        eval_micro_batch_size = (
+            getattr(args, "eval_micro_batch_size", None) or args.micro_batch_size
+        )
+        eval_global_batch_size = (
+            getattr(args, "eval_global_batch_size", None) or args.global_batch_size
+        )
+        eval_num_microbatches = eval_global_batch_size // (
+            eval_micro_batch_size * args.data_parallel_size
+        )
         val_datasets_without_source_datasets = [
             LimitDataset(
                 RepeatDataset(val_ds, worker_config=worker_config),
-                length=args.eval_iters * get_num_microbatches(),
+                length=args.eval_iters * eval_num_microbatches,
                 worker_config=worker_config,
                 reset_after_epoch=True,
             )
@@ -1074,9 +1090,13 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples):
         ]
     else:
         valid_dataloader = EnergonDataloader(None)
+    # No test set is ever built here.  Return None (not an EnergonDataloader
+    # wrapping None) so build_train_valid_test_data_loaders derives
+    # do_test=False; a non-None empty wrapper would enable the end-of-training
+    # test evaluation against an empty iterator (StopIteration).
     test_dataloader = None
 
-    return EnergonDataloader(train_dataloader), valid_dataloader, EnergonDataloader(test_dataloader)
+    return EnergonDataloader(train_dataloader), valid_dataloader, test_dataloader
 
 
 class EnergonDataloader:
