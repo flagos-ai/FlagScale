@@ -20,20 +20,26 @@ on:
     paths-ignore:
       - 'docs/**'
       - 'docker/cuda/**'
+      - 'docker/musa/**'
       - 'docker/build.sh'
       - 'tools/install/**'
       - 'requirements/**'
       - '.github/workflows/build_image_cuda.yml'
+      - '.github/workflows/build_image_common.yml'
+      - '.github/workflows/build_image_musa.yml'
       - '.github/workflows/push_image_harbor.yml'
   pull_request:
     branches: ["main"]
     paths-ignore:
       - 'docs/**'
       - 'docker/cuda/**'
+      - 'docker/musa/**'
       - 'docker/build.sh'
       - 'tools/install/**'
       - 'requirements/**'
       - '.github/workflows/build_image_cuda.yml'
+      - '.github/workflows/build_image_common.yml'
+      - '.github/workflows/build_image_musa.yml'
       - '.github/workflows/push_image_harbor.yml'
   workflow_dispatch:
     inputs:
@@ -47,6 +53,7 @@ on:
           - cuda
           - ascend
           - metax
+          - musa
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
@@ -102,6 +109,15 @@ jobs:
     with:
       platform: metax
 
+  musa_tests:
+    name: MThreads MUSA tests
+    # Use the verified MUSA image from the platform config for PR/push tests.
+    # New image builds remain an explicit concern of build_image_musa.yml.
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'musa'
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: musa
+
   all_tests:
     name: all_tests
     needs:
@@ -109,6 +125,7 @@ jobs:
       - cuda_tests
       # - ascend_tests
       - metax_tests
+      - musa_tests
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -124,15 +141,17 @@ jobs:
           #   failed=true
           # fi
 
-          # if [ "${{ needs.ascend_tests.result }}" != "success" ] && \
-          #    [ "${{ needs.ascend_tests.result }}" != "skipped" ]; then
           #   echo "❌ Ascend tests failed"
-          #   failed=true
-          # fi
 
           if [ "${{ needs.metax_tests.result }}" != "success" ] && \
              [ "${{ needs.metax_tests.result }}" != "skipped" ]; then
             echo "❌ MetaX C550 tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.musa_tests.result }}" != "success" ] && \
+             [ "${{ needs.musa_tests.result }}" != "skipped" ]; then
+            echo "MThreads MUSA tests failed"
             failed=true
           fi
 

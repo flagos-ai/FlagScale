@@ -148,6 +148,40 @@ setup_ascend_training_env() {
     apt-get install -y curl
 }
 
+setup_musa_training_env() {
+    if ! FS_PLATFORM=musa MG_FL_PREFER=musa \
+        python -c 'import megatron.core; import torch_musa' >/dev/null 2>&1; then
+        ./tools/install/install.sh \
+            --platform musa \
+            --task train \
+            --pkg-mgr "$PKG_MGR" \
+            --no-system --no-dev --no-base --no-task \
+            --src-deps megatron-lm \
+            --retry-count 3
+    fi
+
+    local required_files=(
+        /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo.bin
+        /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo.idx
+        /home/gitlab-runner/tokenizers/qwentokenizer/qwen.tiktoken
+        /home/gitlab-runner/tokenizers/qwentokenizer/tokenizer_config.json
+    )
+    local required_file
+    for required_file in "${required_files[@]}"; do
+        if [ ! -r "$required_file" ]; then
+            echo "Required MUSA training asset is missing or unreadable: $required_file" >&2
+            exit 1
+        fi
+    done
+
+    python -c '
+import torch
+import torch_musa
+assert torch.musa.is_available()
+print(f"MUSA training environment ready on {torch.musa.device_count()} devices")
+'
+}
+
 copy_training_data() {
     mkdir -p /opt/data
     cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ 2>/dev/null || true
@@ -181,6 +215,7 @@ if [ "$INSTALL_PLATFORM_DEPS" = true ]; then
         cuda) setup_cuda_training_env ;;
         ascend) setup_ascend_training_env ;;
         metax) setup_metax_training_env ;;
+        musa) setup_musa_training_env ;;
         *) echo "No platform-specific training setup for $PLATFORM" ;;
     esac
 else

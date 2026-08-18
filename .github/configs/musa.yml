@@ -1,0 +1,67 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# MThreads MUSA S5000 Hardware Configuration
+# This file defines CI/CD settings for MUSA-based testing.
+
+hardware_name: musa
+display_name: "MThreads MUSA Tests"
+
+# Latest train/inference/all images validated end-to-end on S5000.
+# Keep all tasks on the same FlagScale revision so common tests use a
+# consistent software stack without rebuilding images for every PR.
+ci_image: harbor.baai.ac.cn/flagscale/flagscale-all:dev-musa-s5000-py3.10-8aa5314e94bc
+ci_train_image: harbor.baai.ac.cn/flagscale/flagscale-train:dev-musa-s5000-py3.10-8aa5314e94bc
+ci_inference_image: harbor.baai.ac.cn/flagscale/flagscale-inference:dev-musa-s5000-py3.10-8aa5314e94bc
+
+# Runner labels for MThreads MUSA hardware
+runner_labels: ["flagscale-mthreads-s5000-gpu8"]
+
+# Container volumes (hardware-specific paths)
+container_volumes:
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data
+  - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
+
+# Container options for MThreads MUSA runtime
+container_options: >-
+  --hostname=flagscale-ci
+  --privileged
+  --ipc=host
+  --shm-size=100g
+  --ulimit memlock=-1
+  --env MTHREADS_VISIBLE_DEVICES=all
+  --env MTHREADS_DRIVER_CAPABILITIES=all
+  --user root
+  --ulimit nofile=65535:65535
+
+# Runtime allowances for models loaded from the shared network volume.
+timeouts:
+  inference_minutes: 45
+  serve_ready_seconds: 600
+
+# =============================================================================
+# Package Manager Configuration
+# =============================================================================
+pkg_mgr: "pip"
+
+# Environment path (conda installation path)
+env_path: ""
+
+# Conda environment names
+env_names:
+  train: ""
+  hetero_train: ""
+  inference: ""
+  serve: ""
+  rl: ""

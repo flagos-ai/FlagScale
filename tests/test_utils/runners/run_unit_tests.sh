@@ -99,6 +99,7 @@ run_unit_tests_for_device() {
     PATTERN_OUTPUT=$(echo "$PATTERNS" | python "$SCRIPT_DIR/helpers.py" extract-patterns)
     INCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^INCLUDE=" | cut -d= -f2-)
     EXCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^EXCLUDE=" | cut -d= -f2-)
+    CONFIGURED_NPROC=$(echo "$PATTERN_OUTPUT" | grep "^NPROC_PER_NODE=" | cut -d= -f2-)
 
     # Build coverage config if COVERAGE_DIR is set
     USE_COVERAGE=false
@@ -114,12 +115,13 @@ data_file = $COVERAGE_DIR/.coverage
 EOF
     fi
 
-    # Auto-detect accelerator count for the selected platform.
-    NPROC=$(detect_accelerator_count "$PLATFORM")
+    # Use the configured unit-test topology, or all visible accelerators.
+    NPROC=${CONFIGURED_NPROC:-$(detect_accelerator_count "$PLATFORM")}
     if ! [[ "$NPROC" =~ ^[0-9]+$ ]] || [ "$NPROC" -le 0 ]; then
-        NPROC=1
+        log_error "Invalid unit nproc_per_node: $NPROC"
+        return 1
     fi
-    log_info "Detected $NPROC accelerator(s)"
+    log_info "Using $NPROC process(es) for unit tests"
 
     # Use 'coverage run' instead of pytest-cov to avoid SQLite concurrent write conflicts:
     # each torchrun rank writes its own .coverage.<host>.<pid>.<random> fragment independently.

@@ -1,0 +1,76 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# FlagScale inference image for MThreads MUSA. The pinned vendor image already
+# supplies its matching torch_musa and vLLM runtime.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/transformerengine-fl@sha256:fb56b8b2882d20de45954ed0d53fd695ae08a23c808d853dae9e57f4fcae618e
+ARG PKG_MGR=pip
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG PIP_DEFAULT_TIMEOUT=300
+
+FROM ${BASE_IMAGE} AS base
+ARG FLAGSCALE_HOME
+ARG PIP_DEFAULT_TIMEOUT
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps \
+    FLAGSCALE_DOWNLOADS=${FLAGSCALE_HOME}/downloads \
+    PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT} \
+    FS_PLATFORM=musa \
+    MUSA_HOME=/usr/local/musa \
+    MPI_HOME=/usr/local/openmpi \
+    PATH="/usr/local/musa/bin:/usr/local/openmpi/bin:/root/.local/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/musa/lib:/usr/local/openmpi/lib:/usr/local/lib:${LD_LIBRARY_PATH}"
+COPY tools/install/musa/env.sh /etc/profile.d/flagscale-env.sh
+WORKDIR /workspace
+
+FROM base AS deps
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_EXTRA_INDEX_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+RUN --mount=type=cache,target=/root/.cache/pip \
+    chmod +x /workspace/tools/install/*.sh /workspace/tools/install/utils/*.sh /workspace/tools/install/musa/*.sh && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_MUSA_BUILD_NO_DEVICE=true \
+    ./tools/install/install.sh --platform musa --task inference --pkg-mgr ${PKG_MGR} --no-system && \
+    rm -rf /workspace/*
+
+FROM deps AS dev
+CMD ["/bin/bash"]
+
+FROM base AS release
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_EXTRA_INDEX_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+RUN --mount=type=cache,target=/root/.cache/pip \
+    chmod +x /workspace/tools/install/*.sh /workspace/tools/install/utils/*.sh /workspace/tools/install/musa/*.sh && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_MUSA_BUILD_NO_DEVICE=true \
+    ./tools/install/install.sh --platform musa --task inference --pkg-mgr ${PKG_MGR} --no-system --no-dev && \
+    rm -rf /workspace/*
+CMD ["/bin/bash"]

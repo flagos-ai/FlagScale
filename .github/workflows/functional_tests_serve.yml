@@ -55,6 +55,11 @@ on:
         type: string
         description: Environment path (venv path for uv, conda installation path for conda)
         default: "/opt/venv"
+      ready_timeout_seconds:
+        required: false
+        type: number
+        description: Maximum time to wait for the service health endpoint
+        default: 180
 
 jobs:
   functional_test_serve:
@@ -212,10 +217,45 @@ jobs:
           echo "✅ Environment ready for serve tests"
         timeout-minutes: 15
 
+      - name: Ensure FlagScale CLI is available
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_ROOT"
+
+          PKG_MGR='${{ inputs.pkg_mgr }}'
+          ENV_NAME='${{ inputs.env_name }}'
+          ENV_PATH='${{ inputs.env_path }}'
+
+          source ./tools/install/utils/pyenv_utils.sh
+          case "$PKG_MGR" in
+            conda)
+              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
+                activate_conda "$ENV_NAME" "$ENV_PATH"
+              fi
+              ;;
+            uv)
+              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
+                activate_uv_env "$ENV_PATH"
+              fi
+              ;;
+            pip)
+              ;;
+            *)
+              echo "Unsupported package manager: $PKG_MGR" >&2
+              exit 1
+              ;;
+          esac
+
+          if ! command -v flagscale >/dev/null 2>&1; then
+            python -m pip install . --no-build-isolation --root-user-action=ignore
+          fi
+          command -v flagscale
+
       - name: Run functional tests
         id: functional_test
         env:
           no_proxy: "localhost"
+          FS_SERVE_READY_TIMEOUT: ${{ inputs.ready_timeout_seconds }}
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT

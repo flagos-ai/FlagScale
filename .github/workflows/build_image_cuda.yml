@@ -77,9 +77,8 @@ on:
     branches: [main]
     paths:
       - 'docker/cuda/**'
-      - 'docker/build.sh'
-      - 'tools/install/**'
-      - 'requirements/**'
+      - 'tools/install/cuda/**'
+      - 'requirements/cuda/**'
       - '.github/workflows/build_image_cuda.yml'
 
 permissions:

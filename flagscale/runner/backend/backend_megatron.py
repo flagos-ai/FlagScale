@@ -18,6 +18,7 @@ from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
+from flagscale.runner.heartbeat.config import prepare_heartbeat_launch_config
 from flagscale.runner.runner_train import (
     _get_args_megatron,
     _update_config_train,
@@ -49,6 +50,7 @@ class MegatronBackend(BackendBase):
         self._prepare_perf_monitor_config()
         self.user_args = _get_args_megatron(self.config)
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+        self.heartbeat_config = prepare_heartbeat_launch_config(self.config, self.rdzv_id)
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint
         self.resources = parse_hostfile(self.config.experiment.runner.get("hostfile", None))
@@ -131,6 +133,10 @@ class MegatronBackend(BackendBase):
             f.write("\n")
             f.write(f"export PYTHONPATH={pkg_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
             f.write("\n")
+            for line in self.heartbeat_config.shell_setup_lines(node_rank):
+                f.write(f"{line}\n")
+            if self.heartbeat_config.enabled:
+                f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
             if enable_monitoring:
@@ -155,13 +161,14 @@ class MegatronBackend(BackendBase):
                 )
             f.write("\n")
 
+            command_body = self.heartbeat_config.training_command_body(node_rank)
             if background:
                 f.write(
-                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                    f'nohup bash -c "{command_body}" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
                 f.write("set -o pipefail\n")
-                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
+                f.write(f'bash -c "{command_body}" 2>&1 | tee -a {host_output_file}\n')
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
@@ -197,6 +204,8 @@ class MegatronBackend(BackendBase):
             # TODO: This is a temporary fix. We need to find a better way to stop the job.
             f.write("    pkill -f 'torchrun'\n")
             f.write("fi\n")
+            for line in self.heartbeat_config.stop_shell_lines(node_rank):
+                f.write(f"{line}\n")
             f.write(f"{after_stop}\n")
             f.flush()
             os.fsync(f.fileno())
