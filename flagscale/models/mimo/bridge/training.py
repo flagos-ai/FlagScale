@@ -307,9 +307,16 @@ def apply_grid_parse_time_contract(args) -> None:
     validators force ``sequence_parallel=False`` when TP == 1), so conflicts
     are reported against the user's actual input.
 
-    This fail-fast applies to the runner/CLI-flattened path; the experimental
-    ``load_yaml`` path is not covered and its validation rewrites are not
-    intercepted.
+    Both parse entries are covered: ``FSTrainArguments.pre_validate_args``
+    calls this before the validation fork, whether validation goes through
+    ``validate_args`` (runner/CLI-flattened) or ``validate_yaml``
+    (experimental ``--yaml-cfg``).  Grid flags are read as top-level
+    attributes everywhere downstream, so a ``--yaml-cfg`` config that engages
+    grid mode carries them top-level and reaches this contract;
+    ``_legacy_parallel_arg`` additionally probes the nested
+    ``model_parallel`` namespace that ``load_yaml`` produces.  As a backstop
+    the grid entry point pins the legacy parallel sizes to 1
+    (train_qwen35.py).
 
     In grid mode the module layouts come exclusively from
     ``--mimo-module-specs`` and the global parallel state runs with
