@@ -47,6 +47,24 @@ class Config:
 
         cfg = _flatten_config(raw)
 
+        # The MIMO grid layout expresses per-module parallelism exclusively via
+        # mimo_module_specs (e.g. images tp=2 / language tp=1,pp=3) and pins the
+        # legacy parallel fields to 1.  This converter derives TP/PP/vision-TP
+        # from those legacy fields and writes the legacy release layout, so a
+        # grid yaml would otherwise be converted with silently wrong sharding
+        # (the grid runtime also mandates ckpt_format=torch_dist, which this
+        # converter does not write).  Fail fast instead of converting.
+        if cfg.get("mimo_module_specs") or cfg.get("mimo_layout") not in (None, "colocated"):
+            raise ValueError(
+                "Grid-layout MIMO checkpoints are not supported by this converter: "
+                f"the training yaml declares mimo_layout={cfg.get('mimo_layout')!r} / "
+                f"mimo_module_specs={cfg.get('mimo_module_specs')!r}, whose per-module "
+                "parallel layouts this converter does not parse (legacy TP/PP fields "
+                "are pinned to 1 in grid configs, so converting anyway would silently "
+                "produce wrongly-sharded checkpoints). Convert with a colocated/legacy "
+                "yaml, or extend the converter for grid layouts first."
+            )
+
         self.tp = cfg.get("tensor_model_parallel_size", 1)
         self.pp = cfg.get("pipeline_model_parallel_size", 1)
         self.ep = cfg.get("expert_model_parallel_size", 1)
@@ -132,8 +150,9 @@ class Config:
     def pp_layer_counts(self):
         """Return a list of layer counts per PP rank, supporting uneven splits.
 
-        Uses decoder_first/last_pipeline_num_layers if set; otherwise divides
-        evenly.  For PP=1, returns [num_layers].
+        Uses decoder_first/last_pipeline_num_layers if set; otherwise splits
+        evenly with the remainder on the FIRST stage (the training-side rule
+        for uneven pipelines).  For PP=1, returns [num_layers].
         """
         if self.pp == 1:
             return [self.num_layers]
@@ -142,13 +161,16 @@ class Config:
         last = self.decoder_last_pipeline_num_layers
 
         if first is None and last is None:
-            # Even split
+            # Remainder goes to the FIRST stage, mirroring the training-side
+            # allocation for uneven pipelines (compute_qwen35_pipeline_layer_split
+            # in flagscale/models/mimo/bridge/recipe/qwen35.py, encoded via
+            # MCore's num_layers_in_first/last_pipeline_stage): 32 layers with
+            # PP3 -> [12, 10, 10], PP6 -> [7, 5, 5, 5, 5, 5].  Distributing the
+            # remainder to trailing ranks instead would shift/drop decoder
+            # layers when merging a training-written checkpoint.
             base = self.num_layers // self.pp
             counts = [base] * self.pp
-            # Distribute remainder to last ranks
-            remainder = self.num_layers - base * self.pp
-            for i in range(remainder):
-                counts[self.pp - 1 - i] += 1
+            counts[0] += self.num_layers - base * self.pp
             return counts
 
         # Uneven split: derive from first/last constraints
