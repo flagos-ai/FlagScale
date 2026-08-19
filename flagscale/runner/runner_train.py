@@ -22,6 +22,10 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.elastic.monitor_service import MonitorService
+from flagscale.runner.heartbeat.config import (
+    HeartbeatLaunchConfig,
+    prepare_heartbeat_launch_config,
+)
 from flagscale.runner.runner_base_legacy import JobStatus, RunnerBase
 from flagscale.runner.utils import (
     find_latest_stdout_log,
@@ -206,6 +210,8 @@ def _get_runner_cmd_train(
         del runner_args["master_port"]
     if "enable_monitoring" in runner_args:
         del runner_args["enable_monitoring"]
+    if "heartbeat" in runner_args:
+        del runner_args["heartbeat"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port
@@ -238,7 +244,9 @@ def _generate_run_script_train(
     background=False,
     pkg_dir=None,
     enable_monitoring=False,
+    heartbeat_config=None,
 ):
+    heartbeat_config = heartbeat_config or HeartbeatLaunchConfig(enabled=False)
     system_config = config.train.system
     logging_config = config.train.system.logging
 
@@ -281,6 +289,10 @@ def _generate_run_script_train(
         f.write("\n")
         f.write(f"export PYTHONPATH={pkg_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
         f.write("\n")
+        for line in heartbeat_config.shell_setup_lines(node_rank):
+            f.write(f"{line}\n")
+        if heartbeat_config.enabled:
+            f.write("\n")
         f.write(f'cmd="{cmd}"\n')
         f.write("\n")
         if enable_monitoring:
@@ -303,13 +315,14 @@ def _generate_run_script_train(
             f.write(f'echo "Monitor service started in background for {host} (node {node_rank})"\n')
         f.write("\n")
 
+        command_body = heartbeat_config.training_command_body(node_rank)
         if background:
             f.write(
-                f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                f'nohup bash -c "{command_body}" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
             )
         else:
             f.write("set -o pipefail\n")
-            f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
+            f.write(f'bash -c "{command_body}" 2>&1 | tee -a {host_output_file}\n')
         f.write("\n")
         f.flush()
         os.fsync(f.fileno())
@@ -318,7 +331,8 @@ def _generate_run_script_train(
     return host_run_script_file
 
 
-def _generate_stop_script_train(config, host, node_rank):
+def _generate_stop_script_train(config, host, node_rank, heartbeat_config=None):
+    heartbeat_config = heartbeat_config or HeartbeatLaunchConfig(enabled=False)
     if getattr(config, "train", None):
         logging_config = config.train.system.logging
     else:
@@ -346,6 +360,8 @@ def _generate_stop_script_train(config, host, node_rank):
         # TODO: This is a temporary fix. We need to find a better way to stop the job.
         f.write("    pkill -f 'torchrun'\n")
         f.write("fi\n")
+        for line in heartbeat_config.stop_shell_lines(node_rank):
+            f.write(f"{line}\n")
         f.write(f"{after_stop}\n")
         f.flush()
         os.fsync(f.fileno())
@@ -409,6 +425,7 @@ class SSHTrainRunner(RunnerBase):
         else:
             raise ValueError(f"Unsupported backend: {self.config.experiment.task.backend}")
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+        self.heartbeat_config = prepare_heartbeat_launch_config(self.config, self.rdzv_id)
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint
         self.resources = parse_hostfile(self.config.experiment.runner.get("hostfile", None))
@@ -466,6 +483,7 @@ class SSHTrainRunner(RunnerBase):
             background=background,
             pkg_dir=node_specific_config.get("build_dir", None),
             enable_monitoring=enable_monitoring,
+            heartbeat_config=self.heartbeat_config,
         )
 
         if host != "localhost":
@@ -593,7 +611,12 @@ class SSHTrainRunner(RunnerBase):
         return None
 
     def _stop_each(self, host, node_rank):
-        host_stop_script_file = _generate_stop_script_train(self.config, host, node_rank)
+        host_stop_script_file = _generate_stop_script_train(
+            self.config,
+            host,
+            node_rank,
+            self.heartbeat_config,
+        )
         logging_config = self.config.train.system.logging
 
         if host != "localhost":
@@ -864,6 +887,8 @@ class CloudTrainRunner(RunnerBase):
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint
         _update_config_train(self.config)
+        self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+        self.heartbeat_config = prepare_heartbeat_launch_config(self.config, self.rdzv_id)
         if self.config.experiment.task.backend == "megatron":
             self.user_args = _get_args_megatron(self.config)
         logger.info("\n************** configuration ***********")
@@ -891,7 +916,12 @@ class CloudTrainRunner(RunnerBase):
         cmd = shlex.join(export_cmd + runner_cmd + [self.user_script] + self.user_args)
 
         host_run_script_file = _generate_run_script_train(
-            self.config, host, node_rank, cmd, background=background
+            self.config,
+            host,
+            node_rank,
+            cmd,
+            background=background,
+            heartbeat_config=self.heartbeat_config,
         )
 
         run_local_command(f"bash {host_run_script_file}", dryrun)

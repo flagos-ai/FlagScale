@@ -45,8 +45,11 @@ from typing import Any, Optional
 
 import torch
 
-from . import arguments
-from . import global_vars
+########## FlagScale Begin ##########
+from flagscale.train import gpu_heartbeat
+########## FlagScale End ##########
+
+from . import arguments, global_vars
 from .utils import is_rank0, print_rank_0
 
 _GLOBAL_RANK_MONITOR_CLIENT = None
@@ -77,6 +80,12 @@ def get_rank_monitor_client() -> Optional[Any]:
 
 def setup() -> None:
     """Initialize fault tolerance before initialize_megatron"""
+    ########## FlagScale Begin ##########
+    # GPU progress heartbeat is independent of the NVIDIA FT package. The runner
+    # enables it through environment variables, and this call is a no-op otherwise.
+    gpu_heartbeat.initialize_from_env()
+    gpu_heartbeat.set_phase("setup")
+    ########## FlagScale End ##########
     args = arguments.parse_args(ignore_unknown_args=True)
     if not args.enable_ft_package:
         return
@@ -122,6 +131,9 @@ def setup() -> None:
 
 def on_training_step_start() -> None:
     """Should be called before each training step"""
+    ########## FlagScale Begin ##########
+    gpu_heartbeat.set_phase("train")
+    ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         global _is_setup_section_open
@@ -137,6 +149,13 @@ def on_training_step_start() -> None:
 
 def on_training_step_end() -> None:
     """Should be called after each training step"""
+    ########## FlagScale Begin ##########
+    # This is the only hot-path operation: an in-memory progress counter update.
+    # The background publisher performs all JSON serialization and file I/O.
+    gpu_heartbeat.mark_training_progress(
+        getattr(global_vars.get_args(), "curr_iteration", None)
+    )
+    ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         global _seen_tr_iters_cnt
@@ -147,6 +166,9 @@ def on_training_step_end() -> None:
 
 def on_eval_step_start() -> None:
     """Should be called before each validation step"""
+    ########## FlagScale Begin ##########
+    gpu_heartbeat.set_phase("eval")
+    ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         global _is_setup_section_open
@@ -160,6 +182,9 @@ def on_eval_step_start() -> None:
 
 def on_eval_step_end() -> None:
     """Should be called after each validation step"""
+    ########## FlagScale Begin ##########
+    gpu_heartbeat.mark_progress("eval")
+    ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         global _curr_eval_iter_idx
@@ -170,6 +195,9 @@ def on_eval_step_end() -> None:
 
 def on_checkpointing_start() -> None:
     """Should be called before each checkpoint-saving-related operation."""
+    ########## FlagScale Begin ##########
+    gpu_heartbeat.set_phase("checkpointing")
+    ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         rmon_cli.start_section("checkpointing")
@@ -181,6 +209,9 @@ def on_checkpointing_end(is_async_finalization: bool) -> None:
     Args:
         is_async_finalization (bool): true if called after an async checkpointing finalization
     """
+    ########## FlagScale Begin ##########
+    gpu_heartbeat.mark_progress("checkpointing")
+    ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         rmon_cli.end_section("checkpointing")
@@ -216,6 +247,9 @@ def shutdown() -> None:
         rmon_cli.shutdown_workload_monitoring()
         print_rank_0("FT: closed.")
     _GLOBAL_RANK_MONITOR_CLIENT = None
+    ########## FlagScale Begin ##########
+    gpu_heartbeat.shutdown()
+    ########## FlagScale End ##########
 
 
 def _load_state_if_exists():

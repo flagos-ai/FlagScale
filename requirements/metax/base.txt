@@ -1,0 +1,5 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+# MetaX platform dependencies. The base image owns the vendor Torch runtime.
+-r ../common.txt

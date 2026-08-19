@@ -1,0 +1,38 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+llm:
+  model: /home/gitlab-runner/data/Qwen3-4B
+  tokenizer: /home/gitlab-runner/data/Qwen3-4B
+  trust_remote_code: true
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.5
+  # KS3-backed checkpoints must be read sequentially. Lazy mmap loading can
+  # trigger slow random reads and native worker crashes on MUSA.
+  safetensors_load_strategy: eager
+  max_model_len: 1024
+  seed: 1234
+  enforce_eager: true
+  disable_custom_all_reduce: true
+
+generate:
+  prompts:
+    - "The first President of the United States"
+    - "The capital of France"
+  sampling:
+    top_p: 0.1
+    top_k: 1
+    temperature: 0.0
+    seed: 1234

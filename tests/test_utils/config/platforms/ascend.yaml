@@ -32,7 +32,8 @@ ascend910:
   tests:
     functional:
       # Add or remove test cases per model
-      train: {}
+      train:
+        qwen3: ["0_6b_ascend"]
       hetero_train: {}
       benchmark: {}
       inference:
@@ -44,9 +45,8 @@ ascend910:
       include: "*"
       # Exclude paths use pytest --ignore.
       exclude:
-        # Ascend CI: skip unit tests that directly depend on Megatron runtime.
+        # Keep only exclusions with known runtime-specific failures.
         - tests/unit_tests/test_spiky_loss_detector.py
         - tests/unit_tests/test_parallel_context.py
         - tests/unit_tests/test_utilities.py
         - tests/unit_tests/serve/processor/test_image_resize_processor.py
-        - tests/unit_tests/train

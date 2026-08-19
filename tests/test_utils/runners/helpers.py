@@ -23,7 +23,7 @@ import json
 import sys
 
 
-def extract_test_patterns(json_str: str) -> tuple[str, str]:
+def extract_test_patterns(json_str: str) -> tuple[str, str, str]:
     """
     Extract include and exclude patterns from unit test configuration JSON.
 
@@ -31,7 +31,7 @@ def extract_test_patterns(json_str: str) -> tuple[str, str]:
         json_str: JSON string containing 'include' and 'exclude' keys
 
     Returns:
-        Tuple of (include_pattern, exclude_args_string)
+        Tuple of (include_pattern, exclude_args_string, nproc_per_node)
     """
     try:
         data = json.loads(json_str)
@@ -47,10 +47,13 @@ def extract_test_patterns(json_str: str) -> tuple[str, str]:
             else ""
         )
 
-        return include, exclude_args
+        nproc_per_node = data.get("nproc_per_node")
+        nproc_per_node = "" if nproc_per_node is None else str(nproc_per_node)
+
+        return include, exclude_args, nproc_per_node
     except (json.JSONDecodeError, KeyError) as e:
         sys.stderr.write(f"Error parsing test patterns: {e}\n")
-        return "*", ""
+        return "*", "", ""
 
 
 def parse_test_cases(json_str: str) -> list[tuple[str, str, str]]:
@@ -117,9 +120,10 @@ def main():
     json_input = sys.stdin.read().strip()
 
     if command == "extract-patterns":
-        include, exclude = extract_test_patterns(json_input)
+        include, exclude, nproc_per_node = extract_test_patterns(json_input)
         print(f"INCLUDE={include}")
         print(f"EXCLUDE={exclude}")
+        print(f"NPROC_PER_NODE={nproc_per_node}")
 
     elif command == "parse-test-cases":
         test_cases = parse_test_cases(json_input)

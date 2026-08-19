@@ -39,6 +39,8 @@ load_platform_config() {
     RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
     VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
     CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
+    INFERENCE_TIMEOUT_MINUTES=$(/usr/local/bin/yq -r '.timeouts.inference_minutes // 15' "$CONFIG_FILE")
+    SERVE_READY_TIMEOUT_SECONDS=$(/usr/local/bin/yq -r '.timeouts.serve_ready_seconds // 180' "$CONFIG_FILE")
 
     # Extract package manager configuration
     PKG_MGR=$(/usr/local/bin/yq -r '.pkg_mgr // "uv"' "$CONFIG_FILE")
@@ -115,6 +117,8 @@ load_platform_config() {
     echo "ci_train_image=$CI_TRAIN_IMAGE" >> $GITHUB_OUTPUT
     echo "ci_inference_image=$CI_INFERENCE_IMAGE" >> $GITHUB_OUTPUT
     echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
+    echo "inference_timeout_minutes=$INFERENCE_TIMEOUT_MINUTES" >> $GITHUB_OUTPUT
+    echo "serve_ready_timeout_seconds=$SERVE_READY_TIMEOUT_SECONDS" >> $GITHUB_OUTPUT
 
     { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT
     { echo 'container_volumes<<EOFVOLUMES'; echo "$VOLUMES"; echo 'EOFVOLUMES'; } >> $GITHUB_OUTPUT
