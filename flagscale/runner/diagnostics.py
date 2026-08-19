@@ -76,10 +76,7 @@ def active_run_id_cleanup_action(path: str, run_id: str) -> str:
 
     qpath = shlex.quote(path)
     qrun_id = shlex.quote(run_id)
-    return (
-        f'if [ -f {qpath} ] && [ \\"\\$(cat {qpath})\\" = {qrun_id} ]; '
-        f"then rm -f {qpath}; fi"
-    )
+    return f'if [ -f {qpath} ] && [ \\"\\$(cat {qpath})\\" = {qrun_id} ]; then rm -f {qpath}; fi'
 
 
 def active_run_id_cleanup_lines(path: str, run_id: str) -> list[str]:
