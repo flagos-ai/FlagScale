@@ -193,13 +193,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task inference --pkg-mgr uv --no-system; \
+        UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task serve --pkg-mgr uv --no-system; \
     elif [ "$PKG_MGR" = "conda" ]; then \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task inference --pkg-mgr conda --env-name flagscale-inference --no-system; \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task serve --pkg-mgr conda --env-name flagscale-inference --no-system; \
     else \
         PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task inference --pkg-mgr pip --no-system; \
+        PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task serve --pkg-mgr pip --no-system; \
     fi && \
     rm -rf /root/deps /root/downloads /workspace
 
@@ -257,13 +265,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task inference --pkg-mgr uv --no-system --no-dev; \
+        UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task serve --pkg-mgr uv --no-system --no-dev; \
     elif [ "$PKG_MGR" = "conda" ]; then \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task inference --pkg-mgr conda --env-name flagscale-inference --no-system --no-dev; \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task serve --pkg-mgr conda --env-name flagscale-inference --no-system --no-dev; \
     else \
         PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
         FLAGSCALE_HOME=${FLAGSCALE_HOME} \
         ./tools/install/install.sh --platform cuda --task inference --pkg-mgr pip --no-system --no-dev; \
+        PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
+        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh --platform cuda --task serve --pkg-mgr pip --no-system --no-dev; \
     fi && \
     rm -rf /root/deps /root/downloads /workspace
 

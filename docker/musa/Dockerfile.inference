@@ -14,7 +14,7 @@
 
 # FlagScale inference image for MThreads MUSA. The pinned vendor image already
 # supplies its matching torch_musa and vLLM runtime.
-ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/transformerengine-fl@sha256:fb56b8b2882d20de45954ed0d53fd695ae08a23c808d853dae9e57f4fcae618e
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/transformerengine-fl:manual-20260802-musa-torch2.7.1-e73781e-vllm29ceebd
 ARG PKG_MGR=pip
 ARG FLAGSCALE_HOME=/opt/flagscale
 ARG PIP_DEFAULT_TIMEOUT=300
@@ -49,6 +49,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     chmod +x /workspace/tools/install/*.sh /workspace/tools/install/utils/*.sh /workspace/tools/install/musa/*.sh && \
     FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_MUSA_BUILD_NO_DEVICE=true \
     ./tools/install/install.sh --platform musa --task inference --pkg-mgr ${PKG_MGR} --no-system && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_MUSA_BUILD_NO_DEVICE=true \
+    ./tools/install/install.sh --platform musa --task serve --pkg-mgr ${PKG_MGR} --no-system && \
     rm -rf /workspace/*
 
 FROM deps AS dev
@@ -72,5 +74,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     chmod +x /workspace/tools/install/*.sh /workspace/tools/install/utils/*.sh /workspace/tools/install/musa/*.sh && \
     FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_MUSA_BUILD_NO_DEVICE=true \
     ./tools/install/install.sh --platform musa --task inference --pkg-mgr ${PKG_MGR} --no-system --no-dev && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_MUSA_BUILD_NO_DEVICE=true \
+    ./tools/install/install.sh --platform musa --task serve --pkg-mgr ${PKG_MGR} --no-system --no-dev && \
     rm -rf /workspace/*
 CMD ["/bin/bash"]
