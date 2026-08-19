@@ -1,0 +1,43 @@
+# FlagScale training image for MetaX C550.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_CONDA=/opt/conda
+ARG FLAGSCALE_MEGATRON_REF=main
+ARG FLAGSCALE_TE_REF=main
+
+FROM ${BASE_IMAGE} AS base
+
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+ARG FLAGSCALE_MEGATRON_REF
+ARG FLAGSCALE_TE_REF
+LABEL io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF} \
+      io.flagscale.transformer-engine-fl.revision=${FLAGSCALE_TE_REF}
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_CONDA=${FLAGSCALE_CONDA} \
+    FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF} \
+    FLAGSCALE_TE_REF=${FLAGSCALE_TE_REF} \
+    MACA_HOME=/opt/maca \
+    CUDA_HOME=/opt/maca \
+    TE_FL_SKIP_CUDA=1 \
+    NVTE_WITH_MACA=1 \
+    PATH="/opt/maca/bin:${FLAGSCALE_CONDA}/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/maca/lib:${LD_LIBRARY_PATH}"
+
+COPY tools/install/metax/env.sh /etc/profile.d/flagscale-env.sh
+WORKDIR /workspace
+
+FROM base AS dev
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+RUN chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/metax/*.sh && \
+    . /etc/profile.d/flagscale-env.sh && \
+    /workspace/tools/install/install.sh --platform metax --task train \
+        --pkg-mgr pip --no-system --no-dev --no-base --force-build && \
+    rm -rf /workspace/tools /workspace/requirements
+CMD ["/bin/bash"]
+
+FROM dev AS release
+CMD ["/bin/bash"]

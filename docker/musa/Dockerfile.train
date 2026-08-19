@@ -17,12 +17,12 @@
 # The vendor's PyTorch 2.9.1 image requires a newer host driver for MCCL than
 # the current S5000 CI fleet provides. Keep the verified PyTorch 2.7.1 base
 # immutable until the fleet driver and vendor image are upgraded together.
-ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/transformerengine-fl@sha256:fb56b8b2882d20de45954ed0d53fd695ae08a23c808d853dae9e57f4fcae618e
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/transformerengine-fl:manual-20260802-musa-torch2.7.1-e73781e-vllm29ceebd
 ARG PKG_MGR=pip
 ARG FLAGSCALE_HOME=/opt/flagscale
 ARG PIP_DEFAULT_TIMEOUT=300
 ARG FLAGSCALE_MEGATRON_REPO=https://github.com/flagos-ai/Megatron-LM-FL.git
-ARG FLAGSCALE_MEGATRON_REF=175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82
+ARG FLAGSCALE_MEGATRON_REF=main
 ARG FLAGSCALE_TE_VERSION=2.0.0+e73781e
 
 FROM ${BASE_IMAGE} AS base

@@ -16,7 +16,8 @@
 
 -r ../common.txt
 
-torchvision==0.23.0
+# torch, torch-npu and torchvision are an atomic vendor runtime supplied by
+# the pinned Ascend base image. Do not resolve or replace them here.
 
 # for robotics
 datasets==4.5.0

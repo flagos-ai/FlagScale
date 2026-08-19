@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from click.exceptions import Exit as ClickExit
+from typer import Exit as TyperExit
 from typer.testing import CliRunner
 
 from flagscale.cli import app, get_action, resolve_config
@@ -52,19 +52,19 @@ class TestGetAction:
 
     def test_mutually_exclusive_stop_dryrun(self, capsys):
         """Multiple flags (stop and dryrun) raises Exit(1)"""
-        with pytest.raises(ClickExit) as exc_info:
+        with pytest.raises(TyperExit) as exc_info:
             get_action(True, True, False, False, False)
         assert exc_info.value.exit_code == 1
 
     def test_mutually_exclusive_all_flags(self, capsys):
         """All flags set raises Exit(1)"""
-        with pytest.raises(ClickExit) as exc_info:
+        with pytest.raises(TyperExit) as exc_info:
             get_action(True, True, True, True, True)
         assert exc_info.value.exit_code == 1
 
     def test_mutually_exclusive_test_query(self, capsys):
         """Multiple flags (test and query) raises Exit(1)"""
-        with pytest.raises(ClickExit) as exc_info:
+        with pytest.raises(TyperExit) as exc_info:
             get_action(False, False, True, True, False)
         assert exc_info.value.exit_code == 1
 
@@ -96,13 +96,13 @@ class TestResolveConfig:
 
     def test_yaml_not_exists(self):
         """Non-existent yaml path raises Exit(1)"""
-        with pytest.raises(ClickExit) as exc_info:
+        with pytest.raises(TyperExit) as exc_info:
             resolve_config("model", Path("/nonexistent/path/config.yaml"), "train")
         assert exc_info.value.exit_code == 1
 
     def test_model_not_found(self):
         """Non-existent model raises Exit(1)"""
-        with pytest.raises(ClickExit) as exc_info:
+        with pytest.raises(TyperExit) as exc_info:
             resolve_config("nonexistent_model_xyz_12345", None, "train")
         assert exc_info.value.exit_code == 1
 
@@ -139,7 +139,7 @@ class TestResolveConfigFromCwd:
     def test_missing_config_in_cwd_raises(self, tmp_path, monkeypatch):
         """Raises Exit(1) when config not found in cwd"""
         monkeypatch.chdir(tmp_path)
-        with pytest.raises(ClickExit) as exc_info:
+        with pytest.raises(TyperExit) as exc_info:
             resolve_config("nonexistent_model", None, "train")
         assert exc_info.value.exit_code == 1
 

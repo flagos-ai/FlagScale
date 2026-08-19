@@ -167,10 +167,14 @@ run_test() {
         # For serve tasks, wait for the service to be fully ready before validation
         if [ "$task" = "serve" ]; then
             local serve_port
+            local result_dir="$test_dir/test_results/$config"
+            local serve_pid_file
+            local serve_log_file
+            local serve_pid
+            local serve_state
             serve_port=$(grep -oP 'port:\s*\K[0-9]+' "$config_file" | head -1)
 
-            local max_wait=600   # ascend: 10 min
-            [ "$PLATFORM" != "ascend" ] && max_wait="${FS_SERVE_READY_TIMEOUT:-180}"
+            local max_wait="${FS_SERVE_READY_TIMEOUT:-180}"
             local interval=10
             local elapsed=0
             local ready=0
@@ -181,6 +185,31 @@ run_test() {
             else
                 log_info "Waiting for service on port $serve_port (timeout: ${max_wait}s)..."
                 while [ $elapsed -lt $max_wait ]; do
+                    # The serve launcher creates these files asynchronously. Refresh
+                    # their paths so an early child-process failure is observable.
+                    if [ -z "$serve_pid_file" ]; then
+                        serve_pid_file=$(find "$result_dir" -type f \
+                            -path '*/pids/host_0_localhost.pid' -print -quit 2>/dev/null || true)
+                    fi
+                    if [ -z "$serve_log_file" ]; then
+                        serve_log_file=$(find "$result_dir" -type f \
+                            -path '*/host_0_localhost.output' -print -quit 2>/dev/null || true)
+                    fi
+
+                    if [ -n "$serve_pid_file" ] && [ -r "$serve_pid_file" ]; then
+                        serve_pid=$(tr -d '[:space:]' < "$serve_pid_file" 2>/dev/null || true)
+                        serve_state=$(ps -o stat= -p "$serve_pid" 2>/dev/null || true)
+                        if [ -n "$serve_pid" ] && \
+                           { [ -z "$serve_state" ] || [[ "$serve_state" = Z* ]]; }; then
+                            log_error "Serve process exited before port $serve_port became ready"
+                            if [ -n "$serve_log_file" ] && [ -r "$serve_log_file" ]; then
+                                tail -n 80 "$serve_log_file"
+                            fi
+                            flagscale serve "$model" --config "$config_file" --stop || true
+                            return 1
+                        fi
+                    fi
+
                     local http_code
                     http_code=$(curl --silent --max-time 5 --output /dev/null \
                         --write-out "%{http_code}" \
@@ -204,8 +233,12 @@ run_test() {
 
             if [ $ready -eq 0 ]; then
                 log_error "Service did not become ready within ${max_wait}s on port $serve_port"
+                if [ -n "$serve_log_file" ] && [ -r "$serve_log_file" ]; then
+                    tail -n 80 "$serve_log_file"
+                fi
                 local serve_log
                 for serve_log in "$exp_dir"/serve_logs/host*.output; do
+                    [ "$serve_log" = "$serve_log_file" ] && continue
                     [ -f "$serve_log" ] || continue
                     log_error "Serve output: $serve_log"
                     tail -n 200 "$serve_log" || true

@@ -18,48 +18,36 @@ on:
   workflow_call:
     inputs:
       platform:
-        description: Platform directory below docker/
+        description: Platform config name under .github/configs
         required: true
         type: string
-      runs_on:
-        description: JSON array containing the runner scale-set label
-        required: true
+      resolved_sources:
+        description: JSON source catalog resolved to immutable revisions
+        required: false
+        default: '{}'
         type: string
-      matrix:
-        description: JSON task matrix, for example {"task":["train","inference","all"]}
-        required: true
-        type: string
-      target:
-        required: true
+      tasks:
+        description: Comma-separated image tasks, or all_tasks
+        required: false
+        default: all_tasks
         type: string
       build_images:
-        required: true
+        required: false
+        default: true
+        type: boolean
+      run_tests:
+        required: false
+        default: true
+        type: boolean
+      push:
+        required: false
+        default: true
         type: boolean
       no_cache:
         required: false
         default: false
         type: boolean
-      push:
-        required: false
-        default: false
-        type: boolean
-      registry:
-        required: true
-        type: string
-      train_image:
-        required: true
-        type: string
-      inference_image:
-        required: true
-        type: string
-      all_image:
-        required: true
-        type: string
-      base_image:
-        required: true
-        type: string
-      build_args:
-        description: Vendor-specific Docker build arguments
+      target:
         required: false
         default: ''
         type: string
@@ -73,13 +61,375 @@ permissions:
   contents: read
 
 jobs:
+  configure:
+    name: Resolve ${{ inputs.platform }} image contract
+    runs-on: ubuntu-latest
+    outputs:
+      platform: ${{ steps.contract.outputs.platform }}
+      runs_on: ${{ steps.contract.outputs.runs_on }}
+      matrix: ${{ steps.contract.outputs.matrix }}
+      max_parallel: ${{ steps.contract.outputs.max_parallel }}
+      train_image: ${{ steps.contract.outputs.train_image }}
+      inference_image: ${{ steps.contract.outputs.inference_image }}
+      train_pkg_mgr: ${{ steps.contract.outputs.train_pkg_mgr }}
+      train_env_name: ${{ steps.contract.outputs.train_env_name }}
+      train_env_path: ${{ steps.contract.outputs.train_env_path }}
+      inference_pkg_mgr: ${{ steps.contract.outputs.inference_pkg_mgr }}
+      inference_env_name: ${{ steps.contract.outputs.inference_env_name }}
+      inference_env_path: ${{ steps.contract.outputs.inference_env_path }}
+      serve_pkg_mgr: ${{ steps.contract.outputs.serve_pkg_mgr }}
+      serve_env_name: ${{ steps.contract.outputs.serve_env_name }}
+      serve_env_path: ${{ steps.contract.outputs.serve_env_path }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install yq
+        shell: bash
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Resolve platform contract
+        id: contract
+        shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          TASKS: ${{ inputs.tasks }}
+          BUILD_IMAGES: ${{ inputs.build_images }}
+          RUN_TESTS: ${{ inputs.run_tests }}
+          PUSH: ${{ inputs.push }}
+          TARGET_OVERRIDE: ${{ inputs.target }}
+          RESOLVED_SOURCES: ${{ inputs.resolved_sources }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PLATFORM" =~ ^[a-z0-9_-]+$ ]]; then
+            echo "::error::Invalid platform: $PLATFORM"
+            exit 1
+          fi
+          if ! jq -e 'type == "object"' <<< "$RESOLVED_SOURCES" >/dev/null; then
+            echo "::error::resolved_sources must be a JSON object"
+            exit 1
+          fi
+          if [ "$BUILD_IMAGES" = true ] && [ "$RUN_TESTS" = true ] && \
+             [ "$PUSH" != true ]; then
+            echo "::error::Testing candidate images requires push=true"
+            exit 1
+          fi
+
+          config_file=".github/configs/${PLATFORM}.yml"
+          if [ ! -f "$config_file" ]; then
+            echo "::error::Platform config not found: $config_file"
+            exit 1
+          fi
+          if [ "$(/usr/local/bin/yq -r '.image_build.enabled // false' "$config_file")" != true ]; then
+            echo "::error::Image builds are not enabled for $PLATFORM"
+            exit 1
+          fi
+
+          runs_on=$(/usr/local/bin/yq -o=json -I=0 \
+            '.image_build.runner_labels // .runner_labels' "$config_file")
+          registry=$(/usr/local/bin/yq -r '.image_build.registry // ""' "$config_file")
+          max_parallel=$(/usr/local/bin/yq -r '.image_build.max_parallel // 1' "$config_file")
+          short_sha="${SOURCE_SHA::7}"
+          if [ -z "$registry" ] || \
+             [ "$(jq -r 'type' <<< "$runs_on")" != array ] || \
+             [ "$(jq 'length' <<< "$runs_on")" -eq 0 ]; then
+            echo "::error::Incomplete image-build registry/runner contract: $PLATFORM"
+            exit 1
+          fi
+          if ! [[ "$max_parallel" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Invalid image_build.max_parallel: $PLATFORM"
+            exit 1
+          fi
+
+          if [ "$TASKS" = all_tasks ]; then
+            mapfile -t task_names < <(/usr/local/bin/yq -r \
+              '.image_build.tasks | to_entries | .[].key' "$config_file")
+          else
+            IFS=',' read -r -a task_names <<< "$TASKS"
+          fi
+          if [ "${#task_names[@]}" -eq 0 ]; then
+            echo "::error::No image tasks selected for $PLATFORM"
+            exit 1
+          fi
+          all_task_selected=false
+          for selected_task in "${task_names[@]}"; do
+            selected_task="${selected_task//[[:space:]]/}"
+            [ "$selected_task" = all ] && all_task_selected=true
+          done
+
+          entries=()
+          candidate_test_roles=0
+          train_image=$(/usr/local/bin/yq -r '.ci_train_image // .ci_image // ""' "$config_file")
+          inference_image=$(/usr/local/bin/yq -r \
+            '.ci_inference_image // .ci_image // ""' "$config_file")
+          train_pkg_mgr=""
+          train_env_name=""
+          train_env_path=""
+          inference_pkg_mgr=""
+          inference_env_name=""
+          inference_env_path=""
+          serve_pkg_mgr=""
+          serve_env_name=""
+          serve_env_path=""
+
+          for raw_task in "${task_names[@]}"; do
+            task="${raw_task//[[:space:]]/}"
+            if [[ ! "$task" =~ ^[a-z0-9_-]+$ ]]; then
+              echo "::error::Invalid image task: $task"
+              exit 1
+            fi
+            if ! TASK="$task" /usr/local/bin/yq -e \
+              '.image_build.tasks[strenv(TASK)] != null' "$config_file" >/dev/null; then
+              echo "::error::${PLATFORM} does not declare image task $task"
+              exit 1
+            fi
+
+            entry=$(TASK="$task" /usr/local/bin/yq -o=json -I=0 \
+              '.image_build.tasks[strenv(TASK)] as $item |
+               {
+                 "task": strenv(TASK),
+                 "dockerfile": $item.dockerfile,
+                 "image_name": $item.image,
+                 "base_image": $item.base_image,
+                 "target": ($item.target // .image_build.target // "dev"),
+                 "network": ($item.network // .image_build.network // "default"),
+                 "registry_login": ($item.registry_login // .image_build.registry_login // false),
+                 "validation_script": ($item.validation_script // .image_build.validation_script // ""),
+                 "runtime_smoke_nproc": ($item.runtime_smoke_nproc // .image_build.runtime_smoke_nproc // ""),
+                 "runtime_device_count": ($item.runtime_device_count // .image_build.runtime_device_count // ""),
+                 "build_args": ((.image_build.build_args // {}) * ($item.build_args // {})),
+                 "source_refs": ((.image_build.source_refs // {}) * ($item.source_refs // {})),
+                  "test_roles": ($item.test_roles // []),
+                  "test_environments": ($item.test_environments // {})
+               }' "$config_file")
+
+            dockerfile=$(jq -r '.dockerfile // ""' <<< "$entry")
+            image_name=$(jq -r '.image_name // ""' <<< "$entry")
+            base_image=$(jq -r '.base_image // ""' <<< "$entry")
+            target=$(jq -r '.target // ""' <<< "$entry")
+            network=$(jq -r '.network // ""' <<< "$entry")
+            validation_script=$(jq -r '.validation_script // ""' <<< "$entry")
+            runtime_smoke_nproc=$(jq -r '.runtime_smoke_nproc // ""' <<< "$entry")
+            runtime_device_count=$(jq -r '.runtime_device_count // ""' <<< "$entry")
+            if [ -n "$TARGET_OVERRIDE" ]; then
+              target="$TARGET_OVERRIDE"
+              entry=$(jq -c --arg target "$target" '.target = $target' <<< "$entry")
+            fi
+            if [ -z "$dockerfile" ] || [ ! -f "$dockerfile" ] || \
+               [ -z "$image_name" ] || [ -z "$base_image" ] || \
+               [ -z "$target" ] || [ -z "$network" ]; then
+              echo "::error::Incomplete image task contract: ${PLATFORM}/${task}"
+              exit 1
+            fi
+            if [[ ! "$target" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+              echo "::error::Invalid image target: ${PLATFORM}/${task}: $target"
+              exit 1
+            fi
+            if [ -n "$validation_script" ] && [ ! -f "$validation_script" ]; then
+              echo "::error::Validation script not found: $validation_script"
+              exit 1
+            fi
+            if [ -n "$runtime_device_count" ] && \
+               ! [[ "$runtime_device_count" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Invalid runtime_device_count: ${PLATFORM}/${task}"
+              exit 1
+            fi
+            if [ -n "$runtime_smoke_nproc" ] && \
+               ! [[ "$runtime_smoke_nproc" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Invalid runtime_smoke_nproc: ${PLATFORM}/${task}"
+              exit 1
+            fi
+            if [ -n "$runtime_smoke_nproc" ] && \
+               [ -n "$runtime_device_count" ] && \
+               [ "$runtime_smoke_nproc" -gt "$runtime_device_count" ]; then
+              echo "::error::runtime_smoke_nproc exceeds runtime_device_count: ${PLATFORM}/${task}"
+              exit 1
+            fi
+
+            test_roles=$(jq -c '.test_roles // []' <<< "$entry")
+            if [ "$(jq -r 'type' <<< "$test_roles")" != array ] || \
+               ! jq -e 'all(.[]; . == "train" or . == "inference")' \
+               <<< "$test_roles" >/dev/null; then
+              echo "::error::Invalid test_roles: ${PLATFORM}/${task}"
+              exit 1
+            fi
+            if [ "$BUILD_IMAGES" = true ] && [ "$RUN_TESTS" = true ] && \
+               [ "$task" = all ] && [ "$(jq 'length' <<< "$test_roles")" -gt 0 ]; then
+              required_roles=()
+              if jq -e 'index("train") != null' <<< "$test_roles" >/dev/null; then
+                required_roles+=(train)
+              fi
+              if jq -e 'index("inference") != null' <<< "$test_roles" >/dev/null; then
+                required_roles+=(inference serve)
+              fi
+              reference_role="${required_roles[0]}"
+              for role in "${required_roles[@]}"; do
+                pkg_mgr=$(jq -r --arg role "$role" \
+                  '.test_environments[$role].pkg_mgr // ""' <<< "$entry")
+                env_name=$(jq -r --arg role "$role" \
+                  '.test_environments[$role].env_name // ""' <<< "$entry")
+                env_path=$(jq -r --arg role "$role" \
+                  '.test_environments[$role].env_path // ""' <<< "$entry")
+                if [ -z "$pkg_mgr" ] || [ -z "$env_path" ]; then
+                  echo "::error::Missing test_environments.${role} for ${PLATFORM}/${task}"
+                  exit 1
+                fi
+                case "$pkg_mgr" in
+                  conda|pip|uv) ;;
+                  *)
+                    echo "::error::Unsupported test environment package manager: ${PLATFORM}/${task}/${role}: $pkg_mgr"
+                    exit 1
+                    ;;
+                esac
+                if [ "$pkg_mgr" = conda ] && [ -z "$env_name" ]; then
+                  echo "::error::Missing test_environments.${role}.env_name for ${PLATFORM}/${task}"
+                  exit 1
+                fi
+                if ! jq -e --arg role "$role" \
+                  --arg reference_role "$reference_role" \
+                  '.test_environments[$role] == .test_environments[$reference_role]' \
+                  <<< "$entry" >/dev/null; then
+                  echo "::error::All image test roles must share one environment: ${PLATFORM}/${task}"
+                  exit 1
+                fi
+              done
+            fi
+
+            if [[ ! "$image_name" =~ ^[a-z0-9][a-z0-9._/-]*[a-z0-9]$ ]] || \
+               [[ "$image_name" == *//* ]] || [[ "$image_name" == *:* ]] || \
+               [[ "$image_name" == *@* ]]; then
+              echo "::error::Invalid image repository for ${PLATFORM}/${task}: $image_name"
+              exit 1
+            fi
+
+            build_args=$(jq -c '.build_args' <<< "$entry")
+            source_metadata='{}'
+            while IFS=$'\t' read -r build_arg source_name; do
+              [ -n "$build_arg" ] || continue
+              source=$(jq -c --arg name "$source_name" '.[$name] // empty' \
+                <<< "$RESOLVED_SOURCES")
+              if [ "$BUILD_IMAGES" = true ] && [ -z "$source" ]; then
+                echo "::error::Source $source_name was not resolved for ${PLATFORM}/${task}"
+                exit 1
+              fi
+              if [ -n "$source" ]; then
+                revision=$(jq -r '.revision' <<< "$source")
+                if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+                  echo "::error::Invalid resolved revision for $source_name: $revision"
+                  exit 1
+                fi
+                build_args=$(jq -c --arg key "$build_arg" --arg value "$revision" \
+                  '. + {($key): $value}' <<< "$build_args")
+                source_metadata=$(jq -c --arg key "$source_name" --argjson value "$source" \
+                  '. + {($key): $value}' <<< "$source_metadata")
+              fi
+            done < <(jq -r '.source_refs | to_entries[]? | [.key, .value] | @tsv' <<< "$entry")
+
+            build_arg_lines=$(jq -r \
+              'to_entries[] | "\(.key)=\(.value)"' <<< "$build_args")
+            source_labels=$(jq -r \
+              'to_entries[] | (.key | gsub("_"; "-")) as $label |
+               "io.flagscale.source.\($label).revision=\(.value.revision)\n" +
+               "io.flagscale.source.\($label).selector=\(.value.selector)"' \
+              <<< "$source_metadata")
+            source_summary=$(jq -r \
+              'to_entries[] |
+               "| `\(.key)` | `\(.value.selector)` | `\(.value.revision)` |"' \
+              <<< "$source_metadata")
+            candidate="${registry}/${image_name}:${short_sha}-${PLATFORM}-${target}"
+            entry=$(jq -c \
+              --arg registry "$registry" \
+              --arg image "$candidate" \
+              --arg build_arg_lines "$build_arg_lines" \
+              --arg source_labels "$source_labels" \
+              --arg source_summary "$source_summary" \
+              --argjson build_args "$build_args" \
+              --argjson resolved_sources "$source_metadata" \
+              '. + {
+                registry: $registry,
+                image: $image,
+                build_arg_lines: $build_arg_lines,
+                source_labels: $source_labels,
+                source_summary: $source_summary,
+                build_args: $build_args,
+                resolved_sources: $resolved_sources
+              }' <<< "$entry")
+            entries+=("$entry")
+
+            if [ "$BUILD_IMAGES" = true ]; then
+              while IFS= read -r role; do
+                case "$role" in
+                  train)
+                    if [ "$all_task_selected" != true ] || [ "$task" = all ]; then
+                      train_image="$candidate"
+                      train_pkg_mgr=$(jq -r '.test_environments.train.pkg_mgr // ""' <<< "$entry")
+                      train_env_name=$(jq -r '.test_environments.train.env_name // ""' <<< "$entry")
+                      train_env_path=$(jq -r '.test_environments.train.env_path // ""' <<< "$entry")
+                    fi
+                    candidate_test_roles=$((candidate_test_roles + 1))
+                    ;;
+                  inference)
+                    if [ "$all_task_selected" != true ] || [ "$task" = all ]; then
+                      inference_image="$candidate"
+                      inference_pkg_mgr=$(jq -r '.test_environments.inference.pkg_mgr // ""' <<< "$entry")
+                      inference_env_name=$(jq -r '.test_environments.inference.env_name // ""' <<< "$entry")
+                      inference_env_path=$(jq -r '.test_environments.inference.env_path // ""' <<< "$entry")
+                      serve_pkg_mgr=$(jq -r '.test_environments.serve.pkg_mgr // ""' <<< "$entry")
+                      serve_env_name=$(jq -r '.test_environments.serve.env_name // ""' <<< "$entry")
+                      serve_env_path=$(jq -r '.test_environments.serve.env_path // ""' <<< "$entry")
+                    fi
+                    candidate_test_roles=$((candidate_test_roles + 1))
+                    ;;
+                  '') ;;
+                  *) echo "::error::Unsupported test role: $role"; exit 1 ;;
+                esac
+              done < <(jq -r '.test_roles[]?' <<< "$entry")
+            fi
+          done
+
+          if [ "$BUILD_IMAGES" = true ] && [ "$RUN_TESTS" = true ] && \
+             [ "$candidate_test_roles" -eq 0 ]; then
+            echo "::error::Selected tasks do not provide a train or inference test image"
+            exit 1
+          fi
+          matrix=$(printf '%s\n' "${entries[@]}" | jq -s -c '{include: .}')
+
+          {
+            echo "platform=$PLATFORM"
+            echo "runs_on=$runs_on"
+            echo "matrix=$matrix"
+            echo "max_parallel=$max_parallel"
+            echo "train_image=$train_image"
+            echo "inference_image=$inference_image"
+            echo "train_pkg_mgr=$train_pkg_mgr"
+            echo "train_env_name=$train_env_name"
+            echo "train_env_path=$train_env_path"
+            echo "inference_pkg_mgr=$inference_pkg_mgr"
+            echo "inference_env_name=$inference_env_name"
+            echo "inference_env_path=$inference_env_path"
+            echo "serve_pkg_mgr=$serve_pkg_mgr"
+            echo "serve_env_name=$serve_env_name"
+            echo "serve_env_path=$serve_env_path"
+          } >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ inputs.platform }} ${{ matrix.task }}
+    needs: configure
     if: inputs.build_images
-    runs-on: ${{ fromJSON(inputs.runs_on) }}
+    runs-on: ${{ fromJSON(needs.configure.outputs.runs_on) }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(inputs.matrix) }}
+      max-parallel: ${{ fromJSON(needs.configure.outputs.max_parallel) }}
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
     steps:
       - name: Clean workspace
         run: sudo rm -rf "$GITHUB_WORKSPACE"/* "$GITHUB_WORKSPACE"/.[!.]* 2>/dev/null || true
@@ -124,24 +474,39 @@ jobs:
         with:
           driver: docker
 
+      - name: Validate registry credentials
+        if: inputs.push || matrix.registry_login
+        shell: bash
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.CONTAINER_REGISTRY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REGISTRY_USERNAME" ] || [ -z "$REGISTRY_PASSWORD" ]; then
+            echo "::error::Registry credentials are required for this image build"
+            exit 1
+          fi
+
       - name: Log in to registry
-        if: inputs.push
+        if: inputs.push || matrix.registry_login
         uses: docker/login-action@v3
         with:
-          registry: ${{ inputs.registry }}
+          registry: ${{ matrix.registry }}
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.CONTAINER_REGISTRY }}
 
-      - name: Select image tag
-        id: image
+      - name: Run platform pre-build contract
+        if: matrix.validation_script != ''
         shell: bash
-        run: |
-          case "${{ matrix.task }}" in
-            train) echo "tag=${{ inputs.train_image }}" >> "$GITHUB_OUTPUT" ;;
-            inference) echo "tag=${{ inputs.inference_image }}" >> "$GITHUB_OUTPUT" ;;
-            all) echo "tag=${{ inputs.all_image }}" >> "$GITHUB_OUTPUT" ;;
-            *) echo "Unsupported image task: ${{ matrix.task }}" >&2; exit 1 ;;
-          esac
+        env:
+          IMAGE_BUILD_PHASE: pre
+          IMAGE_BUILD_TASK: ${{ matrix.task }}
+          IMAGE_BUILD_BASE_IMAGE: ${{ matrix.base_image }}
+          IMAGE_BUILD_CANDIDATE_IMAGE: ${{ matrix.image }}
+          IMAGE_BUILD_RUNTIME_SMOKE_NPROC: ${{ matrix.runtime_smoke_nproc }}
+          IMAGE_BUILD_RUNTIME_DEVICE_COUNT: ${{ matrix.runtime_device_count }}
+          IMAGE_BUILD_VALIDATION_SCRIPT: ${{ matrix.validation_script }}
+        run: bash "$IMAGE_BUILD_VALIDATION_SCRIPT"
 
       - name: Build image (attempt 1)
         id: build_attempt_1
@@ -149,13 +514,15 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/${{ inputs.platform }}/Dockerfile.${{ matrix.task }}
-          target: ${{ inputs.target }}
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          network: ${{ matrix.network }}
           load: true
-          tags: ${{ steps.image.outputs.tag }}
+          tags: ${{ matrix.image }}
           no-cache: ${{ inputs.no_cache }}
           build-args: |
-            ${{ inputs.build_args }}
+            BASE_IMAGE=${{ matrix.base_image }}
+            ${{ matrix.build_arg_lines }}
             HTTP_PROXY=${{ steps.proxy.outputs.http_proxy }}
             HTTPS_PROXY=${{ steps.proxy.outputs.https_proxy }}
             NO_PROXY=${{ steps.proxy.outputs.no_proxy }}
@@ -165,11 +532,11 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
-            org.opencontainers.image.base.name=${{ inputs.base_image }}
+            org.opencontainers.image.base.name=${{ matrix.base_image }}
+            ${{ matrix.source_labels }}
 
       - name: Wait before build retry
         if: steps.build_attempt_1.outcome == 'failure'
-        shell: bash
         run: sleep 15
 
       - name: Build image (attempt 2)
@@ -177,13 +544,15 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/${{ inputs.platform }}/Dockerfile.${{ matrix.task }}
-          target: ${{ inputs.target }}
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          network: ${{ matrix.network }}
           load: true
-          tags: ${{ steps.image.outputs.tag }}
+          tags: ${{ matrix.image }}
           no-cache: ${{ inputs.no_cache }}
           build-args: |
-            ${{ inputs.build_args }}
+            BASE_IMAGE=${{ matrix.base_image }}
+            ${{ matrix.build_arg_lines }}
             HTTP_PROXY=${{ steps.proxy.outputs.http_proxy }}
             HTTPS_PROXY=${{ steps.proxy.outputs.https_proxy }}
             NO_PROXY=${{ steps.proxy.outputs.no_proxy }}
@@ -193,19 +562,104 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.event.pull_request.head.sha || github.sha }}
-            org.opencontainers.image.base.name=${{ inputs.base_image }}
+            org.opencontainers.image.base.name=${{ matrix.base_image }}
+            ${{ matrix.source_labels }}
+
+      - name: Run platform post-build contract
+        if: matrix.validation_script != ''
+        shell: bash
+        env:
+          IMAGE_BUILD_PHASE: post
+          IMAGE_BUILD_TASK: ${{ matrix.task }}
+          IMAGE_BUILD_BASE_IMAGE: ${{ matrix.base_image }}
+          IMAGE_BUILD_CANDIDATE_IMAGE: ${{ matrix.image }}
+          IMAGE_BUILD_RUNTIME_SMOKE_NPROC: ${{ matrix.runtime_smoke_nproc }}
+          IMAGE_BUILD_RUNTIME_DEVICE_COUNT: ${{ matrix.runtime_device_count }}
+          IMAGE_BUILD_VALIDATION_SCRIPT: ${{ matrix.validation_script }}
+        run: bash "$IMAGE_BUILD_VALIDATION_SCRIPT"
 
       - name: Push image with retry
+        id: push_image
         if: inputs.push
         shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if docker push "${{ steps.image.outputs.tag }}"; then
+            push_log=$(mktemp)
+            if docker push "$IMAGE" 2>&1 | tee "$push_log"; then
+              digest=$(sed -nE \
+                's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' \
+                "$push_log" | tail -n 1)
+              rm -f "$push_log"
+              if [ -z "$digest" ]; then
+                echo "::error::Registry push succeeded but no image digest was reported"
+                exit 1
+              fi
+              echo "digest=$digest" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+            rm -f "$push_log"
             [ "$attempt" -eq 3 ] && break
             sleep $((attempt * 15))
           done
           echo "::error::Failed to push image after 3 attempts"
           exit 1
+
+      - name: Record image result
+        shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          TASK: ${{ matrix.task }}
+          IMAGE: ${{ matrix.image }}
+          BASE_IMAGE: ${{ matrix.base_image }}
+          SOURCE_SUMMARY: ${{ matrix.source_summary }}
+          REMOTE_DIGEST: ${{ steps.push_image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          local_id=$(docker image inspect "$IMAGE" --format '{{.Id}}')
+          {
+            echo '### Image build result'
+            echo
+            echo "- Platform: \`$PLATFORM\`"
+            echo "- Task: \`$TASK\`"
+            echo "- Image: \`$IMAGE\`"
+            echo "- Base: \`$BASE_IMAGE\`"
+            if [ -n "$REMOTE_DIGEST" ]; then
+              echo "- Published digest: \`${IMAGE%:*}@$REMOTE_DIGEST\`"
+            else
+              echo '- Published digest: `not pushed`'
+            fi
+            echo "- Local image ID: \`$local_id\`"
+            if [ -n "$SOURCE_SUMMARY" ]; then
+              echo
+              echo '| Source | Selector | Revision |'
+              echo '|---|---|---|'
+              printf '%s\n' "$SOURCE_SUMMARY"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tests:
+    name: Test ${{ inputs.platform }} images
+    needs: [configure, build]
+    if: >-
+      always() &&
+      inputs.run_tests &&
+      needs.configure.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    uses: ./.github/workflows/all_tests_common.yml
+    secrets: inherit
+    with:
+      platform: ${{ needs.configure.outputs.platform }}
+      ci_train_image: ${{ needs.configure.outputs.train_image }}
+      ci_inference_image: ${{ needs.configure.outputs.inference_image }}
+      train_pkg_mgr: ${{ needs.configure.outputs.train_pkg_mgr }}
+      train_env_name: ${{ needs.configure.outputs.train_env_name }}
+      train_env_path: ${{ needs.configure.outputs.train_env_path }}
+      inference_pkg_mgr: ${{ needs.configure.outputs.inference_pkg_mgr }}
+      inference_env_name: ${{ needs.configure.outputs.inference_env_name }}
+      inference_env_path: ${{ needs.configure.outputs.inference_env_path }}
+      serve_pkg_mgr: ${{ needs.configure.outputs.serve_pkg_mgr }}
+      serve_env_name: ${{ needs.configure.outputs.serve_env_name }}
+      serve_env_path: ${{ needs.configure.outputs.serve_env_path }}

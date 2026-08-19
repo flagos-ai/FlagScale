@@ -14,14 +14,18 @@
 
 # Template for adding new hardware
 
-# IMPORTANT: Fill in all fields below for your new hardware
-# Then create: workflows/hardware_name/all_tests.yml that uses this config
+# IMPORTANT: Fill in all fields below for your new hardware. The shared test
+# and image-build workflows consume this config directly; a platform-specific
+# workflow is only needed when the platform has a genuinely different lifecycle.
 
 hardware_name: my_hardware  # Change this to your hardware name
 display_name: "My Hardware Tests"  # Display name for GitHub Actions
 
-# Docker image for this hardware (change image tag if needed)
-ci_image: localhost:5000/flagscale:my-hardware-image
+# Validated images consumed by the shared test workflow. Use a registry that
+# every runner can reach; prefer immutable digests for real platform configs.
+ci_image: registry.example.com/flagos-dev/flagscale-all:validated-tag
+ci_train_image: registry.example.com/flagos-dev/flagscale-train:validated-tag
+ci_inference_image: registry.example.com/flagos-dev/flagscale-inference:validated-tag
 
 # Runner labels for this hardware (CRITICAL - update these for your runners)
 runner_labels:
@@ -38,6 +42,32 @@ container_volumes:
   - /home/flagscale_cicd/docker/docker_build/docker_data:/home/gitlab-runner/data
   - /home/flagscale_cicd/docker/docker_build/docker_tokenizers:/home/gitlab-runner/tokenizers
   # Add hardware-specific volumes here if needed (e.g., cache locations)
+
+# Optional image build contract. A new platform normally needs only this
+# section, docker/<platform>/Dockerfile.<task>, tools/install/<platform>/env.sh,
+# and an optional validation script under tools/install/<platform>/.
+image_build:
+  enabled: false
+  registry: registry.example.com
+  target: dev
+  network: default
+  max_parallel: 1
+  registry_login: true  # Needed for private base pulls; pushes always log in
+  validation_script: ''
+  build_args: {}
+  # Declare only complete image capabilities. Every non-all task needs a
+  # Dockerfile, requirements/<platform>/<task>.txt, and install_<task>.sh.
+  # Unsupported tasks stay absent rather than using placeholder files.
+  tasks:
+    train:
+      dockerfile: docker/my_hardware/Dockerfile.train
+      image: flagos-dev/flagscale-train
+      base_image: registry.example.com/vendor/train-base:tag
+      build_args: {}
+      # Map Docker build argument names to entries in image_sources.yml.
+      source_refs:
+        FLAGSCALE_MEGATRON_REF: megatron_lm_fl
+      test_roles: [train]
 
 # Container options (hardware-specific settings - update as needed)
 container_options: >-

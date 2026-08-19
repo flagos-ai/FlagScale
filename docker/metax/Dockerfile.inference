@@ -1,0 +1,45 @@
+# FlagScale inference and serve image for MetaX C550.
+# The immutable base owns Torch, MACA, vLLM-MetaX and its validated FlagGems.
+# This image only installs the workflow-resolved vllm-plugin-FL revision.
+
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-metax-ci
+
+FROM ${BASE_IMAGE} AS dev
+
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG VLLM_PLUGIN_FL_REF=main
+
+LABEL io.flagscale.vllm-plugin-fl.revision=${VLLM_PLUGIN_FL_REF}
+
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps \
+    FLAGSCALE_VLLM_PLUGIN_REF=${VLLM_PLUGIN_FL_REF} \
+    VLLM_PLUGINS=fl \
+    VLLM_FL_PLATFORM=metax
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+# Preserve the immutable vendor runtime contract: the source overlay may add
+# its entry point but must not introduce new dependency conflicts.
+RUN python -m pip check 2>&1 | sort > /tmp/pip-check.before || true
+
+RUN chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/metax/*.sh && \
+    /workspace/tools/install/install.sh --platform metax --task inference \
+        --pkg-mgr pip --no-system --no-dev --no-base && \
+    /workspace/tools/install/install.sh --platform metax --task serve \
+        --pkg-mgr pip --no-system --no-dev --no-base
+
+RUN python -m pip check 2>&1 | sort > /tmp/pip-check.after || true
+
+RUN bash /workspace/tools/install/utils/check_pip_conflicts.sh \
+        /tmp/pip-check.before /tmp/pip-check.after && \
+    rm -f /tmp/pip-check.before /tmp/pip-check.after && \
+    rm -rf /opt/flagscale/deps /workspace/tools /workspace/requirements
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
+
+FROM dev AS release

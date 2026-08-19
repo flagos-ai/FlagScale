@@ -28,9 +28,10 @@ experiment:
       port: 6703
       use_fs_serve: false
   envs:
-    ASCEND_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+    ASCEND_VISIBLE_DEVICES: "4,5"
     HCCL_WHITELIST_DISABLE: 1
-    VLLM_TARGET_DEVICE: "npu"
+    VLLM_PLUGINS: "fl"
+    VLLM_FL_PLATFORM: "ascend"
     no_proxy: "127.0.0.1,localhost"
 
 action: run

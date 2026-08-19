@@ -1,0 +1,8 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+-r ./inference.txt
+
+# Client-side dependencies used by the serve health and real-request checks.
+httpx>=0.27,<1
+requests>=2.32,<3

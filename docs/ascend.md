@@ -20,7 +20,8 @@
 ### Serve with vllm
 #### 1. Launch Container
 ```bash
-docker pull quay.io/ascend/vllm-ascend:v0.13.0rc1-a3
+ASCEND_IMAGE=harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260812-ascend-dev-inference
+docker pull "$ASCEND_IMAGE"
 ```
 
 ```bash
@@ -55,7 +56,7 @@ docker run \
     -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
     -v /usr/local/sbin:/usr/local/sbin \
     -v /etc/ascend_install.info:/etc/ascend_install.info \
-    quay.io/ascend/vllm-ascend:v0.13.0rc1-a3 \
+    "$ASCEND_IMAGE" \
     bash
 ```
 
@@ -66,22 +67,18 @@ git clone https://github.com/flagos-ai/FlagScale.git
 cd FlagScale
 ```
 
-Install build dependencies first:
+Install FlagScale without replacing the validated vLLM, vllm-plugin-FL, and
+FlagGems versions provided by the image:
 
 ```bash
-pip install setuptools==82.0.0 scikit-build-core==0.11 pybind11==3.0.2 ninja==1.13.0 cmake==4.2.3
-```
-
-Install FlagScale with Ascend serve extras:
-
-```bash
-pip install ".[ascend-serve]" -v --no-build-isolation
+pip install . --no-build-isolation
 ```
 
 #### 3. Start Serving
 
 ```bash
 export VLLM_PLUGINS=fl
+export VLLM_FL_PLATFORM=ascend
 export TRITON_ALL_BLOCKS_PARALLEL=1
 
 vllm serve --model /models/Qwen3-4B --served-model-name qwen --enforce-eager

@@ -66,6 +66,8 @@
 # -----------------------------------------------------------------------------
 export FLAGSCALE_HOME FLAGSCALE_CONDA FLAGSCALE_DEPS FLAGSCALE_DOWNLOADS
 export UV_PROJECT_ENVIRONMENT MPI_HOME ASCEND_HOME ASCEND_TOOLKIT_HOME
+export ASCEND_HOME_PATH="$ASCEND_TOOLKIT_HOME"
+export ASCEND_OPP_PATH="$ASCEND_TOOLKIT_HOME/opp"
 export UV_HTTP_TIMEOUT UV_INDEX_STRATEGY UV_LINK_MODE
 export VIRTUAL_ENV="$UV_PROJECT_ENVIRONMENT"
 
@@ -73,4 +75,12 @@ export VIRTUAL_ENV="$UV_PROJECT_ENVIRONMENT"
 # PATH Configuration
 # -----------------------------------------------------------------------------
 export PATH="$UV_PROJECT_ENVIRONMENT/bin:$FLAGSCALE_CONDA/bin:$HOME/.local/bin:$MPI_HOME/bin:$ASCEND_TOOLKIT_HOME/bin:$PATH"
-export LD_LIBRARY_PATH="$ASCEND_TOOLKIT_HOME/lib64:$ASCEND_HOME/driver/lib64:$MPI_HOME/lib64:$MPI_HOME/lib:/usr/local/lib:$LD_LIBRARY_PATH"
+nnal_library_paths=""
+for library_path in \
+    "$ASCEND_HOME"/nnal/atb/*/atb/cxx_abi_*/lib \
+    "$ASCEND_HOME"/nnal/atb/*/lib \
+    "$ASCEND_HOME"/nnal/asdsip/*/lib; do
+    [ -d "$library_path" ] || continue
+    nnal_library_paths="$nnal_library_paths:$library_path"
+done
+export LD_LIBRARY_PATH="$ASCEND_TOOLKIT_HOME/lib64$nnal_library_paths:$ASCEND_HOME/driver/lib64:$MPI_HOME/lib64:$MPI_HOME/lib:/usr/local/lib:${LD_LIBRARY_PATH:-}"

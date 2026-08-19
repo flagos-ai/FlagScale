@@ -15,7 +15,7 @@
 # MetaX C550 Platform Configuration
 # Flexible test selection mechanism for MetaX C550 GPU (MACA) environments
 #
-# MetaX C550 specs: 2x C550 GPUs, 65536 MiB each, MACA 3.3.0
+# MetaX C550 specs: 8x C550 GPUs, 65536 MiB each, MACA 3.3.0
 #
 # Users can modify the following:
 # - functional: Add/remove test case names in the support lists
@@ -38,9 +38,12 @@ c550:
       train:
         qwen3: ["0_6b_metax"]
       hetero_train: {}
-      benchmark: {} # qwen3: ["0_6b_metax"]
-      inference: {}
-      serve: {}
+      benchmark:
+        qwen3: ["0_6b_metax"]
+      inference:
+        qwen3: ["4b_tp2_metax"]
+      serve:
+        qwen2_5: ["0.5b_metax"]
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

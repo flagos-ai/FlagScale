@@ -1,0 +1,367 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Build Docker Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform config name, or all for every enabled platform
+        required: true
+        default: all
+        type: string
+      tasks:
+        description: Comma-separated image tasks, or all_tasks
+        required: true
+        default: all_tasks
+        type: string
+      build_images:
+        description: Build new candidate images
+        required: true
+        default: true
+        type: boolean
+      run_tests:
+        description: Run tests against the candidate images
+        required: true
+        default: true
+        type: boolean
+      push:
+        description: Push candidate images to the shared registry
+        required: true
+        default: true
+        type: boolean
+      no_cache:
+        description: Build without Docker cache
+        required: true
+        default: false
+        type: boolean
+      target:
+        description: Override the target declared by each platform config
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  prepare:
+    name: Resolve image build inputs
+    runs-on: ubuntu-latest
+    outputs:
+      platform_matrix: ${{ steps.prepare.outputs.platform_matrix }}
+      resolved_sources: ${{ steps.prepare.outputs.resolved_sources }}
+      execute: ${{ steps.prepare.outputs.execute }}
+      tasks: ${{ steps.prepare.outputs.tasks }}
+      build_images: ${{ steps.prepare.outputs.build_images }}
+      run_tests: ${{ steps.prepare.outputs.run_tests }}
+      push: ${{ steps.prepare.outputs.push }}
+      no_cache: ${{ steps.prepare.outputs.no_cache }}
+      target: ${{ steps.prepare.outputs.target }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install yq
+        shell: bash
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Validate contracts and resolve source revisions
+        id: prepare
+        shell: bash
+        env:
+          INPUT_PLATFORM: ${{ inputs.platform }}
+          INPUT_TASKS: ${{ inputs.tasks }}
+          INPUT_BUILD_IMAGES: ${{ inputs.build_images }}
+          INPUT_RUN_TESTS: ${{ inputs.run_tests }}
+          INPUT_PUSH: ${{ inputs.push }}
+          INPUT_NO_CACHE: ${{ inputs.no_cache }}
+          INPUT_TARGET: ${{ inputs.target }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          source_file=.github/configs/image_sources.yml
+          if [ ! -f "$source_file" ]; then
+            echo "::error::Source catalog not found: $source_file"
+            exit 1
+          fi
+          source_catalog=$(/usr/local/bin/yq -o=json -I=0 '.sources' "$source_file")
+          printf '%s' "$source_catalog" | \
+            python3 tools/install/utils/resolve_source_refs.py --validate-only >/dev/null
+
+          execute=true
+          selected_platform="${INPUT_PLATFORM:-all}"
+          tasks="${INPUT_TASKS:-all_tasks}"
+          build_images="${INPUT_BUILD_IMAGES:-true}"
+          run_tests="${INPUT_RUN_TESTS:-true}"
+          push="${INPUT_PUSH:-true}"
+          no_cache="${INPUT_NO_CACHE:-false}"
+          target="${INPUT_TARGET:-}"
+
+          if [[ ! "$selected_platform" =~ ^(all|[a-z0-9_-]+)$ ]]; then
+            echo "::error::Invalid platform: $selected_platform"
+            exit 1
+          fi
+          if [ -z "$tasks" ]; then
+            echo "::error::At least one image task is required"
+            exit 1
+          fi
+          declare -A selected_tasks=()
+          if [ "$tasks" != all_tasks ]; then
+            IFS=',' read -r -a raw_tasks <<< "$tasks"
+            normalized_tasks=()
+            for raw_task in "${raw_tasks[@]}"; do
+              task="${raw_task//[[:space:]]/}"
+              if [[ ! "$task" =~ ^[a-z0-9_-]+$ ]]; then
+                echo "::error::Invalid image task: $task"
+                exit 1
+              fi
+              selected_tasks["$task"]=1
+              normalized_tasks+=("$task")
+            done
+            if [ "${#normalized_tasks[@]}" -eq 0 ]; then
+              echo "::error::At least one image task is required"
+              exit 1
+            fi
+            tasks=$(IFS=,; echo "${normalized_tasks[*]}")
+          fi
+          if [ -n "$target" ] && [[ ! "$target" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::Invalid image target: $target"
+            exit 1
+          fi
+          if [ "$build_images" = true ] && [ "$run_tests" = true ] && \
+             [ "$push" != true ]; then
+            echo "::error::Testing candidate images requires push=true"
+            exit 1
+          fi
+          if [ "$build_images" != true ]; then
+            push=false
+          fi
+
+          platforms=()
+          for config_file in .github/configs/*.yml; do
+            enabled=$(/usr/local/bin/yq -r '.image_build.enabled // false' "$config_file")
+            [ "$enabled" = true ] || continue
+            platform=$(basename "$config_file" .yml)
+            if [ "$selected_platform" = all ] || [ "$selected_platform" = "$platform" ]; then
+              platforms+=("$platform")
+            fi
+          done
+          if [ "${#platforms[@]}" -eq 0 ]; then
+            echo "::error::No enabled image-build platform matched $selected_platform"
+            exit 1
+          fi
+
+          source_names=$(jq -c 'keys' <<< "$source_catalog")
+          requested_sources='[]'
+          for platform in "${platforms[@]}"; do
+            config_file=".github/configs/${platform}.yml"
+            env_script="tools/install/${platform}/env.sh"
+            registry=$(/usr/local/bin/yq -r '.image_build.registry // ""' "$config_file")
+            runners=$(/usr/local/bin/yq -o=json -I=0 \
+              '.image_build.runner_labels // .runner_labels // []' "$config_file")
+            max_parallel=$(/usr/local/bin/yq -r '.image_build.max_parallel // 1' "$config_file")
+            if [ -z "$registry" ] || \
+               [ "$(jq -r 'type' <<< "$runners")" != array ] || \
+               [ "$(jq 'length' <<< "$runners")" -eq 0 ]; then
+              echo "::error::Incomplete image_build contract: $platform"
+              exit 1
+            fi
+            if ! jq -e 'all(.[]; type == "string" and length > 0)' \
+              <<< "$runners" >/dev/null; then
+              echo "::error::Invalid runner labels: $platform"
+              exit 1
+            fi
+            if ! [[ "$max_parallel" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Invalid image_build.max_parallel: $platform"
+              exit 1
+            fi
+            if [ ! -f "$env_script" ]; then
+              echo "::error::Platform environment script not found: $env_script"
+              exit 1
+            fi
+            bash -n "$env_script"
+
+            mapfile -t platform_tasks < <(/usr/local/bin/yq -r \
+              '.image_build.tasks | to_entries | .[].key' "$config_file")
+            if [ "${#platform_tasks[@]}" -eq 0 ]; then
+              echo "::error::image_build.tasks is empty: $platform"
+              exit 1
+            fi
+
+            for task in "${platform_tasks[@]}"; do
+              if [[ ! "$task" =~ ^[a-z0-9_-]+$ ]]; then
+                echo "::error::Invalid image task name: ${platform}/${task}"
+                exit 1
+              fi
+              entry=$(TASK="$task" /usr/local/bin/yq -o=json -I=0 \
+                '.image_build.tasks[strenv(TASK)] as $item |
+                 {
+                   "dockerfile": $item.dockerfile,
+                   "image": $item.image,
+                   "base_image": $item.base_image,
+                   "target": ($item.target // .image_build.target // "dev"),
+                   "network": ($item.network // .image_build.network // "default"),
+                   "registry_login": ($item.registry_login // .image_build.registry_login // false),
+                   "validation_script": ($item.validation_script // .image_build.validation_script // ""),
+                   "build_args": ((.image_build.build_args // {}) * ($item.build_args // {})),
+                   "source_refs": ((.image_build.source_refs // {}) * ($item.source_refs // {})),
+                   "test_roles": ($item.test_roles // [])
+                 }' "$config_file")
+              dockerfile=$(jq -r '.dockerfile // ""' <<< "$entry")
+              image=$(jq -r '.image // ""' <<< "$entry")
+              base_image=$(jq -r '.base_image // ""' <<< "$entry")
+              target_value=$(jq -r '.target // ""' <<< "$entry")
+              network=$(jq -r '.network // ""' <<< "$entry")
+              validation_script=$(jq -r '.validation_script // ""' <<< "$entry")
+              build_args=$(jq -c '.build_args // {}' <<< "$entry")
+              source_refs=$(jq -c '.source_refs // {}' <<< "$entry")
+              if [ -z "$dockerfile" ] || [ ! -f "$dockerfile" ] || \
+                 [ -z "$image" ] || [ -z "$base_image" ] || [ -z "$network" ]; then
+                echo "::error::Incomplete image task contract: ${platform}/${task}"
+                exit 1
+              fi
+              if [[ ! "$image" =~ ^[a-z0-9][a-z0-9._/-]*[a-z0-9]$ ]] || \
+                 [[ "$image" == *//* ]] || [[ "$image" == *:* ]] || \
+                 [[ "$image" == *@* ]]; then
+                echo "::error::Invalid image repository for ${platform}/${task}: $image"
+                exit 1
+              fi
+              if [[ ! "$target_value" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+                echo "::error::Invalid target: ${platform}/${task}: $target_value"
+                exit 1
+              fi
+              if ! jq -e '.registry_login | type == "boolean"' \
+                <<< "$entry" >/dev/null; then
+                echo "::error::registry_login must be boolean: ${platform}/${task}"
+                exit 1
+              fi
+              if ! jq -e \
+                '(.test_roles | type) == "array" and
+                 all(.test_roles[]; . == "train" or . == "inference")' \
+                <<< "$entry" >/dev/null; then
+                echo "::error::Invalid test_roles: ${platform}/${task}"
+                exit 1
+              fi
+              if [ -n "$validation_script" ]; then
+                if [ ! -f "$validation_script" ]; then
+                  echo "::error::Validation script not found: $validation_script"
+                  exit 1
+                fi
+                bash -n "$validation_script"
+              fi
+              if [ "$(jq -r 'type' <<< "$build_args")" != object ] || \
+                 [ "$(jq -r 'type' <<< "$source_refs")" != object ]; then
+                echo "::error::build_args/source_refs must be mappings: ${platform}/${task}"
+                exit 1
+              fi
+              if ! jq -e --argjson names "$source_names" \
+                'all(to_entries[]; . as $entry |
+                 ($entry.key | test("^[A-Z][A-Z0-9_]*$")) and
+                 ($entry.value | type == "string") and
+                 ($names | index($entry.value) != null))' \
+                <<< "$source_refs" >/dev/null; then
+                echo "::error::Invalid source_refs: ${platform}/${task}"
+                exit 1
+              fi
+              if ! jq -e --argjson refs "$source_refs" \
+                '[keys[] as $key | select($refs | has($key))] | length == 0' \
+                <<< "$build_args" >/dev/null; then
+                echo "::error::build_args and source_refs overlap: ${platform}/${task}"
+                exit 1
+              fi
+              if [ "$tasks" = all_tasks ] || \
+                 [ -n "${selected_tasks[$task]:-}" ]; then
+                requested_sources=$(jq -c --argjson refs "$source_refs" \
+                  '. + [$refs[]] | unique' <<< "$requested_sources")
+              fi
+            done
+
+            while IFS= read -r script; do
+              bash -n "$script"
+            done < <(find "tools/install/${platform}" -maxdepth 1 -type f -name '*.sh' -print)
+          done
+
+          resolved_sources='{}'
+          if [ "$execute" = true ] && [ "$build_images" = true ] && \
+             [ "$(jq 'length' <<< "$requested_sources")" -gt 0 ]; then
+            selected_catalog=$(jq -c --argjson names "$requested_sources" \
+              'with_entries(select(.key as $key | ($names | index($key)) != null))' \
+              <<< "$source_catalog")
+            resolved_sources=$(printf '%s' "$selected_catalog" | \
+              python3 tools/install/utils/resolve_source_refs.py)
+          fi
+          platform_matrix=$(printf '%s\n' "${platforms[@]}" | \
+            jq -R . | jq -sc '{platform: .}')
+
+          {
+            echo "platform_matrix=$platform_matrix"
+            echo "resolved_sources=$resolved_sources"
+            echo "execute=$execute"
+            echo "tasks=$tasks"
+            echo "build_images=$build_images"
+            echo "run_tests=$run_tests"
+            echo "push=$push"
+            echo "no_cache=$no_cache"
+            echo "target=$target"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo '### Image build plan'
+            echo
+            echo "- Platforms: \`${platforms[*]}\`"
+            echo "- Build images: \`$build_images\`"
+            echo "- Run tests: \`$run_tests\`"
+            echo "- Execute on this event: \`$execute\`"
+            if [ "$resolved_sources" != '{}' ]; then
+              echo
+              echo '| Source | Policy | Selector | Revision |'
+              echo '|---|---|---|---|'
+              jq -r 'to_entries[] |
+                "| `\(.key)` | `\(.value.policy)` | `\(.value.selector)` | `\(.value.revision)` |"' \
+                <<< "$resolved_sources"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build_and_test:
+    name: Build and test ${{ matrix.platform }}
+    needs: prepare
+    if: needs.prepare.outputs.execute == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.platform_matrix) }}
+    uses: ./.github/workflows/build_image_common.yml
+    secrets: inherit
+    with:
+      platform: ${{ matrix.platform }}
+      resolved_sources: ${{ needs.prepare.outputs.resolved_sources }}
+      tasks: ${{ needs.prepare.outputs.tasks }}
+      build_images: ${{ fromJSON(needs.prepare.outputs.build_images) }}
+      run_tests: ${{ fromJSON(needs.prepare.outputs.run_tests) }}
+      push: ${{ fromJSON(needs.prepare.outputs.push) }}
+      no_cache: ${{ fromJSON(needs.prepare.outputs.no_cache) }}
+      target: ${{ needs.prepare.outputs.target }}

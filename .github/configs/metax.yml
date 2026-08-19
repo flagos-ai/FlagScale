@@ -21,8 +21,8 @@ display_name: "MetaX C550 Tests"
 
 # Docker images for MetaX C550 (MACA-based)
 ci_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
-ci_train_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
-ci_inference_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale:0a6cc4b-metax-train-dev
+ci_inference_image: harbor.baai.ac.cn/flagos-dev/flagscale-inference:86c8e54-metax-dev
 
 # Runner labels for MetaX C550 hardware
 runner_labels: ["flagscale-metax-c550-gpu2-8c-256g"]
@@ -32,6 +32,37 @@ container_volumes:
   - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data
   - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
 
+# Image build contract consumed by the generic build workflow.
+image_build:
+  enabled: true
+  registry: harbor.baai.ac.cn
+  target: dev
+  network: default
+  max_parallel: 1
+  # The C550 runner exposes an eight-device host. Individual image smoke
+  # tests still use runtime_smoke_nproc=2 below because the smoke collective
+  # only needs two processes.
+  runtime_device_count: '8'
+  runtime_smoke_nproc: '2'
+  registry_login: true
+  validation_script: tools/install/metax/validate_image_build.sh
+  tasks:
+    train:
+      dockerfile: docker/metax/Dockerfile.train
+      image: flagos-dev/flagscale-train
+      test_roles: [train]
+      base_image: harbor.baai.ac.cn/flagscale/megatron-lm-with-te:202603231839
+      build_args: {}
+      source_refs:
+        FLAGSCALE_MEGATRON_REF: megatron_lm_fl
+        FLAGSCALE_TE_REF: transformer_engine_fl
+    inference:
+      dockerfile: docker/metax/Dockerfile.inference
+      image: flagos-dev/flagscale-inference
+      test_roles: [inference]
+      base_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:v0.20.2-metax-ci
+      source_refs:
+        VLLM_PLUGIN_FL_REF: vllm_plugin_fl
 # Container options for MetaX C550 (MACA runtime)
 container_options: >-
   --hostname=flagscale-ci
@@ -52,6 +83,13 @@ container_options: >-
   --cap-add NET_ADMIN
   --security-opt seccomp=unconfined
 
+# MetaX vLLM may spend about three minutes loading the first model. Keep this
+# platform allowance in configuration so the common serve workflow stays
+# hardware-neutral.
+timeouts:
+  inference_minutes: 15
+  serve_ready_seconds: 600
+
 # =============================================================================
 # Package Manager Configuration
 # =============================================================================
@@ -65,4 +103,5 @@ env_names:
   train: "base"
   hetero_train: ""
   inference: ""
+  serve: ""
   rl: ""
