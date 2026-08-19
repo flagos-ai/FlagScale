@@ -1168,18 +1168,6 @@ def pretrain(
 
     ########## FlagScale Begin ##########
     args = get_args()
-    if args.mg_fl_prefer:
-        os.environ['MG_FL_PREFER'] = args.mg_fl_prefer
-    # enable flagos:triton / vendor:cuda / reference:torch backend for transformer engine fl
-    if args.te_fl_prefer:
-        os.environ['TE_FL_PREFER'] = args.te_fl_prefer
-    if args.te_fl_per_op:
-        os.environ['TE_FL_PER_OP'] = args.te_fl_per_op
-    if args.te_fl_allow_vendors:
-        os.environ['TE_FL_ALLOW_VENDORS'] = args.te_fl_allow_vendors
-    if args.te_fl_deny_vendors:
-        os.environ['TE_FL_DENY_VENDORS'] = args.te_fl_deny_vendors
-
     # enable flag gems to replace torch ops for distributed training
     # TODO(lixianduo): fix flag gems re-register error
     if args.enable_flag_gems:
