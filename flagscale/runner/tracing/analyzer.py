@@ -209,6 +209,7 @@ class TraceAnalyzer:
         *,
         now_monotonic_s: float,
         now_unix_ns: int,
+        trace_source_issues: dict[tuple[int, int], tuple[str, ...]] | None = None,
     ) -> list[Finding]:
         findings: list[Finding] = []
         if self.detect_heartbeat_timeouts:
@@ -242,6 +243,7 @@ class TraceAnalyzer:
                 elapsed_s=elapsed_s,
                 detection_phase=detection_phase,
                 timeout_s=timeout_s,
+                trace_source_issues=trace_source_issues,
             )
             self._emit_once(("collective_missing_enter", *key), missing, findings)
 
@@ -366,22 +368,23 @@ class TraceAnalyzer:
         elapsed_s: float,
         detection_phase: str,
         timeout_s: float,
+        trace_source_issues: dict[tuple[int, int], tuple[str, ...]] | None,
     ) -> Finding:
         entered = sorted(collective.enters)
         missing = sorted(set(range(collective.expected_nranks)) - set(entered))
         members = self._comm_members.get((collective.run_id, collective.comm_uid_hash), {})
         rank_status: list[dict[str, Any]] = []
         known_states: list[str] = []
-        trace_event_loss_possible = False
+        source_states: list[str] = []
         for comm_rank in missing:
             global_rank = members.get(comm_rank)
             status: dict[str, Any] = {"comm_rank": comm_rank, "rank": global_rank}
             heartbeat = self._heartbeats.get(global_rank) if global_rank is not None else None
-            probe_status = self._probe_status.get(global_rank) if global_rank is not None else None
-            dropped_events = _as_int(
-                probe_status.get("dropped_events") if probe_status else 0, default=0
+            source = self._trace_source_status(
+                global_rank,
+                trace_source_issues=trace_source_issues,
             )
-            trace_event_loss_possible = trace_event_loss_possible or dropped_events > 0
+            source_states.append(str(source["status"]))
             if heartbeat is None:
                 status["heartbeat"] = "unknown"
             else:
@@ -395,21 +398,35 @@ class TraceAnalyzer:
                     }
                 )
                 known_states.append(state)
-            status["probe_dropped_events"] = dropped_events
+            status["probe_dropped_events"] = source["dropped_events"]
+            status["trace_source"] = source
             rank_status.append(status)
 
-        if trace_event_loss_possible:
+        if "unavailable" in source_states:
+            source_coverage = "insufficient"
+            reason = "trace_source_unavailable"
+            confidence = "unknown"
+        elif "incomplete" in source_states:
+            source_coverage = "insufficient"
+            reason = "trace_source_incomplete"
+            confidence = "unknown"
+        elif "lossy" in source_states:
+            source_coverage = "degraded"
             reason = "probe_event_loss_possible"
             confidence = "suspected"
-        elif "stale" in known_states:
-            reason = "rank_exit_or_crash_suspected"
-            confidence = "suspected"
-        elif known_states and all(state == "alive" for state in known_states):
-            reason = "rank_alive_but_not_entered"
-            confidence = "observed"
         else:
-            reason = "missing_rank_status_unknown"
-            confidence = "observed"
+            source_coverage = "sufficient"
+            if "stale" in known_states:
+                reason = "rank_exit_or_crash_suspected"
+                confidence = "suspected"
+            elif known_states and all(state == "alive" for state in known_states):
+                reason = "rank_alive_but_not_entered"
+                confidence = "observed"
+            else:
+                reason = "missing_rank_status_unknown"
+                confidence = "observed"
+
+        trace_event_loss_possible = source_coverage != "sufficient"
 
         first_event = next(iter(collective.enters.values()))
         return Finding(
@@ -430,9 +447,76 @@ class TraceAnalyzer:
                 "threshold_reason": self._threshold_reason(detection_phase),
                 "reason": reason,
                 "confidence": confidence,
+                "trace_source_coverage": source_coverage,
                 "trace_event_loss_possible": trace_event_loss_possible,
             },
         )
+
+    def _trace_source_status(
+        self,
+        global_rank: int | None,
+        *,
+        trace_source_issues: dict[tuple[int, int], tuple[str, ...]] | None,
+    ) -> dict[str, Any]:
+        """Describe whether absence of a trace event is usable evidence."""
+
+        issues: list[str] = []
+        if global_rank is None:
+            return {
+                "status": "unavailable",
+                "pid": None,
+                "dropped_events": 0,
+                "issues": ["communicator_rank_not_mapped"],
+            }
+
+        process = self._processes.get(global_rank)
+        probe_status = self._probe_status.get(global_rank)
+        process_pid = _as_int(process.event.get("pid"), default=-1) if process is not None else -1
+        status_pid = (
+            _as_int(probe_status.get("pid"), default=-1) if probe_status is not None else -1
+        )
+        if process is None:
+            issues.append("process_start_not_observed")
+        if probe_status is None:
+            issues.append("probe_status_not_observed")
+        if process_pid >= 0 and status_pid >= 0 and process_pid != status_pid:
+            issues.append("probe_status_pid_mismatch")
+
+        pid = process_pid if process_pid >= 0 else status_pid
+        if trace_source_issues is not None and pid >= 0:
+            source_key = (global_rank, pid)
+            if source_key not in trace_source_issues:
+                issues.append("trace_file_not_observed")
+            else:
+                issues.extend(trace_source_issues[source_key])
+
+        dropped_events = _as_int(
+            probe_status.get("dropped_events") if probe_status else 0,
+            default=0,
+        )
+        unavailable_issues = {
+            "process_start_not_observed",
+            "probe_status_not_observed",
+            "probe_status_pid_mismatch",
+            "trace_file_not_observed",
+        }
+        if unavailable_issues.intersection(issues):
+            source_status = "unavailable"
+        elif issues:
+            source_status = "incomplete"
+        elif dropped_events > 0:
+            source_status = "lossy"
+        else:
+            # This proves that the source was loaded and that the collector has
+            # observed no concrete loss signal. It intentionally does not claim
+            # continuous writer liveness.
+            source_status = "available"
+        return {
+            "status": source_status,
+            "pid": pid if pid >= 0 else None,
+            "dropped_events": dropped_events,
+            "issues": sorted(set(issues)),
+        }
 
     def _collective_detection_phase(self, collective: _CollectiveRound) -> str:
         """Return a stable phase for one collective round.

@@ -23,10 +23,21 @@ def test_jsonl_tailer_waits_for_a_complete_line(tmp_path):
     tailer = JsonlTailer(tmp_path)
 
     assert tailer.poll() == []
+    assert tailer.source_issues() == {(0, 10): ("partial_json_record",)}
 
     with path.open("a", encoding="utf-8") as file_obj:
         file_obj.write(',"run_id":"r"}\n')
     assert tailer.poll() == [{"event": "heartbeat", "run_id": "r"}]
+    assert tailer.source_issues() == {(0, 10): ()}
+
+
+def test_jsonl_tailer_records_malformed_source_data(tmp_path):
+    path = tmp_path / "rank_1_pid_11.jsonl"
+    path.write_text("not-json\n", encoding="utf-8")
+    tailer = JsonlTailer(tmp_path)
+
+    assert tailer.poll() == []
+    assert tailer.source_issues() == {(1, 11): ("malformed_json_record",)}
 
 
 def test_jsonl_tailer_ignores_reports_and_reads_only_new_events(tmp_path):

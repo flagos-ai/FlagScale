@@ -52,6 +52,11 @@ def _ingest(analyzer, event, observed=1.0, unix_ns=1_000_000_000):
     )
 
 
+def _ingest_probe_source(analyzer, rank, pid=10):
+    _ingest(analyzer, _event("process_start", rank=rank, pid=pid))
+    _ingest(analyzer, _event("probe_status", rank=rank, pid=pid, dropped_events=0))
+
+
 def test_missing_enter_reports_live_missing_rank_without_claiming_crash():
     analyzer = TraceAnalyzer(
         run_id=RUN_ID,
@@ -60,6 +65,7 @@ def test_missing_enter_reports_live_missing_rank_without_claiming_crash():
     )
     _ingest(analyzer, _event("comm_init", rank=0, comm_rank=0))
     _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest_probe_source(analyzer, rank=1)
     _ingest(
         analyzer,
         _event(
@@ -82,7 +88,9 @@ def test_missing_enter_reports_live_missing_rank_without_claiming_crash():
     assert finding.hang_type == "collective_missing_enter"
     assert finding.details["missing_comm_ranks"] == [1]
     assert finding.details["reason"] == "rank_alive_but_not_entered"
+    assert finding.details["trace_source_coverage"] == "sufficient"
     assert finding.details["missing_rank_status"][0]["heartbeat"] == "alive"
+    assert finding.details["missing_rank_status"][0]["trace_source"]["status"] == "available"
 
 
 def test_missing_enter_correlates_a_stale_heartbeat_as_suspected_crash():
@@ -92,6 +100,7 @@ def test_missing_enter_correlates_a_stale_heartbeat_as_suspected_crash():
         collective_timeout_s=2,
     )
     _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest_probe_source(analyzer, rank=1)
     _ingest(analyzer, _event("heartbeat", rank=1), observed=1.0)
     _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1.0)
 
@@ -228,6 +237,7 @@ def test_missing_enter_is_downgraded_when_probe_dropped_events():
         collective_timeout_s=2,
     )
     _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest(analyzer, _event("process_start", rank=1))
     _ingest(
         analyzer,
         _event("heartbeat", rank=1),
@@ -240,3 +250,53 @@ def test_missing_enter_is_downgraded_when_probe_dropped_events():
 
     assert findings[0].details["reason"] == "probe_event_loss_possible"
     assert findings[0].details["confidence"] == "suspected"
+    assert findings[0].details["trace_source_coverage"] == "degraded"
+
+
+def test_missing_enter_is_unknown_when_probe_source_was_not_observed():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        heartbeat_timeout_s=10,
+        collective_timeout_s=2,
+    )
+    _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest(analyzer, _event("heartbeat", rank=1), observed=1)
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1)
+
+    findings = analyzer.scan(now_monotonic_s=5, now_unix_ns=5_000_000_000)
+
+    assert findings[0].details["reason"] == "trace_source_unavailable"
+    assert findings[0].details["confidence"] == "unknown"
+    assert findings[0].details["trace_source_coverage"] == "insufficient"
+    source = findings[0].details["missing_rank_status"][0]["trace_source"]
+    assert source["status"] == "unavailable"
+    assert source["issues"] == ["probe_status_not_observed", "process_start_not_observed"]
+
+
+def test_missing_enter_is_unknown_when_trace_file_is_incomplete():
+    analyzer = TraceAnalyzer(
+        run_id=RUN_ID,
+        heartbeat_timeout_s=10,
+        collective_timeout_s=2,
+    )
+    _ingest(analyzer, _event("comm_init", rank=1, comm_rank=1))
+    _ingest_probe_source(analyzer, rank=1)
+    _ingest(analyzer, _event("heartbeat", rank=1), observed=1)
+    _ingest(analyzer, _event("nccl_call", rank=0, comm_rank=0), observed=1)
+
+    findings = analyzer.scan(
+        now_monotonic_s=5,
+        now_unix_ns=5_000_000_000,
+        trace_source_issues={(1, 10): ("partial_json_record",)},
+    )
+
+    assert findings[0].details["reason"] == "trace_source_incomplete"
+    assert findings[0].details["confidence"] == "unknown"
+    assert findings[0].details["trace_source_coverage"] == "insufficient"
+    source = findings[0].details["missing_rank_status"][0]["trace_source"]
+    assert source == {
+        "status": "incomplete",
+        "pid": 10,
+        "dropped_events": 0,
+        "issues": ["partial_json_record"],
+    }

@@ -20,6 +20,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import signal
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ from .analyzer import Finding, TraceAnalyzer
 
 logger = logging.getLogger("flagscale.tracing")
 
+_TRACE_SOURCE_PATTERN = re.compile(r"^rank_(\d+)_pid_(\d+)\.jsonl$")
+
 
 class JsonlTailer:
     """Incrementally read complete JSON lines from per-process trace files."""
@@ -37,22 +40,55 @@ class JsonlTailer:
         self.trace_dir = trace_dir
         self._offsets: dict[Path, int] = {}
         self._remainders: dict[Path, str] = {}
+        self._source_paths: dict[tuple[int, int], Path] = {}
+        self._source_issues: dict[tuple[int, int], set[str]] = {}
+
+    @staticmethod
+    def _source_key(path: Path) -> tuple[int, int] | None:
+        match = _TRACE_SOURCE_PATTERN.fullmatch(path.name)
+        if match is None:
+            return None
+        return int(match.group(1)), int(match.group(2))
+
+    def source_issues(self) -> dict[tuple[int, int], tuple[str, ...]]:
+        """Return collector-visible source files and permanent/transient issues."""
+
+        return {
+            source: tuple(sorted(self._source_issues.get(source, set())))
+            for source in self._source_paths
+        }
 
     def poll(self) -> list[dict]:
         events: list[dict] = []
-        for path in sorted(self.trace_dir.glob("rank_*_pid_*.jsonl")):
+        paths = sorted(self.trace_dir.glob("rank_*_pid_*.jsonl"))
+        visible_paths = set(paths)
+        for source, path in self._source_paths.items():
+            if path not in visible_paths:
+                self._source_issues.setdefault(source, set()).add("trace_file_missing")
+
+        for path in paths:
+            source = self._source_key(path)
+            if source is not None:
+                self._source_paths[source] = path
+                issues = self._source_issues.setdefault(source, set())
+                issues.discard("trace_file_missing")
+                issues.discard("trace_read_error")
             offset = self._offsets.get(path, 0)
             try:
                 size = path.stat().st_size
                 if size < offset:
                     offset = 0
                     self._remainders.pop(path, None)
+                    if source is not None:
+                        issues.add("trace_file_truncated")
                 with path.open("r", encoding="utf-8", errors="replace") as file_obj:
                     file_obj.seek(offset)
                     chunk = file_obj.read()
                     self._offsets[path] = file_obj.tell()
             except OSError as exc:
                 logger.debug("Could not read %s: %s", path, exc)
+                if source is not None:
+                    issues.add("trace_read_error")
                 continue
 
             if not chunk:
@@ -62,14 +98,20 @@ class JsonlTailer:
             for line in lines:
                 if not line.endswith(("\n", "\r")):
                     self._remainders[path] = line
+                    if source is not None:
+                        issues.add("partial_json_record")
                     continue
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     logger.warning("Ignored malformed trace line in %s", path)
+                    if source is not None:
+                        issues.add("malformed_json_record")
                     continue
                 if isinstance(event, dict):
                     events.append(event)
+            if source is not None and path not in self._remainders:
+                issues.discard("partial_json_record")
         return events
 
 
@@ -112,7 +154,8 @@ def run_monitor(args: argparse.Namespace) -> int:
         delayed_enter_threshold_s=args.delayed_enter_threshold,
         checkpoint_timeout_s=args.checkpoint_timeout,
     )
-    tailers = [JsonlTailer(trace_dir)]
+    trace_tailer = JsonlTailer(trace_dir)
+    tailers = [trace_tailer]
     if args.heartbeat_dir:
         tailers.append(JsonlTailer(Path(args.heartbeat_dir)))
     stopping = False
@@ -140,6 +183,7 @@ def run_monitor(args: argparse.Namespace) -> int:
             findings = analyzer.scan(
                 now_monotonic_s=time.monotonic(),
                 now_unix_ns=time.time_ns(),
+                trace_source_issues=trace_tailer.source_issues(),
             )
             _append_findings(output, findings)
 
@@ -174,6 +218,7 @@ def run_monitor(args: argparse.Namespace) -> int:
                     analyzer.scan(
                         now_monotonic_s=time.monotonic(),
                         now_unix_ns=time.time_ns(),
+                        trace_source_issues=trace_tailer.source_issues(),
                     ),
                 )
                 break
