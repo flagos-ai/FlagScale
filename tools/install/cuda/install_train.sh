@@ -27,6 +27,10 @@ RETRY_COUNT="${FLAGSCALE_RETRY_COUNT:-3}"
 FLAGSCALE_HOME="${FLAGSCALE_HOME:-/opt/flagscale}"
 FLAGSCALE_DEPS="${FLAGSCALE_DEPS:-$FLAGSCALE_HOME/deps}"
 REQ_FILE="$PROJECT_ROOT/requirements/cuda/train.txt"
+TE_REPO="${FLAGSCALE_TE_REPO:-https://github.com/flagos-ai/TransformerEngine-FL.git}"
+TE_REF="${FLAGSCALE_TE_REF:-main}"
+MEGATRON_REPO="${FLAGSCALE_MEGATRON_REPO:-https://github.com/flagos-ai/Megatron-LM-FL.git}"
+MEGATRON_REF="${FLAGSCALE_MEGATRON_REF:-main}"
 
 # Source deps available for this task
 SRC_DEPS_LIST="apex flash-attn transformer-engine megatron-lm"
@@ -34,6 +38,27 @@ SRC_DEPS_LIST="apex flash-attn transformer-engine megatron-lm"
 while [[ $# -gt 0 ]]; do
     case $1 in --debug) DEBUG=true; shift ;; *) shift ;; esac
 done
+
+resolved_source_ready() {
+    local package=$1
+    local ref=$2
+    local marker=$3
+
+    [ "${FLAGSCALE_FORCE_BUILD:-false}" != true ] || return 1
+    [ -f "$marker" ] || return 1
+    [ "$(cat "$marker")" = "$ref" ] || return 1
+    is_package_installed "$package"
+}
+
+record_resolved_source() {
+    local ref=$1
+    local marker=$2
+    if [ "$DEBUG" = true ]; then
+        log_info "Would record resolved source $ref in $marker"
+        return 0
+    fi
+    printf '%s\n' "$ref" > "$marker"
+}
 
 # =============================================================================
 # Pip Installation
@@ -83,27 +108,40 @@ install_flash_attn() {
 }
 
 install_transformer_engine() {
-    should_build_package "transformer_engine" || return 0
-    set_step "Installing TransformerEngine"
+    local marker="$FLAGSCALE_DEPS/.transformer-engine-fl.ref"
+    if resolved_source_ready "transformer_engine" "$TE_REF" "$marker"; then
+        log_info "TransformerEngine-FL $TE_REF is already installed, skipping"
+        return 0
+    fi
+    set_step "Installing resolved TransformerEngine-FL"
     local pip_cmd=$(get_pip_cmd)
     run_cmd -d $DEBUG $pip_cmd install --root-user-action=ignore nvidia-mathdx --extra-index-url https://pypi.nvidia.com || return 1
     mkdir -p "$FLAGSCALE_DEPS"
-    retry_git_clone -d $DEBUG --recursive \
-        "https://github.com/flagos-ai/TransformerEngine-FL.git" "$FLAGSCALE_DEPS/TransformerEngine" "$RETRY_COUNT" || return 1
+    retry_git_checkout_ref -d "$DEBUG" --recursive \
+        "$TE_REPO" "$TE_REF" "$FLAGSCALE_DEPS/TransformerEngine" \
+        "$RETRY_COUNT" || return 1
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/TransformerEngine' && \
         NVTE_FRAMEWORK=pytorch $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
-    log_success "TransformerEngine ready"
+    record_resolved_source "$TE_REF" "$marker" || return 1
+    log_success "TransformerEngine-FL ready at $TE_REF"
 }
 
 install_megatron_lm() {
-    should_build_package "megatron-core" || return 0
-    set_step "Installing Megatron-LM-FL"
+    local marker="$FLAGSCALE_DEPS/.megatron-lm-fl.ref"
+    if resolved_source_ready "megatron-core" "$MEGATRON_REF" "$marker"; then
+        log_info "Megatron-LM-FL $MEGATRON_REF is already installed, skipping"
+        return 0
+    fi
+    set_step "Installing resolved Megatron-LM-FL"
     mkdir -p "$FLAGSCALE_DEPS"
-    retry_git_clone -d $DEBUG "https://github.com/flagos-ai/Megatron-LM-FL.git" "$FLAGSCALE_DEPS/Megatron-LM-FL" "$RETRY_COUNT" || return 1
+    retry_git_checkout_ref -d "$DEBUG" \
+        "$MEGATRON_REPO" "$MEGATRON_REF" "$FLAGSCALE_DEPS/Megatron-LM-FL" \
+        "$RETRY_COUNT" || return 1
     local pip_cmd=$(get_pip_cmd)
     run_cmd -d $DEBUG bash -c "cd '$FLAGSCALE_DEPS/Megatron-LM-FL' && \
         $pip_cmd install --root-user-action=ignore --no-build-isolation . -vvv" || return 1
-    log_success "Megatron-LM-FL ready"
+    record_resolved_source "$MEGATRON_REF" "$marker" || return 1
+    log_success "Megatron-LM-FL ready at $MEGATRON_REF"
 }
 
 install_src() {

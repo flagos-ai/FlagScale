@@ -41,6 +41,42 @@ on:
         type: string
         description: Override container_volumes. Falls back to platform config if not set.
         default: ""
+      train_pkg_mgr:
+        required: false
+        type: string
+        default: ""
+      train_env_name:
+        required: false
+        type: string
+        default: ""
+      train_env_path:
+        required: false
+        type: string
+        default: ""
+      inference_pkg_mgr:
+        required: false
+        type: string
+        default: ""
+      inference_env_name:
+        required: false
+        type: string
+        default: ""
+      inference_env_path:
+        required: false
+        type: string
+        default: ""
+      serve_pkg_mgr:
+        required: false
+        type: string
+        default: ""
+      serve_env_name:
+        required: false
+        type: string
+        default: ""
+      serve_env_path:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   checkout_and_config:
@@ -64,8 +100,12 @@ jobs:
       benchmark_test_matrix: ${{ steps.config.outputs.benchmark_test_matrix }}
       inference_timeout_minutes: ${{ steps.config.outputs.inference_timeout_minutes }}
       serve_ready_timeout_seconds: ${{ steps.config.outputs.serve_ready_timeout_seconds }}
-      pkg_mgr: ${{ steps.config.outputs.pkg_mgr }}
-      env_path: ${{ steps.config.outputs.env_path }}
+      pkg_mgr_train: ${{ steps.config.outputs.pkg_mgr_train || steps.config.outputs.pkg_mgr }}
+      pkg_mgr_inference: ${{ steps.config.outputs.pkg_mgr_inference || steps.config.outputs.pkg_mgr }}
+      pkg_mgr_serve: ${{ steps.config.outputs.pkg_mgr_serve || steps.config.outputs.pkg_mgr }}
+      env_path_train: ${{ steps.config.outputs.env_path_train || steps.config.outputs.env_path }}
+      env_path_inference: ${{ steps.config.outputs.env_path_inference || steps.config.outputs.env_path }}
+      env_path_serve: ${{ steps.config.outputs.env_path_serve || steps.config.outputs.env_path }}
       env_name_train: ${{ steps.config.outputs.env_name_train }}
       env_name_inference: ${{ steps.config.outputs.env_name_inference }}
       env_name_serve: ${{ steps.config.outputs.env_name_serve }}
@@ -77,7 +117,7 @@ jobs:
         continue-on-error: true
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -96,7 +136,7 @@ jobs:
         continue-on-error: true
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -114,7 +154,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -159,6 +199,33 @@ jobs:
           if [ -n "${{ inputs.ci_inference_image }}" ]; then
             echo "ci_inference_image=${{ inputs.ci_inference_image }}" >> $GITHUB_OUTPUT
           fi
+          if [ -n "${{ inputs.train_pkg_mgr }}" ]; then
+            echo "pkg_mgr_train=${{ inputs.train_pkg_mgr }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.train_env_name }}" ]; then
+            echo "env_name_train=${{ inputs.train_env_name }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.train_env_path }}" ]; then
+            echo "env_path_train=${{ inputs.train_env_path }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.inference_pkg_mgr }}" ]; then
+            echo "pkg_mgr_inference=${{ inputs.inference_pkg_mgr }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.inference_env_name }}" ]; then
+            echo "env_name_inference=${{ inputs.inference_env_name }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.inference_env_path }}" ]; then
+            echo "env_path_inference=${{ inputs.inference_env_path }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.serve_pkg_mgr }}" ]; then
+            echo "pkg_mgr_serve=${{ inputs.serve_pkg_mgr }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.serve_env_name }}" ]; then
+            echo "env_name_serve=${{ inputs.serve_env_name }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ inputs.serve_env_path }}" ]; then
+            echo "env_path_serve=${{ inputs.serve_env_path }}" >> "$GITHUB_OUTPUT"
+          fi
           # Use single-quoted assignment so bash treats the JSON value literally
           # (double quotes inside the JSON would break echo "runs_on=${{ inputs.runs_on }}")
           RUNS_ON_INPUT='${{ inputs.runs_on }}'
@@ -181,9 +248,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
 
   unit_tests:
     needs:
@@ -203,9 +270,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
 
   functional_tests_train:
     needs:
@@ -221,9 +288,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
 
   functional_tests_hetero_train:
     needs:
@@ -239,9 +306,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
 
   functional_tests_inference:
     needs:
@@ -257,9 +324,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_inference }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_inference }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_inference }}
       timeout_minutes: ${{ fromJSON(needs.checkout_and_config.outputs.inference_timeout_minutes) }}
 
   functional_tests_serve:
@@ -276,9 +343,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_serve }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_serve }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_serve }}
       ready_timeout_seconds: ${{ fromJSON(needs.checkout_and_config.outputs.serve_ready_timeout_seconds) }}
 
   # NOTE: rl functional tests are temporarily disabled
@@ -313,9 +380,9 @@ jobs:
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
       container_volumes: ${{ needs.checkout_and_config.outputs.container_volumes }}
       container_options: ${{ needs.checkout_and_config.outputs.container_options }}
-      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr }}
+      pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
-      env_path: ${{ needs.checkout_and_config.outputs.env_path }}
+      env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
 
   all_tests_complete:
     defaults:
@@ -383,12 +450,7 @@ jobs:
             failed=true
           fi
 
-          # NOTE: Inference, serve, and rl checks disabled
-          # if [ "${{ needs.functional_tests_rl.result }}" != "success" ] && \
-          #    [ "${{ needs.functional_tests_rl.result }}" != "skipped" ]; then
-          #   echo "❌ RL functional tests failed"
-          #   failed=true
-          # fi
+          # RL remains disabled and is intentionally absent from this gate.
 
           if [ "$failed" = "true" ]; then
             exit 1

@@ -1,0 +1,99 @@
+# FlagScale training image for Huawei Ascend NPUs.
+# CANN user-space libraries and torch_npu come from the base image. The host
+# driver is mounted at container runtime; credentials and drivers are never
+# baked into this image.
+
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/megatron-lm-fl:manual-20260717-ascend-dev
+ARG PKG_MGR=pip
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_TE_REPO=https://github.com/flagos-ai/TransformerEngine-FL.git
+ARG FLAGSCALE_TE_REF=main
+ARG FLAGSCALE_MEGATRON_REPO=https://github.com/flagos-ai/Megatron-LM-FL.git
+ARG FLAGSCALE_MEGATRON_REF=main
+
+FROM ${BASE_IMAGE} AS base
+
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_TE_REF
+ARG FLAGSCALE_MEGATRON_REF
+
+LABEL io.flagscale.transformer-engine-fl.revision=${FLAGSCALE_TE_REF} \
+      io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF}
+
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps \
+    FLAGSCALE_DOWNLOADS=${FLAGSCALE_HOME}/downloads \
+    FS_PLATFORM=npu \
+    UV_HTTP_TIMEOUT=500 \
+    PATH="${FLAGSCALE_HOME}/venv/bin:/root/.local/bin:${PATH}"
+
+RUN python -m pip install --no-cache-dir ninja==1.13.0
+
+COPY tools/install/ascend/env.sh /etc/profile.d/flagscale-env.sh
+WORKDIR /workspace
+
+FROM base AS deps
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_TE_REPO
+ARG FLAGSCALE_TE_REF
+ARG FLAGSCALE_MEGATRON_REPO
+ARG FLAGSCALE_MEGATRON_REF
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL} \
+    FLAGSCALE_TE_REPO=${FLAGSCALE_TE_REPO} \
+    FLAGSCALE_TE_REF=${FLAGSCALE_TE_REF} \
+    FLAGSCALE_MEGATRON_REPO=${FLAGSCALE_MEGATRON_REPO} \
+    FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/opt/flagscale/downloads,sharing=locked \
+    . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/ascend/*.sh && \
+    ./tools/install/install.sh --platform ascend --task train \
+        --pkg-mgr ${PKG_MGR} --no-system --no-base --force-build && \
+    rm -rf /workspace/*
+
+FROM deps AS dev
+CMD ["/bin/bash"]
+
+FROM base AS release
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_TE_REPO
+ARG FLAGSCALE_TE_REF
+ARG FLAGSCALE_MEGATRON_REPO
+ARG FLAGSCALE_MEGATRON_REF
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL} \
+    FLAGSCALE_TE_REPO=${FLAGSCALE_TE_REPO} \
+    FLAGSCALE_TE_REF=${FLAGSCALE_TE_REF} \
+    FLAGSCALE_MEGATRON_REPO=${FLAGSCALE_MEGATRON_REPO} \
+    FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/ascend/*.sh && \
+    ./tools/install/install.sh --platform ascend --task train \
+        --pkg-mgr ${PKG_MGR} --no-system --no-dev --no-base --force-build && \
+    rm -rf /workspace/*
+
+CMD ["/bin/bash"]
