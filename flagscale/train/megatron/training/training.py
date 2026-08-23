@@ -161,7 +161,8 @@ from megatron.core.pipeline_parallel.utils import (
 )
 from megatron.core.optimizer import get_mup_config_overrides, get_standard_config_overrides
 from megatron.training.checkpointing import load_checkpoint
-from megatron.training.checkpointing import save_checkpoint, save_grads
+from megatron.training.checkpointing import save_checkpoint as _megatron_save_checkpoint
+from megatron.training.checkpointing import save_grads
 from megatron.training.checkpointing import checkpoint_exists
 from megatron.training.checkpointing import get_loaded_iteration
 from megatron.core.full_cuda_graph import FullCudaGraphWrapper
@@ -350,6 +351,103 @@ def _is_global_rank_zero() -> bool:
 
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
+
+
+def _memrift_trace(msg: str):
+    """Lightweight trace logging for hang diagnosis (enabled by MEMRIFT_TRACE=1)."""
+    if os.environ.get("MEMRIFT_TRACE", "0") != "1":
+        return
+    try:
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else -1
+    except Exception:
+        rank = -1
+    print(f"[MemRiftTrace][rank={rank}] {msg}", flush=True)
+
+
+def _get_memrift_activation_context(model):
+    """
+    Return a context manager for MemRift activation compression if enabled.
+    When memrift_activation_enable is True and model has _memrift_activation_context
+    (injected by inject_memrift_if_configured), the returned context wraps forward+backward
+    so that saved activations are compressed and released on demand.
+    Otherwise returns a no-op nullcontext.
+    """
+    from contextlib import nullcontext
+    args = get_args()
+    if not getattr(args, "memrift_activation_enable", False):
+        return nullcontext()
+    chunk = model[0] if isinstance(model, list) else model
+    if not hasattr(chunk, "_memrift_activation_context"):
+        return nullcontext()
+    return chunk._memrift_activation_context()
+
+
+def _memrift_profiler_on_iter_start():
+    """Signal MemRift memory profiler that a new iteration is starting."""
+    args = get_args()
+    if not getattr(args, "memrift_enable", False):
+        return
+    if getattr(args, "memrift_profile_memory", False):
+        from flagscale.compress.memrift.memory_profiler import get_memory_profiler
+
+        profiler = get_memory_profiler()
+        if profiler is not None:
+            profiler.on_iter_start()
+
+
+def _memrift_profiler_on_iter_end():
+    """Signal MemRift memory profiler that the iteration (forward+backward) ended."""
+    args = get_args()
+    if not getattr(args, "memrift_enable", False):
+        return
+    if getattr(args, "memrift_profile_memory", False):
+        from flagscale.compress.memrift.memory_profiler import get_memory_profiler
+
+        profiler = get_memory_profiler()
+        if profiler is not None:
+            profiler.on_iter_end()
+    # Per-iteration cleanup: free any residual materialized frozen base weights and
+    # reset backward tracking state.
+    if getattr(args, "memrift_weight_enable", False):
+        from flagscale.compress.memrift import train_hooks as _th
+
+        for _ldr in getattr(_th, "_LOADERS", []):
+            _ldr.release_all_layers()
+
+
+def save_checkpoint(*checkpoint_args, **checkpoint_kwargs):
+    """Save a shape-correct checkpoint while keeping weights streamed in training."""
+    args = get_args()
+    if not (
+        getattr(args, "memrift_enable", False)
+        and getattr(args, "memrift_weight_enable", False)
+    ):
+        return _megatron_save_checkpoint(*checkpoint_args, **checkpoint_kwargs)
+
+    model = (
+        checkpoint_args[1]
+        if len(checkpoint_args) > 1
+        else checkpoint_kwargs.get("model")
+    )
+    if model is None:
+        raise TypeError("save_checkpoint requires model for MemRift lifecycle handling")
+
+    from flagscale.compress.memrift.train_hooks import (
+        finish_memrift_checkpoint_save,
+        prepare_memrift_checkpoint_io,
+    )
+
+    loaders = prepare_memrift_checkpoint_io(model)
+    try:
+        return _megatron_save_checkpoint(*checkpoint_args, **checkpoint_kwargs)
+    finally:
+        try:
+            if getattr(args, "async_save", False):
+                # MemRift's custom CUDA pool can recycle materialized buffers as soon
+                # as they are released. Wait until the async writer has consumed them.
+                maybe_finalize_async_save(blocking=True)
+        finally:
+            finish_memrift_checkpoint_save(loaders)
 
 
 def destroy_global_state():
@@ -1175,7 +1273,7 @@ def pretrain(
             import flag_gems
         except ImportError:
             raise RuntimeError("Failed to import 'flag_gems'. Please install flag_gems.")
-        
+
         try:
             flag_gems.enable(record=True, once=True, unused=args.flag_gems_unused, path=args.flag_gems_log_path)
         except Exception as e:
@@ -1754,6 +1852,20 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
             peft.load_state_dict_post_hooks(model_module)
     ########## FlagScale End ##########
 
+    ######## FLAGSCALE MEMRIFT BEGIN ########
+    # Import lazily so disabled runs do not depend on MemRift's optional runtime.
+    # Once explicitly enabled, initialization errors are fatal: continuing after a
+    # partial injection can leave frozen parameters empty or only partly mapped.
+    # Weight MemRift intentionally runs before the model is moved to CUDA so the
+    # original full model allocation is released before the final device transfer.
+    if getattr(args, "memrift_enable", False):
+        try:
+            from flagscale.compress.memrift.train_hooks import inject_memrift_if_configured
+        except ImportError as exc:
+            raise RuntimeError("MemRift is enabled but its training hooks cannot be imported") from exc
+        inject_memrift_if_configured(model, args)
+    ######## FLAGSCALE MEMRIFT END   ########
+
     # Set tensor model parallel attributes if not set.
     # Only parameters that are already tensor model parallel have these
     # attributes set for them. We should make sure the default attributes
@@ -2056,6 +2168,13 @@ def setup_model_and_optimizer(
                 use_gloo_process_groups=args.use_gloo_process_groups,
                 layer_wise_distributed_optimizer='dist' in config.optimizer,
             )
+        if (
+            getattr(args, "memrift_enable", False)
+            and getattr(args, "memrift_weight_enable", False)
+        ):
+            from flagscale.compress.memrift.train_hooks import validate_memrift_optimizer
+
+            validate_memrift_optimizer(model, optimizer)
         opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
 
     one_logger and one_logger.log_metrics({"app_build_optimzer_finish_time": one_logger_utils.get_timestamp_in_ms()})
@@ -2239,6 +2358,13 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                         optim_instance._copy_main_params_to_param_buffer()
 
         # Forward pass.
+        # MemRift: profiler iteration boundary + activation compression context
+        _memrift_trace(
+            f"train_step: enter fwd_bwd (iter={getattr(args, 'curr_iteration', -1)}, "
+            f"num_microbatches={get_num_microbatches()}, memrift_act={getattr(args, 'memrift_activation_enable', False)})"
+        )
+        _memrift_profiler_on_iter_start()
+
         if save_dgrads_in_this_iteration:
             enable_dgrad_logging(model, args.save)
         with OptionalSectionContext(
@@ -2247,18 +2373,20 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
             enabled=should_profile_straggler,
             profile_cuda=profile_cuda,
         ):
-            losses_reduced = forward_backward_func(
-                forward_step_func=forward_step_func,
-                data_iterator=data_iterator,
-                model=model,
-                num_microbatches=get_num_microbatches(),
-                seq_length=args.seq_length,
-                micro_batch_size=args.micro_batch_size,
-                decoder_seq_length=args.decoder_seq_length,
-                forward_only=False,
-                adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
-                force_all_reduce=save_wgrads_in_this_iteration,
-            )
+            # MemRift: wrap forward+backward so saved activations are compressed/released on demand.
+            with _get_memrift_activation_context(model):
+                losses_reduced = forward_backward_func(
+                    forward_step_func=forward_step_func,
+                    data_iterator=data_iterator,
+                    model=model,
+                    num_microbatches=get_num_microbatches(),
+                    seq_length=args.seq_length,
+                    micro_batch_size=args.micro_batch_size,
+                    decoder_seq_length=args.decoder_seq_length,
+                    forward_only=False,
+                    adjust_tensor_shapes_fn=adjust_tensor_shapes_fn,
+                    force_all_reduce=save_wgrads_in_this_iteration,
+                )
         if save_dgrads_in_this_iteration:
             save_dgrads(iteration + 1)
             disable_dgrad_logging()
@@ -2266,6 +2394,8 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         # Reset force_all_reduce field.
         for model_chunk in model:
             model_chunk.force_all_reduce = False
+
+        _memrift_trace("train_step: exit fwd_bwd")
 
     # Checkpoint main_grads.
     if save_wgrads_in_this_iteration:
@@ -2316,14 +2446,21 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         profile_cuda=profile_cuda,
     ):
         timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
+        _memrift_trace("train_step: optimizer.step begin")
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+
         # get max attention logit for logging and run clip_qk()
         # Part of MuonClip Optimizer step
         log_max_attention_logit = 0
         if args.qk_clip or args.log_max_attention_logit:
             log_max_attention_logit = clip_qk(model, log_max_only=not args.qk_clip)
-    
+
         timers('optimizer').stop()
+        _memrift_trace("train_step: optimizer.step end")
+
+    # Record the iteration boundary after optimizer.step so profiler samples
+    # include optimizer allocations and MemRift cleanup runs after all work.
+    _memrift_profiler_on_iter_end()
 
     # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
     # so we must gather across mp ranks
