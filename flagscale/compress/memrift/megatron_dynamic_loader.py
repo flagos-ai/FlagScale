@@ -186,7 +186,7 @@ class CompressedParam(nn.Parameter):
             if not fs_sp.is_available():
                 raise RuntimeError(
                     "CUDA extension float_split_stride_pin not available. "
-                    "Please build it first: cd flagscale/compress/float_split_stride_pin && pip install -e ."
+                    "Please build it first: cd flagscale/compress/memrift/csrc && pip install -e ."
                 )
         except ImportError as e:
             raise RuntimeError(

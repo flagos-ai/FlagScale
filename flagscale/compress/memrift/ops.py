@@ -1,8 +1,4 @@
-"""Python access to the optional MemRift split/merge CUDA kernels.
-
-The MemRift-scoped extension is preferred.  The legacy package is retained as
-a runtime fallback for environments that already built the old extension.
-"""
+"""Python access to the optional MemRift split/merge CUDA kernels."""
 
 from importlib import import_module
 from types import ModuleType
@@ -22,31 +18,40 @@ def _valid(module: ModuleType | None) -> bool:
 
 
 _ext: ModuleType | None = None
-for _name in (
-    "flagscale.compress.memrift._float_split_stride_pin",
-    "float_split_stride_pin._ext",
-    "flagscale.compress.float_split_stride_pin.float_split_stride_pin._ext",
-):
+_load_error: BaseException | None = None
+_loaded = False
+
+
+def _load() -> ModuleType | None:
+    """Load the extension after package initialization has completed."""
+    global _ext, _load_error, _loaded
+    if _loaded:
+        return _ext
+    _loaded = True
     try:
-        _candidate = import_module(_name)
-    except ImportError:
-        continue
-    if _valid(_candidate):
-        _ext = _candidate
-        break
+        candidate = import_module("flagscale.compress.memrift._float_split_stride_pin")
+    except (ImportError, OSError) as exc:
+        _load_error = exc
+        return None
+    if _valid(candidate):
+        _ext = candidate
+    else:
+        _load_error = RuntimeError("MemRift CUDA extension is missing one or more required symbols")
+    return _ext
 
 
 def is_available() -> bool:
     """Return whether a compatible CUDA extension was imported."""
-    return _ext is not None
+    return _load() is not None
 
 
 def _require() -> ModuleType:
-    if _ext is None:
+    ext = _load()
+    if ext is None:
         raise RuntimeError(
             "MemRift CUDA kernels are unavailable; build flagscale/compress/memrift/csrc first"
-        )
-    return _ext
+        ) from _load_error
+    return ext
 
 
 def split(*args, **kwargs):
