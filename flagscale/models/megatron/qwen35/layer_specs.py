@@ -63,7 +63,7 @@ def _patch_standard_attention_specs(
             attn_spec.module = attention_cls
 
 
-def get_qwen35_language_model_spec(config, patch=True) -> TransformerBlockSubmodules:
+def get_qwen35_language_model_spec(config, patch=True, vp_stage=None) -> TransformerBlockSubmodules:
     """Build hybrid GDN + Attention block spec for Qwen3.5 language model.
 
     Args:
@@ -71,6 +71,9 @@ def get_qwen35_language_model_spec(config, patch=True) -> TransformerBlockSubmod
             - experimental_attention_variant: "gated_delta_net"
             - linear_attention_freq: 4 (1 attention per 4 layers)
             - num_layers: 64 (for 27B dense)
+        vp_stage: Virtual pipeline stage index. Must be forwarded when VPP is on,
+            otherwise get_transformer_layer_offset() asserts (vp_stage must be
+            provided if virtual_pipeline_model_parallel_size is set).
 
     Returns:
         TransformerBlockSubmodules with per-layer specs where:
@@ -82,7 +85,7 @@ def get_qwen35_language_model_spec(config, patch=True) -> TransformerBlockSubmod
     # standard SelfAttention + standard MLP)
     block_spec = get_transformer_block_with_experimental_attention_variant_spec(
         config,
-        vp_stage=None,
+        vp_stage=vp_stage,
     )
 
     # This flag only for mtp layer (patch = false).
@@ -135,16 +138,22 @@ def get_mlp_module_spec(
         )
 
 
-def get_qwen35_mtp_block_spec(args, config):
+def get_qwen35_mtp_block_spec(args, config, vp_stage=None):
     mtp_block_spec = None
     if getattr(args, "mtp_num_layers", None) is not None:
         # MTP uses standard SelfAttention (not Qwen35SelfAttention or GDN).
         # Generate an unpatched block spec so MTP gets vanilla SelfAttention.
         # NOTE(wqq) Maybe we can make this code clear but it match Megatron-Bridge behavior.
-        unpatched_spec = get_qwen35_language_model_spec(config, patch=False)
+        # NOTE(vpp): vp_stage must be forwarded here too. With VPP on, both the
+        # unpatched decoder spec build and get_gpt_mtp_block_spec compute layer
+        # offsets that assert on vp_stage. MTP layers are only built on the last
+        # pipeline stage's last vp chunk (get_mtp_num_layers_to_build gates this),
+        # so on other stages this returns None before touching layer_specs.
+        unpatched_spec = get_qwen35_language_model_spec(config, patch=False, vp_stage=vp_stage)
         mtp_block_spec = get_gpt_mtp_block_spec(
             config,
             unpatched_spec,
             use_transformer_engine=args.use_te,
+            vp_stage=vp_stage,
         )
     return mtp_block_spec

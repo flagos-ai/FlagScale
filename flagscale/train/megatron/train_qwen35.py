@@ -16,6 +16,7 @@
 
 import os
 import sys
+import time
 import logging
 from functools import partial
 from copy import deepcopy
@@ -33,6 +34,8 @@ from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import StragglerDetector
 
 from megatron.training.utils import unwrap_model
+from megatron.training.utils import is_first_or_last_pipeline_stage
+from megatron.core.transformer.multi_token_prediction import mtp_on_this_rank
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
@@ -100,8 +103,25 @@ def model_provider(
     args = get_args()
     print_rank_0("start building qwen3.5 model ...")
 
+    # NOTE(vpp): When virtual pipeline parallelism is on, Megatron's get_model()
+    # builds one chunk per virtual stage and passes vp_stage=i via kwargs. We must
+    # forward it to Qwen35Model so MTP placement (mtp_on_this_rank) and language
+    # layer counting land on the correct virtual stage. Defaults to None (VPP off).
+    vp_stage = kwargs.get("vp_stage", None)
+
     # Build transformer config with Qwen35 config class
     config = core_transformer_config_from_args(args, Qwen35TransformerConfig)
+    # 20260726: yaml-driven configs go through validate_yaml(), which skips
+    # Megatron's validate_args() where virtual_pipeline_model_parallel_size is
+    # derived from --num-layers-per-virtual-pipeline-stage; backfill it here.
+    if (
+        getattr(config, "virtual_pipeline_model_parallel_size", None) is None
+        and getattr(args, "num_layers_per_virtual_pipeline_stage", None) is not None
+    ):
+        num_layers_per_stage = args.num_layers // args.transformer_pipeline_model_parallel_size
+        config.virtual_pipeline_model_parallel_size = (
+            num_layers_per_stage // args.num_layers_per_virtual_pipeline_stage
+        )
     # Qwen3.5 uses zero-centered gamma for RMSNorm; override if needed
     # (core_transformer_config_from_args may be affected by apply_layernorm_1p)
     config.layernorm_zero_centered_gamma = getattr(args, 'layernorm_zero_centered_gamma', True)
@@ -124,7 +144,7 @@ def model_provider(
     print_rank_0("building Qwen3.5 model in TE...")
 
     # Language model spec: hybrid GDN + Attention
-    language_layer_spec = get_qwen35_language_model_spec(config)
+    language_layer_spec = get_qwen35_language_model_spec(config, vp_stage=vp_stage)
 
     # Vision model spec (identical to Qwen3-VL)
     vision_model_spec = get_qwen3vl_vision_model_spec()
@@ -134,7 +154,7 @@ def model_provider(
         config.variable_seq_lengths = True
 
     # MTP (Multi-Token Prediction) spec
-    mtp_block_spec = get_qwen35_mtp_block_spec(args, config)
+    mtp_block_spec = get_qwen35_mtp_block_spec(args, config, vp_stage=vp_stage)
 
     args.padded_vocab_size = args.vocab_size
     model = Qwen35Model(
@@ -162,6 +182,7 @@ def model_provider(
         parallel_output=True,
         language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
         mtp_block_spec=mtp_block_spec,
+        vp_stage=vp_stage,
     )
 
     model.freeze(
@@ -205,7 +226,7 @@ def get_ltor_masks_and_position_ids(
 
 
 def get_batch(
-    data_iterator, model: Qwen35Model = None
+    data_iterator, model: Qwen35Model = None, vp_stage: int = None
 ) -> Tuple:
     """Generate a batch."""
     imgs = None
@@ -215,9 +236,43 @@ def get_batch(
     attention_mask = None
     position_ids = None
 
+    # NOTE(vpp): Under virtual pipeline parallelism the interleaved scheduler calls
+    # forward_step once per local model chunk. Middle chunks (pre_process=False)
+    # receive their input activations via set_input_tensor, so tokens/labels/vision
+    # from the batch are unused for them -- but mRoPE position_ids and
+    # attention_mask are data-dependent, so middle chunks must still pull data
+    # (each chunk has its own data iterator under VPP, kept in sync by the
+    # scheduler) and compute them; see the is_middle_vpp_chunk return branch
+    # below. When vp_stage is None (VPP off) is_first_or_last_pipeline_stage
+    # checks the physical pipeline stage, so plain-PP middle stages (e.g. pp4)
+    # take the same middle-chunk path -- unlike train_gpt.py, they still need
+    # position_ids because this model's rotary embedding is data-dependent.
+    args = get_args()
+    config = core_transformer_config_from_args(args, Qwen35TransformerConfig)
+    is_middle_vpp_chunk = not is_first_or_last_pipeline_stage(
+        vp_stage
+    ) and not mtp_on_this_rank(config, ignore_virtual=False, vp_stage=vp_stage)
+    # NOTE(mrope-fix): do NOT early-return all-None for middle chunks without a
+    # data iterator. Data loaders are built on TP rank 0 only, so non-TP0 ranks
+    # of a middle pipeline stage always have data_iterator=None; they receive the
+    # batch via broadcast_data() below (data=None path) and must still compute
+    # the data-dependent mRoPE position_ids -- the decoder of a middle chunk
+    # needs them for its rotary embedding. Returning all-None fed
+    # position_ids=None into the model and crashed in rope.py
+    # ('NoneType' object has no attribute 'ndim'), while rank 0 of the same
+    # stage blocked in broadcast_data waiting for the TP peers that had
+    # already returned. (Hit on plain pp4 without VPP, 2026-08-10.)
+
     cur_platform.range_push("get_data")
     if data_iterator is not None and get_tensor_model_parallel_rank() == 0:
+        # 20260804 data-pipeline probe (FLAGS_PROFILE_DATA=1): time the blocking
+        # next() — queue wait for dataloader workers (decode+I/O aggregated).
+        # Per-call line lets post-analysis correlate fetch stalls with iteration
+        # time spikes (data-dependent shard glitches).
+        _data_prof = os.getenv("FLAGS_PROFILE_DATA", "0") == "1"
+        _t0 = time.perf_counter() if _data_prof else 0.0
         data = next(data_iterator)
+        _fetch_ms = (time.perf_counter() - _t0) * 1e3 if _data_prof else -1.0
         pad_token_id = IGNORE_IDX
         while (data["target"] == pad_token_id).all():
             logging.getLogger(__name__).warning(
@@ -225,6 +280,8 @@ def get_batch(
                 "Get next data to avoid fail, but it's better to check the data!"
             )
             data = next(data_iterator)
+        if _data_prof:
+            print(f"[DATA_FETCH] wait_ms={_fetch_ms:.1f}", flush=True)
     else:
         data = None
 
@@ -265,6 +322,26 @@ def get_batch(
         model=model,
     )
     cur_platform.range_pop()
+
+    if is_middle_vpp_chunk:
+        # mRoPE position_ids are data-dependent: every VPP chunk's decoder needs
+        # them for rotary embeddings, so middle chunks must also pull data (each
+        # chunk has its own data iterator under VPP, kept in sync by the
+        # scheduler) and compute position_ids/attention_mask. Vision tensors and
+        # labels are unused when pre_process is False.
+        return (
+            None,
+            None,
+            None,
+            attention_mask,
+            position_ids,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
     return (
         tokens,
@@ -335,10 +412,24 @@ def loss_func(
     return (loss, num_tokens, {'lm loss': reporting_loss})
 
 
-def forward_step(data_iterator, model: Qwen35Model):
-    """Forward training step."""
+def forward_step(data_iterator, model: Qwen35Model, return_schedule_plan: bool = False):
+    """Forward training step.
+
+    Args:
+        data_iterator: Input data iterator
+        model (Qwen35Model): The Qwen3.5 multimodal model
+        return_schedule_plan (bool): Whether to return a schedule plan (for
+            overlap_moe_expert_parallel_comm / combined_1f1b) instead of the
+            output tensor. Mirrors train_deepseek_v4.forward_step.
+    """
     args = get_args()
     timers = get_timers()
+
+    # NOTE(vpp): The interleaved (VPP) scheduler invokes forward_step once per local
+    # model chunk and tags each chunk's model with .vp_stage. Extract it so get_batch
+    # can decide whether this chunk needs real data. unwrap_model peels DDP/Float16
+    # wrappers; vp_stage defaults to None when VPP is off.
+    vp_stage = getattr(unwrap_model(model), "vp_stage", None)
 
     timers('batch-generator', log_level=2).start()
     global stimer
@@ -355,11 +446,64 @@ def forward_step(data_iterator, model: Qwen35Model):
             video_thw_grids,
             image_input_mask,
             video_input_mask,
-        ) = get_batch(data_iterator, model=unwrap_model(model))
+        ) = get_batch(data_iterator, model=unwrap_model(model), vp_stage=vp_stage)
     timers('batch-generator').stop()
+
+    # Middle VPP chunks (pre_process=False) receive their input activation via
+    # set_input_tensor and get None tokens/vision from get_batch. Skip vision
+    # assembly and let Qwen35Model.forward take its non-pre_process branch
+    # (vision ignored). position_ids/attention_mask are real: the decoder of a
+    # middle chunk still needs them for mRoPE and variable-length attention.
+    if tokens is None:
+        # 20260727: combined_1f1b (EP A2A overlap) requires forward_step to
+        # return a schedule plan for EVERY chunk, including middle VPP chunks
+        # (pp2+vpp2 means both ranks have middle chunks). Build the plan with
+        # input_ids=None; the wrapper delegates to the language model, whose
+        # chunk takes its input via set_input_tensor.
+        if return_schedule_plan:
+            with stimer:
+                schedule_plan = model.build_schedule_plan(
+                    input_ids=None,
+                    position_ids=position_ids,
+                    vision_data=None,
+                    vision_grid_thw=None,
+                    attention_mask=attention_mask,
+                    labels=None,
+                    loss_mask=loss_mask,
+                )
+            return schedule_plan, partial(loss_func, loss_mask, model=model)
+        with stimer:
+            output_tensor = model(
+                input_ids=None,
+                position_ids=position_ids,
+                vision_data=None,
+                vision_grid_thw=None,
+                attention_mask=attention_mask,
+                labels=None,
+            )
+        return output_tensor, partial(loss_func, loss_mask, model=model)
 
     vision_data = torch.cat([imgs, videos], dim=0)
     vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
+
+    if return_schedule_plan:
+        assert args.overlap_moe_expert_parallel_comm, (
+            "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
+        )
+        with stimer:
+            schedule_plan = model.build_schedule_plan(
+                input_ids=tokens,
+                position_ids=position_ids,
+                vision_data=vision_data,
+                vision_grid_thw=vision_grid,
+                video_start_index=image_input_mask.sum().cpu().item(),
+                image_input_mask=image_input_mask,
+                video_input_mask=video_input_mask,
+                attention_mask=attention_mask,
+                labels=labels,
+                loss_mask=loss_mask,
+            )
+        return schedule_plan, partial(loss_func, loss_mask, model=model)
 
     with stimer:
         output_tensor = model(
@@ -372,7 +516,6 @@ def forward_step(data_iterator, model: Qwen35Model):
             video_input_mask=video_input_mask,
             attention_mask=attention_mask,
             labels=labels,
-            loss_mask=loss_mask,
         )
 
     return output_tensor, partial(loss_func, loss_mask, model=model)
@@ -437,8 +580,16 @@ def is_dataloader_rank(transformer_pipeline_model_parallel_size):
     return is_first_rank
 
 
-def train_valid_test_dataloaders_provider(train_val_test_num_samples):
-    """Build multimodal train, validation and test dataloaders."""
+def train_valid_test_dataloaders_provider(train_val_test_num_samples, vp_stage=None):
+    """Build multimodal train, validation and test dataloaders.
+
+    NOTE(vpp): vp_stage is required as a kwarg when VPP is on -- pretrain() builds
+    one data iterator per virtual stage via functools.partial(provider, vp_stage=i)
+    and asserts the signature accepts it. The energon multimodal stream is identical
+    across virtual stages (all chunks would see the same samples), so we accept the
+    argument but do not use it for data partitioning. Per-chunk data gating happens
+    later in get_batch (only first/last/MTP chunks actually pull from the iterator).
+    """
     args = get_args()
     if not is_dataloader_rank(args.transformer_pipeline_model_parallel_size):
         return None, None, None

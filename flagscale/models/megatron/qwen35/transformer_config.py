@@ -94,10 +94,17 @@ class Qwen35TransformerConfig(TransformerConfig):
 
 def get_vision_model_config(args, config):
     """Build vision encoder config from language transformer config."""
-    assert parallel_state.get_virtual_pipeline_model_parallel_world_size() is None, "NotSupported"
+    # assert parallel_state.get_virtual_pipeline_model_parallel_world_size() is None, "NotSupported"
+    # (vpp): ...（注释见文件）
+    vpp_size = parallel_state.get_virtual_pipeline_model_parallel_world_size()
 
     # Qwen3.5 vision encoder params from args (varies by model size)
-    config.num_layers = args.vision_num_layers
+    if vpp_size is not None:
+        config.num_layers = args.vision_num_layers * vpp_size
+    else:
+        config.num_layers = args.vision_num_layers
+
+    # config.num_layers = args.vision_num_layers 
     config.hidden_size = args.vision_hidden_size
     config.ffn_hidden_size = args.vision_ffn_hidden_size
     config.deepstack_visual_indexes = []
