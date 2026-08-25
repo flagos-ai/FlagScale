@@ -49,14 +49,14 @@ def test_get_version_fallback_to_default(mocker):
     # Make importlib.metadata.version raise an exception
     mocker.patch("importlib.metadata.version", side_effect=Exception("Not installed"))
 
-    # Make tomllib.load raise an exception
-    mocker.patch("tomllib.load", side_effect=Exception("Parse error"))
+    # Python 3.10 has no stdlib tomllib. Making the project file unavailable
+    # exercises the same final fallback on every supported Python version.
+    mocker.patch("pathlib.Path.exists", return_value=False)
 
     from flagscale import _get_version
 
     result = _get_version()
-    # Should return a string (either version or default)
-    assert isinstance(result, str)
+    assert result == "0.0.0"
 
 
 def test_version_is_string():

@@ -1,0 +1,60 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+# This base was validated by the vllm-plugin-FL Hygon CI. It owns the matching
+# DTK, torch and vLLM 0.20.2 runtime; FlagScale only overlays resolved sources.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-plugin-fl-hygon-vllm0.20.2-dtk26.04-py3.10-ci
+ARG FLAGGEMS_REF=62d70b9e858ec407572153ee8cdf65cc24a637d5
+ARG VLLM_PLUGIN_FL_REF=ffa2ee3eb3831f3873dd0966d12fc8e0b4e6e3d4
+
+FROM ${BASE_IMAGE} AS base
+
+ARG FLAGGEMS_REF
+ARG VLLM_PLUGIN_FL_REF
+
+LABEL io.flagscale.platform=hygon-bw1000 \
+      io.flagscale.flaggems.revision=${FLAGGEMS_REF} \
+      io.flagscale.vllm-plugin-fl.revision=${VLLM_PLUGIN_FL_REF}
+
+ENV FLAGSCALE_HOME=/opt/flagscale \
+    FLAGSCALE_DEPS=/opt/flagscale/deps \
+    FLAGSCALE_FLAGGEMS_REF=${FLAGGEMS_REF} \
+    FLAGSCALE_VLLM_PLUGIN_FL_REF=${VLLM_PLUGIN_FL_REF} \
+    GEMS_VENDOR=hygon \
+    VLLM_PLUGINS=fl \
+    VLLM_FL_PLATFORM=hygon \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN python -m pip check 2>&1 | sort > /tmp/pip-check.before || true
+
+RUN chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/hygon/*.sh && \
+    /workspace/tools/install/install.sh --platform hygon --task inference \
+        --pkg-mgr pip --no-system --no-dev --no-base && \
+    /workspace/tools/install/install.sh --platform hygon --task serve \
+        --pkg-mgr pip --no-system --no-dev --no-base --only-pip
+
+RUN python -m pip check 2>&1 | sort > /tmp/pip-check.after || true
+
+RUN bash /workspace/tools/install/utils/check_pip_conflicts.sh \
+        /tmp/pip-check.before /tmp/pip-check.after && \
+    rm -rf /opt/flagscale/deps /workspace/tools /workspace/requirements \
+        /tmp/pip-check.before /tmp/pip-check.after
+
+# Runtime-compiled artifacts are host/device specific and must not be shipped
+# in the reusable inference image.
+RUN rm -rf /root/.triton/cache /root/.cache/torch/kernels
+
+WORKDIR /workspace
+
+FROM base AS dev
+ENTRYPOINT []
+CMD ["/bin/bash"]
+
+FROM base AS release
+ENTRYPOINT []
+CMD ["/bin/bash"]

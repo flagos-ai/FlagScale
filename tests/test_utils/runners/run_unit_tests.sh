@@ -137,7 +137,7 @@ EOF
     fi
 
     PYTEST_CMD="torchrun --nproc_per_node=$NPROC $RUNNER_CMD $TEST_TARGETS -v --tb=short"
-    wait_for_gpu
+    wait_for_gpu || return 1
     # Apply exclude patterns if any
     if [ -n "$EXCLUDE" ]; then
         PYTEST_CMD="torchrun --nproc_per_node=$NPROC $RUNNER_CMD $EXCLUDE $TEST_TARGETS -v --tb=short"

@@ -1,0 +1,111 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+hardware_name: hygon
+display_name: "Hygon BW1000 Tests"
+
+# Stable BW1000 images validated by the Hygon functional tests.
+ci_image: harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260820-hygon-dev-inference
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260820-hygon-dev-train
+ci_inference_image: harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260820-hygon-dev-inference
+
+runner_labels: ["flagscale-hygon-bw1000-gpu8"]
+
+# Image build contract consumed by the generic build workflow. Training and
+# inference remain separate so the vLLM runtime never enters the train image.
+image_build:
+  enabled: true
+  registry: harbor.baai.ac.cn
+  target: dev
+  network: host
+  max_parallel: 1
+  registry_login: true
+  validation_script: tools/install/hygon/validate_image_build.sh
+  runtime_smoke_nproc: 2
+  runtime_device_count: 2
+  tasks:
+    train:
+      dockerfile: docker/hygon/Dockerfile.train
+      image: flagos-dev/flagscale-train
+      test_roles: [train]
+      # The vendor-provided DTK base retains its historical vllm repository
+      # name, but this training image does not install vLLM-plugin-FL.
+      base_image: harbor.sourcefind.cn:5443/dcu/admin/base/vllm:0.15.1-ubuntu22.04-dtk26.04-py3.10
+      build_args: {}
+      source_refs:
+        MEGATRON_REF: megatron_lm_fl
+        FLAGGEMS_REF: flaggems
+        TRANSFORMER_ENGINE_REF: transformer_engine_fl
+      test_environments:
+        train:
+          pkg_mgr: pip
+          env_name: ""
+          env_path: /usr/local
+    inference:
+      dockerfile: docker/hygon/Dockerfile.inference
+      image: flagos-dev/flagscale-inference
+      test_roles: [inference]
+      base_image: harbor.baai.ac.cn/flagos-dev/vllm-plugin-fl:vllm-plugin-fl-hygon-vllm0.20.2-dtk26.04-py3.10-ci
+      build_args: {}
+      source_refs:
+        FLAGGEMS_REF: flaggems
+        VLLM_PLUGIN_FL_REF: vllm_plugin_fl
+      test_environments:
+        inference:
+          pkg_mgr: pip
+          env_name: ""
+          env_path: /usr/local
+        serve:
+          pkg_mgr: pip
+          env_name: ""
+          env_path: /usr/local
+
+container_volumes:
+  - /opt/hyhal:/opt/hyhal:ro
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data:ro
+  - /mnt/airs-business/cicd/baai_datasets/Qwen3-4B:/home/gitlab-runner/models/Qwen3-4B:ro
+  - /mnt/airs-business/cicd/baai_tokenizers/qwentokenizer:/home/gitlab-runner/tokenizers/qwentokenizer:ro
+
+# DTK exposes BW1000 devices through the KFD/DRI compatibility interfaces.
+# Force Git checkout to HTTP/1.1 because this runner network intermittently
+# resets GitHub HTTP/2 transfers.
+container_options: >-
+  --device=/dev/kfd
+  --device=/dev/dri
+  --group-add video
+  --ipc=host
+  --env HSA_FORCE_FINE_GRAIN_PCIE=1
+  --env GIT_CONFIG_COUNT=1
+  --env GIT_CONFIG_KEY_0=http.version
+  --env GIT_CONFIG_VALUE_0=HTTP/1.1
+  --shm-size=64g
+  --user root
+  --ulimit nofile=1048576:1048576
+  --cap-add SYS_PTRACE
+  --security-opt seccomp=unconfined
+
+# Qwen3-4B can take more than 600 seconds to initialize from the shared model
+# volume on BW1000 before the API server becomes ready.
+timeouts:
+  inference_minutes: 15
+  serve_ready_seconds: 900
+
+pkg_mgr: "pip"
+env_path: "/usr/local"
+env_names:
+  train: ""
+  hetero_train: ""
+  inference: ""
+  serve: ""
+  rl: ""

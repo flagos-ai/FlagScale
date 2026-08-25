@@ -93,6 +93,22 @@ _gpu_fetch_nvidia() {
     mapfile -t mem_total < <(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null)
 }
 
+# Hygon's NVIDIA compatibility CLI does not implement memory query fields.
+# Query the DTK-backed Torch runtime directly instead.
+_gpu_fetch_hygon() {
+    local mem_output
+    mem_output=$(python - <<'PY'
+import torch
+
+for index in range(torch.cuda.device_count()):
+    free, total = torch.cuda.mem_get_info(index)
+    print(total - free, total)
+PY
+    ) || return 1
+    mapfile -t mem_used < <(echo "$mem_output" | awk '{print $1}')
+    mapfile -t mem_total < <(echo "$mem_output" | awk '{print $2}')
+}
+
 # Fetch mem_used[] and mem_total[] arrays for metax
 _gpu_fetch_metax() {
     local mem_output
@@ -129,10 +145,20 @@ _gpu_poll_loop() {
     local gpu_count=$1 fetch_fn=$2
 
     while true; do
-        "$fetch_fn"
+        mem_used=()
+        mem_total=()
+        if ! "$fetch_fn"; then
+            log_error "Unable to query accelerator memory"
+            return 1
+        fi
         local need_wait=false max_pct=0
         for ((i=0; i<gpu_count; i++)); do
-            [ -z "${mem_total[i]}" ] || [ "${mem_total[i]}" -eq 0 ] && continue
+            if ! [[ "${mem_used[i]:-}" =~ ^[0-9]+$ ]] || \
+                ! [[ "${mem_total[i]:-}" =~ ^[0-9]+$ ]]; then
+                log_error "Unable to query numeric memory values for accelerator $i"
+                return 1
+            fi
+            [ "${mem_total[i]}" -eq 0 ] && continue
             local pct=$(( mem_used[i] * 100 / mem_total[i] ))
             [ $pct -gt $max_pct ] && max_pct=$pct
             [ $pct -gt 50 ] && { need_wait=true; break; }
@@ -146,7 +172,10 @@ _gpu_poll_loop() {
 
 wait_for_gpu() {
     local gpu_count fetch_fn
-    if command -v nvidia-smi &>/dev/null; then
+    if [ "${PLATFORM:-}" = hygon ]; then
+        gpu_count=$(python -c 'import torch; print(torch.cuda.device_count())') || return 1
+        fetch_fn=_gpu_fetch_hygon
+    elif command -v nvidia-smi &>/dev/null; then
         gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
         fetch_fn=_gpu_fetch_nvidia
     elif command -v mx-smi &>/dev/null; then
@@ -161,7 +190,11 @@ wait_for_gpu() {
     else
         return 0
     fi
-    [ -z "$gpu_count" ] || [ "$gpu_count" -eq 0 ] && return 0
+    if ! [[ "$gpu_count" =~ ^[0-9]+$ ]]; then
+        log_error "Unable to determine accelerator count"
+        return 1
+    fi
+    [ "$gpu_count" -eq 0 ] && return 0
     _gpu_poll_loop "$gpu_count" "$fetch_fn"
 }
 

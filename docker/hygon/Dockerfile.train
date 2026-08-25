@@ -1,0 +1,98 @@
+# syntax=docker/dockerfile:1.6
+
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# FlagScale training image for Hygon BW1000 DCUs. The vendor base supplies DTK
+# and PyTorch. The FlagOS Transformer Engine implementation is installed below;
+# FlagScale is checked out at test time so one image can exercise PR revisions.
+
+ARG BASE_IMAGE=harbor.sourcefind.cn:5443/dcu/admin/base/vllm:0.15.1-ubuntu22.04-dtk26.04-py3.10
+ARG PYTHON_VERSION=3.10
+ARG MEGATRON_REF=409c1ed949675ddf9aa540aaae48652f446351cc
+ARG FLAGGEMS_REF=f7ae8e6b934a33ec1ccaf2c9aae71edf205f8fb4
+ARG TRANSFORMER_ENGINE_REF=94c7007c84107028919b4e52213d1bcb4ca3f7cf
+
+FROM ${BASE_IMAGE} AS base
+
+ARG PYTHON_VERSION
+ARG MEGATRON_REF
+ARG FLAGGEMS_REF
+ARG TRANSFORMER_ENGINE_REF
+
+LABEL io.flagscale.platform=hygon-bw1000 \
+      io.flagscale.megatron-lm-fl.revision=${MEGATRON_REF} \
+      io.flagscale.flaggems.revision=${FLAGGEMS_REF} \
+      io.flagscale.transformer-engine-fl.revision=${TRANSFORMER_ENGINE_REF}
+
+ENV FLAGSCALE_HOME=/opt/flagscale \
+    FLAGSCALE_DEPS=/opt/flagscale/deps \
+    CUDA_PATH=/opt/dtk/cuda/cuda-12 \
+    CUDA_HOME=/opt/dtk/cuda/cuda-12 \
+    DEVICE_HOME=/opt/dtk/cuda/cuda-12 \
+    CCL_HOME=/opt/dtk/cuda/cuda-12 \
+    TE_FL_SKIP_CUDA=1 \
+    TORCHINDUCTOR_WORKER_START=spawn \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        curl \
+        git \
+        ninja-build \
+        python3-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    git config --system http.version HTTP/1.1 && \
+    python -c "import sys; expected='${PYTHON_VERSION}'; actual=f'{sys.version_info.major}.{sys.version_info.minor}'; assert actual == expected, f'expected Python {expected}, found {actual}'"
+
+WORKDIR /workspace
+
+FROM base AS deps
+
+ARG MEGATRON_REF
+ARG FLAGGEMS_REF
+ARG TRANSFORMER_ENGINE_REF
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    FLAGSCALE_MEGATRON_REF=${MEGATRON_REF} \
+    FLAGSCALE_FLAGGEMS_REF=${FLAGGEMS_REF} \
+    FLAGSCALE_TRANSFORMER_ENGINE_REF=${TRANSFORMER_ENGINE_REF}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN python -c "from importlib.metadata import distribution; from pathlib import Path; dist=distribution('torch'); location=str(dist.locate_file('torch')); Path('/tmp/flagscale-vendor-torch').write_text(dist.version + '\\n' + location); Path('/tmp/flagscale-torch-constraint.txt').write_text('torch==' + dist.version + '\\n')" && \
+    chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/hygon/*.sh && \
+    PIP_CONSTRAINT=/tmp/flagscale-torch-constraint.txt \
+    /workspace/tools/install/install.sh --platform hygon --task train \
+        --pkg-mgr pip --no-system --no-dev --force-build && \
+    python -c "from importlib.metadata import distribution; from pathlib import Path; dist=distribution('torch'); expected=Path('/tmp/flagscale-vendor-torch').read_text().splitlines(); actual=[dist.version, str(dist.locate_file('torch'))]; assert actual == expected, f'vendor torch changed: expected {expected}, found {actual}'" && \
+    rm -rf /workspace/tools /workspace/requirements \
+        /tmp/flagscale-vendor-torch /tmp/flagscale-torch-constraint.txt
+
+FROM deps AS dev
+
+ENTRYPOINT []
+CMD ["/bin/bash"]
+
+FROM deps AS release
+
+ENTRYPOINT []
+CMD ["/bin/bash"]

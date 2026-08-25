@@ -1,0 +1,50 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+defaults:
+  - _self_
+  - train: 0_6b_hygon
+
+experiment:
+  exp_name: 0_6b_hygon
+  exp_dir: tests/functional_tests/train/qwen3/test_results/0_6b_hygon
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_gpt.py
+  runner:
+    backend: torchrun
+    nnodes: 1
+    nproc_per_node: 1
+    rdzv_backend: static
+    no_shared_fs: false
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    # Override the base image's vendor-specific setting with an algorithm
+    # accepted by the DTK NCCL compatibility layer on BW1000.
+    NCCL_ALGO: "Ring"
+    # Megatron deterministic mode requires Transformer Engine to reject
+    # nondeterministic attention implementations.
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    TORCHINDUCTOR_WORKER_START: spawn
+  cmds:
+    before_start: ulimit -n 1048576
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

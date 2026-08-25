@@ -130,6 +130,7 @@ extend-exclude = ["examples/aquila/tokenizer*"]
 
 [tool.typos.default]
 extend-ignore-identifiers-re = [
+    "HSA_FORCE_FINE_GRAIN_PCIE",
     "NVML.*",
     ".*thw",
     "nd_*",

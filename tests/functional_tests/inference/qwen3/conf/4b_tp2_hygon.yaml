@@ -1,0 +1,33 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+defaults:
+  - _self_
+  - inference: 4b_tp2_hygon
+
+experiment:
+  exp_name: qwen3
+  exp_dir: tests/functional_tests/inference/qwen3/test_results/4b_tp2_hygon
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/inference_llm.py
+  runner:
+    hostfile: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0,1"
+    SEED: 1234
+    PYTHONHASHSEED: 0
+    MKL_NUM_THREADS: 1
+    OMP_NUM_THREADS: 1
+    NUMEXPR_NUM_THREADS: 1
+    GEMS_VENDOR: "hygon"
+    VLLM_PLUGINS: "fl"
+    VLLM_FL_PLATFORM: "hygon"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
