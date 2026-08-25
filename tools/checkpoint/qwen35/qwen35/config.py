@@ -49,6 +49,8 @@ class Config:
         self.tp = cfg.get("tensor_model_parallel_size", 1)
         self.pp = cfg.get("pipeline_model_parallel_size", 1)
         self.ep = cfg.get("expert_model_parallel_size", 1)
+        self.vision_tp_explicit = "vision_tensor_model_parallel_size" in cfg
+        self.vision_tp = cfg.get("vision_tensor_model_parallel_size", self.tp)
 
         # Uneven PP: optional per-stage layer counts
         self.decoder_first_pipeline_num_layers = cfg.get("decoder_first_pipeline_num_layers", None)
@@ -91,6 +93,18 @@ class Config:
         self.patch_size = _require(cfg, "patch_size")
         self.temporal_patch_size = 2  # hardcoded in get_vision_model_config
         self.use_linear_proj = cfg.get("vision_patch_embed_linear", True)
+
+        self.validate_vision_tp()
+
+    def validate_vision_tp(self):
+        assert 1 <= self.vision_tp <= self.tp and self.tp % self.vision_tp == 0, (
+            f"vision_tensor_model_parallel_size ({self.vision_tp}) must satisfy "
+            f"1 <= vision_tp <= tp and tp % vision_tp == 0 (tp={self.tp})"
+        )
+        assert self.vision_num_attention_heads % self.vision_tp == 0, (
+            f"vision_num_attention_heads ({self.vision_num_attention_heads}) must be "
+            f"divisible by vision_tp ({self.vision_tp})"
+        )
 
     @property
     def is_moe(self):

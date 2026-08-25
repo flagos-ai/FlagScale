@@ -107,6 +107,13 @@ def parse_args():
         help="Override tensor model parallel size from YAML",
     )
     p.add_argument(
+        "--vision-tp",
+        type=int,
+        default=None,
+        help="Override vision tensor model parallel size from YAML "
+        "(MIMO colocated layout: vision TP smaller than language TP)",
+    )
+    p.add_argument(
         "--pp",
         type=int,
         default=None,
@@ -149,10 +156,15 @@ def main():
     cfg = Config(args.yaml)
     if args.tp is not None:
         cfg.tp = args.tp
+        if args.vision_tp is None and not cfg.vision_tp_explicit:
+            cfg.vision_tp = args.tp
     if args.pp is not None:
         cfg.pp = args.pp
     if args.ep is not None:
         cfg.ep = args.ep
+    if args.vision_tp is not None:
+        cfg.vision_tp = args.vision_tp
+    cfg.validate_vision_tp()
 
     # Auto-detect model type from whichever input is available
     hf_input = args.hf_path if args.direction == "hf2meg" else None
@@ -167,7 +179,7 @@ def main():
 
     print(f"Direction: {args.direction}")
     print(f"Model type: {model_type}")
-    print(f"TP={cfg.tp}, PP={cfg.pp}, EP={cfg.ep}")
+    print(f"TP={cfg.tp}, PP={cfg.pp}, EP={cfg.ep}, vision TP={cfg.vision_tp}")
     print(f"Layers={cfg.num_layers}, hidden={cfg.hidden_size}")
     print(f"LN adjustment: {LN_ADJUSTMENT}")
     print(f"Ref skip value: {args.ref_skip_value}")

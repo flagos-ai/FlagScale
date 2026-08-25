@@ -1086,6 +1086,15 @@ def _add_flagscale_specific_args(parser):
         'Default to 0 to disable inference wandb logging.',
     )
 
+    # MIMO colocated training flag.  When enabled, training.py uses per-module
+    # DDP and optimizer paths instead of the single outer DDP/optimizer.
+    group.add_argument(
+        '--use-mimo',
+        action='store_true',
+        default=False,
+        help='Enable FlagScale colocated MIMO training with per-module DDP/optimizer.',
+    )
+
     return parser
 
 

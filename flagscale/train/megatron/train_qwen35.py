@@ -19,10 +19,11 @@ import sys
 import logging
 from functools import partial
 from copy import deepcopy
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch._dynamo
+import torch.distributed as dist
 
 from argparse import Namespace
 
@@ -73,6 +74,7 @@ from megatron.training.global_vars import get_tokenizer
 from flagscale.models.megatron.qwen2_5_vl.tensor_parallel import broadcast_data
 
 from flagscale.models.megatron.qwen35.qwen35_model import Qwen35Model
+from flagscale.models.megatron.qwen35.qwen35_mimo_model import Qwen35MIMOModel
 from flagscale.models.megatron.qwen35.transformer_config import (
     Qwen35TransformerConfig,
     get_vision_model_config,
@@ -84,6 +86,12 @@ from flagscale.models.megatron.qwen35.layer_specs import (
     get_mlp_module_spec
 )
 from flagscale.models.megatron.qwen3_vl.layer_specs import get_qwen3vl_vision_model_spec
+
+from flagscale.models.mimo import (
+    ModuleParallelismConfig,
+    build_colocated_pg_collections,
+    validate_mimo_config,
+)
 
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
@@ -137,32 +145,110 @@ def model_provider(
     mtp_block_spec = get_qwen35_mtp_block_spec(args, config)
 
     args.padded_vocab_size = args.vocab_size
-    model = Qwen35Model(
-        language_transformer_config=config,
-        language_transformer_layer_spec=language_layer_spec,
-        language_vocab_size=args.padded_vocab_size,
-        language_max_sequence_length=args.max_position_embeddings,
 
-        vision_transformer_config=vision_config,
-        vision_transformer_layer_spec=vision_model_spec,
-        vision_projection_config=vision_projector_config,
-        vision_projection_layer_spec=vision_projector_spec,
-        vision_projection_type='mlp',
+    if args.use_mimo:
+        # Colocated MIMO: vision and language modules run under different
+        # parallel configurations on the same ranks.
+        world_size = torch.distributed.get_world_size()
+        vision_tp = getattr(args, "vision_tensor_model_parallel_size", None) or args.tensor_model_parallel_size
+        vision_pp = getattr(args, "vision_pipeline_model_parallel_size", None) or args.pipeline_model_parallel_size
+        # Vision DP is always derived, never set manually (same as Megatron DP).
+        vision_dp = world_size // vision_tp // vision_pp
+        vision_parallelism = ModuleParallelismConfig(
+            tensor_model_parallel_size=vision_tp,
+            pipeline_model_parallel_size=vision_pp,
+            data_parallel_size=vision_dp,
+        )
+        language_parallelism = ModuleParallelismConfig(
+            tensor_model_parallel_size=args.tensor_model_parallel_size,
+            pipeline_model_parallel_size=args.pipeline_model_parallel_size,
+            data_parallel_size=world_size // args.tensor_model_parallel_size // args.pipeline_model_parallel_size,
+            expert_model_parallel_size=getattr(args, "expert_model_parallel_size", 1),
+        )
+        pg_collections = build_colocated_pg_collections(
+            vision_parallelism, language_parallelism, world_size
+        )
+        pg_summary = ", ".join(
+            f"{name}(tp={dist.get_world_size(pgs.tp)}, "
+            f"dp={dist.get_world_size(pgs.dp)}, "
+            f"pp={dist.get_world_size(pgs.pp)})"
+            for name, pgs in pg_collections.items()
+        )
+        print_rank_0(f"MIMO process group collections: {pg_summary}")
 
-        language_position_embedding_type=args.position_embedding_type,
-        language_rotary_percent=args.rotary_percent,
-        language_rotary_base=args.rotary_base,
+        # Single-point validation of model-agnostic MIMO config constraints.
+        vit_batch_factor = validate_mimo_config(
+            args, vision_parallelism, language_parallelism, get_num_microbatches()
+        )
+        print_rank_0(
+            f"MIMO vit_batch_factor={vit_batch_factor} "
+            f"(vision_dp={vision_parallelism.data_parallel_size}, "
+            f"language_dp={language_parallelism.data_parallel_size}, "
+            f"num_microbatches={get_num_microbatches()})"
+        )
 
-        pre_process=pre_process,
-        post_process=post_process,
-        add_decoder=add_decoder,
-        add_encoder=add_encoder,
+        model = Qwen35MIMOModel(
+            language_transformer_config=config,
+            language_transformer_layer_spec=language_layer_spec,
+            language_vocab_size=args.padded_vocab_size,
+            language_max_sequence_length=args.max_position_embeddings,
 
-        fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
-        parallel_output=True,
-        language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
-        mtp_block_spec=mtp_block_spec,
-    )
+            vision_transformer_config=vision_config,
+            vision_transformer_layer_spec=vision_model_spec,
+            vision_projection_config=vision_projector_config,
+            vision_projection_layer_spec=vision_projector_spec,
+            pg_collections=pg_collections,
+            vision_parallelism=vision_parallelism,
+            language_parallelism=language_parallelism,
+
+            vision_projection_type='mlp',
+            language_position_embedding_type=args.position_embedding_type,
+            language_rotary_percent=args.rotary_percent,
+            language_rotary_base=args.rotary_base,
+
+            pre_process=pre_process,
+            post_process=post_process,
+            add_decoder=add_decoder,
+            add_encoder=add_encoder,
+
+            fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
+            parallel_output=True,
+            language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+            mtp_block_spec=mtp_block_spec,
+            vit_batch_factor=vit_batch_factor,
+            use_fp32_grad_cache=getattr(args, "mimo_fp32_grad_cache", False),
+        )
+
+        # Attach the language pg_collection to the wrapper for compatibility with
+        # code that expects a top-level pg_collection attribute.
+        model.pg_collection = pg_collections["language"]
+    else:
+        model = Qwen35Model(
+            language_transformer_config=config,
+            language_transformer_layer_spec=language_layer_spec,
+            language_vocab_size=args.padded_vocab_size,
+            language_max_sequence_length=args.max_position_embeddings,
+
+            vision_transformer_config=vision_config,
+            vision_transformer_layer_spec=vision_model_spec,
+            vision_projection_config=vision_projector_config,
+            vision_projection_layer_spec=vision_projector_spec,
+            vision_projection_type='mlp',
+
+            language_position_embedding_type=args.position_embedding_type,
+            language_rotary_percent=args.rotary_percent,
+            language_rotary_base=args.rotary_base,
+
+            pre_process=pre_process,
+            post_process=post_process,
+            add_decoder=add_decoder,
+            add_encoder=add_encoder,
+
+            fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
+            parallel_output=True,
+            language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+            mtp_block_spec=mtp_block_spec,
+        )
 
     model.freeze(
         freeze_language_model=args.freeze_LM,
@@ -204,9 +290,7 @@ def get_ltor_masks_and_position_ids(
     return attention_mask, loss_mask, position_ids
 
 
-def get_batch(
-    data_iterator, model: Qwen35Model = None
-) -> Tuple:
+def get_batch(data_iterator, model: Qwen35Model = None) -> Dict:
     """Generate a batch."""
     imgs = None
     tokens = None
@@ -266,19 +350,19 @@ def get_batch(
     )
     cur_platform.range_pop()
 
-    return (
-        tokens,
-        labels,
-        loss_mask,
-        attention_mask,
-        position_ids,
-        imgs,
-        videos,
-        image_thw_grids,
-        video_thw_grids,
-        image_input_mask,
-        video_input_mask,
-    )
+    return {
+        "tokens": tokens,
+        "labels": labels,
+        "loss_mask": loss_mask,
+        "attention_mask": attention_mask,
+        "position_ids": position_ids,
+        "imgs": imgs,
+        "videos": videos,
+        "image_thw_grids": image_thw_grids,
+        "video_thw_grids": video_thw_grids,
+        "image_input_mask": image_input_mask,
+        "video_input_mask": video_input_mask,
+    }
 
 
 SPIKY_LOSS_FACTOR = 10
@@ -335,47 +419,49 @@ def loss_func(
     return (loss, num_tokens, {'lm loss': reporting_loss})
 
 
-def forward_step(data_iterator, model: Qwen35Model):
+def forward_step(data_iterator, model):
     """Forward training step."""
     args = get_args()
     timers = get_timers()
 
     timers('batch-generator', log_level=2).start()
     global stimer
-    with stimer(bdata=True):
-        (
-            tokens,
-            labels,
-            loss_mask,
-            attention_mask,
-            position_ids,
-            imgs,
-            videos,
-            image_thw_grids,
-            video_thw_grids,
-            image_input_mask,
-            video_input_mask,
-        ) = get_batch(data_iterator, model=unwrap_model(model))
+
+    unwrapped = unwrap_model(model)
+    vision_output = None
+    if args.use_mimo:
+        # MIMO scheduler path: the model owns the scheduler; it assembles a new
+        # ViT macro batch when the current one is exhausted and returns the next
+        # LLM microbatch together with its vision output.
+        batch, vision_output = unwrapped.next_microbatch(data_iterator, get_batch)
+        vision_data = None
+        vision_grid = None
+    else:
+        with stimer(bdata=True):
+            batch = get_batch(data_iterator, model=unwrapped)
+        vision_data = torch.cat([batch["imgs"], batch["videos"]], dim=0)
+        vision_grid = torch.cat([batch["image_thw_grids"], batch["video_thw_grids"]], dim=0)
     timers('batch-generator').stop()
 
-    vision_data = torch.cat([imgs, videos], dim=0)
-    vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
+    model_kwargs = dict(
+        input_ids=batch["tokens"],
+        position_ids=batch["position_ids"],
+        vision_data=vision_data,
+        vision_grid_thw=vision_grid,
+        video_start_index=batch["image_input_mask"].sum().cpu().item(),
+        image_input_mask=batch["image_input_mask"],
+        video_input_mask=batch["video_input_mask"],
+        attention_mask=batch["attention_mask"],
+        labels=batch["labels"],
+        loss_mask=batch["loss_mask"],
+    )
+    if args.use_mimo:
+        model_kwargs["vision_output"] = vision_output
 
     with stimer:
-        output_tensor = model(
-            input_ids=tokens,
-            position_ids=position_ids,
-            vision_data=vision_data,
-            vision_grid_thw=vision_grid,
-            video_start_index=image_input_mask.sum().cpu().item(),
-            image_input_mask=image_input_mask,
-            video_input_mask=video_input_mask,
-            attention_mask=attention_mask,
-            labels=labels,
-            loss_mask=loss_mask,
-        )
+        output_tensor = model(**model_kwargs)
 
-    return output_tensor, partial(loss_func, loss_mask, model=model)
+    return output_tensor, partial(loss_func, batch["loss_mask"], model=model)
 
 
 def run_online_eval(model):
@@ -494,7 +580,10 @@ class EnergonDataloader:
     """Wrapper for Megatron Energon dataloader."""
     def __init__(self, dataloader):
         self._dataloader = dataloader
-        self._iter = iter(cyclic_iter(dataloader))
+        if dataloader is not None:
+            self._iter = iter(cyclic_iter(dataloader))
+        else:
+            self._iter = iter([])
 
     def __next__(self):
         return self._iter.__next__()
@@ -552,6 +641,39 @@ def add_qwen35_extra_args(parser):
     group.add_argument("--vision-ffn-hidden-size", type=int, default=None)
     group.add_argument("--vision-num-attention-heads", type=int, default=None)
 
+    # Profiling args required when the FlagScale runner maps YAML profiling fields to CLI.
+    group.add_argument("--use-nsys-profiler", action="store_true", dest="profile", default=False)
+
+    return parser
+
+
+def add_mimo_args(parser):
+    """Extra arguments for colocated MIMO training."""
+    group = parser.add_argument_group(title="mimo arguments")
+    group.add_argument(
+        "--vision-tensor-model-parallel-size",
+        type=int,
+        default=None,
+        help="Tensor parallel size for the vision module (defaults to language TP).",
+    )
+    group.add_argument(
+        "--vision-pipeline-model-parallel-size",
+        type=int,
+        default=None,
+        help="Pipeline parallel size for the vision module (defaults to language PP).",
+    )
+    group.add_argument(
+        "--vision-micro-batch-size",
+        type=int,
+        default=None,
+        help="Micro batch size for the vision module (defaults to language micro batch size).",
+    )
+    group.add_argument(
+        "--mimo-fp32-grad-cache",
+        action="store_true",
+        default=False,
+        help="Accumulate visual microbatch gradients in fp32 inside the MIMO scheduler.",
+    )
     return parser
 
 
@@ -564,7 +686,7 @@ if __name__ == "__main__":
         ModelType.encoder_or_decoder,
         forward_step,
         args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
-        extra_args_provider=add_qwen35_extra_args,
+        extra_args_provider=lambda parser: add_mimo_args(add_qwen35_extra_args(parser)),
         process_non_loss_data_func=write_online_eval_to_tensorboard,
         non_loss_data_func=run_online_eval,
     )
