@@ -286,11 +286,13 @@ class TraceAnalyzer:
         for key in completed_rounds:
             self._rounds.pop(key, None)
 
+        p2p_findings: list[Finding] = []
         self._scan_p2p(
             now_monotonic_s=now_monotonic_s,
             now_unix_ns=now_unix_ns,
-            output=findings,
+            output=p2p_findings,
         )
+        findings.extend(self._coalesce_missing_p2p_findings(p2p_findings))
         return findings
 
     def _ingest_p2p(
@@ -354,7 +356,14 @@ class TraceAnalyzer:
         now_unix_ns: int,
         output: list[Finding],
     ) -> None:
-        for key, direction in list(self._p2p_calls.items()):
+        directions = sorted(
+            self._p2p_calls.items(),
+            key=lambda item: min(
+                (call.effective_seen_monotonic_s for call in item[1].calls.values()),
+                default=now_monotonic_s,
+            ),
+        )
+        for key, direction in directions:
             for call in list(direction.calls.values()):
                 event = call.event
                 event_id = _p2p_event_id(event)
@@ -416,6 +425,9 @@ class TraceAnalyzer:
                             "local_group_id": _as_int(event.get("group_id"), default=0),
                             "local_group_op_index": _as_int(event.get("group_op_index"), default=0),
                             "local_p2p_op_index": _as_int(event.get("p2p_op_index"), default=-1),
+                            "_event_timestamp_unix_ns": _as_int(
+                                event.get("timestamp_unix_ns"), default=0
+                            ),
                             "waited_s": max(0.0, age_s),
                             "reason": "counterpart_not_observed_in_match_window",
                             "clock_assumption": "hosts have synchronized wall clocks",
@@ -509,6 +521,100 @@ class TraceAnalyzer:
         # the candidate indexes.
         self._seen_p2p_ids.difference_update(self._resolved_p2p_ids)
         self._resolved_p2p_ids.clear()
+
+    @staticmethod
+    def _coalesce_missing_p2p_findings(findings: list[Finding]) -> list[Finding]:
+        """Combine a burst of missing calls on one P2P link into one finding."""
+        grouped: dict[tuple[str, str, int, int], list[Finding]] = {}
+        output: list[Finding] = []
+
+        for finding in findings:
+            if finding.hang_type != "p2p_missing_counterpart":
+                output.append(finding)
+                continue
+            src_rank = _as_int(finding.details.get("src_comm_rank"), default=-1)
+            dst_rank = _as_int(finding.details.get("dst_comm_rank"), default=-1)
+            low_rank, high_rank = sorted((src_rank, dst_rank))
+            key = (finding.run_id, finding.comm_uid_hash, low_rank, high_rank)
+            grouped.setdefault(key, []).append(finding)
+
+        coalesced: list[tuple[int, Finding]] = []
+        for group in grouped.values():
+            primary = min(
+                group,
+                key=lambda finding: (
+                    _as_int(
+                        finding.details.get("_event_timestamp_unix_ns"),
+                        default=0,
+                    ),
+                    finding.comm_seq,
+                ),
+            )
+            details = dict(primary.details)
+            primary_timestamp_ns = _as_int(
+                details.pop("_event_timestamp_unix_ns", None),
+                default=0,
+            )
+
+            if len(group) > 1:
+                comm_seqs = sorted(finding.comm_seq for finding in group)
+                operation_indexes = sorted(
+                    index
+                    for finding in group
+                    if (
+                        index := _as_int(
+                            finding.details.get("local_p2p_op_index"),
+                            default=-1,
+                        )
+                    )
+                    >= 0
+                )
+                directions = sorted(
+                    {
+                        (
+                            _as_int(finding.details.get("src_comm_rank"), default=-1),
+                            _as_int(finding.details.get("dst_comm_rank"), default=-1),
+                            str(finding.details.get("observed_api", "")),
+                        )
+                        for finding in group
+                    }
+                )
+                details.update(
+                    {
+                        "aggregated_missing_call_count": len(group),
+                        "comm_seq_range": [comm_seqs[0], comm_seqs[-1]],
+                        "affected_directions": [
+                            {
+                                "src_comm_rank": src_rank,
+                                "dst_comm_rank": dst_rank,
+                                "observed_api": api,
+                            }
+                            for src_rank, dst_rank, api in directions
+                        ],
+                    }
+                )
+                if operation_indexes:
+                    details["local_p2p_op_index_range"] = [
+                        operation_indexes[0],
+                        operation_indexes[-1],
+                    ]
+
+            coalesced.append(
+                (
+                    primary_timestamp_ns,
+                    Finding(
+                        hang_type=primary.hang_type,
+                        run_id=primary.run_id,
+                        comm_uid_hash=primary.comm_uid_hash,
+                        comm_seq=primary.comm_seq,
+                        detected_at_unix_ns=primary.detected_at_unix_ns,
+                        details=details,
+                    ),
+                )
+            )
+
+        output.extend(finding for _, finding in sorted(coalesced, key=lambda item: item[0]))
+        return output
 
     def _add_p2p_call(self, direction: _P2PDirection, call: _P2PCall) -> None:
         event = call.event

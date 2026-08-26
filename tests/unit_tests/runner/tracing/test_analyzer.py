@@ -459,6 +459,91 @@ def test_missing_p2p_counterpart_is_only_suspected():
     assert findings[0].details["confidence"] == "suspected"
 
 
+def test_missing_p2p_burst_on_same_peer_pair_is_coalesced():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    calls = [
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_seq=10,
+            comm_rank=0,
+            peer=1,
+            call_seq=10,
+            p2p_op_index=4,
+            timestamp_unix_ns=1_000_000_000,
+        ),
+        _event(
+            "nccl_call",
+            api="ncclRecv",
+            comm_seq=11,
+            comm_rank=0,
+            peer=1,
+            call_seq=11,
+            p2p_op_index=4,
+            timestamp_unix_ns=1_100_000_000,
+        ),
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_seq=12,
+            comm_rank=0,
+            peer=1,
+            call_seq=12,
+            p2p_op_index=5,
+            timestamp_unix_ns=1_200_000_000,
+        ),
+    ]
+    for event in calls:
+        _ingest(analyzer, event)
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+
+    assert [finding.hang_type for finding in findings] == ["p2p_missing_counterpart"]
+    finding = findings[0]
+    assert finding.comm_seq == 10
+    assert finding.details["aggregated_missing_call_count"] == 3
+    assert finding.details["comm_seq_range"] == [10, 12]
+    assert finding.details["local_p2p_op_index_range"] == [4, 5]
+    assert finding.details["affected_directions"] == [
+        {"src_comm_rank": 0, "dst_comm_rank": 1, "observed_api": "ncclSend"},
+        {"src_comm_rank": 1, "dst_comm_rank": 0, "observed_api": "ncclRecv"},
+    ]
+
+
+def test_missing_p2p_calls_on_different_communicators_remain_separate():
+    analyzer = TraceAnalyzer(run_id=RUN_ID, p2p_timeout_s=5, p2p_match_window_s=2)
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_rank=0,
+            peer=1,
+            call_seq=1,
+            timestamp_unix_ns=1_000_000_000,
+        ),
+    )
+    _ingest(
+        analyzer,
+        _event(
+            "nccl_call",
+            api="ncclSend",
+            comm_uid_hash="fedcba9876543210",
+            comm_rank=0,
+            peer=1,
+            call_seq=2,
+            timestamp_unix_ns=1_100_000_000,
+        ),
+    )
+
+    findings = analyzer.scan(now_monotonic_s=10, now_unix_ns=10_000_000_000)
+
+    assert [finding.comm_uid_hash for finding in findings] == [
+        COMM,
+        "fedcba9876543210",
+    ]
+
+
 def test_late_p2p_counterpart_is_absorbed_without_reverse_missing_report():
     analyzer = TraceAnalyzer(
         run_id=RUN_ID,
