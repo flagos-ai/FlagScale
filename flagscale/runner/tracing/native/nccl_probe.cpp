@@ -259,6 +259,12 @@ class Runtime {
       file_path_ = trace_dir_ + "/rank_" + std::to_string(rank_) + "_pid_" +
                    std::to_string(static_cast<long long>(::getpid())) + ".jsonl";
       enabled_ = true;
+
+      // This process is the training rank selected by torchrun. Keep tracing active
+      // in the current process, but do not let later exec'd helpers inherit the
+      // activation flag. They also inherit RANK and LD_PRELOAD, and would otherwise
+      // create empty per-rank trace files even though they never call NCCL.
+      (void)::unsetenv("FLAGSCALE_TRACE_ENABLE");
       worker_ = std::thread(&Runtime::WorkerLoop, this);
     } catch (...) {
       // Tracing is diagnostic-only. Failure to allocate or start its worker must not

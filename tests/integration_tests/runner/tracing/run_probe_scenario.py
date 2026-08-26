@@ -172,6 +172,11 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
     if scenario == "sanity":
         return 0 if return_code == 0 and not findings else 1
 
+    if scenario == "subprocess":
+        # Only the two torchrun workers should own trace files. The helper spawned
+        # by each worker performs no NCCL work and must not create another file.
+        return 0 if return_code == 0 and not findings and len(raw_files) == 2 else 1
+
     expected = EXPECTED_FINDING[scenario]
     if expected not in finding_types:
         print(workload_log.read_text(encoding="utf-8", errors="replace")[-4000:], file=sys.stderr)
@@ -185,7 +190,7 @@ def main() -> int:
     parser.add_argument(
         "--scenario",
         required=True,
-        choices=("sanity", *EXPECTED_FINDING),
+        choices=("sanity", "subprocess", *EXPECTED_FINDING),
     )
     parser.add_argument("--timeout", type=float, default=10.0)
     args = parser.parse_args()

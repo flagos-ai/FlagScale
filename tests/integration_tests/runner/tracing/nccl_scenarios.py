@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import sys
 import time
 from datetime import timedelta
 
@@ -49,6 +51,17 @@ def run(scenario: str) -> None:
         dist.destroy_process_group()
         return
 
+    if scenario == "subprocess":
+        # Rank-launched helpers inherit RANK and LD_PRELOAD. They must not activate
+        # the NCCL probe unless they are themselves a training rank.
+        subprocess.run(
+            [sys.executable, "-c", "import time; time.sleep(0.25)"],
+            check=True,
+        )
+        dist.all_reduce(tensor)
+        dist.destroy_process_group()
+        return
+
     if scenario == "not_enter":
         if rank == 0:
             dist.all_reduce(tensor)
@@ -64,7 +77,7 @@ def main() -> int:
     parser.add_argument(
         "--scenario",
         required=True,
-        choices=("sanity", "not_enter"),
+        choices=("sanity", "subprocess", "not_enter"),
     )
     gpu_heartbeat.initialize_from_env()
     run(parser.parse_args().scenario)
