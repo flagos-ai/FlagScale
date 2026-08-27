@@ -137,6 +137,7 @@ def get_mlp_module_spec(
 
 def get_qwen35_mtp_block_spec(args, config):
     mtp_block_spec = None
+    use_te = args.transformer_impl == "transformer_engine"
     if getattr(args, "mtp_num_layers", None) is not None:
         # MTP uses standard SelfAttention (not Qwen35SelfAttention or GDN).
         # Generate an unpatched block spec so MTP gets vanilla SelfAttention.
@@ -145,6 +146,6 @@ def get_qwen35_mtp_block_spec(args, config):
         mtp_block_spec = get_gpt_mtp_block_spec(
             config,
             unpatched_spec,
-            use_transformer_engine=args.use_te,
+            use_transformer_engine=use_te,
         )
     return mtp_block_spec

@@ -141,6 +141,22 @@ class Qwen35LanguageModule(GPTModel):
             assert self.mrope_section is not None, (
                 "mrope requires mrope_section setting, but we got None from TransformerConfig"
             )
+        elif self.position_embedding_type == "rope" and not self.config.multi_latent_attention:
+            from megatron.core.models.common.embeddings.rotary_pos_embedding import (
+                RotaryEmbedding,
+            )
+
+            self.rotary_pos_emb = RotaryEmbedding(
+                kv_channels=self.config.kv_channels,
+                rotary_percent=rotary_percent,
+                rotary_interleaved=self.config.rotary_interleaved,
+                seq_len_interpolation_factor=seq_len_interpolation_factor,
+                rotary_base=rotary_base,
+                rope_scaling=rope_scaling,
+                rope_scaling_factor=rope_scaling_factor,
+                use_cpu_initialization=self.config.use_cpu_initialization,
+                cp_group=parallel_state.get_context_parallel_group(check_initialized=False),
+            )
 
         # Cache for RoPE tensors which do not change between iterations.
         self.rotary_pos_emb_cache = {}

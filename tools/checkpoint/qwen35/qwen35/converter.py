@@ -170,8 +170,10 @@ class BaseConverter:
         """Convert HF state dict to full (unsharded) Megatron state dict."""
         meg_sd = {}
         self._convert_llm_hf2meg(hf_sd, meg_sd)
-        convert_vision_hf2meg(hf_sd, meg_sd, self.cfg)
-        convert_mtp_hf2meg(hf_sd, meg_sd, self.cfg)
+        if self.cfg.enable_vision:
+            convert_vision_hf2meg(hf_sd, meg_sd, self.cfg)
+        if self.cfg.mtp_num_layers > 0:
+            convert_mtp_hf2meg(hf_sd, meg_sd, self.cfg)
         return meg_sd
 
     # -------------------------------------------------------------------------
@@ -255,8 +257,10 @@ class BaseConverter:
         """Convert merged Megatron state dict to HF naming convention."""
         hf_sd = {}
         self._convert_llm_meg2hf(full_sd, hf_sd)
-        convert_vision_meg2hf(full_sd, hf_sd, self.cfg)
-        convert_mtp_meg2hf(full_sd, hf_sd, self.cfg)
+        if self.cfg.enable_vision:
+            convert_vision_meg2hf(full_sd, hf_sd, self.cfg)
+        if self.cfg.mtp_num_layers > 0:
+            convert_mtp_meg2hf(full_sd, hf_sd, self.cfg)
         return hf_sd
 
     # -------------------------------------------------------------------------
@@ -268,15 +272,22 @@ class BaseConverter:
         tp = cfg.tp
         shards = [{} for _ in range(tp)]
 
-        vis_h = cfg.vision_hidden_size
-        vis_heads = cfg.vision_num_attention_heads
-        vis_head_dim = vis_h // vis_heads
-        vis_qg = vis_heads
+        if cfg.enable_vision:
+            vis_h = cfg.vision_hidden_size
+            vis_heads = cfg.vision_num_attention_heads
+            vis_head_dim = vis_h // vis_heads
+            vis_qg = vis_heads
+        else:
+            vis_h = vis_heads = vis_head_dim = vis_qg = 0
 
         for k, v in meg_sd.items():
             if not isinstance(v, torch.Tensor):
                 for r in range(tp):
                     shards[r][k] = v
+                continue
+
+            # Skip MTP weights when MTP is disabled
+            if "mtp" in k and cfg.mtp_num_layers == 0:
                 continue
 
             # Embedding / output layer
@@ -291,6 +302,9 @@ class BaseConverter:
 
             # Vision model
             if "vision_model" in k:
+                if not cfg.enable_vision:
+                    # Vision weights exist but vision is disabled in config, skip
+                    continue
                 if "patch_embed" in k or "pos_embed" in k or "final_layernorm" in k:
                     for r in range(tp):
                         shards[r][k] = v
@@ -426,11 +440,14 @@ class BaseConverter:
         for s in shards:
             all_keys.update(s.keys())
 
-        vis_h = cfg.vision_hidden_size
-        vis_heads = cfg.vision_num_attention_heads
-        vis_head_dim = vis_h // vis_heads
-        vis_qg = vis_heads
-        vis_gps = vis_qg // tp
+        if cfg.enable_vision:
+            vis_h = cfg.vision_hidden_size
+            vis_heads = cfg.vision_num_attention_heads
+            vis_head_dim = vis_h // vis_heads
+            vis_qg = vis_heads
+            vis_gps = vis_qg // tp
+        else:
+            vis_h = vis_heads = vis_head_dim = vis_qg = vis_gps = 0
 
         for k in sorted(all_keys):
             if "extra_state" in k:
@@ -439,7 +456,14 @@ class BaseConverter:
             if not vals or not isinstance(vals[0], torch.Tensor):
                 continue
 
+            # Skip MTP weights when MTP is disabled
+            if "mtp" in k and cfg.mtp_num_layers == 0:
+                continue
+
             if "vision_model" in k:
+                if not cfg.enable_vision:
+                    # Vision weights exist in checkpoint but vision is disabled in config, skip
+                    continue
                 if "patch_embed" in k or "pos_embed" in k:
                     merged[k] = vals[0]
                 elif "linear_qkv.weight" in k:
