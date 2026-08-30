@@ -19,7 +19,7 @@
     pipeline_parallel_size: 1
     gpu_memory_utilization: 0.9
     max_num_seqs: 256
-    limit_mm_per_prompt: image=18
+    limit_mm_per_prompt: '{"image": 18}'
     port: 9010
     trust_remote_code: true
     enable_chunked_prefill: true
