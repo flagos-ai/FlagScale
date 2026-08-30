@@ -1,0 +1,29 @@
+# OpenVLA LoRA verifier training, following the official OpenVLA recipe.
+system: {}
+
+kerv:
+  stage: verifier_lora
+  source_root: ${oc.env:OPENVLA_SOURCE_ROOT,./openvla}
+  entrypoint: vla-scripts/finetune.py
+  launcher: python
+  work_dir: .
+  dependencies:
+    - torch
+    - transformers
+    - draccus
+  arguments:
+    vla_path: ${oc.env:KERV_BASE_CHECKPOINT,openvla/openvla-7b}
+    data_root_dir: ${oc.env:KERV_DATA_ROOT,./datasets/open-x-embodiment}
+    dataset_name: ${oc.env:KERV_DATASET_NAME,libero_goal_no_noops}
+    run_root_dir: ${experiment.exp_dir}
+    adapter_tmp_dir: ${experiment.exp_dir}/adapter-tmp
+    lora_rank: 32
+    lora_dropout: 0.0
+    batch_size: 16
+    grad_accumulation_steps: 1
+    learning_rate: 5.0e-4
+    image_aug: true
+    use_lora: true
+    use_quantization: false
+    wandb_project: KERV-Verifier
+    run_id_note: kerv-libero-goal
