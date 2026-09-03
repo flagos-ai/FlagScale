@@ -72,7 +72,8 @@ export LD_LIBRARY_PATH=/path/to/osmesa/lib:${LD_LIBRARY_PATH:-}
 LoRA fine-tuning follows the official OpenVLA Hugging Face recipe:
 
 ```bash
-flagscale train kerv -c examples/kerv/conf/train_verifier_lora.yaml
+export KERV_TRAIN_STAGE=verifier_lora
+flagscale train kerv -c examples/kerv/conf/train.yaml
 ```
 
 Full training follows the official OpenVLA FSDP recipe and normally requires
@@ -80,8 +81,9 @@ eight GPUs. Set `KERV_PRISMATIC_CHECKPOINT` and a registered OpenVLA
 `KERV_VLA_CONFIG` before launching:
 
 ```bash
+export KERV_TRAIN_STAGE=verifier_full
 export KERV_TRAIN_GPUS=8
-flagscale train kerv -c examples/kerv/conf/train_verifier_full.yaml
+flagscale train kerv -c examples/kerv/conf/train.yaml
 ```
 
 ## Train the drafter
@@ -97,7 +99,8 @@ drafter with the released DeepSpeed ZeRO-2 configuration:
 
 ```bash
 export KERV_DRAFT_DATA=$PWD/outputs/kerv_draft_data/samples
-flagscale train kerv -c examples/kerv/conf/train_drafter.yaml
+export KERV_TRAIN_STAGE=drafter
+flagscale train kerv -c examples/kerv/conf/train.yaml
 ```
 
 The drafter script writes DeepSpeed checkpoints under `state_<epoch>`. Select
@@ -150,7 +153,8 @@ pytest tests/test_utils/runners/check_results.py::test_inference_equal \
 Configuration composition does not require weights:
 
 ```bash
-flagscale train kerv -c examples/kerv/conf/train_verifier_lora.yaml --dryrun
+KERV_TRAIN_STAGE=verifier_lora \
+  flagscale train kerv -c examples/kerv/conf/train.yaml --dryrun
 flagscale inference kerv -c examples/kerv/conf/inference.yaml --dryrun
 ```
 

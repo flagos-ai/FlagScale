@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from flagscale.kerv_runtime import (
+from .entrypoint import (
     KERVEntrypointError,
     build_inprocess_argv,
     load_kerv_task_config,

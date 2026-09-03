@@ -9,7 +9,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from flagscale.inference.inference_kerv import main as inference_main
-from flagscale.kerv_runtime import (
+from flagscale.models.kerv.entrypoint import (
     KERVEntrypointError,
     build_inprocess_argv,
     run_kerv_entrypoint,

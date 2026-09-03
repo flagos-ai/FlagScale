@@ -19,14 +19,16 @@ def _compose(name: str):
 def test_all_public_kerv_configs_compose(monkeypatch):
     monkeypatch.setenv("KERV_SOURCE_ROOT", "/tmp/KERV")
     monkeypatch.setenv("OPENVLA_SOURCE_ROOT", "/tmp/openvla")
-    names = (
-        "train_verifier_lora",
-        "train_verifier_full",
-        "generate_draft_data",
-        "train_drafter",
-        "inference",
-    )
-    for name in names:
+    for stage in ("verifier_lora", "verifier_full", "drafter"):
+        monkeypatch.setenv("KERV_TRAIN_STAGE", stage)
+        config = _compose("train")
+        OmegaConf.resolve(config)
+        assert config.train.kerv.stage == stage
+        assert config.train.system is not None
+        assert config.train.kerv.launcher == "python"
+        assert config.experiment.task.entrypoint == "flagscale/train/train_kerv.py"
+
+    for name in ("generate_draft_data", "inference"):
         config = _compose(name)
         OmegaConf.resolve(config)
         task_config = config.inference if name == "inference" else config.train
@@ -61,29 +63,40 @@ def test_inference_uses_safe_profile(monkeypatch):
 def test_all_public_configs_build_commands_without_weights(tmp_path, monkeypatch):
     kerv_root = tmp_path / "KERV"
     openvla_root = tmp_path / "openvla"
-    entrypoints = {
-        "train_verifier_lora": (openvla_root, "vla-scripts/finetune.py"),
-        "train_verifier_full": (openvla_root, "vla-scripts/train.py"),
+    training_entrypoints = {
+        "verifier_lora": (openvla_root, "vla-scripts/finetune.py"),
+        "verifier_full": (openvla_root, "vla-scripts/train.py"),
+        "drafter": (kerv_root, "training/train_drafter.py"),
+    }
+    other_entrypoints = {
         "generate_draft_data": (kerv_root, "training/generate_drafter_data.py"),
-        "train_drafter": (kerv_root, "training/train_drafter.py"),
         "inference": (
             kerv_root,
             "openvla/experiments/robot/libero/run_kerv_libero.py",
         ),
     }
-    for source_root, relative in entrypoints.values():
+    for source_root, relative in (*training_entrypoints.values(), *other_entrypoints.values()):
         script = source_root / relative
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text("print('smoke')\n", encoding="utf-8")
 
     monkeypatch.setenv("KERV_SOURCE_ROOT", str(kerv_root))
     monkeypatch.setenv("OPENVLA_SOURCE_ROOT", str(openvla_root))
-    for name, (source_root, relative) in entrypoints.items():
+    for stage, (source_root, relative) in training_entrypoints.items():
+        monkeypatch.setenv("KERV_TRAIN_STAGE", stage)
+        config = _compose("train")
+        OmegaConf.resolve(config)
+        config_path = tmp_path / f"train_{stage}.yaml"
+        OmegaConf.save(config, config_path)
+        kerv = load_kerv_config(config_path)
+        command, _, _ = build_kerv_command(kerv)
+        assert command[1] == str(source_root / relative)
+
+    for name, (source_root, relative) in other_entrypoints.items():
         config = _compose(name)
         OmegaConf.resolve(config)
-        runner_config = config.inference if name == "inference" else config
         config_path = tmp_path / f"{name}.yaml"
-        OmegaConf.save(runner_config, config_path)
+        OmegaConf.save(config, config_path)
         kerv = load_kerv_config(config_path)
         command, _, _ = build_kerv_command(kerv)
         assert command[1] == str(source_root / relative)

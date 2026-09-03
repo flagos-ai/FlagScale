@@ -1,4 +1,8 @@
 # OpenVLA full verifier training, following the official FSDP recipe.
+resources:
+  nproc_per_node: ${oc.env:KERV_TRAIN_GPUS,8}
+  cuda_visible_devices: ${oc.env:CUDA_VISIBLE_DEVICES,'0,1,2,3,4,5,6,7'}
+
 system: {}
 
 kerv:

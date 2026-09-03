@@ -1,12 +1,13 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
 
+# Select verifier_lora, verifier_full, or drafter with KERV_TRAIN_STAGE.
 defaults:
   - _self_
-  - train: drafter
+  - train: ${oc.env:KERV_TRAIN_STAGE,verifier_lora}
 
 experiment:
-  exp_name: kerv_drafter
+  exp_name: kerv_${train.kerv.stage}
   exp_dir: outputs/${experiment.exp_name}
   task:
     type: train
@@ -14,10 +15,10 @@ experiment:
     entrypoint: flagscale/train/train_kerv.py
   runner:
     hostfile: null
-    nproc_per_node: ${oc.env:KERV_TRAIN_GPUS,4}
+    nproc_per_node: ${train.resources.nproc_per_node}
     rdzv_backend: static
   envs:
-    CUDA_VISIBLE_DEVICES: ${oc.env:CUDA_VISIBLE_DEVICES,'0,1,2,3'}
+    CUDA_VISIBLE_DEVICES: ${train.resources.cuda_visible_devices}
     WANDB_MODE: ${oc.env:WANDB_MODE,offline}
 
 action: run

@@ -16,7 +16,7 @@
 
 import argparse
 
-from flagscale.kerv_runtime import load_kerv_task_config, run_kerv_entrypoint
+from flagscale.models.kerv.entrypoint import load_kerv_task_config, run_kerv_entrypoint
 
 
 def main() -> None:

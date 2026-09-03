@@ -16,7 +16,7 @@
 
 import argparse
 
-from flagscale.kerv_runtime import load_kerv_task_config, run_kerv_entrypoint
+from flagscale.models.kerv.entrypoint import load_kerv_task_config, run_kerv_entrypoint
 
 
 _TRAIN_STAGES = {"verifier_lora", "verifier_full", "draft_data", "drafter"}
