@@ -166,7 +166,7 @@ def test_kalman_predict_handles_scalar_and_vector_history():
     assert 11.0 < vector[1].item() <= 12.0
 
 
-def test_native_runtime_executes_draft_verify_and_kalman_paths():
+def test_native_runtime_smoke_executes_draft_verify_and_kalman_paths():
     config = KERVConfig(
         action_dim=3,
         candidate_depth=2,

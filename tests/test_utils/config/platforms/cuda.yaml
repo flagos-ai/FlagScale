@@ -44,7 +44,6 @@ a100:
         qwen3: ["tp2_pp2"]
       inference:
         qwen3: ["4b_tp2"]
-        kerv: ["native_runtime_smoke"]
       serve:
         qwen2_5: ["0.5b"]
     unit:

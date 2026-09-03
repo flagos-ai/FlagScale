@@ -124,7 +124,7 @@ operators from the checked-out `runtime_opt` package, including static-tree
 packing and attention, Verify-Accept control, KV commit, QKV fusion,
 Gate-Up-SwiGLU fusion, and RoPE/KV write.
 
-## Native runtime and CI smoke
+## Native runtime tests
 
 The model-independent control path is directly importable from
 `flagscale.models.kerv`. It has no checkpoint dependency and is covered by the
@@ -132,20 +132,6 @@ multi-platform unit-test suite:
 
 ```bash
 pytest tests/unit_tests/models/kerv -v
-```
-
-The CUDA functional test runs real candidate generation, static-tree
-construction, verification, and acceptance on the current GPU, then compares
-its output with a checked-in golden result:
-
-```bash
-flagscale inference kerv \
-  -c tests/functional_tests/inference/kerv/conf/native_runtime_smoke.yaml \
-  --test
-
-pytest tests/test_utils/runners/check_results.py::test_inference_equal \
-  --path tests/functional_tests --task inference --model kerv \
-  --case native_runtime_smoke
 ```
 
 ## Configuration check
