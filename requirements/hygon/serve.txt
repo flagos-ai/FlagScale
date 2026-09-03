@@ -1,0 +1,5 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+# Serving uses the same validated vLLM runtime as inference. No additional
+# Python dependency is installed for this task.

@@ -9,6 +9,7 @@ megatron.core.tokenizers.utils.build_tokenizer. This module provides:
 """
 
 from collections import OrderedDict
+from collections.abc import Mapping
 
 from megatron.core.tokenizers.base_tokenizer import MegatronTokenizerBase
 from megatron.core.tokenizers.utils.build_tokenizer import (
@@ -281,9 +282,31 @@ class _Qwen2VLTokenizer(_FlagScaleTokenizerBase):
         return self.tokenizer(text, return_tensors=return_tensors, padding=padding,
                 max_length=max_length, truncation=truncation, add_special_tokens=add_special_tokens)
 
-    def apply_chat_template(self, conversations, tokenize:bool=True, **kwargs):
-        return self.tokenizer.apply_chat_template(conversations, tokenize=tokenize, chat_template=self.chat_template, **kwargs)
-    
+    def apply_chat_template(self, conversations, tokenize: bool = True, **kwargs):
+        """Apply the chat template while preserving the legacy return type by default.
+
+        Transformers 5 defaults ``return_dict`` to ``True``, while Transformers 4
+        defaults it to ``False``. FlagScale callers expect token IDs unless they
+        explicitly request a mapping, so keep that contract stable across versions.
+        """
+        return_dict = kwargs.setdefault("return_dict", False)
+        output = self.tokenizer.apply_chat_template(
+            conversations,
+            tokenize=tokenize,
+            chat_template=self.chat_template,
+            **kwargs,
+        )
+
+        # Be defensive around custom/remote tokenizers that ignore return_dict=False.
+        if tokenize and not return_dict and isinstance(output, Mapping):
+            if "input_ids" not in output:
+                raise ValueError(
+                    "Tokenizer returned a mapping without 'input_ids' while tokenize=True"
+                )
+            return output["input_ids"]
+
+        return output
+
     @property
     def vocab_size(self):
         return self.tokenizer.vocab_size + self.extra_vocab_size

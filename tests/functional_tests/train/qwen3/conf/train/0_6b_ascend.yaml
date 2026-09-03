@@ -1,0 +1,99 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+defaults:
+  - data
+
+data:
+  data_path: /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo
+  tokenizer:
+    tokenizer_path: /home/gitlab-runner/data/Qwen3-4B
+
+system:
+  # torch_npu maps Megatron's supported NCCL choice to HCCL on Ascend.
+  distributed_backend: nccl
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  disable_bias_linear: true
+  reset_position_ids: true
+  reset_attention_mask: true
+  qk_layernorm: true
+  use_distributed_optimizer: false
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: true
+  logging:
+    log_interval: 1
+    no_log_loss_scale_to_tensorboard: true
+  checkpoint:
+    no_save_optim: true
+    no_save_rng: true
+    no_load_optim: true
+    no_load_rng: true
+    save_interval: 100000
+    ckpt_format: torch
+    tensorboard_log_interval: 999999
+
+model:
+  deterministic_mode: true
+  transformer_impl: transformer_engine
+  attention_backend: unfused
+  te_fl_prefer: reference
+  te_fl_per_op: "rmsnorm_fwd=reference"
+  te_fl_allow_vendors: "npu"
+  te_fl_deny_vendors: "cuda"
+  enable_flag_gems: false
+  no_persist_layer_norm: true
+  no_masked_softmax_fusion: true
+  no_check_for_nan_in_loss_and_grad: false
+  no_gradient_accumulation_fusion: true
+  num_layers: 28
+  hidden_size: 1024
+  ffn_hidden_size: 3072
+  kv_channels: 128
+  num_attention_heads: 16
+  group_query_attention: true
+  num_query_groups: 8
+  seq_length: 256
+  max_position_embeddings: 40960
+  norm_epsilon: 1e-6
+  use_rotary_position_embeddings: true
+  rotary_base: 1000000
+  no_rope_fusion: true
+  swiglu: true
+  normalization: RMSNorm
+  untie_embeddings_and_output_weights: false
+  no_position_embedding: true
+  init_method_std: 0.006
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  clip_grad: 1.0
+  train_iters: 10
+  eval_iters: 0
+  eval_interval: 1000
+  micro_batch_size: 1
+  global_batch_size: 2
+  seed: 42
+
+  optimizer:
+    weight_decay: 0.1
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    lr_scheduler:
+      lr: 1.0e-5
+      min_lr: 1.0e-6
+      lr_warmup_samples: 0
+      lr_warmup_fraction: 0.01
+      lr_decay_style: cosine

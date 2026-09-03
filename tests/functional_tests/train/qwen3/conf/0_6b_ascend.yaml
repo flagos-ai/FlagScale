@@ -1,0 +1,47 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+defaults:
+  - _self_
+  - train: 0_6b_ascend
+
+experiment:
+  exp_name: 0_6b_ascend
+  exp_dir: tests/functional_tests/train/qwen3/test_results/0_6b_ascend
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_gpt.py
+  runner:
+    backend: torchrun
+    nnodes: 1
+    nproc_per_node: 2
+    rdzv_backend: static
+    no_shared_fs: false
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    FS_PLATFORM: npu
+    ASCEND_RT_VISIBLE_DEVICES: "0,1"
+    HCCL_CONNECT_TIMEOUT: "1800"
+    NCCL_ALGO: "Ring"
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: "0"
+  cmds:
+    before_start: ''
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

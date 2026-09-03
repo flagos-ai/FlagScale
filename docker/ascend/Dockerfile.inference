@@ -1,0 +1,61 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The immutable base owns the matching Ascend vLLM, FlagTree and Triton runtime.
+# FlagScale only overlays the resolved vllm-plugin-FL and FlagGems revisions.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260812-ascend-dev-inference
+
+FROM ${BASE_IMAGE} AS dev
+
+ARG VLLM_PLUGIN_FL_REF=main
+# Direct builds use the current stable release; CI resolves the latest release
+# to an immutable commit before dispatching the platform build.
+ARG FLAGGEMS_REF=v5.3.0
+
+LABEL io.flagscale.vllm-plugin-fl.revision=${VLLM_PLUGIN_FL_REF} \
+      io.flagscale.flaggems.revision=${FLAGGEMS_REF}
+
+ENV VLLM_PLUGINS=fl \
+    VLLM_FL_PLATFORM=ascend \
+    TRITON_ALL_BLOCKS_PARALLEL=1
+
+ENV FLAGSCALE_VLLM_PLUGIN_REF=${VLLM_PLUGIN_FL_REF} \
+    FLAGSCALE_FLAGGEMS_REF=${FLAGGEMS_REF}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+# The immutable vendor base contains unrelated package metadata findings.
+# Installing the pinned plugin must not introduce any additional conflicts.
+RUN python -m pip check 2>&1 | sort > /tmp/pip-check.before || true
+
+RUN chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/ascend/*.sh && \
+    /workspace/tools/install/install.sh --platform ascend --task inference \
+        --pkg-mgr pip --no-system --no-dev --no-base && \
+    /workspace/tools/install/install.sh --platform ascend --task serve \
+        --pkg-mgr pip --no-system --no-dev --no-base --only-pip
+
+RUN python -m pip check 2>&1 | sort > /tmp/pip-check.after || true
+
+RUN bash /workspace/tools/install/utils/check_pip_conflicts.sh \
+        /tmp/pip-check.before /tmp/pip-check.after && \
+    rm -f /tmp/pip-check.before /tmp/pip-check.after && \
+    rm -rf /opt/flagscale/deps /workspace/tools /workspace/requirements
+
+WORKDIR /workspace
+
+FROM dev AS release
+CMD ["/bin/bash"]
