@@ -30,7 +30,7 @@ from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
 from megatron.core.rerun_state_machine import get_rerun_state_machine
-from megatron.core.utils import StragglerDetector
+from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 
 from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
@@ -100,6 +100,24 @@ def model_provider(
     args = get_args()
     print_rank_0("start building qwen3.5 model ...")
 
+    if args.record_memory_history:
+        torch.cuda.memory._record_memory_history(
+            True,
+            # keep 100,000 alloc/free events from before the snapshot
+            trace_alloc_max_entries=100000,
+            # record stack information for the trace events
+            trace_alloc_record_context=True,
+        )
+
+        def oom_observer(device, alloc, device_alloc, device_free):
+            # snapshot right after an OOM happened
+            print('saving allocated state during OOM')
+
+            filename = f"oom_rank-{torch.distributed.get_rank()}_{args.memory_snapshot_path}"
+            torch.cuda.memory._dump_snapshot(filename)
+
+        torch._C._cuda_attach_out_of_memory_observer(oom_observer)
+
     # Build transformer config with Qwen35 config class
     config = core_transformer_config_from_args(args, Qwen35TransformerConfig)
     # Qwen3.5 uses zero-centered gamma for RMSNorm; override if needed
@@ -114,12 +132,18 @@ def model_provider(
         args.rotary_seq_len_interpolation_factor = None
 
     # Vision configs (identical encoder to Qwen3-VL)
-    vision_config = get_vision_model_config(args, deepcopy(config))
-    vision_config.pipeline_model_parallel_size = 1
-    vision_config.first_pipeline_num_layers = None
-    vision_projector_config = get_vision_projection_config(
-        deepcopy(config), vision_config.hidden_size, args.spatial_merge_size
-    )
+    enable_vision = getattr(args, 'enable_vision', True)
+    if enable_vision:
+        vision_config = get_vision_model_config(args, deepcopy(config))
+        vision_config.pipeline_model_parallel_size = 1
+        vision_config.first_pipeline_num_layers = None
+        vision_projector_config = get_vision_projection_config(
+            deepcopy(config), vision_config.hidden_size, args.spatial_merge_size
+        )
+    else:
+        print_rank_0("Vision is disabled, building text-only model...")
+        vision_config = None
+        vision_projector_config = None
 
     print_rank_0("building Qwen3.5 model in TE...")
 
@@ -127,8 +151,12 @@ def model_provider(
     language_layer_spec = get_qwen35_language_model_spec(config)
 
     # Vision model spec (identical to Qwen3-VL)
-    vision_model_spec = get_qwen3vl_vision_model_spec()
-    vision_projector_spec = get_mlp_module_spec(add_norm=False).submodules
+    if enable_vision:
+        vision_model_spec = get_qwen3vl_vision_model_spec()
+        vision_projector_spec = get_mlp_module_spec(add_norm=False).submodules
+    else:
+        vision_model_spec = None
+        vision_projector_spec = None
 
     if args.enable_variable_seq_lengths:
         config.variable_seq_lengths = True
@@ -136,7 +164,9 @@ def model_provider(
     # MTP (Multi-Token Prediction) spec
     mtp_block_spec = get_qwen35_mtp_block_spec(args, config)
 
-    args.padded_vocab_size = args.vocab_size
+    # args.padded_vocab_size = args.vocab_size
+    # print(f"set args.padded_vocab_size to before init model: {args.padded_vocab_size=}")
+
     model = Qwen35Model(
         language_transformer_config=config,
         language_transformer_layer_spec=language_layer_spec,
@@ -157,6 +187,7 @@ def model_provider(
         post_process=post_process,
         add_decoder=add_decoder,
         add_encoder=add_encoder,
+        enable_vision=enable_vision,
 
         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
         parallel_output=True,
@@ -166,7 +197,7 @@ def model_provider(
 
     model.freeze(
         freeze_language_model=args.freeze_LM,
-        freeze_vision_model=args.freeze_ViT,
+        freeze_vision_model=args.freeze_ViT if enable_vision else False,
         freeze_vision_projection=False,
     )
 
@@ -184,13 +215,21 @@ def get_ltor_masks_and_position_ids(
     model: Qwen35Model = None,
 ):
     """Build masks and position ids for left-to-right model."""
-    # Position ids [3 X bs X seqlen]
-    position_ids, _ = model.get_rope_index(
-        input_ids=input_ids,
-        image_grid_thw=image_thw_grids,
-        video_grid_thw=video_thw_grids,
-        attention_mask=input_ids != pad_token,
-    )
+    args = get_args()
+
+    if not getattr(args, 'enable_vision', True):
+        # Text-only: position_ids is [3, B, S] with all three dimensions identical
+        batch_size, seq_len = input_ids.shape
+        pos = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+        position_ids = pos.unsqueeze(0).expand(3, -1, -1)
+    else:
+        # Multimodal: compute mRoPE position indices from vision grids
+        position_ids, _ = model.get_rope_index(
+            input_ids=input_ids,
+            image_grid_thw=image_thw_grids,
+            video_grid_thw=video_thw_grids,
+            attention_mask=input_ids != pad_token,
+        )
 
     # Loss mask
     loss_mask = torch.ones(target.size(), dtype=torch.float, device=input_ids.device)
@@ -215,6 +254,9 @@ def get_batch(
     attention_mask = None
     position_ids = None
 
+    args = get_args()
+    enable_vision = getattr(args, 'enable_vision', True)
+
     cur_platform.range_push("get_data")
     if data_iterator is not None and get_tensor_model_parallel_rank() == 0:
         data = next(data_iterator)
@@ -230,18 +272,29 @@ def get_batch(
 
     data_text = broadcast_data(["text"], data, torch.int64)["text"]
     target = broadcast_data(["target"], data, torch.int64)["target"]
-    imgs = broadcast_data(["imgs"], data, torch.float32)["imgs"]
-    videos = broadcast_data(["videos"], data, torch.float32)["videos"]
-    image_thw_grids = broadcast_data(["image_thw_grids"], data, torch.long)["image_thw_grids"]
 
-    args = get_args()
+    if enable_vision:
+        imgs = broadcast_data(["imgs"], data, torch.float32)["imgs"]
+        videos = broadcast_data(["videos"], data, torch.float32)["videos"]
+        image_thw_grids = broadcast_data(["image_thw_grids"], data, torch.long)["image_thw_grids"]
+    else:
+        imgs = None
+        videos = None
+        image_thw_grids = None
+
     if data_text.shape[-1] == args.max_padding_length and get_pipeline_model_parallel_rank() == 0:
         cur_platform.empty_cache()
 
-    video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
-    second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)['second_per_grid_ts']
-    image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
-    video_input_mask = broadcast_data(["video_input_mask"], data, torch.bool)["video_input_mask"]
+    if enable_vision:
+        video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
+        second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)['second_per_grid_ts']
+        image_input_mask = broadcast_data(["image_input_mask"], data, torch.bool)["image_input_mask"]
+        video_input_mask = broadcast_data(["video_input_mask"], data, torch.bool)["video_input_mask"]
+    else:
+        video_thw_grids = None
+        second_per_grid_ts = None
+        image_input_mask = None
+        video_input_mask = None
     cur_platform.range_pop()
 
     cur_platform.range_push("index tokens")
@@ -358,22 +411,34 @@ def forward_step(data_iterator, model: Qwen35Model):
         ) = get_batch(data_iterator, model=unwrap_model(model))
     timers('batch-generator').stop()
 
-    vision_data = torch.cat([imgs, videos], dim=0)
-    vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
+    enable_vision = getattr(args, 'enable_vision', True)
 
-    with stimer:
-        output_tensor = model(
-            input_ids=tokens,
-            position_ids=position_ids,
-            vision_data=vision_data,
-            vision_grid_thw=vision_grid,
-            video_start_index=image_input_mask.sum().cpu().item(),
-            image_input_mask=image_input_mask,
-            video_input_mask=video_input_mask,
-            attention_mask=attention_mask,
-            labels=labels,
-            loss_mask=loss_mask,
-        )
+    if enable_vision:
+        vision_data = torch.cat([imgs, videos], dim=0)
+        vision_grid = torch.cat([image_thw_grids, video_thw_grids], dim=0)
+
+        with stimer:
+            output_tensor = model(
+                input_ids=tokens,
+                position_ids=position_ids,
+                vision_data=vision_data,
+                vision_grid_thw=vision_grid,
+                video_start_index=image_input_mask.sum().cpu().item(),
+                image_input_mask=image_input_mask,
+                video_input_mask=video_input_mask,
+                attention_mask=attention_mask,
+                labels=labels,
+                loss_mask=loss_mask,
+            )
+    else:
+        with stimer:
+            output_tensor = model(
+                input_ids=tokens,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+                loss_mask=loss_mask,
+            )
 
     return output_tensor, partial(loss_func, loss_mask, model=model)
 
@@ -391,6 +456,69 @@ def write_online_eval_to_tensorboard(data, iteration, writer):
         for k, v in item.items():
             writer.add_scalar(k, v, iteration)
 
+
+###############################################################################
+# Text-only (GPT-style) data loading — used when enable_vision=False
+###############################################################################
+
+from flagscale.train.megatron.train_gpt import (
+    get_batch as get_batch_gpt,
+    train_valid_test_datasets_provider as train_valid_test_datasets_provider_gpt,
+    get_embedding_ranks,
+)
+
+
+def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
+    """Generate a batch for text-only training (GPT-style), with mRoPE position_ids."""
+    tokens, labels, loss_mask, attention_mask, position_ids, packed_seq_params = get_batch_gpt(
+        data_iterator, vp_stage
+    )
+
+    # Expand position_ids from [B, S] to [3, B, S] for mRoPE (text-only: all 3 dims identical)
+    if position_ids is not None:
+        position_ids = position_ids.unsqueeze(0).expand(3, -1, -1).contiguous()
+
+    return tokens, labels, loss_mask, attention_mask, position_ids, packed_seq_params
+
+
+def forward_step_text(data_iterator, model: Qwen35Model, return_schedule_plan: bool = False):
+    """Forward training step for text-only mode."""
+    args = get_args()
+    timers = get_timers()
+
+    timers('batch-generator', log_level=2).start()
+    global stimer
+    with stimer(bdata=True):
+        vp_stage = get_attr_wrapped_model(model, "vp_stage")
+        tokens, labels, loss_mask, attention_mask, position_ids, packed_seq_params = get_batch_text(
+            data_iterator, vp_stage
+        )
+    timers('batch-generator').stop()
+
+    with stimer:
+        if return_schedule_plan:
+            assert args.overlap_moe_expert_parallel_comm, \
+                "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
+            schedule_plan = model.build_schedule_plan(
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
+            )
+            return schedule_plan, partial(loss_func, loss_mask, model=model)
+        else:
+            output_tensor = model(
+                input_ids=tokens,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+                loss_mask=loss_mask,
+                packed_seq_params=packed_seq_params,
+            )
+
+    return output_tensor, partial(loss_func, loss_mask, model=model)
+
+
+###############################################################################
+# Multimodal (energon) data loading — used when enable_vision=True
+###############################################################################
 
 def datasets_provider(worker_config=None):
     """Create multimodal train, validation and test datasets."""
@@ -516,6 +644,10 @@ def add_qwen35_extra_args(parser):
     """Extra arguments for Qwen3.5 training."""
     group = parser.add_argument_group(title="qwen35 arguments")
     group.add_argument("--disable-vision-class-token", action="store_true", default=False)
+    group.add_argument("--enable-vision", action="store_true", default=True,
+                       help="Enable vision encoder for multimodal training (default).")
+    group.add_argument("--no-enable-vision", dest="enable_vision", action="store_false",
+                       help="Disable vision encoder for text-only LLM training.")
     group.add_argument("--dataloader-save", type=str, default=None)
     group.add_argument("--extra-vocab-size", type=int, default=0)
     group.add_argument("--spatial-merge-size", type=int, default=2)
@@ -556,15 +688,38 @@ def add_qwen35_extra_args(parser):
 
 
 if __name__ == "__main__":
-    train_valid_test_dataloaders_provider.is_distributed = True
+    # Determine vision mode from CLI args before megatron initialization.
+    # NOTE: FlagScale's flatten_dict_to_args skips bool=False values in YAML,
+    # so to disable vision in YAML, use `no_enable_vision: True` (generates --no-enable-vision).
+    import argparse
+    _pre_parser = argparse.ArgumentParser(add_help=False)
+    _pre_parser.add_argument("--enable-vision", action="store_true", default=True)
+    _pre_parser.add_argument("--no-enable-vision", dest="enable_vision", action="store_false")
+    _pre_args, _ = _pre_parser.parse_known_args()
+    _enable_vision = _pre_args.enable_vision
 
-    pretrain(
-        train_valid_test_dataloaders_provider,
-        model_provider,
-        ModelType.encoder_or_decoder,
-        forward_step,
-        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
-        extra_args_provider=add_qwen35_extra_args,
-        process_non_loss_data_func=write_online_eval_to_tensorboard,
-        non_loss_data_func=run_online_eval,
-    )
+    if _enable_vision:
+        # Multimodal mode: use energon dataloaders
+        train_valid_test_dataloaders_provider.is_distributed = True
+        pretrain(
+            train_valid_test_dataloaders_provider,
+            model_provider,
+            ModelType.encoder_or_decoder,
+            forward_step,
+            args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
+            extra_args_provider=add_qwen35_extra_args,
+            process_non_loss_data_func=write_online_eval_to_tensorboard,
+            non_loss_data_func=run_online_eval,
+        )
+    else:
+        # Text-only mode: use GPT-style dataset (bin/idx)
+        train_valid_test_datasets_provider_gpt.is_distributed = True
+        pretrain(
+            train_valid_test_datasets_provider_gpt,
+            model_provider,
+            ModelType.encoder_or_decoder,
+            forward_step_text,
+            args_defaults={'tokenizer_type': 'HFTokenizerFS'},
+            extra_args_provider=add_qwen35_extra_args,
+            get_embedding_ranks=get_embedding_ranks,
+        )

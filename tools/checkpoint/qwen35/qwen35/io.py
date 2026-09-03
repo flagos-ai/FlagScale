@@ -42,6 +42,34 @@ def load_hf_config(hf_dir):
         return json.load(f)
 
 
+def _patch_attn_backend_enum():
+    """Add missing AttnBackend members so torch.load can unpickle them.
+
+    The checkpoint serializes the full training args which may include enum
+    values (e.g., AttnBackend.fsa=6) not present in the current installation.
+    These enums are irrelevant to weight conversion but block deserialization.
+    """
+    try:
+        from megatron.core.transformer.enums import AttnBackend
+
+        _expected = {"fsa": 6}
+        for name, value in _expected.items():
+            if value not in AttnBackend._value2member_map_:
+                new_member = object.__new__(AttnBackend)
+                new_member._name_ = name
+                new_member._value_ = value
+                AttnBackend._value2member_map_[value] = new_member
+                AttnBackend._member_map_[name] = new_member
+                AttnBackend._member_names_.append(name)
+                type.__setattr__(AttnBackend, name, new_member)
+    except (ImportError, Exception):
+        pass
+
+
+# Patch once at import time
+_patch_attn_backend_enum()
+
+
 def load_megatron_shard(path):
     """Load a single Megatron shard and return its 'model' state dict."""
     sd = torch.load(path, map_location="cpu", weights_only=False)

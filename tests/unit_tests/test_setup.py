@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 import os
 import sys
 import unittest.mock
@@ -31,6 +32,8 @@ with unittest.mock.patch("setuptools.setup"):
         build_extras,
         parse_requirements,
     )
+
+    _cmd_filter = importlib.import_module("parse_requirements")._cmd_filter
 
 
 # --- Dynamic discovery ---
@@ -285,6 +288,32 @@ class TestParseRequirements:
 
         assert deps == ["torch==2.9.1", "megatron-core"]
         assert pkg_opts == {"megatron-core": ["--no-build-isolation"]}
+
+    @pytest.mark.parametrize("include_option", ["-r", "--requirement"])
+    def test_filter_preserves_relative_includes_outside_source_dir(self, req_tree, include_option):
+        """Filtered temp files resolve includes from the source file directory."""
+        source_dir = req_tree / "requirements" / "platform"
+        source_dir.mkdir(parents=True)
+        included = source_dir / "base.txt"
+        included.write_text("numpy==1.26.4\n")
+
+        req_file = source_dir / "serve.txt"
+        req_file.write_text(
+            f"{include_option} ./base.txt\n"
+            "# [--extra-index-url https://example.com/simple]\n"
+            "platform-package==1.0\n"
+        )
+        output = req_tree / "filtered" / "serve.txt"
+        output.parent.mkdir()
+
+        _cmd_filter(str(req_file), str(output))
+
+        assert output.read_text() == (
+            f"{include_option} {included.resolve()}\n"
+            "# [skipped by installer] platform-package==1.0\n"
+        )
+        deps, _, _ = parse_requirements(str(output))
+        assert deps == ["numpy==1.26.4"]
 
     def test_regular_comments_not_treated_as_annotation(self, req_tree):
         """Regular comments are not confused with annotations"""
