@@ -1,0 +1,37 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+device_types:
+  - bw1000
+
+bw1000:
+  name: "bw1000"
+  tests:
+    functional:
+      train:
+        qwen3: ["0_6b_hygon"]
+      hetero_train: {}
+      benchmark: {}
+      inference:
+        qwen3: ["4b_tp2_hygon"]
+      serve:
+        qwen3: ["4b_tp2_hygon"]
+    unit:
+      nproc_per_node: 1
+      include: "*"
+      exclude:
+        # This test defines an eight-rank heterogeneous mesh; it is not a single-rank unit test.
+        - tests/unit_tests/test_parallel_context.py::test_parallel_config
+        # This distributed-only case requires world_size to be divisible by two.
+        - tests/unit_tests/test_spiky_loss_detector.py

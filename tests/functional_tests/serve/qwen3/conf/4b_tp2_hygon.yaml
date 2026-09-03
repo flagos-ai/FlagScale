@@ -1,0 +1,30 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+defaults:
+  - _self_
+  - serve: 4b_tp2_hygon
+
+experiment:
+  exp_name: qwen3
+  exp_dir: tests/functional_tests/serve/qwen3/test_results/4b_tp2_hygon
+  task:
+    type: serve
+    entrypoint: null
+  runner:
+    hostfile: null
+    deploy:
+      port: 6703
+      use_fs_serve: false
+  envs:
+    CUDA_VISIBLE_DEVICES: "0,1"
+    GEMS_VENDOR: "hygon"
+    VLLM_PLUGINS: "fl"
+    VLLM_FL_PLATFORM: "hygon"
+    no_proxy: "127.0.0.1,localhost"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

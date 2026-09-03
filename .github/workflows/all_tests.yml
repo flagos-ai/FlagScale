@@ -44,6 +44,7 @@ on:
           - all
           - cuda
           - ascend
+          - hygon
           - metax
           - musa
 
@@ -66,6 +67,13 @@ jobs:
     with:
       platform: ascend
 
+  hygon_tests:
+    name: Hygon tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'hygon'
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: hygon
+
   metax_tests:
     name: MetaX tests
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'metax'
@@ -85,6 +93,7 @@ jobs:
     needs:
       - cuda_tests
       - ascend_tests
+      - hygon_tests
       - metax_tests
       - musa_tests
     runs-on: ubuntu-latest
@@ -103,6 +112,12 @@ jobs:
           if [ "${{ needs.ascend_tests.result }}" != "success" ] && \
              [ "${{ needs.ascend_tests.result }}" != "skipped" ]; then
             echo "❌ Ascend tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.hygon_tests.result }}" != "success" ] && \
+             [ "${{ needs.hygon_tests.result }}" != "skipped" ]; then
+            echo "Hygon tests failed"
             failed=true
           fi
 

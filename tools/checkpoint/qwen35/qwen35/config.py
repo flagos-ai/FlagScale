@@ -84,13 +84,27 @@ class Config:
             self.moe_ffn_hidden_size = 0
             self.moe_shared_expert_intermediate_size = 0
 
-        self.vision_num_layers = _require(cfg, "vision_num_layers")
-        self.vision_hidden_size = _require(cfg, "vision_hidden_size")
-        self.vision_num_attention_heads = _require(cfg, "vision_num_attention_heads")
-        self.vision_ffn_hidden_size = _require(cfg, "vision_ffn_hidden_size")
-        self.patch_size = _require(cfg, "patch_size")
-        self.temporal_patch_size = 2  # hardcoded in get_vision_model_config
-        self.use_linear_proj = cfg.get("vision_patch_embed_linear", True)
+        # Vision params: optional for LLM-only training (no_enable_vision: True)
+        self.enable_vision = not cfg.get("no_enable_vision", False)
+        if self.enable_vision:
+            self.vision_num_layers = _require(cfg, "vision_num_layers")
+            self.vision_hidden_size = _require(cfg, "vision_hidden_size")
+            self.vision_num_attention_heads = _require(cfg, "vision_num_attention_heads")
+            self.vision_ffn_hidden_size = _require(cfg, "vision_ffn_hidden_size")
+            self.patch_size = _require(cfg, "patch_size")
+            self.temporal_patch_size = 2  # hardcoded in get_vision_model_config
+            self.use_linear_proj = cfg.get("vision_patch_embed_linear", True)
+        else:
+            self.vision_num_layers = 0
+            self.vision_hidden_size = 0
+            self.vision_num_attention_heads = 0
+            self.vision_ffn_hidden_size = 0
+            self.patch_size = 0
+            self.temporal_patch_size = 0
+            self.use_linear_proj = False
+
+        # MTP params: optional
+        self.mtp_num_layers = cfg.get("mtp_num_layers", 0) or 0
 
     @property
     def is_moe(self):
