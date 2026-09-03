@@ -79,6 +79,8 @@ class RankState:
     progress: dict[str, Any] | None = None
     progress_seen_s: float | None = None
     progress_seq: int = 0
+    checkpoint_active: bool = False
+    checkpoint_id: str | None = None
     ended: bool = False
 
 
@@ -125,11 +127,22 @@ class HeartbeatAnalyzer:
             state.start = event
             state.start_seen_s = observed_s
             state.ended = False
-        elif event_type == "heartbeat":
+        elif event_type in {"heartbeat", "checkpoint_start", "checkpoint_end"}:
             state.heartbeat = event
             state.heartbeat_seen_s = observed_s
             self._reported.discard((rank, pid, "initial_process_heartbeat"))
             self._reported.discard((rank, pid, "subsequent_process_heartbeat"))
+            checkpoint_id = event.get("checkpoint_id")
+            if event_type == "checkpoint_start":
+                state.checkpoint_active = True
+                state.checkpoint_id = str(checkpoint_id) if checkpoint_id is not None else None
+            elif event_type == "checkpoint_end":
+                if checkpoint_id is None or str(checkpoint_id) == state.checkpoint_id:
+                    state.checkpoint_active = False
+            elif "checkpoint_active" in event:
+                state.checkpoint_active = bool(event.get("checkpoint_active"))
+                if checkpoint_id is not None:
+                    state.checkpoint_id = str(checkpoint_id)
         elif event_type == "process_end":
             state.heartbeat = event
             state.heartbeat_seen_s = observed_s
@@ -145,7 +158,7 @@ class HeartbeatAnalyzer:
 
     def _process_status(self, state: RankState, now_s: float) -> tuple[float, str, str, float]:
         source = state.heartbeat or state.progress or state.start
-        phase = str(source.get("phase") or "setup")
+        phase = "checkpointing" if state.checkpoint_active else str(source.get("phase") or "setup")
         if state.heartbeat_seen_s is None:
             return (
                 now_s - state.start_seen_s,
@@ -153,9 +166,8 @@ class HeartbeatAnalyzer:
                 phase,
                 self.initial_process_timeout_s,
             )
-        timeout_s = (
-            self.checkpoint_timeout_s if phase == "checkpointing" else self.process_timeout_s
-        )
+        checkpoint_active = state.checkpoint_active or phase == "checkpointing"
+        timeout_s = self.checkpoint_timeout_s if checkpoint_active else self.process_timeout_s
         return (
             now_s - state.heartbeat_seen_s,
             "subsequent_process_heartbeat",
@@ -165,12 +177,11 @@ class HeartbeatAnalyzer:
 
     def _progress_age(self, state: RankState, now_s: float) -> tuple[float, str, float]:
         source = state.heartbeat or state.progress or state.start
-        phase = str(source.get("phase") or "setup")
+        phase = "checkpointing" if state.checkpoint_active else str(source.get("phase") or "setup")
         if state.progress_seen_s is None:
             return now_s - state.start_seen_s, phase, self.initial_progress_timeout_s
-        timeout_s = (
-            self.checkpoint_timeout_s if phase == "checkpointing" else self.progress_timeout_s
-        )
+        checkpoint_active = state.checkpoint_active or phase == "checkpointing"
+        timeout_s = self.checkpoint_timeout_s if checkpoint_active else self.progress_timeout_s
         return now_s - state.progress_seen_s, phase, timeout_s
 
     def scan(
@@ -264,6 +275,8 @@ class HeartbeatAnalyzer:
                     "pid": pid,
                     "hostname": source.get("hostname"),
                     "phase": phase,
+                    "checkpoint_active": state.checkpoint_active,
+                    "checkpoint_id": state.checkpoint_id,
                     "iteration": source.get("iteration"),
                     "progress_seq": state.progress_seq,
                     "timeout_type": progress_timeout_type,
@@ -327,6 +340,8 @@ class HeartbeatAnalyzer:
                     "cuda_visible_devices": source.get("cuda_visible_devices"),
                     "assigned_gpu": source.get("assigned_gpu"),
                     "phase": phase,
+                    "checkpoint_active": state.checkpoint_active,
+                    "checkpoint_id": state.checkpoint_id,
                     "iteration": source.get("iteration"),
                     "progress_seq": state.progress_seq,
                     "process_liveness": (

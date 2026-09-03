@@ -263,6 +263,76 @@ def test_checkpoint_phase_does_not_extend_initial_process_timeout():
     assert findings[0]["timeout_s"] == 2
 
 
+def test_explicit_checkpoint_lifecycle_controls_monitor_phase():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start"), observed_s=1.0)
+    analyzer.ingest(
+        _event("heartbeat", progress_seq=1, iteration=17, phase="train"),
+        observed_s=1.5,
+    )
+    analyzer.ingest(
+        _event(
+            "checkpoint_start",
+            progress_seq=1,
+            iteration=17,
+            phase="checkpointing",
+            checkpoint_active=True,
+            checkpoint_id="iteration-17-1",
+        ),
+        observed_s=2.0,
+    )
+
+    assert analyzer.scan(now_s=5.5, now_unix_ns=5_500_000_000) == []
+    active = analyzer.snapshot(5.5, 5_500_000_000)["ranks"][0]
+    assert active["phase"] == "checkpointing"
+    assert active["checkpoint_active"] is True
+    assert active["checkpoint_id"] == "iteration-17-1"
+
+    analyzer.ingest(
+        _event(
+            "checkpoint_end",
+            progress_seq=2,
+            iteration=17,
+            phase="train",
+            checkpoint_active=False,
+            checkpoint_id="iteration-17-1",
+        ),
+        observed_s=6.0,
+    )
+    completed = analyzer.snapshot(6.0, 6_000_000_000)["ranks"][0]
+    assert completed["phase"] == "train"
+    assert completed["checkpoint_active"] is False
+    assert completed["checkpoint_id"] == "iteration-17-1"
+
+
+def test_stale_checkpoint_end_does_not_close_newer_checkpoint():
+    analyzer = _analyzer()
+    analyzer.ingest(_event("process_start"), observed_s=1.0)
+    analyzer.ingest(
+        _event(
+            "checkpoint_start",
+            phase="checkpointing",
+            checkpoint_active=True,
+            checkpoint_id="iteration-18-2",
+        ),
+        observed_s=2.0,
+    )
+    analyzer.ingest(
+        _event(
+            "checkpoint_end",
+            phase="train",
+            checkpoint_active=False,
+            checkpoint_id="iteration-17-1",
+        ),
+        observed_s=2.5,
+    )
+
+    rank = analyzer.snapshot(2.5, 2_500_000_000)["ranks"][0]
+    assert rank["phase"] == "checkpointing"
+    assert rank["checkpoint_active"] is True
+    assert rank["checkpoint_id"] == "iteration-18-2"
+
+
 def test_rank_that_never_started_is_detected_from_expected_world_size():
     analyzer = _analyzer(expected_world_size=2, monitor_started_s=1)
     analyzer.ingest(_event("heartbeat", rank=0, local_rank=0), observed_s=1.5)

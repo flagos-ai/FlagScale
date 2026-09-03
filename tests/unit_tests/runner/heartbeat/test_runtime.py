@@ -90,3 +90,30 @@ def test_publisher_reports_progress_marked_by_training_hook(tmp_path):
         "visible_ordinal": 1,
         "device_token": "1",
     }
+
+
+def test_checkpoint_lifecycle_is_flushed_without_waiting_for_periodic_heartbeat(tmp_path):
+    runtime = _runtime(tmp_path, interval=60)
+    runtime.start()
+    runtime.set_phase("train")
+
+    checkpoint_id = runtime.checkpoint_start(iteration=17)
+    records = [json.loads(line) for line in runtime.path.read_text().splitlines()]
+    started = [record for record in records if record["event"] == "checkpoint_start"]
+
+    assert len(started) == 1
+    assert started[0]["checkpoint_active"] is True
+    assert started[0]["checkpoint_id"] == checkpoint_id
+    assert started[0]["iteration"] == 17
+    assert started[0]["phase"] == "checkpointing"
+
+    assert runtime.checkpoint_end() == checkpoint_id
+    records = [json.loads(line) for line in runtime.path.read_text().splitlines()]
+    ended = [record for record in records if record["event"] == "checkpoint_end"]
+
+    assert len(ended) == 1
+    assert ended[0]["checkpoint_active"] is False
+    assert ended[0]["checkpoint_id"] == checkpoint_id
+    assert ended[0]["phase"] == "train"
+    assert ended[0]["progress_seq"] == 1
+    runtime.stop()

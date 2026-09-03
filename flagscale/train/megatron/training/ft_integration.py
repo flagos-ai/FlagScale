@@ -196,7 +196,7 @@ def on_eval_step_end() -> None:
 def on_checkpointing_start() -> None:
     """Should be called before each checkpoint-saving-related operation."""
     ########## FlagScale Begin ##########
-    gpu_heartbeat.set_phase("checkpointing")
+    gpu_heartbeat.checkpoint_start(getattr(global_vars.get_args(), "curr_iteration", None))
     ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
@@ -210,7 +210,7 @@ def on_checkpointing_end(is_async_finalization: bool) -> None:
         is_async_finalization (bool): true if called after an async checkpointing finalization
     """
     ########## FlagScale Begin ##########
-    gpu_heartbeat.mark_progress("checkpointing")
+    gpu_heartbeat.checkpoint_end()
     ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
