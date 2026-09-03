@@ -87,47 +87,25 @@ _MTP_DIRECT_HF2MEG, _MTP_DIRECT_MEG2HF, _MTP_LN_KEYS_MEG2HF = _get_mtp_mappings(
 
 def _convert_mtp_mlp_hf2meg(hf_sd, meg_sd, cfg):
     """Convert MTP MLP: dense by default, MoE extensions when present."""
-    # Dense MLP
+    from qwen35.mlp import convert_moe_mlp_hf2meg
+
+    # Dense MLP (gate + up -> linear_fc1)
     mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.linear_fc1.weight"
     gate = hf_sd.get("mtp.layers.0.mlp.gate_proj.weight")
     up = hf_sd.get("mtp.layers.0.mlp.up_proj.weight")
     if gate is not None and up is not None:
         meg_sd[mk] = torch.cat([gate, up], dim=0)
 
-    # MoE extensions (only if MoE-specific keys present)
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.router.weight"
-    hk = "mtp.layers.0.mlp.gate.weight"
-    if hk in hf_sd:
-        meg_sd[mk] = hf_sd[hk]
-
-    for e in range(cfg.num_experts):
-        mk = f"language_model.mtp.layers.0.mtp_model_layer.mlp.experts.linear_fc1.weight{e}"
-        gate = hf_sd.get(f"mtp.layers.0.mlp.experts.{e}.gate_proj.weight")
-        up = hf_sd.get(f"mtp.layers.0.mlp.experts.{e}.up_proj.weight")
-        if gate is not None and up is not None:
-            meg_sd[mk] = torch.cat([gate, up], dim=0)
-
-    for e in range(cfg.num_experts):
-        mk = f"language_model.mtp.layers.0.mtp_model_layer.mlp.experts.linear_fc2.weight{e}"
-        hk = f"mtp.layers.0.mlp.experts.{e}.down_proj.weight"
-        if hk in hf_sd:
-            meg_sd[mk] = hf_sd[hk]
-
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.shared_experts.linear_fc1.weight"
-    gate = hf_sd.get("mtp.layers.0.mlp.shared_expert.gate_proj.weight")
-    up = hf_sd.get("mtp.layers.0.mlp.shared_expert.up_proj.weight")
-    if gate is not None and up is not None:
-        meg_sd[mk] = torch.cat([gate, up], dim=0)
-
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.shared_experts.linear_fc2.weight"
-    hk = "mtp.layers.0.mlp.shared_expert.down_proj.weight"
-    if hk in hf_sd:
-        meg_sd[mk] = hf_sd[hk]
-
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.shared_experts.gate_weight"
-    hk = "mtp.layers.0.mlp.shared_expert_gate.weight"
-    if hk in hf_sd:
-        meg_sd[mk] = hf_sd[hk]
+    # MoE MLP: reuse backbone conversion logic with MTP prefixes
+    if "mtp.layers.0.mlp.gate.weight" in hf_sd:
+        convert_moe_mlp_hf2meg(
+            hf_sd,
+            meg_sd,
+            0,
+            hf_pfx="mtp.layers.0",
+            mg_pfx="language_model.mtp.layers.0.mtp_model_layer",
+            cfg=cfg,
+        )
 
 
 def convert_mtp_hf2meg(hf_sd, meg_sd, cfg):
@@ -149,6 +127,8 @@ def convert_mtp_hf2meg(hf_sd, meg_sd, cfg):
 
 def _convert_mtp_mlp_meg2hf(full_sd, hf_sd, cfg):
     """Convert MTP MLP: dense by default, MoE extensions when present."""
+    from qwen35.mlp import convert_moe_mlp_meg2hf
+
     # Dense MLP
     mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.linear_fc1.weight"
     if mk in full_sd:
@@ -156,36 +136,17 @@ def _convert_mtp_mlp_meg2hf(full_sd, hf_sd, cfg):
         hf_sd["mtp.layers.0.mlp.gate_proj.weight"] = gate
         hf_sd["mtp.layers.0.mlp.up_proj.weight"] = up
 
-    # MoE extensions
+    # MoE MLP: reuse backbone conversion logic with MTP prefixes
     mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.router.weight"
     if mk in full_sd:
-        hf_sd["mtp.layers.0.mlp.gate.weight"] = full_sd[mk]
-
-    for e in range(cfg.num_experts):
-        mk = f"language_model.mtp.layers.0.mtp_model_layer.mlp.experts.linear_fc1.weight{e}"
-        if mk in full_sd:
-            gate, up = torch.split(full_sd[mk], cfg.moe_ffn_hidden_size, dim=0)
-            hf_sd[f"mtp.layers.0.mlp.experts.{e}.gate_proj.weight"] = gate
-            hf_sd[f"mtp.layers.0.mlp.experts.{e}.up_proj.weight"] = up
-
-    for e in range(cfg.num_experts):
-        mk = f"language_model.mtp.layers.0.mtp_model_layer.mlp.experts.linear_fc2.weight{e}"
-        if mk in full_sd:
-            hf_sd[f"mtp.layers.0.mlp.experts.{e}.down_proj.weight"] = full_sd[mk]
-
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.shared_experts.linear_fc1.weight"
-    if mk in full_sd:
-        gate, up = torch.split(full_sd[mk], cfg.moe_shared_expert_intermediate_size, dim=0)
-        hf_sd["mtp.layers.0.mlp.shared_expert.gate_proj.weight"] = gate
-        hf_sd["mtp.layers.0.mlp.shared_expert.up_proj.weight"] = up
-
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.shared_experts.linear_fc2.weight"
-    if mk in full_sd:
-        hf_sd["mtp.layers.0.mlp.shared_expert.down_proj.weight"] = full_sd[mk]
-
-    mk = "language_model.mtp.layers.0.mtp_model_layer.mlp.shared_experts.gate_weight"
-    if mk in full_sd:
-        hf_sd["mtp.layers.0.mlp.shared_expert_gate.weight"] = full_sd[mk]
+        convert_moe_mlp_meg2hf(
+            full_sd,
+            hf_sd,
+            0,
+            hf_pfx="mtp.layers.0",
+            mg_pfx="language_model.mtp.layers.0.mtp_model_layer",
+            cfg=cfg,
+        )
 
 
 def convert_mtp_meg2hf(full_sd, hf_sd, cfg):

@@ -101,7 +101,7 @@ run_test() {
     fi
 
     log_info "Running: $task/$model/$config"
-    wait_for_gpu
+    wait_for_gpu || return 1
 
     # Clean old results
     # Extract exp_dir from config file and clean it
@@ -359,11 +359,14 @@ run_functional_tests_for_device() {
 # Validate platform
 validate_platform "$PLATFORM" "$SCRIPT_DIR" || exit 1
 
+EXIT_CODE=0
+
 # If device is specified, run for that device only
 if [ -n "$DEVICE" ]; then
     validate_device "$PLATFORM" "$DEVICE" "$SCRIPT_DIR" || exit 1
-    run_functional_tests_for_device "$DEVICE"
-    EXIT_CODE=$?
+    if ! run_functional_tests_for_device "$DEVICE"; then
+        EXIT_CODE=1
+    fi
 else
     # No device specified, run for all devices in the platform
     DEVICE_TYPES=$(get_device_types "$PLATFORM" "$SCRIPT_DIR")
@@ -391,11 +394,11 @@ else
 fi
 
 echo "=========================================="
-if [ $EXIT_CODE -eq 0 ]; then
+if [ "$EXIT_CODE" -eq 0 ]; then
     log_success "All tests completed"
 else
     log_error "Some tests failed"
 fi
 echo "=========================================="
 
-exit $EXIT_CODE
+exit "$EXIT_CODE"
