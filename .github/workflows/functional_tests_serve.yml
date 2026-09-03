@@ -87,7 +87,7 @@ jobs:
         continue-on-error: true
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -107,7 +107,7 @@ jobs:
         continue-on-error: true
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -126,7 +126,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -146,78 +146,7 @@ jobs:
       - name: Check environment info
         run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
 
-      - name: Install dependencies for serve
-        if: inputs.platform == 'cuda'
-        run: |
-          set -euo pipefail
-          cd $PROJECT_ROOT
-
-          PKG_MGR='${{ inputs.pkg_mgr }}'
-          ENV_NAME='${{ inputs.env_name }}'
-          ENV_PATH='${{ inputs.env_path }}'
-
-          echo "Installing dependencies for serve"
-          echo "Package Manager: $PKG_MGR"
-          echo "Environment Name: $ENV_NAME"
-          echo "Environment Path: $ENV_PATH"
-
-          # Source environment utilities
-          source ./tools/install/utils/pyenv_utils.sh
-
-          # Activate environment based on package manager
-          case "$PKG_MGR" in
-            conda)
-              if [ -n "$ENV_NAME" ] && [ -n "$ENV_PATH" ]; then
-                activate_conda "$ENV_NAME" "$ENV_PATH" || { echo "Conda activation failed"; exit 1; }
-              fi
-              ;;
-            uv)
-              if [ -n "$ENV_PATH" ] && [ -d "$ENV_PATH" ]; then
-                activate_uv_env "$ENV_PATH" || { echo "UV activation failed"; exit 1; }
-              fi
-              ;;
-            pip)
-              echo "Using system Python with pip"
-              ;;
-          esac
-
-          echo "Python location: $(which python)"
-          echo "Python version: $(python --version)"
-
-          # Install FlagScale CLI
-          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
-
-          # Verify installation
-          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
-          echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
-
-          # For serve task: all dependencies are pre-installed in the env
-          # No additional installation needed
-          echo "Environment ready for serve tests"
-        timeout-minutes: 5
-
-      - name: Install dependencies for serve ascend
-        if: inputs.platform == 'ascend'
-        run: |
-          set -euo pipefail
-
-          # Install vllm-plugin-FL
-          pip install vllm-plugin-fl==0.1.0+vllm0.13.0 \
-            --extra-index-url https://resource.flagos.net/repository/flagos-pypi-hosted/simple \
-            || { echo "❌ vllm-plugin-FL install failed"; exit 1; }
-          echo "✅ vllm-plugin-FL installed successfully"
-
-          # Install FlagScale
-          cd $PROJECT_ROOT
-          pip install . --no-build-isolation --root-user-action=ignore || { echo "❌ FlagScale CLI install failed"; exit 1; }
-
-          # Verify installation
-          command -v flagscale || { echo "❌ FlagScale CLI not found in PATH"; exit 1; }
-          echo "✅ FlagScale CLI installed successfully: $(flagscale --version 2>/dev/null || echo 'version unknown')"
-          echo "✅ Environment ready for serve tests"
-        timeout-minutes: 15
-
-      - name: Ensure FlagScale CLI is available
+      - name: Install current FlagScale CLI
         run: |
           set -euo pipefail
           cd "$PROJECT_ROOT"
@@ -246,10 +175,11 @@ jobs:
               ;;
           esac
 
-          if ! command -v flagscale >/dev/null 2>&1; then
-            python -m pip install . --no-build-isolation --root-user-action=ignore
-          fi
+          # Always install the checked-out revision so the functional test does
+          # not accidentally exercise a stale FlagScale package from the image.
+          python -m pip install . --no-build-isolation --root-user-action=ignore
           command -v flagscale
+          flagscale --version
 
       - name: Run functional tests
         id: functional_test
@@ -297,6 +227,10 @@ jobs:
               ;;
             pip)
               echo "Running tests with pip/system Python"
+              PLATFORM_ENV_SCRIPT="./tools/install/$PLATFORM/env.sh"
+              if [ -f "$PLATFORM_ENV_SCRIPT" ]; then
+                source "$PLATFORM_ENV_SCRIPT"
+              fi
               ;;
           esac
 

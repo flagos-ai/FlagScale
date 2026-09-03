@@ -31,6 +31,12 @@ The annotations are plain comments, so the file remains valid for
 import os
 import re
 import sys
+from urllib.parse import urlsplit
+
+_REQUIREMENT_INCLUDE_RE = re.compile(
+    r"^(?P<indent>\s*)(?P<option>-r|--requirement)(?P<separator>\s+|=)"
+    r"(?P<path>\S+)(?P<suffix>\s*(?:#.*)?)(?P<newline>\r?\n?)$"
+)
 
 
 def parse_requirements(req_file):
@@ -71,8 +77,9 @@ def parse_requirements(req_file):
                     if opts and opts[0].startswith("-"):
                         pending_options.extend(opts)
                 continue
-            if line.startswith("-r "):
-                included = line[3:].strip()
+            include_match = _REQUIREMENT_INCLUDE_RE.match(line)
+            if include_match:
+                included = include_match.group("path")
                 included_path = os.path.normpath(os.path.join(base_dir, included))
                 sub_deps, sub_opts, sub_pkg_opts = parse_requirements(included_path)
                 deps.extend(sub_deps)
@@ -101,14 +108,33 @@ def _cmd_annotations(req_file):
         print(f"{pkg}\t{' '.join(opts)}")
 
 
+def _rewrite_relative_include(line, base_dir):
+    """Keep requirement includes valid when copying to another directory."""
+    match = _REQUIREMENT_INCLUDE_RE.match(line)
+    if not match:
+        return line
+
+    included = match.group("path")
+    if os.path.isabs(included) or urlsplit(included).scheme:
+        return line
+
+    absolute = os.path.abspath(os.path.join(base_dir, included))
+    return (
+        f"{match.group('indent')}{match.group('option')} "
+        f"{absolute}{match.group('suffix')}{match.group('newline')}"
+    )
+
+
 def _cmd_filter(req_file, output_file):
     """Write a copy of *req_file* with annotated packages commented out."""
     abs_req = os.path.abspath(req_file)
+    base_dir = os.path.dirname(abs_req)
     _, _, pkg_options = parse_requirements(abs_req)
     if not pkg_options:
         # No annotations — just copy the file.
         with open(abs_req) as src, open(output_file, "w") as dst:
-            dst.write(src.read())
+            for line in src:
+                dst.write(_rewrite_relative_include(line, base_dir))
         return
 
     # Build set of annotated package lines for fast lookup.
@@ -134,7 +160,7 @@ def _cmd_filter(req_file, output_file):
                 dst.write(f"# [skipped by installer] {stripped}\n")
                 pending = False
             else:
-                dst.write(line)
+                dst.write(_rewrite_relative_include(line, base_dir))
                 pending = False
 
 

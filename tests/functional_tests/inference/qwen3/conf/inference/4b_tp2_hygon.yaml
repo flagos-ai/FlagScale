@@ -1,0 +1,27 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+llm:
+  model: /home/gitlab-runner/models/Qwen3-4B
+  tokenizer: /home/gitlab-runner/models/Qwen3-4B
+  trust_remote_code: true
+  tensor_parallel_size: 2
+  pipeline_parallel_size: 1
+  gpu_memory_utilization: 0.5
+  safetensors_load_strategy: eager
+  max_model_len: 1024
+  max_num_batched_tokens: 1024
+  max_num_seqs: 1
+  seed: 1234
+  enforce_eager: true
+  disable_custom_all_reduce: true
+
+generate:
+  prompts:
+    - "The first President of the United States"
+    - "The capital of France"
+  sampling:
+    top_p: 0.1
+    top_k: 1
+    temperature: 0.0
+    seed: 1234

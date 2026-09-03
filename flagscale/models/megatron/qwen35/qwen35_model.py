@@ -72,10 +72,10 @@ class Qwen35Model(MegatronModule):
         language_transformer_layer_spec: ModuleSpec,
         language_vocab_size: int,
         language_max_sequence_length: int,
-        vision_transformer_config: TransformerConfig,
-        vision_transformer_layer_spec: ModuleSpec,
-        vision_projection_config: TransformerConfig,
-        vision_projection_layer_spec: ModuleSpec,
+        vision_transformer_config: TransformerConfig = None,
+        vision_transformer_layer_spec: ModuleSpec = None,
+        vision_projection_config: TransformerConfig = None,
+        vision_projection_layer_spec: ModuleSpec = None,
         vision_projection_type: str = "mlp",
         parallel_output: bool = True,
         language_position_embedding_type: str = "mrope",
@@ -84,6 +84,7 @@ class Qwen35Model(MegatronModule):
         post_process: bool = True,
         add_encoder: bool = True,
         add_decoder: bool = True,
+        enable_vision: bool = True,
         language_rotary_base: int = 10000000,
         fp16_lm_cross_entropy: bool = False,
         language_share_embeddings_and_output_weights: bool = False,
@@ -100,6 +101,7 @@ class Qwen35Model(MegatronModule):
         self.post_process = post_process
         self.add_encoder = add_encoder
         self.add_decoder = add_decoder
+        self.enable_vision = enable_vision
 
         self.encoder_hidden_state = None
         self.vision_model = None
@@ -108,11 +110,13 @@ class Qwen35Model(MegatronModule):
 
         self.square_merge_size = (
             vision_projection_config.ffn_hidden_size // vision_transformer_config.hidden_size
+            if vision_projection_config is not None and vision_transformer_config is not None
+            else 1
         )
 
         self.share_embeddings_and_output_weights = False
 
-        if self.pre_process:
+        if self.enable_vision and self.pre_process:
             self.vision_model = Qwen3VisionModel(
                 vision_transformer_config,
                 vision_transformer_layer_spec,
@@ -173,7 +177,7 @@ class Qwen35Model(MegatronModule):
             modules.append(self.language_model)
         if freeze_vision_model and self.vision_model is not None:
             modules.append(self.vision_model)
-        if freeze_vision_projection and self.vision_model.projection is not None:
+        if freeze_vision_projection and self.vision_model is not None and self.vision_model.projection is not None:
             modules.append(self.vision_model.projection)
 
         for module in modules:
@@ -207,7 +211,7 @@ class Qwen35Model(MegatronModule):
         if self.pre_process:
             vision_embeds = None
             deepstack_feature_lists = None
-            if vision_grid_thw is not None and vision_grid_thw.shape[0] > 0:
+            if self.vision_model is not None and vision_grid_thw is not None and vision_grid_thw.shape[0] > 0:
                 vision_embeds, deepstack_feature_lists = self.vision_model(
                     vision_data=vision_data,
                     grid_thw=vision_grid_thw,
