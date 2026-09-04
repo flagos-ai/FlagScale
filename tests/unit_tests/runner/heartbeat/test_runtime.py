@@ -117,3 +117,14 @@ def test_checkpoint_lifecycle_is_flushed_without_waiting_for_periodic_heartbeat(
     assert ended[0]["phase"] == "train"
     assert ended[0]["progress_seq"] == 1
     runtime.stop()
+
+
+def test_checkpoint_end_without_start_does_not_write_transition(tmp_path):
+    runtime = _runtime(tmp_path, interval=60)
+    runtime.start()
+
+    assert runtime.checkpoint_end() is None
+    runtime.stop()
+
+    records = [json.loads(line) for line in runtime.path.read_text().splitlines()]
+    assert not any(record["event"] == "checkpoint_end" for record in records)
