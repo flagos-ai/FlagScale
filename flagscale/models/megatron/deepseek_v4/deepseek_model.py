@@ -16,6 +16,8 @@ from typing import Optional
 
 import torch
 
+from megatron.plugin.platform import get_platform
+
 ## megatron-core
 from megatron.core.models.gpt import GPTModel
 from megatron.core.packed_seq_params import PackedSeqParams
@@ -23,62 +25,12 @@ from megatron.core.utils import deprecate_inference_params
 from megatron.core.inference.contexts import BaseInferenceContext
 from megatron.core.transformer.engram import get_or_create_hash_mapping
 
+from flagscale.models.megatron.engram.lazy_hash import (
+    LazyHashInputIds,
+    pre_compute_first_local_engram_layer,
+)
 
-class LazyHashInputIds:
-    """
-    Lazy wrapper for hash input IDs that computes asynchronously and
-    synchronizes only when accessed. This allows hash computation to overlap
-    with preprocessing and early decoder layers.
-    """
-
-    def __init__(self, hash_mapping, input_ids, hash_stream=None):
-        self.hash_mapping = hash_mapping
-        self.input_ids = input_ids
-        self.hash_stream = hash_stream
-        self._result = None
-        self._is_async_pending = False        
-        # Async
-        if self.hash_stream is not None:
-            # self.hash_stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(self.hash_stream):
-                self._result = self.hash_mapping.hash(self.input_ids)
-            self._is_async_pending = True
-            # record result to use across stream
-            self._record_current_stream()
-
-    def _record_current_stream(self):
-        """Helper to record current stream on all result tensors"""
-        if self._result is None:
-            return
-        current_stream = torch.cuda.current_stream()
-        if isinstance(self._result, dict):
-            for t in self._result.values():
-                if isinstance(t, torch.Tensor):
-                    t.record_stream(current_stream)
-        elif isinstance(self._result, torch.Tensor):
-            self._result.record_stream(current_stream)
-
-    def __getitem__(self, key):
-        # Case 1: Async compute -> wait
-        if self._is_async_pending:
-            torch.cuda.current_stream().wait_stream(self.hash_stream)
-            self._is_async_pending = False  # Async finish
-            self._record_current_stream()
-            
-        # Case 2: Sync but no compute -> start compute
-        elif self._result is None:
-            self._result = self.hash_mapping.hash(self.input_ids)
-            
-        # Case 3: Async or sync compute is finished.
-        # print(f"[rank{torch.distributed.get_rank()}]: LazyHashInputIds result = {self._result}")
-        return self._result[key]
-
-    def get(self, key, default=None):
-        """Get hash result with default value."""
-        try:
-            return self[key]
-        except KeyError:
-            return default
+cur_platform = get_platform()
 
 
 class DeepSeekModel(GPTModel):
@@ -98,11 +50,11 @@ class DeepSeekModel(GPTModel):
         else:
             self.engram_hash = None
 
-        # Optional: Create a separate CUDA stream for hash computation
+        # Optional: Create a separate device stream for hash computation
         # This allows overlapping hash computation with preprocessing
         self._hash_stream = None
-        if torch.cuda.is_available():
-            self._hash_stream = torch.cuda.Stream()
+        if cur_platform.is_available():
+            self._hash_stream = cur_platform.Stream()
 
     def forward(
         self,
@@ -158,6 +110,9 @@ class DeepSeekModel(GPTModel):
             decoder_extra_block_kwargs['input_ids'] = input_ids
         if self.config.use_engram:
             decoder_extra_block_kwargs['engram_hash_input_ids'] = engram_hash_input_ids
+            pre_compute_first_local_engram_layer(
+                self.decoder, engram_hash_input_ids
+            )
         
         # Run decoder
         decoder_output = self.decoder(
@@ -227,10 +182,9 @@ class DeepSeekModel(GPTModel):
                 input_ids=input_ids,
                 hash_stream=self._hash_stream,
             )
-            if extra_block_kwargs is None:
-                extra_block_kwargs = {
-                    "engram_hash_input_ids": engram_hash_input_ids,
-                }
+            pre_compute_first_local_engram_layer(self.decoder, engram_hash_input_ids)
+            extra_block_kwargs = dict(extra_block_kwargs or {})
+            extra_block_kwargs["engram_hash_input_ids"] = engram_hash_input_ids
         return super().build_schedule_plan(
             input_ids,
             position_ids,
