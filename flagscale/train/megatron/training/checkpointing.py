@@ -36,7 +36,7 @@ from megatron.core.optimizer import DistributedOptimizer
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import get_torch_version, is_torch_min_version
 
-from ..core.dist_checkpointing.utils import _clean_metadata_for_serialization
+from megatron.core.dist_checkpointing.utils import _clean_metadata_for_serialization
 from . import ft_integration, wandb_utils
 from .async_utils import get_save_and_finalize_callbacks, is_empty_async_queue, schedule_async_save
 from megatron.core.dist_checkpointing.strategies.async_utils import _disable_gc
@@ -1976,7 +1976,12 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
                          'exiting ...'.format(checkpoint_name))
             raise e
     else:
-        if (args.fp16 or args.bf16) and optimizer is not None:
+        # fix for load fsdp_dtensor ckpt
+        if (
+            (args.fp16 or args.bf16)
+            and optimizer is not None
+            and not args.use_megatron_fsdp
+        ):
             if args.load_main_params_from_ckpt:
                 optimizer.reload_model_params(state_dict=state_dict)
             else:

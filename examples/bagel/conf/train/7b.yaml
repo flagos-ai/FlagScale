@@ -1,0 +1,167 @@
+system:
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  use_distributed_optimizer: true
+  use_precision_aware_optimizer: true
+  overlap_grad_reduce: false
+  overlap_param_gather: false
+  use_megatron_fsdp: true
+  overlap_param_gather_with_optimizer_step: false
+  megatron_fsdp_main_params_dtype: fp32
+  megatron_fsdp_main_grads_dtype: bf16
+  megatron_fsdp_grad_comm_dtype: bf16
+  data_parallel_sharding_strategy: optim_grads_params # optim_grads, optim_grads_params
+
+  # full recompute
+  recompute_method: "uniform"
+  recompute_granularity: "full"
+  recompute_num_layers: 1
+
+  # profile
+  profile: true
+  profile_step_start: 0
+  profile_step_end: 5
+  use_pytorch_profiler: true
+  record_memory_history: true
+  profile_ranks: [0, 1, 2, 3, 4, 5, 6, 7]
+  # nvtx_ranges: true
+
+  # # block recompute
+  # recompute_method: "block"
+  # recompute_granularity: "full"
+  # recompute_num_layers: 1
+
+  # # core recompute
+  # recompute_granularity: "selective"
+
+  no_gradient_accumulation_fusion: true
+  precision:
+    bf16: true
+    attention_softmax_in_fp32: true
+    accumulate_allreduce_grads_in_fp32: false
+    main_grads_dtype: bf16
+    main_params_dtype: fp32
+  logging:
+    log_interval: 1
+    tensorboard_log_interval: 1
+    # wandb_project: bagel_flagscale
+    # wandb_exp_name: bagel_7b_mot_8gpu
+  checkpoint:
+    save_interval: 5000000
+    load: /share/project/zhaoyingli/checkpoints/ByteDance-Seed/BAGEL-7B-MoT-fsdp-dtensor/
+    no_load_optim: true
+    no_load_rng: true
+    # ckpt_format: torch
+    ckpt_format: fsdp_dtensor
+
+model:
+  # LLM Architecture
+  language_model_type: qwen2.5_7B
+  dataset_provider: bagel_vlm_t2i
+  model_provider: bagel_vlm_t2i
+  transformer_impl: transformer_engine
+  num_layers: 28
+  hidden_size: 3584
+  ffn_hidden_size: 18944
+  num_attention_heads: 28
+  num_query_groups: 4
+  group_query_attention: true
+  seq_length: 30720
+  norm_epsilon: 1e-6
+  max_position_embeddings: 32768
+  position_embedding_type: rope
+  rotary_base: 1000000
+  swiglu: true
+  normalization: RMSNorm
+  init_method_std: 0.02
+  attention_dropout: 0.0
+  hidden_dropout: 0.0
+  untie_embeddings_and_output_weights: true
+  no_rope_fusion: true
+  qk_layernorm: true
+  disable_bias_linear: true
+  add_qkv_bias: true
+  attention_backend: auto
+
+  # freeze model
+  freeze_LLM: false
+  freeze_ViT: true
+  freeze_VAE: true
+  freeze_text_embed: true
+  freeze_connect: false
+
+  # freeze branch
+  freeze_und: false
+  freeze_gen: false
+
+  # vit
+  vision_model_type: siglip
+  patch_dim: 14
+  image_size: 980
+
+  # vit_hidden_size: 1152
+  # vit_ffn_hidden_size: 4304
+  # vit_num_layers: 27
+  # vit_num_attention_heads: 16
+  # vit_image_size: 980
+  # vit_patch_size: 14
+  # vit_num_channels: 3
+
+  # # VAE
+  # vae_z_channels: 16
+  # vae_downsample: 8
+
+  # Bagle extra
+  max_latent_size: 64
+  latent_patch_size: 2
+  vit_max_num_patch_per_side: 70
+  interpolate_pos: false
+  timestep_shift: 1.0
+  visual_und: true
+  visual_gen: true
+
+  # training
+  finetune: false
+  train_iters: 300000
+  eval_iters: 0
+  eval_interval: 999999
+  micro_batch_size: 1
+  global_batch_size: 8
+  ce_weight: 0.25
+  mse_weight: 1.0
+
+  optimizer:
+    lr: 1e-4
+    lr_warmup_init: 0.0
+    lr_warmup_iters: 2500
+    lr_decay_style: constant
+    adam_beta1: 0.9
+    adam_beta2: 0.95
+    adam_eps: 1e-15
+    clip_grad: 1.0
+
+data:
+  dataloader_type: external
+  # data_path: /share/project/zhaoyingli/dataset/bagel_example/vlm/wds/
+  data_path: /share/project/zhaoyingli/bagel-fs/FlagScale/examples/bagel/data/pretrain_dataset.yaml
+  split: "1,0,0"
+  num_workers: 1
+
+  # packing
+  max_num_tokens: 30720
+  max_num_tokens_per_sample: 30720
+  expected_num_tokens: 30720
+  packing_buffer_size: 50
+  max_buffer_size: 50
+  prefer_buffer_before: 16384
+
+  tokenizer:
+    tokenizer_type: BagelTokenizerFS
+    tokenizer_path: /share/project/zhaoyingli/checkpoints/ByteDance-Seed/BAGEL-7B-MoT/
+    vocab_size: 152064
+    make_vocab_size_divisible_by: 64
+    tokenizer_prompt_format: qwen2p5
+
+  # bagel_model_path: /workspace/new_agent_v2/models/BAGEL-7B-MoT
+  # bagel_src_dir: /workspace/new_agent_v2/BAGEL
+  # dataset_config_file: /workspace/new_agent_v2/BAGEL/data/configs/example.yaml

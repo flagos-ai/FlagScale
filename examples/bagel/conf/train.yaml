@@ -1,0 +1,37 @@
+defaults:
+  - train: 7b
+  - _self_
+
+experiment:
+  exp_name: bagel
+  exp_dir: outputs
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/megatron/train_bagel.py
+  runner:
+    nnodes: 1
+    nproc_per_node: 8
+    rdzv_backend: static
+    hostfile: /share/project/zhaoyingli/hostfiles/hostfile.1
+  cmds:
+    before_start: "ulimit -n 1048576 && source /root/miniconda3/bin/activate /share/project/zhaoyingli/envs/bagel-fs-train"
+  envs:
+    CUDA_LAUNCH_BLOCKING: 1
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    CUDA_DEVICE_MAX_CONNECTIONS: 4
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    # NCCL_DEBUG: INFO
+    GLOO_SOCKET_IFNAME: eth0
+    NCCL_SOCKET_IFNAME: eth0
+    NCCL_IB_DISABLE: 0
+    NCCL_IB_GID_INDEX: 7
+    NCCL_IB_HCA: mlx5_100,mlx5_101,mlx5_102,mlx5_103,mlx5_104,mlx5_105,mlx5_106,mlx5_107
+    NCCL_IB_TIMEOUT: 22
+    NCCL_IB_RETRY_CNT: 13
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

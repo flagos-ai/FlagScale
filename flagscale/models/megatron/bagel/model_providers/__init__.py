@@ -1,0 +1,1 @@
+from .bagel_vlm_t2i import model_provider_bagel_vlm_t2i

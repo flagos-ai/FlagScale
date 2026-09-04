@@ -392,6 +392,112 @@ class _RWKVTokenizerFS(_FlagScaleTokenizerBase):
         raise NotImplementedError("RWKVTokenizer does not support chat templates.")
 
 
+class _BagelTokenizerFS(_FlagScaleTokenizerBase):
+    def __init__(self, tokenizer_path):
+        super().__init__(path=tokenizer_path)
+        from transformers import AutoTokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_path,
+            trust_remote_code=True,
+        )
+
+        all_special_tokens = []
+        for k, v in self.tokenizer.special_tokens_map.items():
+            if isinstance(v, str):
+                all_special_tokens.append(v)
+            elif isinstance(v, list):
+                all_special_tokens += v
+
+        self._new_special_tokens = {
+            "bos_token": "<|im_start|>",
+            "eos_token": "<|im_end|>",
+            "start_of_image": "<|vision_start|>",
+            "end_of_image": "<|vision_end|>",
+        }
+
+        new_tokens = []
+        for special_token in self._new_special_tokens.values():
+            if special_token not in all_special_tokens:
+                new_tokens.append(special_token)
+
+        self._num_new_tokens = self.tokenizer.add_tokens(new_tokens)
+        self._bos_token_id = self.tokenizer.convert_tokens_to_ids(
+            self._new_special_tokens["bos_token"]
+        )
+        self._eos_token_id = self.tokenizer.convert_tokens_to_ids(
+            self._new_special_tokens["eos_token"]
+        )
+        self._start_of_image_id = self.tokenizer.convert_tokens_to_ids(
+            self._new_special_tokens["start_of_image"]
+        )
+        self._end_of_image_id = self.tokenizer.convert_tokens_to_ids(
+            self._new_special_tokens["end_of_image"]
+        )
+        self._new_special_token_ids = dict(
+            bos_token_id=self._bos_token_id, 
+            eos_token_id=self._eos_token_id, 
+            start_of_image_id=self._start_of_image_id, 
+            end_of_image_id=self._end_of_image_id,
+        )
+
+    @property
+    def vocab_size(self):
+        return self.tokenizer.vocab_size + len(self._new_special_tokens)
+
+    @property
+    def vocab(self):
+        return self.tokenizer.vocab
+
+    def tokenize(self, text):
+        return self.tokenizer.tokenize(text)
+
+    def encode(self, text):
+        return self.tokenizer.encode(text)
+
+    def detokenize(self, token_ids):
+        return self.tokenizer.decode(token_ids)
+
+    @property
+    def num_new_tokens(self):
+        return self.num_new_tokens
+
+    @property
+    def new_special_token_ids(self):
+        return self._new_special_token_ids
+
+    @property
+    def bos_token(self):
+        return self._new_special_tokens["bos_token"]
+
+    @property
+    def eos_token(self):
+        return self._new_special_tokens["eos_token"]
+
+    @property
+    def bos_token_id(self):
+        return self._bos_token_id
+
+    @property
+    def eos_token_id(self):
+        return self._eos_token_id
+
+    @property
+    def start_of_image(self):
+        return self._new_special_tokens["start_of_image"]
+
+    @property
+    def end_of_image(self):
+        return self._new_special_tokens["end_of_image"]
+
+    @property
+    def start_of_image_id(self):
+        self._start_of_image_id
+
+    @property
+    def end_of_image_id(self):
+        self._end_of_image_id
+
+
 # ---------------------------------------------------------------------------
 # Factory functions and registration
 # ---------------------------------------------------------------------------
@@ -438,6 +544,15 @@ def _build_rwkv(args, **kwargs):
     return _RWKVTokenizerFS(args.tokenizer_path)
 
 
+def _build_bagel(args, **kwargs):
+    assert args.tokenizer_path
+    tokenizer = _BagelTokenizerFS(args.tokenizer_path)
+    # Released BAGEL embeddings include padded vocabulary rows.
+    if args.vocab_size is not None:
+        args.padded_vocab_size = args.vocab_size
+    return tokenizer
+
+
 register_tokenizer_factory('AquilaTokenizerFS', _build_aquila)
 register_tokenizer_factory('HFTokenizerFS', _build_hf)
 register_tokenizer_factory('Llama3TokenizerFS', _build_llama3)
@@ -446,3 +561,4 @@ register_tokenizer_factory('HFTokenizersTokenizerFS', _build_hftokenizers)
 register_tokenizer_factory('Qwen2TokenizerFS', _build_qwen2)
 register_tokenizer_factory('Qwen2VLTokenizer', _build_qwen2vl)
 register_tokenizer_factory('RWKVTokenizer', _build_rwkv)
+register_tokenizer_factory('BagelTokenizerFS', _build_bagel)
