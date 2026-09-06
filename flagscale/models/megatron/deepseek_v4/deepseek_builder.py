@@ -92,7 +92,7 @@ def get_deepseek_layer_spec(
     backend = _get_backend_spec_provider(config=config)
     hybrid_attn_spec = get_dsv4_hybrid_module_spec_for_backend(config=config, backend=backend)
 
-    moe_layer_spec = _get_moe_module_spec(config=config, backend=backend)
+    moe_layer_spec, fuse_layernorm_pre_moe = _get_moe_module_spec(config=config, backend=backend)
     rms_norm = config.normalization == "RMSNorm"
     input_layernorm = (
         IdentityOp
@@ -101,7 +101,7 @@ def get_deepseek_layer_spec(
     )
     pre_mlp_layernorm = (
         IdentityOp
-        if moe_layer_spec.metainfo["fuse_pre_mlp_layernorm"]
+        if fuse_layernorm_pre_moe
         else backend.layer_norm(rms_norm=rms_norm, for_qk=False)
     )
     if build_engram:
@@ -204,54 +204,51 @@ def deepseek_builder(args, pre_process, post_process, vp_stage=None, config=None
             config = core_transformer_config_from_args(args)
 
 
-    if args.use_legacy_models:
-        raise NotImplementedError("Legacy GPT models do not support deepseek module insertion.")
+    if args.spec is not None:
+        raise NotImplementedError("Using custom spec is not supported with deepseek builder.")
     else:
-        if args.spec is not None:
-            raise NotImplementedError("Using custom spec is not supported with deepseek builder.")
-        else:
-            use_te = args.transformer_impl == "transformer_engine"
+        use_te = args.transformer_impl == "transformer_engine"
 
-            if args.heterogeneous_layers_config_path is not None:
-                assert not (config.transformer_impl == "inference_optimized")
-                raise NotImplementedError("Using heterogeneous layers is not supported with deepseek builder.")
-            transformer_layer_spec = get_deepseek_decoder_block_spec(
-                config=config,
-                use_transformer_engine=use_te,
-                normalization=args.normalization,
-                qk_l2_norm=args.qk_l2_norm,
-                vp_stage=vp_stage,
-                use_moe=True
-            )
-
-        mtp_block_spec = None
-        if args.mtp_num_layers is not None:
+        if args.heterogeneous_layers_config_path is not None:
             assert not (config.transformer_impl == "inference_optimized")
-            transformer_layer_spec_for_mtp = get_deepseek_layer_spec(use_te, config, build_engram=False)
-            mtp_block_spec = get_gpt_mtp_block_spec(
-                config,
-                transformer_layer_spec_for_mtp,
-                use_transformer_engine=use_te,
-                vp_stage=vp_stage,
-            )
-
-        model = DeepSeekModel(
+            raise NotImplementedError("Using heterogeneous layers is not supported with deepseek builder.")
+        transformer_layer_spec = get_deepseek_decoder_block_spec(
             config=config,
-            transformer_layer_spec=transformer_layer_spec,
-            vocab_size=args.padded_vocab_size,
-            max_sequence_length=args.max_position_embeddings,
-            pre_process=pre_process,
-            post_process=post_process,
-            fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
-            parallel_output=True,
-            share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
-            position_embedding_type=args.position_embedding_type,
-            rotary_percent=args.rotary_percent,
-            rotary_base=args.rotary_base,
-            rope_scaling=args.use_rope_scaling,
-            mtp_block_spec=mtp_block_spec,
+            use_transformer_engine=use_te,
+            normalization=args.normalization,
+            qk_l2_norm=args.qk_l2_norm,
             vp_stage=vp_stage,
-            pg_collection=pg_collection,
+            use_moe=True
         )
+
+    mtp_block_spec = None
+    if args.mtp_num_layers is not None:
+        assert not (config.transformer_impl == "inference_optimized")
+        transformer_layer_spec_for_mtp = get_deepseek_layer_spec(use_te, config, build_engram=False)
+        mtp_block_spec = get_gpt_mtp_block_spec(
+            config,
+            transformer_layer_spec_for_mtp,
+            use_transformer_engine=use_te,
+            vp_stage=vp_stage,
+        )
+
+    model = DeepSeekModel(
+        config=config,
+        transformer_layer_spec=transformer_layer_spec,
+        vocab_size=args.padded_vocab_size,
+        max_sequence_length=args.max_position_embeddings,
+        pre_process=pre_process,
+        post_process=post_process,
+        fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
+        parallel_output=True,
+        share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+        position_embedding_type=args.position_embedding_type,
+        rotary_percent=args.rotary_percent,
+        rotary_base=args.rotary_base,
+        rope_scaling=args.use_rope_scaling,
+        mtp_block_spec=mtp_block_spec,
+        vp_stage=vp_stage,
+        pg_collection=pg_collection,
+    )
     print(f"Model = {model}")
     return model

@@ -192,19 +192,16 @@ def forward_step(data_iterator, model: RWKVModel, return_schedule_plan: bool = F
         return None, None
 
     with stimer:
-        if args.use_legacy_models:
-            output_tensor = model(tokens, labels=labels)
+        if return_schedule_plan:
+            assert (
+                args.overlap_moe_expert_parallel_comm
+            ), "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
+            schedule_plan = model.build_schedule_plan(
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
+            )
+            return schedule_plan, partial(loss_func, loss_mask, model=model)
         else:
-            if return_schedule_plan:
-                assert (
-                    args.overlap_moe_expert_parallel_comm
-                ), "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
-                schedule_plan = model.build_schedule_plan(
-                    tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
-                )
-                return schedule_plan, partial(loss_func, loss_mask, model=model)
-            else:
-                output_tensor = model(tokens, labels=labels, loss_mask=loss_mask)
+            output_tensor = model(tokens, labels=labels, loss_mask=loss_mask)
 
     # [ModelOpt]: model is needed to access ModelOpt distillation losses
     return output_tensor, partial(loss_func, loss_mask, model=model)

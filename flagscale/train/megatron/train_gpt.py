@@ -187,7 +187,7 @@ def loss_func(
     return loss, num_tokens, report
 
 
-def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = False):
+def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = False, get_batch_func=get_batch):
     """Forward training step.
 
     Args:
@@ -215,7 +215,7 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             max_seqlen,
             position_ids,
             tokens,
-        ) = get_batch(data_iterator, vp_stage, dualpipev_stage)
+        ) = get_batch_func(data_iterator, vp_stage, dualpipev_stage)
 
     packed_seq_params = None
     if cu_seqlens is not None:
@@ -262,6 +262,8 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
 def is_dataset_built_on_rank(vp_stage=None, is_packed_sequence=False):
     args = get_args()
     config = core_transformer_config_from_args(args)
+    if getattr(args, "build_dataset_on_all_pipeline_stages", False):
+        return mpu.get_tensor_model_parallel_rank() == 0
     if mpu.get_tensor_model_parallel_rank() != 0:
         return False
     elif is_packed_sequence:
@@ -394,7 +396,7 @@ def get_embedding_ranks(pp_ranks: List[int]):
     return embedding_ranks
 
 
-def main(model_builder=gpt_builder):
+def main(model_builder=gpt_builder, get_batch_func=get_batch, build_dataset_on_all_pipeline_stages=False):
     # Timestamp right after entering __main__ block (after all imports/library setup)
     _MAIN_ENTRY_TIME = time.time()
 
@@ -415,12 +417,13 @@ def main(model_builder=gpt_builder):
         extra_args_provider=add_modelopt_args if has_nvidia_modelopt else None,
         args_defaults={'tokenizer_type': 'GPT2BPETokenizer'},
     )
+    args.build_dataset_on_all_pipeline_stages = build_dataset_on_all_pipeline_stages
     full_config = pretrain_cfg_container_from_args(args)
     pretrain_func(full_config,
         train_valid_test_datasets_provider,
         partial(model_provider, model_builder),
         ModelType.encoder_or_decoder,
-        forward_step,
+        partial(forward_step, get_batch_func=get_batch_func),
         store=store,
         get_embedding_ranks=get_embedding_ranks,
         ######### FlagScale Begin #########

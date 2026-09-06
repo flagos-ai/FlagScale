@@ -154,7 +154,6 @@ class DeepSeekModel(GPTModel):
             runtime_gather_output=runtime_gather_output,
             extra_block_kwargs=extra_block_kwargs,
             inference_context=inference_context,
-            is_spec_decode=is_spec_decode,
             mhc_multistream=mhc_multistream,
         )
 

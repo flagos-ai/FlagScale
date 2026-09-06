@@ -22,8 +22,6 @@ def model_provider(
 ) -> Union[GPTModel, HybridModel]:
     """Builds the model.
 
-    If you set the use_legacy_models to True, it will return the legacy GPT model and if not the mcore GPT model.
-
     Args:
         model_builder: A callable that builds the actual model, its signature is the same as model_provider's with an exception of the first argument which is a builder itself. In addition might take a config passed from outside to skip its own config loading. See gpt_builder or hybrid_builder for an example, see _gpt_model_builder in train_rl.py to see how to augment a default gpt builder and pass the config from outside
         pre_process (bool, optional): Set to true if you need to compute embedings. Defaults to True.
