@@ -21,7 +21,7 @@ from megatron.core.fusions.fused_bias_dropout import get_bias_dropout_add
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
-from megatron.training import print_rank_0
+from megatron.training import get_args, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 from megatron.core.transformer.identity_op import IdentityOp
@@ -31,7 +31,6 @@ from megatron.core.transformer.transformer_block import (
 )
 
 from megatron.core.transformer.enums import LayerType
-from megatron.training.utils import get_args
 from megatron.core.models.gpt.experimental_attention_variant_module_specs import (
     get_transformer_block_with_experimental_attention_variant_spec, 
     _get_backend_spec_provider,

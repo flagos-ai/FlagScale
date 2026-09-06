@@ -23,6 +23,7 @@ from megatron.training.utils.common_utils import (
     to_empty_if_meta_device,
     get_nvtx_range,
     has_nvrx_installed,
+    has_nvrx_checkpointing_async_support,
     get_batch_on_this_cp_rank,
     get_batch_on_this_tp_rank,
     unwrap_model,

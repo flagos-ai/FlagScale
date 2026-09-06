@@ -36,7 +36,8 @@ from megatron.training import (
     inprocess_restart,
     print_rank_0,
 )
-from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.datasets.sft_dataset import SFTDataset
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
@@ -60,7 +61,9 @@ from megatron.training.training import pretrain
 stimer = StragglerDetector()
 
 
-def model_provider(pre_process=True, post_process=True) -> RWKVModel:
+def model_provider(
+    pre_process=True, post_process=True, config=None, pg_collection=None
+) -> RWKVModel:
     """Builds the model.
 
     Args:
@@ -277,11 +280,17 @@ if __name__ == "__main__":
     # Optionally enable inprocess restart on pretrain
     pretrain, store = inprocess_restart.maybe_wrap_for_inprocess_restart(pretrain)
 
+    args = parse_and_validate_args(
+        extra_args_provider=add_modelopt_args if has_nvidia_modelopt else None,
+        args_defaults={'tokenizer_type': 'RWKVTokenizer'},
+    )
+    full_config = pretrain_cfg_container_from_args(args)
+
     pretrain(
+        full_config,
         train_valid_test_datasets_provider,
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'RWKVTokenizer'},
         store=store,
     )

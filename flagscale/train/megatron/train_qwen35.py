@@ -34,11 +34,12 @@ from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 
 from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
-from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
 try:
-    from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+    from megatron.post_training.arguments import add_modelopt_args
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
     from megatron.post_training.model_provider import model_provider as model_provider_modelopt
 
@@ -345,7 +346,7 @@ def loss_func(
     """Loss function."""
     args = get_args()
 
-    if has_nvidia_modelopt and modelopt_args_enabled(args):
+    if has_nvidia_modelopt and getattr(args, "modelopt_enabled", False):
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()
@@ -698,16 +699,21 @@ if __name__ == "__main__":
     _pre_args, _ = _pre_parser.parse_known_args()
     _enable_vision = _pre_args.enable_vision
 
+    args = parse_and_validate_args(
+        extra_args_provider=add_qwen35_extra_args,
+        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer' if _enable_vision else 'HFTokenizerFS'},
+    )
+    full_config = pretrain_cfg_container_from_args(args)
+
     if _enable_vision:
         # Multimodal mode: use energon dataloaders
         train_valid_test_dataloaders_provider.is_distributed = True
         pretrain(
+            full_config,
             train_valid_test_dataloaders_provider,
             model_provider,
             ModelType.encoder_or_decoder,
             forward_step,
-            args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
-            extra_args_provider=add_qwen35_extra_args,
             process_non_loss_data_func=write_online_eval_to_tensorboard,
             non_loss_data_func=run_online_eval,
         )
@@ -715,11 +721,10 @@ if __name__ == "__main__":
         # Text-only mode: use GPT-style dataset (bin/idx)
         train_valid_test_datasets_provider_gpt.is_distributed = True
         pretrain(
+            full_config,
             train_valid_test_datasets_provider_gpt,
             model_provider,
             ModelType.encoder_or_decoder,
             forward_step_text,
-            args_defaults={'tokenizer_type': 'HFTokenizerFS'},
-            extra_args_provider=add_qwen35_extra_args,
             get_embedding_ranks=get_embedding_ranks,
         )
