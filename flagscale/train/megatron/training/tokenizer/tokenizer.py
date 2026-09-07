@@ -462,7 +462,13 @@ def _build_qwen2(args, **kwargs):
 def _build_qwen2vl(args, **kwargs):
     assert args.tokenizer_path
     tok = _Qwen2VLTokenizer(args.tokenizer_path, args.extra_vocab_size)
-    args.padded_vocab_size = tok.vocab_size
+    # Released VL checkpoints can pad embedding rows beyond the tokenizer vocabulary.
+    args.padded_vocab_size = getattr(args, "vocab_size", None) or tok.vocab_size
+    if args.padded_vocab_size < len(tok.tokenizer):
+        raise ValueError(
+            f"Model vocabulary ({args.padded_vocab_size}) is smaller than the tokenizer "
+            f"including special tokens ({len(tok.tokenizer)}). Set vocab_size or extra_vocab_size."
+        )
     return tok
 
 

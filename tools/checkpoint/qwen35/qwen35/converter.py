@@ -548,6 +548,11 @@ class BaseConverter:
         extra = torch.empty(0, dtype=torch.uint8)
         prefixes = set()
         for k in list(result.keys()):
+            # MTP uses TE modules directly under each predictor layer.
+            if k.startswith("language_model.mtp.layers."):
+                base = k.rsplit(".", 1)[0]
+                if base.rsplit(".", 1)[-1] in ("enorm", "hnorm", "eh_proj", "final_layernorm"):
+                    prefixes.add(base)
             for pattern in constants.EXTRA_STATE_KEYS:
                 if pattern in k:
                     idx = k.find(pattern)
@@ -555,6 +560,9 @@ class BaseConverter:
                         base = k[: idx + len(pattern)]
                         prefixes.add(base)
         for base in prefixes:
+            # The vision block ends in torch.nn.LayerNorm, not a TE module.
+            if base == "vision_model.decoder.final_layernorm":
+                continue
             es_key = f"{base}._extra_state"
             if es_key not in result:
                 result[es_key] = extra.clone()

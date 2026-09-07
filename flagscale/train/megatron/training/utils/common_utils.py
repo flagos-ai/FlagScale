@@ -13,6 +13,12 @@ import torch
 
 from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 from megatron.core._rank_utils import safe_get_rank as _safe_get_rank
+try:
+    from megatron.core.dist_checkpointing.strategies.nvrx import has_nvrx_async_support
+except (ImportError, ModuleNotFoundError):
+    def has_nvrx_async_support():
+        return False
+
 
 try:
     from transformer_engine.pytorch.optimizers import multi_tensor_applier, multi_tensor_l2norm
@@ -906,3 +912,7 @@ def has_nvrx_installed():
     except (ImportError, ModuleNotFoundError):
         return False
 
+
+def has_nvrx_checkpointing_async_support():
+    """Checks whether the installed NVRx package exposes the async checkpointing API Megatron uses."""
+    return has_nvrx_async_support()

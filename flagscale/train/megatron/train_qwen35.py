@@ -34,11 +34,12 @@ from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 
 from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
-from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
 try:
-    from megatron.post_training.arguments import add_modelopt_args, modelopt_args_enabled
+    from megatron.post_training.arguments import add_modelopt_args
     from megatron.post_training.loss_func import loss_func as loss_func_modelopt
     from megatron.post_training.model_provider import model_provider as model_provider_modelopt
 
@@ -94,7 +95,8 @@ IGNORE_IDX = -100
 
 
 def model_provider(
-    pre_process=True, post_process=True, add_encoder=True, add_decoder=True, **kwargs
+    pre_process=True, post_process=True, add_encoder=True, add_decoder=True,
+    vp_stage=None, config=None, pg_collection=None, **kwargs
 ) -> Union[Qwen35Model]:
     """Provide a Qwen3.5 model instance."""
     args = get_args()
@@ -119,7 +121,8 @@ def model_provider(
         torch._C._cuda_attach_out_of_memory_observer(oom_observer)
 
     # Build transformer config with Qwen35 config class
-    config = core_transformer_config_from_args(args, Qwen35TransformerConfig)
+    if config is None:
+        config = core_transformer_config_from_args(args, Qwen35TransformerConfig)
     # Qwen3.5 uses zero-centered gamma for RMSNorm; override if needed
     # (core_transformer_config_from_args may be affected by apply_layernorm_1p)
     config.layernorm_zero_centered_gamma = getattr(args, 'layernorm_zero_centered_gamma', True)
@@ -148,7 +151,7 @@ def model_provider(
     print_rank_0("building Qwen3.5 model in TE...")
 
     # Language model spec: hybrid GDN + Attention
-    language_layer_spec = get_qwen35_language_model_spec(config)
+    language_layer_spec = get_qwen35_language_model_spec(config, vp_stage=vp_stage)
 
     # Vision model spec (identical to Qwen3-VL)
     if enable_vision:
@@ -193,6 +196,8 @@ def model_provider(
         parallel_output=True,
         language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
         mtp_block_spec=mtp_block_spec,
+        vp_stage=vp_stage,
+        pg_collection=pg_collection,
     )
 
     model.freeze(
@@ -282,9 +287,6 @@ def get_batch(
         videos = None
         image_thw_grids = None
 
-    if data_text.shape[-1] == args.max_padding_length and get_pipeline_model_parallel_rank() == 0:
-        cur_platform.empty_cache()
-
     if enable_vision:
         video_thw_grids = broadcast_data(["video_thw_grids"], data, torch.long)["video_thw_grids"]
         second_per_grid_ts = broadcast_data(['second_per_grid_ts'], data, torch.float32)['second_per_grid_ts']
@@ -345,7 +347,7 @@ def loss_func(
     """Loss function."""
     args = get_args()
 
-    if has_nvidia_modelopt and modelopt_args_enabled(args):
+    if has_nvidia_modelopt and getattr(args, "modelopt_enabled", False):
         return loss_func_modelopt(loss_mask, output_tensor, model=model)
 
     losses = output_tensor.view(-1).float()
@@ -698,28 +700,33 @@ if __name__ == "__main__":
     _pre_args, _ = _pre_parser.parse_known_args()
     _enable_vision = _pre_args.enable_vision
 
+    args = parse_and_validate_args(
+        extra_args_provider=add_qwen35_extra_args,
+        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer' if _enable_vision else 'HFTokenizerFS'},
+    )
+    full_config = pretrain_cfg_container_from_args(args)
+
     if _enable_vision:
         # Multimodal mode: use energon dataloaders
         train_valid_test_dataloaders_provider.is_distributed = True
         pretrain(
+            full_config,
             train_valid_test_dataloaders_provider,
             model_provider,
             ModelType.encoder_or_decoder,
             forward_step,
-            args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
-            extra_args_provider=add_qwen35_extra_args,
             process_non_loss_data_func=write_online_eval_to_tensorboard,
             non_loss_data_func=run_online_eval,
+            get_embedding_ranks=get_embedding_ranks,
         )
     else:
         # Text-only mode: use GPT-style dataset (bin/idx)
         train_valid_test_datasets_provider_gpt.is_distributed = True
         pretrain(
+            full_config,
             train_valid_test_datasets_provider_gpt,
             model_provider,
             ModelType.encoder_or_decoder,
             forward_step_text,
-            args_defaults={'tokenizer_type': 'HFTokenizerFS'},
-            extra_args_provider=add_qwen35_extra_args,
             get_embedding_ranks=get_embedding_ranks,
         )

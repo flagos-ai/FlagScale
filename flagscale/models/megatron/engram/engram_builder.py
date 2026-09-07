@@ -367,7 +367,6 @@ def engram_builder(
 
     config = core_transformer_config_from_args(args)
 
-    assert not args.use_legacy_models, "Engram only supported in Mcore!"
     assert args.spec is None, "Engram only supported in Mcore!"
     use_te = args.transformer_impl == "transformer_engine"
     assert use_te, "Engram only supported in Transformer Engine!"
