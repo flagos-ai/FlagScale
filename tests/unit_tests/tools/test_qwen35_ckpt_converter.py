@@ -14,7 +14,7 @@
 
 """Unit tests for the Qwen3.5 checkpoint converter PP sharding rules.
 
-Guards two contracts verified in plan:0016 / iteration_0018:
+Guards two contracts:
 
 1. The converter's default (no explicit first/last) uneven-PP layer split must
    match the training-side allocation
