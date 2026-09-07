@@ -25,7 +25,7 @@ ci_train_image: harbor.baai.ac.cn/flagscale/flagscale-train:dev-cu128-py3.12-202
 ci_inference_image: harbor.baai.ac.cn/flagscale/flagscale-inference:dev-cu128-py3.12-20260302102033
 
 # Runner labels for this hardware
-runner_labels: ['flagscale-nvidia-a100-gpu2-32c-128g']
+runner_labels: ['flagcicd-a100']
 
 # Image build contract consumed by the generic image-build workflow.
 image_build:
