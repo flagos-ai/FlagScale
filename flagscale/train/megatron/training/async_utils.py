@@ -11,9 +11,20 @@ from abc import ABC
 from typing import TYPE_CHECKING, Any
 
 from megatron.core.dist_checkpointing.strategies.async_utils import AsyncRequest
-from megatron.core.dist_checkpointing.strategies.nvrx import (
-    make_nvrx_async_request,
-)
+try:
+    from megatron.core.dist_checkpointing.strategies.nvrx import (
+        make_nvrx_async_request,
+    )
+except (ImportError, ModuleNotFoundError):
+    def make_nvrx_async_request(
+        async_request_cls, async_fn, async_fn_args, finalize_fns,
+        async_fn_kwargs=None, preload_fn=None,
+    ):
+        return async_request_cls(
+            async_fn, async_fn_args, finalize_fns,
+            async_fn_kwargs=async_fn_kwargs, preload_fn=preload_fn,
+        )
+
 from megatron.core.dist_checkpointing.strategies.torch import get_async_strategy
 from megatron.training import get_args
 from megatron.training.utils import print_rank_0
