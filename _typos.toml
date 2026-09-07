@@ -1,0 +1,6 @@
+# Configuration for the typos pre-commit hook (crate-ci/typos)
+
+[default.extend-words]
+# `rpmbuild -ba` (build source + binary packages) is a standard rpmbuild flag
+# with no long-option equivalent; not a typo of "by"/"be".
+ba = "ba"

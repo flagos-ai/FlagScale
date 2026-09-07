@@ -1,0 +1,7 @@
+flagscale (1.0.0-1) unstable; urgency=medium
+
+  * Initial packaging of FlagScale 1.0.0
+  * Core library and CLI tool
+  * Support for training, serving, inference, and RL workflows
+
+ -- FlagOS Contributors <contact@flagos.io>  Mon, 13 Apr 2026 02:00:00 +0000
