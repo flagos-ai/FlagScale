@@ -1,0 +1,57 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+# The validated vendor base owns torch_gcu, ECCL and TransformerEngine-FL.
+# FlagScale only overlays the workflow-resolved Megatron-LM-FL revision.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/megatron-lm-fl:manual-20260810-enflame-dev
+
+FROM ${BASE_IMAGE} AS dev
+
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_MEGATRON_REPO=https://github.com/flagos-ai/Megatron-LM-FL.git
+ARG FLAGSCALE_MEGATRON_REF=main
+
+LABEL io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF}
+
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps \
+    FLAGSCALE_MEGATRON_PATH=${FLAGSCALE_HOME}/deps/Megatron-LM-FL \
+    FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF} \
+    PYTHONPATH=${FLAGSCALE_HOME}/deps/Megatron-LM-FL:${PYTHONPATH}
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends make && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    mkdir -p "${FLAGSCALE_MEGATRON_PATH}"; \
+    git init -q "${FLAGSCALE_MEGATRON_PATH}"; \
+    git -C "${FLAGSCALE_MEGATRON_PATH}" remote add origin "${FLAGSCALE_MEGATRON_REPO}"; \
+    for attempt in 1 2 3; do \
+        git -c http.version=HTTP/1.1 -C "${FLAGSCALE_MEGATRON_PATH}" \
+            fetch --depth 1 origin "${FLAGSCALE_MEGATRON_REF}" && break; \
+        [ "${attempt}" -eq 3 ] && exit 1; \
+        sleep $((attempt * 10)); \
+    done; \
+    git -C "${FLAGSCALE_MEGATRON_PATH}" checkout -q --detach FETCH_HEAD; \
+    actual_ref="$(git -C "${FLAGSCALE_MEGATRON_PATH}" rev-parse HEAD)"; \
+    if printf '%s' "${FLAGSCALE_MEGATRON_REF}" | grep -Eq '^[0-9a-fA-F]{40}$'; then \
+        test "${actual_ref}" = "${FLAGSCALE_MEGATRON_REF}"; \
+    else \
+        fetched_ref="$(git -C "${FLAGSCALE_MEGATRON_PATH}" rev-parse FETCH_HEAD)"; \
+        test "${actual_ref}" = "${fetched_ref}"; \
+    fi; \
+    sed -i \
+        's/if torch.cuda.device_count() > 0 and torch.cuda.is_available():/if torch.version.cuda is not None and torch.cuda.device_count() > 0 and torch.cuda.is_available():/' \
+        "${FLAGSCALE_MEGATRON_PATH}/megatron/plugin/platform/platform_cuda.py"; \
+    grep -F 'torch.version.cuda is not None' \
+        "${FLAGSCALE_MEGATRON_PATH}/megatron/plugin/platform/platform_cuda.py"; \
+    purelib="$(python3 -S -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"; \
+    pybind11_includes="$(PYTHONPATH="${purelib}" python3 -S -m pybind11 --includes)"; \
+    extension_suffix="$(python3-config --extension-suffix)"; \
+    make -C "${FLAGSCALE_MEGATRON_PATH}/megatron/core/datasets" \
+        CPPFLAGS="${pybind11_includes}" LIBEXT="${extension_suffix}"
+
+WORKDIR /workspace
+
+FROM dev AS release

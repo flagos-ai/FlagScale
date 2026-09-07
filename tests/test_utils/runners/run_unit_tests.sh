@@ -88,15 +88,14 @@ run_unit_tests_for_device() {
     echo "=========================================="
 
     # Get unit test patterns from platform configuration
-    PARSE_CMD="python \"$SCRIPT_DIR/parse_config.py\" --platform \"$PLATFORM\" --device \"$device\" --type unit"
-
-    PATTERNS=$(eval "$PARSE_CMD" 2>/dev/null) || {
+    PATTERNS=$(run_config_python "$PLATFORM" "$SCRIPT_DIR/parse_config.py" \
+        --platform "$PLATFORM" --device "$device" --type unit 2>/dev/null) || {
         log_error "Failed to parse test configuration for device: $device"
         return 1
     }
 
     # Extract include and exclude patterns using helper
-    PATTERN_OUTPUT=$(echo "$PATTERNS" | python "$SCRIPT_DIR/helpers.py" extract-patterns)
+    PATTERN_OUTPUT=$(echo "$PATTERNS" | run_config_python "$PLATFORM" "$SCRIPT_DIR/helpers.py" extract-patterns)
     INCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^INCLUDE=" | cut -d= -f2-)
     EXCLUDE=$(echo "$PATTERN_OUTPUT" | grep "^EXCLUDE=" | cut -d= -f2-)
     CONFIGURED_NPROC=$(echo "$PATTERN_OUTPUT" | grep "^NPROC_PER_NODE=" | cut -d= -f2-)
@@ -113,6 +112,14 @@ parallel = true
 source = $PROJECT_ROOT
 data_file = $COVERAGE_DIR/.coverage
 EOF
+        if [ "$PLATFORM" = "enflame" ]; then
+            cat >> "$COVERAGERC" <<EOF
+omit = */_remote_module_non_scriptable
+
+[report]
+ignore_errors = true
+EOF
+        fi
     fi
 
     # Use the configured unit-test topology, or all visible accelerators.
@@ -125,29 +132,38 @@ EOF
 
     # Use 'coverage run' instead of pytest-cov to avoid SQLite concurrent write conflicts:
     # each torchrun rank writes its own .coverage.<host>.<pid>.<random> fragment independently.
-    if [ "$USE_COVERAGE" = true ]; then
-        RUNNER_CMD="-m coverage run --rcfile=$COVERAGERC -m pytest"
+    if [ "$USE_COVERAGE" = true ] && [ "$PLATFORM" = "enflame" ]; then
+        # torch_gcu is imported by a site .pth file before coverage starts.
+        # Start the worker without site initialization, then add the regular
+        # package and project paths explicitly so coverage initializes first.
+        COVERAGE_BOOTSTRAP='import os, runpy, sys, sysconfig; sys.path[:0] = [path for path in os.environ.get("PYTHONPATH", "").split(os.pathsep) if path] + [sysconfig.get_path("purelib"), sysconfig.get_path("platlib")]; sys.argv = sys.argv[1:]; runpy.run_module("coverage", run_name="__main__")'
+        RUNNER_CMD=(--no-python python -S -E -c "$COVERAGE_BOOTSTRAP" coverage run "--rcfile=$COVERAGERC" -m pytest)
+    elif [ "$USE_COVERAGE" = true ]; then
+        RUNNER_CMD=(-m coverage run "--rcfile=$COVERAGERC" -m pytest)
     else
-        RUNNER_CMD="-m pytest"
+        RUNNER_CMD=(-m pytest)
     fi
 
     TEST_TARGETS="tests/unit_tests/"
     if [ -n "$INCLUDE" ] && [ "$INCLUDE" != "*" ]; then
         TEST_TARGETS="$INCLUDE"
     fi
+    read -r -a TEST_TARGET_ARGS <<< "$TEST_TARGETS"
 
-    PYTEST_CMD="torchrun --nproc_per_node=$NPROC $RUNNER_CMD $TEST_TARGETS -v --tb=short"
+    PYTEST_CMD=(torchrun "--nproc_per_node=$NPROC" "${RUNNER_CMD[@]}" "${TEST_TARGET_ARGS[@]}" -v --tb=short)
     wait_for_gpu || return 1
     # Apply exclude patterns if any
     if [ -n "$EXCLUDE" ]; then
-        PYTEST_CMD="torchrun --nproc_per_node=$NPROC $RUNNER_CMD $EXCLUDE $TEST_TARGETS -v --tb=short"
+        read -r -a EXCLUDE_ARGS <<< "$EXCLUDE"
+        PYTEST_CMD=(torchrun "--nproc_per_node=$NPROC" "${RUNNER_CMD[@]}" "${EXCLUDE_ARGS[@]}" "${TEST_TARGET_ARGS[@]}" -v --tb=short)
     fi
 
-    log_info "Command: $PYTEST_CMD"
+    printf -v printable_cmd '%q ' "${PYTEST_CMD[@]}"
+    log_info "Command: $printable_cmd"
 
     # Run unit tests
     set +e
-    eval "$PYTEST_CMD"
+    "${PYTEST_CMD[@]}"
     local test_exit=$?
     set -e
 
@@ -178,7 +194,7 @@ else
     log_info "Running tests for all devices: $DEVICE_TYPES"
 
     # Parse device types using helper
-    DEVICES=$(echo "$DEVICE_TYPES" | python "$SCRIPT_DIR/helpers.py" parse-devices)
+    DEVICES=$(echo "$DEVICE_TYPES" | run_config_python "$PLATFORM" "$SCRIPT_DIR/helpers.py" parse-devices)
 
     OVERALL_EXIT_CODE=0
     for device in $DEVICES; do
