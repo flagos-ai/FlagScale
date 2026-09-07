@@ -100,8 +100,15 @@ class HeartbeatLaunchConfig:
 
     def training_command_body(self, node_rank: int) -> str:
         """Run training and notify the node-zero heartbeat monitor on exit."""
-        if not self.enabled:
+        exit_actions = self.command_exit_actions(node_rank)
+        if not exit_actions:
             return "$cmd; sync"
+        return "$cmd; rc=\\$?; " + "; ".join(exit_actions) + "; sync; exit \\$rc"
+
+    def command_exit_actions(self, node_rank: int) -> list[str]:
+        """Return cleanup actions for a shared diagnostic command wrapper."""
+        if not self.enabled:
+            return []
         exit_actions: list[str] = []
         if node_rank == 0:
             completion_file = shlex.quote(self.completion_file)
@@ -112,9 +119,7 @@ class HeartbeatLaunchConfig:
                 f"if [ -f {health_pid_file} ]; then "
                 f'kill \\"\\$(cat {health_pid_file})\\" 2>/dev/null || true; fi'
             )
-        if not exit_actions:
-            return "$cmd; sync"
-        return "$cmd; rc=\\$?; " + "; ".join(exit_actions) + "; sync; exit \\$rc"
+        return exit_actions
 
     def shell_setup_lines(self, node_rank: int) -> list[str]:
         if not self.enabled:
