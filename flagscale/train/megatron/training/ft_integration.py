@@ -50,6 +50,7 @@ from flagscale.train import gpu_heartbeat
 ########## FlagScale End ##########
 
 from . import arguments, global_vars
+from .async_utils import is_empty_async_queue
 from .utils import is_rank0, print_rank_0
 
 _GLOBAL_RANK_MONITOR_CLIENT = None
@@ -193,24 +194,49 @@ def on_eval_step_end() -> None:
         _curr_eval_iter_idx += 1
 
 
-def on_checkpointing_start() -> None:
-    """Should be called before each checkpoint-saving-related operation."""
+def on_checkpointing_start(
+    is_async_finalization: bool = False,
+    blocking: bool = True,
+) -> None:
+    """Should be called before each checkpoint-saving-related operation.
+
+    Args:
+        is_async_finalization (bool): true for an async checkpoint finalization call.
+        blocking (bool): true if the finalization call can wait for pending work.
+    """
     ########## FlagScale Begin ##########
-    gpu_heartbeat.set_phase("checkpointing")
+    # Non-blocking async finalization is polled before every training iteration and is
+    # usually a no-op. Only publish a checkpoint lifecycle when checkpoint work is
+    # definitely happening: a save call, or a blocking finalization with pending work.
+    should_track_checkpoint = not is_async_finalization or (
+        blocking and not is_empty_async_queue()
+    )
+    if should_track_checkpoint:
+        gpu_heartbeat.checkpoint_start(
+            getattr(global_vars.get_args(), "curr_iteration", None)
+        )
     ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:
         rmon_cli.start_section("checkpointing")
 
 
-def on_checkpointing_end(is_async_finalization: bool) -> None:
+def on_checkpointing_end(
+    is_async_finalization: bool,
+    blocking: bool = True,
+) -> None:
     """Should be called after each checkpoint-saving-related operation.
 
     Args:
         is_async_finalization (bool): true if called after an async checkpointing finalization
+        blocking (bool): true if the finalization call could wait for pending work
     """
     ########## FlagScale Begin ##########
-    gpu_heartbeat.mark_progress("checkpointing")
+    # The matching start is always published for saves. Non-blocking finalization
+    # never opens a heartbeat checkpoint, while an empty blocking finalization makes
+    # checkpoint_end a cheap no-op in the heartbeat runtime.
+    if not is_async_finalization or blocking:
+        gpu_heartbeat.checkpoint_end()
     ########## FlagScale End ##########
     rmon_cli = get_rank_monitor_client()
     if rmon_cli is not None:

@@ -1598,9 +1598,9 @@ def pretrain(
     if wandb_writer:
         wandb_writer.finish()
 
-    ft_integration.on_checkpointing_start()
+    ft_integration.on_checkpointing_start(is_async_finalization=True, blocking=True)
     maybe_finalize_async_save(blocking=True, terminate=True)
-    ft_integration.on_checkpointing_end(is_async_finalization=True)
+    ft_integration.on_checkpointing_end(is_async_finalization=True, blocking=True)
 
     one_logger and one_logger.log_metrics(
         {'app_finish_time': one_logger_utils.get_timestamp_in_ms()}
@@ -3412,9 +3412,9 @@ def train(
                 nsys_nvtx_context = torch.autograd.profiler.emit_nvtx(record_shapes=True)
                 nsys_nvtx_context.__enter__()
 
-        ft_integration.on_checkpointing_start()
+        ft_integration.on_checkpointing_start(is_async_finalization=True, blocking=False)
         maybe_finalize_async_save(blocking=False)
-        ft_integration.on_checkpointing_end(is_async_finalization=True)
+        ft_integration.on_checkpointing_end(is_async_finalization=True, blocking=False)
         # Update the timeout for all process groups after initialization
         # We update the timeout after the first successful iteration,
         # which takes longer than others usually
@@ -3862,11 +3862,11 @@ def train(
     if pre_hook_enabled:
         disable_forward_pre_hook(model)
 
-    ft_integration.on_checkpointing_start()
+    ft_integration.on_checkpointing_start(is_async_finalization=True, blocking=True)
     # This will finalize all unfinalized async request and terminate
     # a persistent async worker if persistent ckpt worker is enabled
     maybe_finalize_async_save(blocking=True, terminate=True)
-    ft_integration.on_checkpointing_end(is_async_finalization=True)
+    ft_integration.on_checkpointing_end(is_async_finalization=True, blocking=True)
 
     if args.log_energy:
         energy_monitor.lap()
