@@ -53,6 +53,7 @@ class VisionTransformerBlock(TransformerBlock):
         pre_process: bool = True,
         post_process: bool = True,
         pg_collection: ProcessGroupCollection = None,
+        vp_stage: int = None,
     ):
         super().__init__(
             config=config,
@@ -61,6 +62,7 @@ class VisionTransformerBlock(TransformerBlock):
             pre_process=pre_process,
             post_process=post_process,
             pg_collection=pg_collection,
+            vp_stage=vp_stage,
         )
 
     def _checkpointed_forward(

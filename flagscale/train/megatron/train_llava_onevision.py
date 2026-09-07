@@ -15,7 +15,8 @@ sys.path.append(
 )
 
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
-from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.core import mpu, tensor_parallel
 from megatron.core.enums import ModelType
 from flagscale.models.megatron.llava_onevision.config import (
@@ -49,6 +50,8 @@ def model_provider(
     add_encoder=True,
     add_decoder=True,
     parallel_output=True,
+    config=None,
+    pg_collection=None,
 ) -> LLaVAOneVisionModel:
     """Builds the model.
 
@@ -490,13 +493,18 @@ def llava_position_embedding_ranks(pp_ranks):
 if __name__ == "__main__":
     train_valid_test_dataloaders_provider.is_distributed = True
 
+    args = parse_and_validate_args(
+        extra_args_provider=add_multimodal_extra_args,
+        args_defaults={"tokenizer_type": "GPT2BPETokenizer"},
+    )
+    full_config = pretrain_cfg_container_from_args(args)
+
     pretrain(
+        full_config,
         train_valid_test_dataloaders_provider,
         model_provider,
         ModelType.encoder_and_decoder,
         forward_step,
-        args_defaults={"tokenizer_type": "GPT2BPETokenizer"},
-        extra_args_provider=add_multimodal_extra_args,
         get_embedding_ranks=llava_embedding_ranks,
         get_position_embedding_ranks=llava_position_embedding_ranks,
     )

@@ -43,12 +43,14 @@ class ProfilingConfig:
 
     pytorch_profiler_collect_shapes: bool = False
     """Collect tensor shape in pytorch profiler."""
-
+  
     pytorch_profiler_collect_callstack: bool = False
     """Collect callstack in pytorch profiler."""
 
+    ########## FlagScale Begin ##########
     pytorch_profiler_collect_memory: bool = False
     """Collect memory allocation/deallocation events in pytorch profiler."""
+    ########## FlagScale End ##########
 
     pytorch_profiler_collect_chakra: bool = False
     """Collect chakra trace in pytorch profiler."""
@@ -63,7 +65,7 @@ class ProfilingConfig:
     """Specifies where to dump the memory history pickle."""
 
     record_shapes: bool = False
-    """Record shapes of tensors."""
+    """Record shapes of tensors in `torch.autograd.profiler.emit_nvtx` for the Nsys profiler."""
 
     nvtx_ranges: bool = False
     """Enable NVTX range annotations for profiling. When enabled, inserts NVTX markers
@@ -74,7 +76,7 @@ class ProfilingConfig:
 class DistributedInitConfig:
     """Configuration settings for distributed training initialization."""
 
-    distributed_backend: Literal["nccl", "gloo", "flagcx", "mccl"] = "nccl"
+    distributed_backend: Literal["nccl", "gloo", "flagcx", "mccl"] = "nccl"  # FlagScale Modify
     """Which backend to use for distributed training."""
 
     distributed_timeout_minutes: int = 10

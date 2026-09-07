@@ -22,38 +22,38 @@ from megatron.core.rerun_state_machine import (
     RerunMode,
     initialize_rerun_state_machine,
 )
-from megatron.core.transformer.custom_layers.batch_invariant_kernels import enable_batch_invariant_mode
+from megatron.core.transformer.custom_layers.batch_invariant_kernels import (
+    enable_batch_invariant_mode,
+)
 from megatron.core.utils import get_te_version, is_te_min_version, is_torch_min_version
-from megatron.training import get_adlr_autoresume, get_args, get_tensorboard_writer
-from megatron.training.utils import print_rank_0, warn_rank_0
-from megatron.training import inprocess_restart
-from megatron.training.arguments import parse_args, validate_args
+from megatron.training import (
+    get_adlr_autoresume,
+    get_args,
+    get_tensorboard_writer,
+    inprocess_restart,
+)
 from megatron.training.async_utils import init_persistent_async_worker
-from megatron.training.checkpointing import load_args_from_checkpoint
-from megatron.training.global_vars import set_global_variables, set_global_writers
-from megatron.training.utils import is_rank0
-from megatron.training.yaml_arguments import validate_yaml
+from megatron.training.utils import is_rank0, print_rank_0, warn_rank_0
 
+########## FlagScale Begin ##########
+from megatron.training.global_vars import set_global_writers
 from megatron.backend_config import configure_backend_environment
 from megatron.training.arguments_fs import FSTrainArguments
 from megatron.training.global_vars import set_spiky_loss_detector
 from megatron.plugin.hetero.parallel_context import set_parallel_context
 from megatron.plugin.decorators import overridable
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+########## FlagScale End ##########
 
 logger = logging.getLogger(__name__)
 
-from megatron.plugin.platform import get_platform
-cur_platform = get_platform()
 
 def initialize_megatron(
-    extra_args_provider=None,
-    args_defaults={},
-    ignore_unknown_args=False,
     allow_no_cuda=False,
     skip_mpu_initialization=False,
     get_embedding_ranks=None,
     get_position_embedding_ranks=None,
-    parsed_args=None,
     store=None,
 ):
     """Set global variables, initialize distributed, and
@@ -66,51 +66,18 @@ def initialize_megatron(
     """
     if not allow_no_cuda:
         # Make sure cuda is available.
-        assert cur_platform.is_available(), "Megatron requires CUDA."
+        assert cur_platform.is_available(), "Megatron requires CUDA."  # FlagScale Modify
 
-    # Parse arguments
-    if parsed_args is None:
-        args = parse_args(extra_args_provider, ignore_unknown_args)
-    else:
-        args = parsed_args
+    args = get_args()
 
-    # Prep for checkpoint conversion.
-    if args.ckpt_convert_format is not None:
-        assert args.ckpt_convert_save is not None
-        assert args.load is not None
-        args.exit_on_missing_checkpoint = True
-
-    if args.use_checkpoint_args or args_defaults.get("use_checkpoint_args", False):
-        assert args.load is not None or args.pretrained_checkpoint is not None, "--use-checkpoint-args requires --load or --pretrained-checkpoint argument"
-        assert args.non_persistent_ckpt_type != "local", (
-            "--use-checkpoint-args is not supported with --non_persistent_ckpt_type=local. "
-            "Two-stage checkpoint loading is not implemented, and all arguments must be defined "
-            "before initializing LocalCheckpointManager."
-        )
-        load_args_from_checkpoint(args, load_arg='pretrained_checkpoint')
-        load_args_from_checkpoint(args)
-
+    ########## FlagScale Begin ##########
     configure_backend_environment(args)
-
     ## FlagScale Begin: Pre Validate Arguments ##
     fs_argument = FSTrainArguments(args)
-    args_defaults["enable_hetero"] = args.enable_hetero
-    args_defaults["standalone_embedding_stage"] = args.standalone_embedding_stage
-    args_defaults["multiple_of"] = args.multiple_of
-    args_defaults["hidden_dim_multiplier"] = args.hidden_dim_multiplier
     fs_argument.pre_validate_args()
-
-    if args.yaml_cfg is not None:
-        args = validate_yaml(args, args_defaults)
-    else:
-        validate_args(args, args_defaults)
-
     ## FlagScale End: Post Validate Arguments ##
     fs_argument.post_validate_args()
-
-    # set global args, build tokenizer, and set adlr-autoresume,
-    # tensorboard-writer, and timers.
-    set_global_variables(args)
+    ########## FlagScale End ##########
 
     # set logging level
     setup_logging()
@@ -142,8 +109,10 @@ def initialize_megatron(
         print_rank_0("Enabling batch invariant mode globally")
         enable_batch_invariant_mode()
 
+    ########## FlagScale Begin ##########
     if args.auto_skip_spiky_loss:
         set_spiky_loss_detector(args=args)
+    ########## FlagScale End ##########
 
     # torch.distributed initialization
     def finish_mpu_init():
@@ -161,15 +130,16 @@ def initialize_megatron(
             use_cudagraphable_rng=args.cuda_graph_impl != "none",
         )
 
-
         # Setup MoE aux loss scale value.
         if args.num_experts is not None:
             from megatron.core.transformer.moe.router import MoEAuxLossAutoScaler
 
-            MoEAuxLossAutoScaler.set_loss_scale(torch.ones(1, device=cur_platform.current_device()))
+            MoEAuxLossAutoScaler.set_loss_scale(torch.ones(1, device=cur_platform.current_device()))  # FlagScale Modify
 
+        ########## FlagScale Begin ##########
         # Set tensorboard writer and wandb writer.
         set_global_writers(args)
+        ########## FlagScale End ##########
 
     if skip_mpu_initialization:
         return None
@@ -202,7 +172,7 @@ def initialize_megatron(
         # No continuation function
         return None
 
-@overridable
+@overridable  # FlagScale Modify
 def _compile_dependencies():
 
     args = get_args()
@@ -211,8 +181,10 @@ def _compile_dependencies():
     # Compile dataset C++ code.
     # =========================
     # TODO: move this to ninja
+    ########## FlagScale Begin ##########
     from megatron.plugin.utils import is_built_on_zero_rank
     if is_built_on_zero_rank():
+    ########## FlagScale End ##########
         start_time = time.time()
         print("> compiling dataset index builder ...")
         from megatron.core.datasets.utils import compile_helpers
@@ -260,11 +232,16 @@ def _initialize_tp_communicators():
             args.hidden_size,
         ]
 
-
     if is_te_min_version("2.7.0"):
         UserBufferQuantizationMode = te_module.base.UserBufferQuantizationMode
-        quantization_modes = [UserBufferQuantizationMode.FP8 if args.fp8 else UserBufferQuantizationMode.NONE]
-        if args.fp8 is not None and args.first_last_layers_bf16 and (args.num_layers_at_start_in_bf16 > 0 or args.num_layers_at_end_in_bf16 > 0):
+        quantization_modes = [
+            UserBufferQuantizationMode.FP8 if args.fp8 else UserBufferQuantizationMode.NONE
+        ]
+        if (
+            args.fp8 is not None
+            and args.first_last_layers_bf16
+            and (args.num_layers_at_start_in_bf16 > 0 or args.num_layers_at_end_in_bf16 > 0)
+        ):
             quantization_modes.append(UserBufferQuantizationMode.NONE)
         # The process group with the target bootstrap backend is created in Transformer Engine.
         te_module.base.initialize_ub(
@@ -303,7 +280,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
     """Initialize torch.distributed and core model parallel."""
     args = get_args()
 
-    device_count = cur_platform.device_count()
+    device_count = cur_platform.device_count()  # FlagScale Modify
     if torch.distributed.is_initialized():
 
         print_rank_0("torch distributed is already initialized, skipping initialization ...")
@@ -315,14 +292,14 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
         print_rank_0("> initializing torch distributed ...")
         # Manually set the device ids.
         if device_count > 0:
-            cur_platform.set_device(args.local_rank)
-            device_id = torch.device(cur_platform.device_name(args.local_rank))
+            cur_platform.set_device(args.local_rank)  # FlagScale Modify
+            device_id = torch.device(cur_platform.device_name(args.local_rank))  # FlagScale Modify
         else:
             device_id = None
 
         # Set to non-default stream for cudagraph capturing.
         if args.cuda_graph_impl == "transformer_engine":
-            cur_platform.set_stream(cur_platform.Stream())
+            cur_platform.set_stream(cur_platform.Stream())  # FlagScale Modify
 
         # Set flight recorder env vars if specified.
         # Priority: pre-existing environment variable > MLM argument.
@@ -375,17 +352,18 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
             'rank': args.rank,
             'timeout': timedelta(minutes=args.distributed_timeout_minutes),
         }
+        ########## FlagScale Begin ##########
         if args.enable_hetero and args.hetero_use_cpu_communication:
             # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
             #     init_process_group_kwargs['backend'] = 'gloo'
             init_process_group_kwargs['backend'] = "cpu:gloo"
-        # TODO: @aoyulong the init_process_group will be hanging if the device_id is set
-        # if packaging.version.Version(torch.__version__) >= packaging.version.Version("2.3.0"):
-        #     init_process_group_kwargs['device_id'] = device_id
-
+        ########## FlagScale End ##########
         if args.fake_process_group:
-            assert is_torch_min_version("2.3.0"), "Fake process group is only supported with PyTorch 2.3.0 and above."
+            assert is_torch_min_version(
+                "2.3.0"
+            ), "Fake process group is only supported with PyTorch 2.3.0 and above."
             from torch.testing._internal.distributed.fake_pg import FakeStore
+
             store = FakeStore()
             init_process_group_kwargs['backend'] = 'fake'
             init_process_group_kwargs['store'] = store
@@ -396,10 +374,12 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
     # Set the tensor model-parallel, pipeline model-parallel, and
     # data-parallel communicators.
     if device_count > 0:
+        ########## FlagScale Begin ##########
         # Set the parallel context.
         if args.enable_hetero:
             set_parallel_context(args)
             return
+        ########## FlagScale End ##########
 
         if mpu.model_parallel_is_initialized():
             print("model parallel is already initialized")
@@ -416,7 +396,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
                 expert_model_parallel_size=args.expert_model_parallel_size,
                 num_distributed_optimizer_instances=args.num_distributed_optimizer_instances,
                 expert_tensor_parallel_size=args.expert_tensor_parallel_size,
-                engram_embedding_parallel_size=args.engram_embedding_parallel_size,
+                engram_embedding_parallel_size=args.engram_embedding_parallel_size,  # FlagScale Modify
                 distributed_timeout_minutes=args.distributed_timeout_minutes,
                 nccl_communicator_config_path=args.nccl_communicator_config_path,
                 order='tp-cp-ep-dp-pp' if not args.use_tp_pp_dp_mapping else 'tp-cp-ep-pp-dp',
@@ -425,8 +405,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
                 create_gloo_process_groups=args.use_gloo_process_groups,
                 high_priority_stream_groups=args.high_priority_stream_groups,
                 sharp_enabled_group=args.sharp_enabled_group,
-                create_all_gather_group=args.create_all_gather_group,
-                create_dualpipev_parallel_size=args.use_dualpipev,
+                create_dualpipev_parallel_size=args.use_dualpipev,  # FlagScale Modify
             )
             print_rank_0(
                 f"> initialized tensor model parallel with size "
@@ -464,7 +443,7 @@ def _set_random_seed(
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
-        if cur_platform.device_count() > 0:
+        if cur_platform.device_count() > 0:  # FlagScale Modify
             tensor_parallel.model_parallel_cuda_manual_seed(
                 seed, te_rng_tracker, inference_rng_tracker, use_cudagraphable_rng
             )
@@ -502,11 +481,12 @@ def set_jit_fusion_options():
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
 
+    ########## FlagScale Begin ##########
     try:
         _warmup_jit_function()
     except Exception as e:
         print_rank_0(f"WARNING: JIT fusion warmup failed ({e}). Skipping fused kernel warmup.")
-
+    ########## FlagScale End ##########
 
 def _warmup_jit_function():
     """Compilie JIT functions before the main training steps"""
@@ -520,7 +500,7 @@ def _warmup_jit_function():
 
     # Warmup fused bias+gelu
     bias = torch.rand(
-        args.ffn_hidden_size // args.tensor_model_parallel_size, dtype=dtype, device=cur_platform.device_name()
+        args.ffn_hidden_size // args.tensor_model_parallel_size, dtype=dtype, device=cur_platform.device_name()  # FlagScale Modify
     )
     input = torch.rand(
         (
@@ -529,7 +509,7 @@ def _warmup_jit_function():
             args.ffn_hidden_size // args.tensor_model_parallel_size,
         ),
         dtype=dtype,
-        device=cur_platform.device_name(),
+        device=cur_platform.device_name(),  # FlagScale Modify
     )
     # Warmup JIT fusions with the input grad_enable state of both forward
     # prop and recomputation
@@ -550,14 +530,14 @@ def _warmup_jit_function():
     input = torch.rand(
         (seq_length // args.context_parallel_size, args.micro_batch_size, args.hidden_size),
         dtype=dtype,
-        device=cur_platform.device_name(),
+        device=cur_platform.device_name(),  # FlagScale Modify
     )
     residual = torch.rand(
         (seq_length // args.context_parallel_size, args.micro_batch_size, args.hidden_size),
         dtype=dtype,
-        device=cur_platform.device_name(),
+        device=cur_platform.device_name(),  # FlagScale Modify
     )
-    bias = torch.rand((args.hidden_size), dtype=dtype, device=cur_platform.device_name()).expand_as(residual)
+    bias = torch.rand((args.hidden_size), dtype=dtype, device=cur_platform.device_name()).expand_as(residual)  # FlagScale Modify
     dropout_rate = 0.1
     # Warmup JIT fusions with the input grad_enable state of both forward
     # prop and recomputation
@@ -568,7 +548,7 @@ def _warmup_jit_function():
         for _ in range(5):
             output = bias_dropout_add_fused_train([input, bias], residual, dropout_rate)
     del bias, input, residual, output
-    cur_platform.empty_cache()
+    cur_platform.empty_cache()  # FlagScale Modify
 
 
 def setup_logging() -> None:

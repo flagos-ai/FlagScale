@@ -44,7 +44,8 @@ from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.transformer.spec_utils import import_module
 from megatron.core.utils import StragglerDetector
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
-from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.checkpointing import get_checkpoint_name  # for dataloder
 from megatron.training.utils import (
     get_batch_on_this_cp_rank,
@@ -55,11 +56,6 @@ from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
 # # For pytorch 2.6
 # torch.serialization.add_safe_globals([Namespace])
-
-
-import megatron.legacy.model  # isort: skip
-
-# NOTE: Loading `megatron.legacy.model` earlier fails due to circular import
 
 try:
     from megatron.post_training.arguments import add_modelopt_args
@@ -118,14 +114,24 @@ LAST_LARGE_IMG = False
 
 
 def model_provider(
-    pre_process=True, post_process=True, add_encoder=True, add_decoder=True
+    pre_process=True,
+    post_process=True,
+    add_encoder=True,
+    add_decoder=True,
+    vp_stage=None,
+    config=None,
+    pg_collection=None,
 ) -> Union[Qwen2_5VLModel]:
     args = get_args()
     build_tokenizer(args)
     print_rank_0("start building qwen2-vl model ...")
 
+    # The vision encoder lives only on the first pipeline stage.
+    add_encoder = add_encoder and pre_process
+
     # Config of vit, llm and projector
-    config = core_transformer_config_from_args(args)
+    if config is None:
+        config = core_transformer_config_from_args(args)
     use_te = args.transformer_impl == "transformer_engine"
     if not use_te:
         raise NotImplementedError("The Qwen2-VL model is only implemented with TransformerEngine!")
@@ -174,6 +180,8 @@ def model_provider(
         fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
         parallel_output=True,
         language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+        pg_collection=pg_collection,
+        vp_stage=vp_stage,
     )
 
     model.freeze(
@@ -874,13 +882,18 @@ def add_multimodal_extra_args(parser):
 if __name__ == "__main__":
     train_valid_test_dataloaders_provider.is_distributed = True
 
+    args = parse_and_validate_args(
+        extra_args_provider=add_multimodal_extra_args,
+        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
+    )
+    full_config = pretrain_cfg_container_from_args(args)
+
     pretrain(
+        full_config,
         train_valid_test_dataloaders_provider,
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
-        extra_args_provider=add_multimodal_extra_args,
         process_non_loss_data_func=write_online_eval_to_tensorboard,
         non_loss_data_func=run_online_eval,
     )
