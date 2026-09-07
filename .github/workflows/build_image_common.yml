@@ -257,7 +257,7 @@ jobs:
 
             test_roles=$(jq -c '.test_roles // []' <<< "$entry")
             if [ "$(jq -r 'type' <<< "$test_roles")" != array ] || \
-               ! jq -e 'all(.[]; . == "train" or . == "inference")' \
+               ! jq -e 'all(.[]; . == "train")' \
                <<< "$test_roles" >/dev/null; then
               echo "::error::Invalid test_roles: ${PLATFORM}/${task}"
               exit 1
@@ -267,9 +267,6 @@ jobs:
               required_roles=()
               if jq -e 'index("train") != null' <<< "$test_roles" >/dev/null; then
                 required_roles+=(train)
-              fi
-              if jq -e 'index("inference") != null' <<< "$test_roles" >/dev/null; then
-                required_roles+=(inference serve)
               fi
               reference_role="${required_roles[0]}"
               for role in "${required_roles[@]}"; do
@@ -653,13 +650,6 @@ jobs:
     with:
       platform: ${{ needs.configure.outputs.platform }}
       ci_train_image: ${{ needs.configure.outputs.train_image }}
-      ci_inference_image: ${{ needs.configure.outputs.inference_image }}
       train_pkg_mgr: ${{ needs.configure.outputs.train_pkg_mgr }}
       train_env_name: ${{ needs.configure.outputs.train_env_name }}
       train_env_path: ${{ needs.configure.outputs.train_env_path }}
-      inference_pkg_mgr: ${{ needs.configure.outputs.inference_pkg_mgr }}
-      inference_env_name: ${{ needs.configure.outputs.inference_env_name }}
-      inference_env_path: ${{ needs.configure.outputs.inference_env_path }}
-      serve_pkg_mgr: ${{ needs.configure.outputs.serve_pkg_mgr }}
-      serve_env_name: ${{ needs.configure.outputs.serve_env_name }}
-      serve_env_path: ${{ needs.configure.outputs.serve_env_path }}
