@@ -1,0 +1,28 @@
+# OpenVLA full verifier training, following the official FSDP recipe.
+resources:
+  nproc_per_node: ${oc.env:KERV_TRAIN_GPUS,8}
+  cuda_visible_devices: ${oc.env:CUDA_VISIBLE_DEVICES,'0,1,2,3,4,5,6,7'}
+
+system: {}
+
+kerv:
+  stage: verifier_full
+  source_root: ${oc.env:OPENVLA_SOURCE_ROOT,./openvla}
+  entrypoint: vla-scripts/train.py
+  launcher: python
+  work_dir: .
+  dependencies:
+    - torch
+    - transformers
+    - draccus
+  arguments:
+    pretrained_checkpoint: ${oc.env:KERV_PRISMATIC_CHECKPOINT,./checkpoints/openvla-7b-prismatic/latest-checkpoint.pt}
+    hf_token: ${oc.env:KERV_HF_TOKEN_ENV,HF_TOKEN}
+    vla.type: ${oc.env:KERV_VLA_CONFIG,prism-dinosiglip-224px+mx-bridge}
+    data_root_dir: ${oc.env:KERV_DATA_ROOT,./datasets/open-x-embodiment}
+    run_root_dir: ${experiment.exp_dir}
+    run_id: kerv-openvla-full
+    image_aug: true
+    save_interval: 2500
+    is_resume: false
+    wandb_project: KERV-Verifier
