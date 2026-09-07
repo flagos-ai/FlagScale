@@ -235,7 +235,9 @@ jobs:
           fi
 
           # 3. Validate each subcommand --help
-          SUBCOMMANDS="train serve inference rl compress install test pull run"
+          # TODO: Re-enable serve and inference after vLLM-plugin-FL integration is restored
+          SUBCOMMANDS="train rl compress install test pull run"
+          # SUBCOMMANDS_DISABLED="serve inference"
           for cmd in $SUBCOMMANDS; do
             echo "=========================================="
             echo "Test: flagscale $cmd --help"
