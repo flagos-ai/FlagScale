@@ -27,24 +27,8 @@ source "$SCRIPT_DIR/utils.sh"
 # generating the launch script, so this propagates to the torchrun workers.
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
-# The CI image may expose a baked-in Megatron source tree through PYTHONPATH.
-# Remove it so train and benchmark jobs resolve the package installed for this
-# checkout instead of importing an older image copy.
-if [[ -n "${FLAGSCALE_DEPS:-}" && "$PYTHONPATH" == *"$FLAGSCALE_DEPS/Megatron-LM-FL"* ]]; then
-    MEGATRON_PATH_OLD="$FLAGSCALE_DEPS/Megatron-LM-FL"
-    IFS=: read -r -a PYTHONPATH_ENTRIES <<< "$PYTHONPATH"
-    PYTHONPATH_CLEANED=()
-    for path_entry in "${PYTHONPATH_ENTRIES[@]}"; do
-        [[ "$path_entry" == "$MEGATRON_PATH_OLD" ]] || \
-            PYTHONPATH_CLEANED+=("$path_entry")
-    done
-    if [ "${#PYTHONPATH_CLEANED[@]}" -gt 0 ]; then
-        export PYTHONPATH="$(IFS=:; printf '%s' "${PYTHONPATH_CLEANED[*]}")"
-    else
-        unset PYTHONPATH
-    fi
-    log_info "Removed the image Megatron path so the installed package is used"
-fi
+# Preserve dependency paths selected by the image or environment setup.
+# Source-only Megatron installations may not exist in site-packages.
 
 # trust_remote_code tokenizers are copied into this cache. Train and benchmark
 # jobs can start together on the same runner, so a shared modules directory is
