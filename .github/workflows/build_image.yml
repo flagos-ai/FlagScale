@@ -262,7 +262,7 @@ jobs:
               fi
               if ! jq -e \
                 '(.test_roles | type) == "array" and
-                 all(.test_roles[]; . == "train" or . == "inference")' \
+                 all(.test_roles[]; . == "train")' \
                 <<< "$entry" >/dev/null; then
                 echo "::error::Invalid test_roles: ${platform}/${task}"
                 exit 1
