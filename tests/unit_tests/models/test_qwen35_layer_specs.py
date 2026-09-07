@@ -234,7 +234,7 @@ class TestQwen35LanguageModelSpecPipelineSlicing(unittest.TestCase):
         # patch=False and no explicit pp_rank (MTP uses vanilla attention and
         # the global-parallel-state fallback, unchanged by this fix).
         config = make_language_config(num_layers=24, pp_size=2)
-        args = SimpleNamespace(mtp_num_layers=1, use_te=True)
+        args = SimpleNamespace(mtp_num_layers=1, transformer_impl="transformer_engine")
         with (
             mock.patch.object(
                 layer_specs_mod, "get_qwen35_language_model_spec", return_value="unpatched-spec"
