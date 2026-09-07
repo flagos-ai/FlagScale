@@ -49,7 +49,7 @@ def get_platform_config(platform, device=None):
     """
     if not platform:
         raise ValueError(
-            "Platform must be specified. Available platforms: cuda, ascend, metax, musa. See template.yaml for creating new platforms."
+            "Platform must be specified. Available platforms: cuda, ascend, metax, musa, kunlunxin. See template.yaml for creating new platforms."
         )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,6 +66,8 @@ def get_platform_config(platform, device=None):
         "c550": "metax.yaml",
         "musa": "musa.yaml",
         "s5000": "musa.yaml",
+        "kunlunxin": "kunlunxin.yaml",
+        "p800": "kunlunxin.yaml",
     }
 
     yaml_file = platform_file_map.get(platform, f"{platform}.yaml")
@@ -129,7 +131,7 @@ def get_device_types(platform):
     """
     if not platform:
         raise ValueError(
-            "Platform must be specified. Available platforms: cuda, ascend, metax, musa"
+            "Platform must be specified. Available platforms: cuda, ascend, metax, musa, kunlunxin"
         )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -138,6 +140,7 @@ def get_device_types(platform):
         "ascend": "ascend.yaml",
         "metax": "metax.yaml",
         "musa": "musa.yaml",
+        "kunlunxin": "kunlunxin.yaml",
     }
 
     yaml_file = platform_file_map.get(platform, f"{platform}.yaml")

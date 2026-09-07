@@ -178,6 +178,7 @@ jobs:
           # Always install the checked-out revision so the functional test does
           # not accidentally exercise a stale FlagScale package from the image.
           python -m pip install . --no-build-isolation --root-user-action=ignore
+          python -m pip install pytest --root-user-action=ignore
           command -v flagscale
           flagscale --version
 

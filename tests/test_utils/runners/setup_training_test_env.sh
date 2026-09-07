@@ -78,7 +78,7 @@ activate_python_env() {
 }
 
 install_common_python_deps() {
-    python -m pip install coverage pytest-mock diffusers==0.36.0 transformers==4.57.6 --quiet --root-user-action=ignore
+    python -m pip install coverage pytest pytest-mock diffusers==0.36.0 transformers==4.57.6 --quiet --root-user-action=ignore
 }
 
 install_flagscale_cli() {
@@ -127,6 +127,21 @@ setup_cuda_training_env() {
 }
 
 setup_metax_training_env() {
+    local required_files=(
+        /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo.bin
+        /home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo.idx
+        /home/gitlab-runner/tokenizers/qwentokenizer/qwen.tiktoken
+        /home/gitlab-runner/tokenizers/qwentokenizer/tokenizer_config.json
+        /home/gitlab-runner/tokenizers/qwentokenizer/tokenization_qwen.py
+    )
+    local required_file
+    for required_file in "${required_files[@]}"; do
+        if [ ! -r "$required_file" ]; then
+            echo "Required MetaX training asset is missing or unreadable: $required_file" >&2
+            return 1
+        fi
+    done
+
     if python -c '
 import transformer_engine
 from megatron.core.models.gpt import GPTModel
@@ -191,6 +206,33 @@ print(f"MUSA training environment ready on {torch.musa.device_count()} devices")
 '
 }
 
+setup_kunlunxin_training_env() {
+    if ! python -m pytest --version >/dev/null 2>&1; then
+        install_common_python_deps
+    fi
+
+    if python -c '
+import flagcx
+import megatron.core
+import torch
+import transformer_engine
+import transformer_engine_torch
+from megatron.core.jit import disable_jit_fuser
+from megatron.core.models.gpt.gpt_layer_specs import get_gpt_decoder_layer_specs
+
+assert torch.cuda.is_available()
+assert torch.cuda.device_count() == 8
+assert callable(disable_jit_fuser)
+assert callable(get_gpt_decoder_layer_specs)
+' >/dev/null 2>&1; then
+        echo "Kunlunxin training stack is preinstalled; skipping platform dependency installation"
+        return 0
+    fi
+
+    echo "Kunlunxin training stack is missing from the configured CI image" >&2
+    return 1
+}
+
 copy_training_data() {
     mkdir -p /opt/data
     cp -r /home/gitlab-runner/data/Megatron-LM/* /opt/data/ 2>/dev/null || true
@@ -225,6 +267,7 @@ if [ "$INSTALL_PLATFORM_DEPS" = true ]; then
         ascend) setup_ascend_training_env ;;
         metax) setup_metax_training_env ;;
         musa) setup_musa_training_env ;;
+        kunlunxin) setup_kunlunxin_training_env ;;
         *) echo "No platform-specific training setup for $PLATFORM" ;;
     esac
 else

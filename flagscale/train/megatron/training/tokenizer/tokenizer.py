@@ -8,6 +8,7 @@ megatron.core.tokenizers.utils.build_tokenizer. This module provides:
 2. Each registered tokenizer owns its special token definitions internally
 """
 
+import os
 from collections import OrderedDict
 from collections.abc import Mapping
 
@@ -19,7 +20,6 @@ from megatron.core.tokenizers.utils.build_tokenizer import (
 
 from .gpt2_tokenization import AquilaTokenizer
 from .rwkv_tokenization import RWKVTokenizer
-
 
 # ---------------------------------------------------------------------------
 # Tokenizer factory registration system
@@ -133,20 +133,20 @@ class _HFTokenizerFS(_FlagScaleTokenizerBase):
     def __init__(self, tokenizer_path, use_fast=True):
         super().__init__(path=tokenizer_path)
         from transformers import AutoTokenizer
-        import os
 
-        # Normalize path to absolute if it exists locally
-        # HuggingFace validates repo IDs even with local_files_only=True,
-        # so we need to ensure local paths are properly formatted
-        if os.path.isdir(tokenizer_path):
-            # It's a local directory - use absolute path
+        is_local_path = os.path.isabs(tokenizer_path) or os.path.isdir(tokenizer_path)
+        if is_local_path:
             tokenizer_path = os.path.abspath(tokenizer_path)
+            if not os.path.isdir(tokenizer_path):
+                raise FileNotFoundError(
+                    f"Local tokenizer directory does not exist or is not mounted: {tokenizer_path}"
+                )
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_path,
             trust_remote_code=True,
             use_fast=use_fast,
-            local_files_only=os.path.isdir(tokenizer_path),
+            local_files_only=is_local_path,
         )
         self.eod_id = self.tokenizer.eos_token_id
         self.cls_id = self.tokenizer.bos_token_id

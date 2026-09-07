@@ -29,8 +29,8 @@ runner_labels: ["flagscale-metax-c550-gpu2-8c-256g"]
 
 # Container volumes (hardware-specific paths)
 container_volumes:
-  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data
-  - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data:ro
+  - /mnt/airs-business/cicd/baai_tokenizers/qwentokenizer:/home/gitlab-runner/tokenizers/qwentokenizer:ro
 
 # Image build contract consumed by the generic build workflow.
 image_build:

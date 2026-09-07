@@ -12,22 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Moore Threads S5000 platform configuration.
+# Kunlunxin P800 Platform Configuration
 
 device_types:
-  - s5000
+  - p800
 
-s5000:
-  name: "s5000"
+p800:
+  name: "p800"
   tests:
     functional:
       train:
-        qwen3: ["0_6b_musa"]
-      hetero_train: {}
-      benchmark: {}
-      rl: {}
+        qwen3: ["0_6b_kunlunxin"]
     unit:
-      nproc_per_node: 2
+      nproc_per_node: 8
       include: "*"
       exclude:
         - tests/unit_tests/runner/test_parse_hostfile.py
@@ -42,3 +39,4 @@ s5000:
         - tests/unit_tests/test_init.py::test_get_version_fallback_to_pyproject
         - tests/unit_tests/test_init.py::test_get_version_fallback_to_default
         - tests/unit_tests/test_parallel_context.py::test_parallel_config
+        - tests/unit_tests/models/vla

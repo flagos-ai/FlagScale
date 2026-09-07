@@ -47,6 +47,7 @@ on:
           - hygon
           - metax
           - musa
+          - kunlunxin
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
@@ -88,6 +89,13 @@ jobs:
     with:
       platform: musa
 
+  kunlunxin_tests:
+    name: Kunlunxin P800 tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'kunlunxin'
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: kunlunxin
+
   all_tests:
     name: all_tests
     needs:
@@ -96,6 +104,7 @@ jobs:
       - hygon_tests
       - metax_tests
       - musa_tests
+      - kunlunxin_tests
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -130,6 +139,12 @@ jobs:
           if [ "${{ needs.musa_tests.result }}" != "success" ] && \
              [ "${{ needs.musa_tests.result }}" != "skipped" ]; then
             echo "MThreads MUSA tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.kunlunxin_tests.result }}" != "success" ] && \
+             [ "${{ needs.kunlunxin_tests.result }}" != "skipped" ]; then
+            echo "Kunlunxin P800 tests failed"
             failed=true
           fi
 

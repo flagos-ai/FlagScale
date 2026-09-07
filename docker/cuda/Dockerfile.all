@@ -17,7 +17,7 @@
 # NOTE: This Dockerfile is experimental and requires further testing.
 #       Please report issues at https://github.com/FlagOpen/FlagScale/issues
 #
-# Comprehensive image with all task dependencies (train, inference, rl, hetero_train)
+# Comprehensive image with all task dependencies in one Conda environment.
 #
 # Multi-stage build producing:
 #   - dev: Development image with all tools and dependencies
@@ -40,8 +40,8 @@ ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.7.2
 
-# Package manager: pip, uv, or conda (default: uv)
-ARG PKG_MGR=uv
+# The CUDA all image is only valid when every task shares one Conda environment.
+ARG PKG_MGR=conda
 ARG FLAGSCALE_TE_REF=main
 ARG FLAGSCALE_MEGATRON_REF=main
 
@@ -110,8 +110,8 @@ RUN chmod +x /tmp/tools/install/*.sh && \
 
 # Runtime environment variables (mirrors env.sh for non-interactive shell compatibility)
 ENV FLAGSCALE_HOME=${FLAGSCALE_HOME}
+ENV FLAGSCALE_ENV_NAME=flagscale-all
 ENV UV_PROJECT_ENVIRONMENT=${FLAGSCALE_HOME}/venv
-ENV VIRTUAL_ENV=${FLAGSCALE_HOME}/venv
 ENV FLAGSCALE_CONDA=${FLAGSCALE_HOME}/miniconda3
 ENV FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps
 # UV configuration
@@ -121,15 +121,15 @@ ENV UV_LINK_MODE=copy
 # System paths
 ENV MPI_HOME=/usr/local/mpi
 ENV CUDA_HOME=/usr/local/cuda
-# Keep the shared Conda environment first when Conda is selected, while still
-# allowing uv and pip builds to use their original environment resolution.
-ENV PATH="${FLAGSCALE_HOME}/miniconda3/envs/flagscale-all/bin:${FLAGSCALE_HOME}/venv/bin:${FLAGSCALE_HOME}/miniconda3/bin:/root/.local/bin:/usr/local/mpi/bin:${CUDA_HOME}/bin:$PATH"
+# Put the single all-in-one environment first so the image is usable without
+# a task-specific activation wrapper.
+ENV PATH="${FLAGSCALE_HOME}/miniconda3/envs/flagscale-all/bin:${FLAGSCALE_HOME}/miniconda3/bin:/root/.local/bin:/usr/local/mpi/bin:${CUDA_HOME}/bin:$PATH"
 ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:/usr/local/lib:/usr/local/mpi/lib:/usr/local/mpi/lib64:$LD_LIBRARY_PATH"
 
 WORKDIR /workspace
 
 # =============================================================================
-# ENV STAGE - Ensure uv/conda/pip environments
+# ENV STAGE - Ensure the single Conda environment
 # =============================================================================
 FROM base AS env
 
@@ -138,23 +138,16 @@ ARG FLAGSCALE_HOME=/opt/flagscale
 ARG PYTHON_VERSION=3.12
 
 RUN . /etc/profile.d/flagscale-env.sh && \
-    if [ "$PKG_MGR" = "uv" ]; then \
-        if [ ! -f "${FLAGSCALE_HOME}/venv/bin/python3" ]; then \
-            echo "[ENV] Creating uv venv at ${FLAGSCALE_HOME}/venv (python=${PYTHON_VERSION})"; \
-            "$HOME/.local/bin/uv" venv "${FLAGSCALE_HOME}/venv" --python "${PYTHON_VERSION}"; \
-        else \
-            echo "[ENV] Found uv venv at ${FLAGSCALE_HOME}/venv"; \
-        fi; \
-    elif [ "$PKG_MGR" = "conda" ]; then \
-        CONDA_ENV_NAME=flagscale-all; \
-        if [ -d "${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}" ]; then \
-            echo "[ENV] Found conda env ${CONDA_ENV_NAME} at ${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}"; \
-        else \
-            echo "[ENV] Creating conda env ${CONDA_ENV_NAME} (python=${PYTHON_VERSION})"; \
-            env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" create -y -n "${CONDA_ENV_NAME}" "python=${PYTHON_VERSION}"; \
-        fi; \
+    if [ "$PKG_MGR" != "conda" ]; then \
+        echo "CUDA all requires PKG_MGR=conda" >&2; \
+        exit 1; \
+    fi && \
+    CONDA_ENV_NAME=flagscale-all && \
+    if [ -d "${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}" ]; then \
+        echo "[ENV] Found conda env ${CONDA_ENV_NAME} at ${FLAGSCALE_CONDA}/envs/${CONDA_ENV_NAME}"; \
     else \
-        echo "[ENV] Using system pip (no dedicated env to create)"; \
+        echo "[ENV] Creating conda env ${CONDA_ENV_NAME} (python=${PYTHON_VERSION})"; \
+        env CONDA_NO_PLUGINS=true ANACONDA_ACCEPT_TOS=yes "${FLAGSCALE_CONDA}/bin/conda" create -y -n "${CONDA_ENV_NAME}" "python=${PYTHON_VERSION}"; \
     fi
 
 # =============================================================================
@@ -193,9 +186,9 @@ ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
 COPY tools/install /workspace/tools/install
 COPY requirements /workspace/requirements
 
-# Install all task dependencies based on package manager
+# Install all task dependencies in the shared Conda environment
 # Note: Source env.sh to ensure environment is available in non-interactive RUN
-# Cache mounts: uv cache, pip cache, conda pkgs cache
+# Cache mounts: pip cache and conda package cache
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=${FLAGSCALE_HOME}/miniconda3/pkgs \
@@ -204,18 +197,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chmod +x /workspace/tools/install/utils/*.sh && \
     chmod +x /workspace/tools/install/cuda/*.sh && \
     cd /workspace && \
-    if [ "$PKG_MGR" = "uv" ]; then \
-        UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
-        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
-        ./tools/install/install.sh --platform cuda --task all --pkg-mgr uv --no-system; \
-    elif [ "$PKG_MGR" = "conda" ]; then \
-        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
-        ./tools/install/install.sh --platform cuda --task all --pkg-mgr conda --env-name flagscale-all --no-system; \
-    else \
-        PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
-        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
-        ./tools/install/install.sh --platform cuda --task all --pkg-mgr pip --no-system; \
+    if [ "$PKG_MGR" != "conda" ]; then \
+        echo "CUDA all requires PKG_MGR=conda" >&2; \
+        exit 1; \
     fi && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh \
+            --platform cuda --task all --pkg-mgr conda \
+            --env-name flagscale-all --no-system && \
     rm -rf ${FLAGSCALE_HOME}/deps ${FLAGSCALE_HOME}/downloads /workspace
 
 # =============================================================================
@@ -273,18 +262,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     chmod +x /workspace/tools/install/utils/*.sh && \
     chmod +x /workspace/tools/install/cuda/*.sh && \
     cd /workspace && \
-    if [ "$PKG_MGR" = "uv" ]; then \
-        UV_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
-        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
-        ./tools/install/install.sh --platform cuda --task all --pkg-mgr uv --no-system --no-dev; \
-    elif [ "$PKG_MGR" = "conda" ]; then \
-        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
-        ./tools/install/install.sh --platform cuda --task all --pkg-mgr conda --env-name flagscale-all --no-system --no-dev; \
-    else \
-        PIP_EXTRA_INDEX_URL=${PYTORCH_INDEX} \
-        FLAGSCALE_HOME=${FLAGSCALE_HOME} \
-        ./tools/install/install.sh --platform cuda --task all --pkg-mgr pip --no-system --no-dev; \
+    if [ "$PKG_MGR" != "conda" ]; then \
+        echo "CUDA all requires PKG_MGR=conda" >&2; \
+        exit 1; \
     fi && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+        ./tools/install/install.sh \
+            --platform cuda --task all --pkg-mgr conda \
+            --env-name flagscale-all --no-system --no-dev && \
     rm -rf ${FLAGSCALE_HOME}/deps ${FLAGSCALE_HOME}/downloads /workspace
 
 CMD ["/bin/bash"]

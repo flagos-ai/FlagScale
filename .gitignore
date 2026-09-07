@@ -24,3 +24,7 @@ template_funcs.py
 
 # data files
 # assets/
+
+# Claude Code configuration (local only, do not commit)
+CLAUDE.md
+.claude/
