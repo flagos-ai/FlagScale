@@ -130,7 +130,12 @@ def validate_mimo_config(
         f"leave it unset (Megatron then defaults it to TP) or set it equal."
     )
 
-    vision_micro_batch_size = getattr(args, "vision_micro_batch_size", args.micro_batch_size)
+    # --vision-micro-batch-size defaults to None in the training entries
+    # (meaning "same as the language micro batch size"); coalesce before use —
+    # getattr's default never applies because the attribute exists.
+    vision_micro_batch_size = (
+        getattr(args, "vision_micro_batch_size", None) or args.micro_batch_size
+    )
     vit_batch_factor = compute_vit_batch_factor(
         vision_data_parallel_size=vision_parallelism.data_parallel_size,
         vision_micro_batch_size=vision_micro_batch_size,
