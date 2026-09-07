@@ -31,10 +31,9 @@ from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
 from megatron.core.rerun_state_machine import get_rerun_state_machine
-from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
-from megatron.pipeline_parallel.utils import is_pp_first_stage, is_pp_last_stage
+from megatron.core.utils import StragglerDetector, get_attr_wrapped_model, unwrap_model
+from megatron.core.pipeline_parallel.utils import is_pp_first_stage, is_pp_last_stage
 
-from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
