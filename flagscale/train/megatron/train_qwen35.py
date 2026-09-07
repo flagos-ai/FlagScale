@@ -39,6 +39,15 @@ from megatron.training.argument_utils import pretrain_cfg_container_from_args
 from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
+try:
+    from megatron.post_training.arguments import add_modelopt_args
+    from megatron.post_training.loss_func import loss_func as loss_func_modelopt
+    from megatron.post_training.model_provider import model_provider as model_provider_modelopt
+
+    has_nvidia_modelopt = True
+except ImportError:
+    has_nvidia_modelopt = False
+
 from megatron.training.training import pretrain
 stimer = StragglerDetector()
 
