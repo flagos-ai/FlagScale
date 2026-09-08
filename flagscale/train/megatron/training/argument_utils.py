@@ -130,10 +130,46 @@ class ArgumentGroupFactory:
 
         if origin in [types.UnionType, typing.Union]:
             # Handle Optional and Union
-            if type_tuple[1] == type(None): # Optional type. First element is value inside Optional[]
-                return self._extract_type(type_tuple[0])
-            else:
-                raise TypeInferenceError(f"Unions not supported by argparse: {config_type}")
+            non_none_types = [t for t in type_tuple if t != type(None)]
+
+            # Optional type (Union with None)
+            if len(non_none_types) == 1:
+                return self._extract_type(non_none_types[0])
+
+            # Complex Union: try to find a common base type
+            # Strategy: prioritize str as the argparse type for complex unions,
+            # since str can represent most types via string conversion
+            if len(non_none_types) > 1:
+                # Check if all non-None types are the same primitive type
+                base_types = set()
+                for t in non_none_types:
+                    # Unwrap List types to get their element type
+                    t_origin = typing.get_origin(t)
+                    if t_origin is list:
+                        t_args = typing.get_args(t)
+                        if t_args:
+                            base_types.add(t_args[0])
+                    else:
+                        base_types.add(t)
+
+                # If all types share a common base, use it
+                if len(base_types) == 1:
+                    common_type = base_types.pop()
+                    # Check if it's a primitive or enum type we can handle
+                    if common_type in [str, int, float, bool] or (isinstance(common_type, type) and issubclass(common_type, enum.Enum)):
+                        result = self._extract_type(common_type)
+                        # For Union[T, List[T]], allow multiple values
+                        result["nargs"] = "*"
+                        return result
+
+                # Fallback: use str type with warning
+                warnings.warn(
+                    f"Complex Union type detected: {config_type}. "
+                    f"Falling back to 'str' type for argparse. "
+                    f"You may need to provide 'argparse_meta' in field metadata for precise type handling.",
+                    UserWarning
+                )
+                return {"type": str, "nargs": "*"}
 
         elif origin is list:
             if len(type_tuple) == 1:
