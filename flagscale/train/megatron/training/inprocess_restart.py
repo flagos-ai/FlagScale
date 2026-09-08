@@ -1,15 +1,10 @@
 # Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
 
+import importlib
 import os
 import socket
-from datetime import timedelta
-
-try:
-    import nvidia_resiliency_ext.inprocess as inprocess
-except ImportError:
-    inprocess = None
-
 import warnings
+from datetime import timedelta
 
 import torch
 
@@ -21,8 +16,17 @@ from megatron.training.async_utils import (
 
 from . import arguments
 
+
+def _get_inprocess_module():
+    try:
+        return importlib.import_module("nvidia_resiliency_ext.inprocess")
+    except ImportError:
+        return None
+
+########## FlagScale Begin ##########
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
+########## FlagScale End ##########
 
 def destroy_state():
     from . import training
@@ -30,6 +34,7 @@ def destroy_state():
     rerun_state_machine.destroy_rerun_state_machine()
 
 def inprocess_restart(train, args):
+    inprocess = _get_inprocess_module()
     if inprocess is None:
         warnings.warn('In-process restart is not available')
         return train
@@ -54,7 +59,7 @@ def inprocess_restart(train, args):
         )
     ]
     if args.inprocess_granularity == 'node':
-        device_count = cur_platform.device_count()
+        device_count = cur_platform.device_count()  # FlagScale Modify
 
         layers.append(
             inprocess.rank_assignment.Layer(
@@ -72,7 +77,7 @@ def inprocess_restart(train, args):
     if args.inprocess_empty_cuda_cache:
         finalize.append(
             inprocess.finalize.ThreadedFinalize(
-                timeout=timedelta(seconds=10), fn=cur_platform.empty_cache
+                timeout=timedelta(seconds=10), fn=cur_platform.empty_cache  # FlagScale Modify
             )
         )
 
@@ -160,4 +165,4 @@ def maybe_force_nccl_backend_init(device_id):
     if args.inprocess_restart:
         tensor = torch.ones(128, device=device_id)
         torch.distributed.all_reduce(tensor)
-        cur_platform.synchronize()
+        cur_platform.synchronize()  # FlagScale Modify

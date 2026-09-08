@@ -1,0 +1,135 @@
+# FlagScale Training Dockerfile for Kunlunxin Platform
+
+ARG BASE_IMAGE=torch29_xte2.12:v4
+ARG PKG_MGR=conda
+ARG FLAGSCALE_HOME=/opt/flagscale
+ARG FLAGSCALE_CONDA=/root/miniconda
+ARG FLAGSCALE_MEGATRON_REPO=https://github.com/flagos-ai/Megatron-LM-FL.git
+ARG FLAGSCALE_MEGATRON_REF=175ae90ec92a9e6fea2d74ccd24d6a1835d3ae82
+
+FROM ${BASE_IMAGE} AS base
+
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+ARG FLAGSCALE_MEGATRON_REPO
+ARG FLAGSCALE_MEGATRON_REF
+
+LABEL io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF}
+
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG PIP_DEFAULT_TIMEOUT
+ARG UV_INDEX_URL=${PIP_INDEX_URL}
+ARG UV_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME}
+ENV FLAGSCALE_CONDA=${FLAGSCALE_CONDA}
+ENV FLAGSCALE_ENV_NAME=python310_torch29_cuda
+ENV UV_PROJECT_ENVIRONMENT=${FLAGSCALE_HOME}/venv
+ENV VIRTUAL_ENV=${FLAGSCALE_HOME}/venv
+ENV FLAGSCALE_DEPS=${FLAGSCALE_HOME}/deps
+ENV FLAGSCALE_DOWNLOADS=${FLAGSCALE_HOME}/downloads
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY=unsafe-best-match
+ENV UV_LINK_MODE=copy
+ENV TE_FL_SKIP_CUDA=1
+ENV MPI_HOME=/usr/local/mpi
+ENV KLX_HOME=/opt/xccl_Linux_x86_64
+ENV FLAGSCALE_MEGATRON_PATH=${FLAGSCALE_DEPS}/Megatron-LM-FL
+ENV FLAGSCALE_MEGATRON_REPO=${FLAGSCALE_MEGATRON_REPO}
+ENV FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF}
+ENV PYTHONPATH="${FLAGSCALE_DEPS}/Megatron-LM-FL:$PYTHONPATH"
+ENV PATH="${FLAGSCALE_CONDA}/envs/python310_torch29_cuda/bin:${FLAGSCALE_HOME}/venv/bin:${FLAGSCALE_CONDA}/bin:/root/.local/bin:/usr/local/mpi/bin:${KLX_HOME}/bin:$PATH"
+ENV LD_LIBRARY_PATH="${KLX_HOME}/so:/usr/local/mpi/lib64:/usr/local/mpi/lib:/usr/local/lib:$LD_LIBRARY_PATH"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential ca-certificates curl git tar && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY tools/install/kunlunxin/env.sh /etc/profile.d/flagscale-env.sh
+
+WORKDIR /workspace
+
+FROM base AS deps
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG PIP_DEFAULT_TIMEOUT
+ARG UV_INDEX_URL
+ARG UV_EXTRA_INDEX_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT}
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh && \
+    chmod +x /workspace/tools/install/utils/*.sh && \
+    chmod +x /workspace/tools/install/kunlunxin/*.sh && \
+    cd /workspace && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_CONDA=${FLAGSCALE_CONDA} \
+    ./tools/install/install.sh --platform kunlunxin --task train --pkg-mgr ${PKG_MGR} --env-name python310_torch29_cuda --no-system --no-dev --no-base && \
+    rm -rf /workspace
+
+FROM deps AS dev
+
+CMD ["/bin/bash"]
+
+FROM base AS release
+
+ARG PKG_MGR
+ARG FLAGSCALE_HOME
+ARG FLAGSCALE_CONDA
+
+ARG PIP_INDEX_URL
+ARG PIP_EXTRA_INDEX_URL
+ARG PIP_DEFAULT_TIMEOUT
+ARG UV_INDEX_URL
+ARG UV_EXTRA_INDEX_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy=${HTTP_PROXY}
+ARG https_proxy=${HTTPS_PROXY}
+ARG no_proxy=${NO_PROXY}
+
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT}
+ENV UV_INDEX_URL=${UV_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${UV_EXTRA_INDEX_URL}
+
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+
+RUN . /etc/profile.d/flagscale-env.sh && \
+    chmod +x /workspace/tools/install/*.sh && \
+    chmod +x /workspace/tools/install/utils/*.sh && \
+    chmod +x /workspace/tools/install/kunlunxin/*.sh && \
+    cd /workspace && \
+    FLAGSCALE_HOME=${FLAGSCALE_HOME} FLAGSCALE_CONDA=${FLAGSCALE_CONDA} \
+    ./tools/install/install.sh --platform kunlunxin --task train --pkg-mgr ${PKG_MGR} --env-name python310_torch29_cuda --no-system --no-dev --no-base && \
+    rm -rf /workspace
+
+CMD ["/bin/bash"]

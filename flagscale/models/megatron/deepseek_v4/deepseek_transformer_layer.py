@@ -41,21 +41,22 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
                 "DeepSeekTransformerLayer now requires config.enable_hyper_connections=True."
             )
         super().__init__(config=config, submodules=submodules, *args, **kwargs)
-        if self.config.use_engram:
-            # If not use_engram, the submodules.engram is None
+        self.engram_layer_id = self.layer_number - 1
+        self.is_engram_layer = (
+            self.config.use_engram
+            and self.config.engram_layer_ids is not None
+            and self.engram_layer_id in self.config.engram_layer_ids
+        )
+        if self.is_engram_layer:
             self.engram = build_module(
                 submodules.engram,
                 engram_cfg=self.config,
-                layer_id=self.layer_number - 1,
+                layer_id=self.engram_layer_id,
             )
         else:
             self.engram = None
         self._deepseek_engram_hash_input_ids = None
         self._mhc_recompute_manager = None
-        if self.config.engram_layer_ids is not None and self.layer_number - 1 in self.config.engram_layer_ids:
-            self.is_engram_layer = True
-        else:
-            self.is_engram_layer = False
 
     def _get_submodules_under_cudagraphs(self):
         """Include the DeepSeek-specific submodules in cudagraph pre-forward hooks."""
@@ -105,9 +106,12 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
         inference_params: Optional[Any] = None,
     ):
         """Apply DeepSeek engram before the parent attention path."""
-        if self.engram is not None:
+        if self.is_engram_layer:
             nvtx_range_push(suffix="engram")
-            hidden_states = self.engram(hidden_states, self._deepseek_engram_hash_input_ids)
+            hidden_states = (
+                self.engram(hidden_states, self._deepseek_engram_hash_input_ids)
+                + hidden_states
+            )
             nvtx_range_pop(suffix="engram")
 
         return super()._forward_attention(
@@ -130,7 +134,12 @@ class DeepSeekTransformerLayer(HyperConnectionTransformerLayer):
         )
 
     def pre_compute_embedding(self, engram_hash_input_ids):
-        if isinstance(self.engram, IdentityOp) or (self.layer_number not in self.config.engram_layer_ids):
+        if not self.is_engram_layer or isinstance(self.engram, IdentityOp):
             return
-        hash_input_ids = engram_hash_input_ids[self.layer_number - 1]
+        hash_input_ids = engram_hash_input_ids[self.engram_layer_id]
         self.engram.pre_compute_embedding(hash_input_ids)
+
+    def sharded_state_dict(
+        self, prefix: str = "", sharded_offsets: tuple = (), metadata: dict | None = None
+    ):
+        return super().sharded_state_dict(prefix=prefix, sharded_offsets=sharded_offsets, metadata=metadata)

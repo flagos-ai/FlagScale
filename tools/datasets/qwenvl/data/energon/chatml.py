@@ -75,10 +75,11 @@ class ChatMLWebdataset(DefaultDecoderWebdatasetFactory[ChatMLSample]):
     ):
         super().__init__(
             path,
-            auto_decode=auto_decode,
+            # Only path lists are decoded here; do not construct the unused AV decoder.
+            auto_decode=False,
             image_decode=image_decode,
             ignore_decoder_errors=ignore_decoder_errors,
-            av_decode=av_decode,
+            # ChatML decodes image/video paths below; Energon 6 has no av_decode option.
             video_decode_audio=video_decode_audio,
             **kwargs,
         )

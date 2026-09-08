@@ -315,7 +315,8 @@ jobs:
       - checkout_and_config
       - cli_validation
       - unit_tests
-    if: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
+    # TODO: Re-enable after vLLM-plugin-FL integration is restored
+    if: false  # Temporarily disabled - was: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_inference.yml
     with:
       platform: ${{ inputs.platform }}
@@ -334,7 +335,8 @@ jobs:
       - checkout_and_config
       - cli_validation
       - unit_tests
-    if: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
+    # TODO: Re-enable after vLLM-plugin-FL integration is restored
+    if: false  # Temporarily disabled - was: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_serve.yml
     with:
       platform: ${{ inputs.platform }}

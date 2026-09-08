@@ -1,0 +1,36 @@
+# Full 4B model, MTP enabled. Validated on eight H100 80GB GPUs.
+# Measure logged throughput after iteration 5; observed device usage is about 67 GiB.
+defaults:
+  - train_smoke
+  - _self_
+
+experiment:
+  runner:
+    nproc_per_node: 8
+  envs:
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+    CUDA_VISIBLE_DEVICES: ${oc.env:QWEN35_VISIBLE_DEVICES,"0,1,2,3,4,5,6,7"}
+  exp_name: qwen35_4b_throughput
+  exp_dir: ${oc.env:QWEN35_OUTPUT_DIR,./outputs/qwen35_4b_throughput}
+
+train:
+  system:
+    num_workers: 4
+    tp_comm_overlap: true
+    overlap_grad_reduce: true
+    overlap_param_gather: true
+    checkpoint:
+      save_interval: 1000
+  model:
+    # Fixed padded length keeps the logged FLOPs denominator consistent.
+    enable_variable_seq_lengths: false
+    cross_entropy_loss_fusion: true
+    cross_entropy_fusion_impl: native
+    seq_length: ${oc.env:QWEN35_SEQ_LENGTH,2048}
+    max_padding_length: ${oc.env:QWEN35_SEQ_LENGTH,2048}
+    micro_batch_size: ${oc.env:QWEN35_MICRO_BATCH_SIZE,4}
+    global_batch_size: ${oc.env:QWEN35_GLOBAL_BATCH_SIZE,64}
+    train_iters: ${oc.env:QWEN35_TRAIN_ITERS,15}
+    # False removes the inherited argument group from CLI serialization.
+    recompute: false
+    vision_recompute_activations: false

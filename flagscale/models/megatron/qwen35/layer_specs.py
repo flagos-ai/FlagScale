@@ -63,7 +63,7 @@ def _patch_standard_attention_specs(
             attn_spec.module = attention_cls
 
 
-def get_qwen35_language_model_spec(config, patch=True) -> TransformerBlockSubmodules:
+def get_qwen35_language_model_spec(config, patch=True, vp_stage=None) -> TransformerBlockSubmodules:
     """Build hybrid GDN + Attention block spec for Qwen3.5 language model.
 
     Args:
@@ -82,7 +82,7 @@ def get_qwen35_language_model_spec(config, patch=True) -> TransformerBlockSubmod
     # standard SelfAttention + standard MLP)
     block_spec = get_transformer_block_with_experimental_attention_variant_spec(
         config,
-        vp_stage=None,
+        vp_stage=vp_stage,
     )
 
     # This flag only for mtp layer (patch = false).
