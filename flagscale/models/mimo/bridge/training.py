@@ -2,10 +2,9 @@
 
 """Non-colocated grid training lifecycle helpers (FlagScale-native).
 
-This module wires the grid prototype (``mimo_grid_utils`` /
-``mimo_parallel_utils`` / ``mimo_grid_config``) into the FlagScale training
-lifecycle, mirroring the Megatron-Bridge ``megatron_mimo`` setup but written
-against the actual FlagScale / Megatron-LM-FL v0.18.2 APIs:
+This module wires grid-mode MIMO into the FlagScale training lifecycle,
+mirroring the Megatron-Bridge ``megatron_mimo`` setup against the
+FlagScale / Megatron-LM-FL v0.18.2 APIs:
 
 - :func:`setup_grid_mimo_ddp` — per-module DDP wrapping (one wrapper per
   module the rank participates in, no outer DDP) plus delegation of the
@@ -21,7 +20,7 @@ against the actual FlagScale / Megatron-LM-FL v0.18.2 APIs:
 - :class:`GridTrainingState` — everything the training loop needs for grid
   mode, attached to the model chunk as ``mimo_grid_state``.
 
-Design invariants (inherited from the prototype):
+Design invariants:
 
 - Process groups are created once, by ``build_mimo_infra``, in deterministic
   global module order on every world rank; this module never creates PGs.
@@ -47,6 +46,7 @@ from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.models.mimo import get_mimo_optimizer
 from megatron.core.models.mimo.config.role import MIMO_LANGUAGE_MODULE_KEY
 from megatron.core.models.mimo.optimizer import MimoOptimizer
+from megatron.core.num_microbatches_calculator import reconfigure_num_microbatches_calculator
 from megatron.core.pipeline_parallel.bridge_communicator import BridgeCommunicator
 from megatron.core.pipeline_parallel.multimodule_communicator import (
     MultiModulePipelineCommunicator,
@@ -78,23 +78,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _GRID_TRAINING_STATES: list[GridTrainingState] = []
 
-#: Exact keyword arguments accepted by ``Qwen35GridMIMOModel.forward``.  The
-#: grid forward step calls ``model(**data_batch)``, so the batch dict must
-#: contain exactly these keys - leftover batch keys (``imgs``, ``videos``,
-#: ``image_thw_grids``, ``video_thw_grids``, ...) would raise TypeError.
-GRID_LANGUAGE_FORWARD_KEYS: tuple[str, ...] = (
-    "input_ids",
-    "position_ids",
-    "attention_mask",
-    "loss_mask",
-    "labels",
-    "modality_inputs",
-    "packing_kwargs",
-    "image_input_mask",
-    "video_input_mask",
-    "video_start_index",
-)
-
 
 def build_language_forward_kwargs(
     batch: dict[str, Any],
@@ -109,7 +92,7 @@ def build_language_forward_kwargs(
     Language-only ranks (non-colocated) consume encoder outputs from the MIMO
     bridge, so the raw modality inputs are dropped before the module-local DP
     slice (their leading dimension is not the language sample batch).  The
-    returned dict contains exactly :data:`GRID_LANGUAGE_FORWARD_KEYS`:
+    returned dict contains exactly the model's accepted keyword arguments:
 
     - ``input_ids`` is only set on the first PP stage (embedding lives there),
     - ``labels`` / ``loss_mask`` only on the last PP stage (loss lives there),
@@ -259,10 +242,6 @@ def reconfigure_grid_num_microbatches_calculator(args) -> None:
     any step-batch-size schedule are preserved.  The colocated (non-grid) path
     never calls this helper and keeps the parse-time calculator untouched.
     """
-    from megatron.core.num_microbatches_calculator import (
-        reconfigure_num_microbatches_calculator,
-    )
-
     reconfigure_num_microbatches_calculator(
         rank=args.rank,
         global_batch_size=args.global_batch_size,

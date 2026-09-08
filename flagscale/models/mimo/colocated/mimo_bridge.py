@@ -33,9 +33,6 @@ def get_source_vision_rank(language_pg, forward_idx_in_round, vit_batch_factor):
     TP size is 1.  The group's macro batch is split into whole microbatches
     (see ``get_my_microbatch_range``): TP member j computes and supplies the
     microbatches in its slice.
-
-    Example (language TP=2, vit_batch_factor=4): forwards 0,1 belong to
-    TP member 0; forwards 2,3 to TP member 1.
     """
     assert forward_idx_in_round >= 0, (
         f"forward_idx_in_round must be non-negative, got {forward_idx_in_round}"

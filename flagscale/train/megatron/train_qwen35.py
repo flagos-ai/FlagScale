@@ -14,20 +14,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import sys
+import argparse
 import logging
-from functools import partial
+import os
+import random
+import sys
 from copy import deepcopy
+from functools import partial
 from typing import Dict, List, Optional, Union
 
+import numpy as np
 import torch
 import torch._dynamo
 import torch.distributed as dist
 
 from argparse import Namespace
 
-from megatron.core import parallel_state
+from megatron.core import parallel_state, tensor_parallel
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
 from megatron.core.rerun_state_machine import get_rerun_state_machine
@@ -76,6 +79,7 @@ from flagscale.models.megatron.qwen2_5_vl.tensor_parallel import broadcast_data
 
 from flagscale.models.megatron.qwen35.qwen35_model import Qwen35Model
 from flagscale.models.megatron.qwen35.qwen35_mimo_model import Qwen35MIMOModel
+from flagscale.models.mimo.bridge.data import ModuleDataRole
 from flagscale.models.mimo.bridge.providers.qwen35 import (
     LANGUAGE_MODULE_NAME,
     VISION_MODALITY_NAME,
@@ -538,11 +542,6 @@ def _set_per_module_random_seed(args, infra) -> None:
     module's own PP rank (different stages get different seeds) and fork the
     MCore CUDA RNG tracker with the module's TP/EP/ETP ranks.
     """
-    import random
-
-    import numpy as np
-    from megatron.core import tensor_parallel
-
     seed = args.seed
     tp_rank = ep_rank = etp_rank = 0
     pp_rank = 0
@@ -765,10 +764,6 @@ def _grid_prepare_batch(batch, model, grid_state) -> Dict:
        language PP stages; labels/loss_mask on non-last stages),
     4. assembles ``modality_inputs`` for vision ranks.
     """
-    from flagscale.models.mimo.bridge import (
-        ModuleDataRole,
-    )
-
     module_name = grid_state.active_module_name
     grid = grid_state.infra.module_to_grid_map[module_name]
     dp_size = grid.shape[grid.dim_names.index("dp")]
@@ -1216,7 +1211,6 @@ if __name__ == "__main__":
     # Determine vision mode from CLI args before megatron initialization.
     # NOTE: FlagScale's flatten_dict_to_args skips bool=False values in YAML,
     # so to disable vision in YAML, use `no_enable_vision: True` (generates --no-enable-vision).
-    import argparse
     _pre_parser = argparse.ArgumentParser(add_help=False)
     _pre_parser.add_argument("--enable-vision", action="store_true", default=True)
     _pre_parser.add_argument("--no-enable-vision", dest="enable_vision", action="store_false")

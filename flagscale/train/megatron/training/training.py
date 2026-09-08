@@ -251,6 +251,9 @@ from megatron.core.num_microbatches_calculator import (
     update_num_microbatches,
 )
 from megatron.core.pipeline_parallel import get_forward_backward_func
+from megatron.core.pipeline_parallel.schedules import (
+    forward_backward_pipelining_without_interleaving,
+)
 
 from . import ft_integration, one_logger_utils
 from .activation_logging import (
@@ -3940,14 +3943,9 @@ def train(
             # (even when every module has PP == 1): it owns the cross-module
             # activation/gradient transport via the MultiModulePipelineCommunicator
             # and the dict-of-modules forward/backward contract.
-            from functools import partial as _partial
-            from megatron.core.pipeline_parallel.schedules import (
-                forward_backward_pipelining_without_interleaving,
-            )
-
             grid_state = grid_training_state_from_model_chunk(model[0])
             assert grid_state is not None, "grid mode requires mimo_grid_state on the model"
-            forward_backward_func = _partial(
+            forward_backward_func = partial(
                 forward_backward_pipelining_without_interleaving,
                 p2p_communicator=grid_state.multimodule_communicator,
                 pg_collection=grid_state.multimodule_pg_collection,
@@ -4672,12 +4670,7 @@ def evaluate(
     if grid_state is not None:
         # Non-colocated grid: always drive the multi-module pipeline schedule
         # (see train()).
-        from functools import partial as _partial
-        from megatron.core.pipeline_parallel.schedules import (
-            forward_backward_pipelining_without_interleaving,
-        )
-
-        forward_backward_func = _partial(
+        forward_backward_func = partial(
             forward_backward_pipelining_without_interleaving,
             p2p_communicator=grid_state.multimodule_communicator,
             pg_collection=grid_state.multimodule_pg_collection,

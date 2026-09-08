@@ -12,12 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen3.5-0.8B non-colocated grid MIMO (world 8, images ranks [0,2), language
-# [2,8)) — memory-safe smoke variant of 4b_mimo_grid_2p6: same grid path /
-# batch contract / checkpoint contract, 0.8B model dimensions (≈2.2GiB params
-# vs ≈9GiB for 4B) so the full grid family matrix fits comfortably in 8x A100
-# 40GB even with recompute off.  Model dimensions follow 0.8b.yaml; all grid /
-# system / data / batch / checkpoint settings follow 4b_mimo_grid_2p6.yaml.
+# Qwen3.5-0.8B non-colocated grid MIMO (world 8, images ranks [0,2),
+# language [2,8)). Model dimensions follow 0.8b.yaml; grid, system, data,
+# batch, and checkpoint settings follow 4b_mimo_grid_2p6.yaml.
 #
 # Preset layout: Vision TP2/DP1 (images ranks [0,2)) + Language TP1/PP1/DP6
 # (ranks [2,8)); any spec inside the validator's predicate boundary works.
