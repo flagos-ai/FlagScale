@@ -3,27 +3,21 @@
 """Microbatch scheduler for colocated MIMO deployment.
 
 When the vision module has a larger effective batch size than the language
-module, one ViT forward can feed multiple LLM microbatches.  This scheduler hides
-the macro-batch buffering and gradient routing from the outer Megatron loop.
+module, one ViT forward can feed multiple LLM microbatches; this scheduler
+hides the macro-batch buffering and gradient routing from the outer Megatron
+loop.  It is model-agnostic: it stores opaque batch dictionaries and relies
+on the owning model to provide ``vision_forward_fn`` / ``vision_backward_fn``
+callbacks.  Split visual tensors are detached before being injected into the
+language model, keeping the ViT graph alive for the delayed backward;
+gradients accumulated on the detached splits are concatenated and handed
+back once every microbatch of the macro batch has produced a gradient.
 
-Design notes
-------------
-* The scheduler is model-agnostic: it stores opaque batch dictionaries and
-  relies on the owning model to provide ``vision_forward_fn`` and
-  ``vision_backward_fn`` callbacks.
-* Split visual tensors are detached before being injected into the language
-  model, keeping the ViT computation graph alive for the delayed backward.
-* Gradients accumulated on the detached splits are concatenated and handed
-  back to ``vision_backward_fn`` once every microbatch in the macro batch has
-  produced a gradient.
-* Several macro batches may be live at once under a pipeline schedule: the
-  pipeline interleaves forward and backward of different microbatches, so a
-  newer macro batch can be prepared while an older one still has gradients
-  outstanding.  Each macro batch therefore owns its gradient state and its
-  model-side context (``ctx``), and gradient hooks route back to the macro
-  batch they were registered from.  Macro batches complete in FIFO order
-  (microbatch backward order matches forward order in the supported
-  schedules).
+Several macro batches may be live at once under a pipeline schedule (a newer
+macro batch can be prepared while an older one still has gradients
+outstanding), so each macro batch owns its gradient state and its model-side
+context (``ctx``), and gradient hooks route back to the macro batch they were
+registered from.  Macro batches complete in FIFO order (microbatch backward
+order matches forward order in the supported schedules).
 """
 
 from collections import deque
@@ -82,9 +76,7 @@ class MIMOMicrobatchScheduler:
         self._macros: deque[_MacroBatch] = deque()
         self._serving: _MacroBatch | None = None
 
-    # ------------------------------------------------------------------
     # Macro-batch lifecycle.
-    # ------------------------------------------------------------------
     def need_new_macro_batch(self) -> bool:
         """Return True when a new ViT macro batch must be assembled."""
         return not any(not m.exhausted() for m in self._macros)
@@ -97,9 +89,8 @@ class MIMOMicrobatchScheduler:
     ) -> None:
         """Collect ``vit_batch_factor`` microbatches and run ViT forward.
 
-        The caller (usually ``forward_step``) is responsible for providing a
-        ``get_batch_fn`` that yields one LLM microbatch per call.  Older macro
-        batches with outstanding gradients stay alive alongside the new one.
+        The caller provides a ``get_batch_fn`` yielding one LLM microbatch per
+        call; older macro batches with outstanding gradients stay alive.
         """
         assert self.need_new_macro_batch(), "scheduler still has unconsumed microbatches"
 
@@ -120,10 +111,9 @@ class MIMOMicrobatchScheduler:
     def drop_completed_macros(self) -> None:
         """Drop exhausted macro batches that registered no gradient hooks.
 
-        Mirrors the leading-drop in ``advance``; callers may invoke it between
-        iterations (e.g. before a periodic checkpoint save) to release the
-        trailing no-hook macro's buffers early.  Macros with outstanding
-        gradients are never dropped.
+        Callers may invoke it between iterations (e.g. before a periodic
+        checkpoint save) to release the trailing no-hook macro's buffers
+        early; macros with outstanding gradients are never dropped.
         """
         while (
             self._macros and self._macros[0].exhausted() and not any(self._macros[0].expected_keys)
@@ -139,7 +129,7 @@ class MIMOMicrobatchScheduler:
     def advance(self) -> tuple[int, dict[str, Any], dict[str, Any]]:
         """Return the next microbatch index, batch dict, and vision output dict."""
         # Drop exhausted macro batches that will never produce gradients
-        # (nothing was registered on them, e.g. ranks without a vision module).
+        # (nothing registered, e.g. ranks without a vision module).
         self.drop_completed_macros()
 
         if self.need_new_macro_batch():
@@ -152,9 +142,7 @@ class MIMOMicrobatchScheduler:
         self._serving = macro
         return idx, macro.batches[idx], macro.vision_outputs[idx]
 
-    # ------------------------------------------------------------------
     # Gradient collection.
-    # ------------------------------------------------------------------
     def register_visual_grad_hook(self, tensor: torch.Tensor, key: str) -> torch.Tensor:
         """Detach ``tensor`` and register a hook that collects its gradient.
 
@@ -193,21 +181,20 @@ class MIMOMicrobatchScheduler:
 
         if self._macro_ready(macro):
             self.vision_backward_fn(macro)
-            # Macro batches complete in FIFO order.
             assert macro is self._macros[0], "macro batch completed out of order"
             self._macros.popleft()
-            # The serving pointer must not outlive its macro: it would pin the
-            # batch tensors and gradients until the next advance.  It is re-set
-            # by the next advance() before any hook registration.
+            # The serving pointer must not outlive its macro: it would pin
+            # the batch tensors and gradients until the next advance() re-sets
+            # it before any hook registration.
             if self._serving is macro:
                 self._serving = None
 
     def _macro_ready(self, macro: _MacroBatch) -> bool:
         """Check whether every registered key for every served microbatch is present.
 
-        ViT backward must not run until the whole macro batch has been forwarded,
-        otherwise unserved microbatches look "ready" because no keys have been
-        registered for them yet.
+        ViT backward must not run before the whole macro batch has been
+        forwarded; unserved microbatches would otherwise look "ready" because
+        no keys have been registered for them yet.
         """
         if not macro.exhausted():
             return False
@@ -220,18 +207,16 @@ class MIMOMicrobatchScheduler:
                 return False
         return True
 
-    # ------------------------------------------------------------------
     # Exit-time cleanup.
-    # ------------------------------------------------------------------
     def release(self) -> None:
         """Drop scheduler-held training state ahead of an exit checkpoint save.
 
-        The serving pointer and any residual macro batch keep multi-GiB GPU
+        The serving pointer and residual macro batches keep multi-GiB GPU
         buffers (batch tensors, ViT outputs, gradients) alive through the
-        save.  At exit time every macro batch is fully consumed and
-        gradient-free, so this normally only drops the serving pointer; the
-        assertions below guard against ever dropping a macro that still has
-        unconsumed microbatches or outstanding gradients.
+        save; at exit time everything is normally consumed and gradient-free,
+        so this usually only drops the serving pointer.  The assertions guard
+        against dropping a macro with unconsumed microbatches or outstanding
+        gradients.
         """
         for macro in self._macros:
             assert macro.exhausted(), (

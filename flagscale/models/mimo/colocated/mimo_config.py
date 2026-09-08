@@ -31,16 +31,13 @@ def compute_vit_batch_factor(
 ) -> int:
     """Return the vit_batch_factor relating vision and language batching.
 
-    ``vision_micro_batch_size`` (vbs) is the ViT-side micro batch size: the
-    number of samples each vision DP entity processes in one forward, the
-    vision analog of the LM ``micro_batch_size`` (mbs).  ``vit_batch_factor``
-    (vbf) is the derived relation ``(vision_dp * vbs) / (language_dp * mbs)`` —
-    how many LLM microbatches one ViT macro forward serves.
+    ``vbf = (vision_dp * vbs) / (language_dp * mbs)`` - how many LLM
+    microbatches one ViT macro forward serves.  ``vbs`` is the ViT-side micro
+    batch size, the vision analog of the LM ``mbs``.
     """
     vision_samples = vision_data_parallel_size * vision_micro_batch_size
     language_samples = language_data_parallel_size * language_micro_batch_size
-    # Reject floor-division truncation that would silently shrink the
-    # effective vit_batch_factor.
+    # Reject floor-division truncation (would silently shrink the vbf).
     assert vision_samples % language_samples == 0, (
         f"vision_dp * vision_micro_batch_size ({vision_samples}) must be a multiple of "
         f"language_dp * micro_batch_size ({language_samples}). "
@@ -63,9 +60,8 @@ def validate_mimo_config(
 ) -> int:
     """Validate all model-agnostic MIMO configuration constraints in one place.
 
-    Training entries must call this once before constructing the MIMO model.
-
-    Returns the validated ``vit_batch_factor``.
+    Training entries must call this once before constructing the MIMO model;
+    returns the validated ``vit_batch_factor``.
     """
     assert getattr(args, "rampup_batch_size", None) is None, (
         "Colocated MIMO does not support --rampup-batch-size: the scheduler "
@@ -85,10 +81,10 @@ def validate_mimo_config(
             f"Colocated MIMO currently requires CP=1, got {name} "
             f"cp={parallelism.context_parallel_size}."
         )
-    # Language PP > 1 is supported with the vision module colocated on the
-    # language first-stage ranks only.  Vision PP follows language PP purely
-    # as a grid artifact (the vision DP groups then land on same-stage rank
-    # sets); the vision module itself is never pipelined.
+    # Vision PP follows language PP purely as a grid artifact (the vision DP
+    # groups then land on same-stage rank sets); the vision module itself is
+    # never pipelined (language PP > 1 is fine with vision colocated on the
+    # language first-stage ranks).
     assert vision_parallelism.pipeline_model_parallel_size == (
         language_parallelism.pipeline_model_parallel_size
     ), (
@@ -101,12 +97,11 @@ def validate_mimo_config(
         f"Colocated MIMO currently requires vision TP=1, got "
         f"vision tp={vision_parallelism.tensor_model_parallel_size}."
     )
-    # Expert parallelism (EP) subdivides the language DP domain as
-    # dp = ep * expert_dp and never applies to the dense vision module.
-    # MoE token dispatch runs in the language forward, which every rank
-    # enters for every microbatch, so the all-to-all collectives stay
-    # aligned; expert parameter gradients reduce over the expert-DP
-    # group (singleton when ep == dp).
+    # EP subdivides the language DP domain (dp = ep * expert_dp) and never
+    # applies to the dense vision module.  MoE token dispatch runs in the
+    # language forward, which every rank enters for every microbatch, so the
+    # all-to-all collectives stay aligned; expert parameter gradients reduce
+    # over the expert-DP group (singleton when ep == dp).
     assert vision_parallelism.expert_model_parallel_size == 1, (
         f"Colocated MIMO requires vision EP=1 (vision module is dense), "
         f"got vision ep={vision_parallelism.expert_model_parallel_size}."
@@ -119,7 +114,7 @@ def validate_mimo_config(
     # The process-group builder aliases the expert-TP group to the module TP
     # group (hetero_pg_utils), so a configured ETP different from the language
     # TP would be silently ignored.  Megatron defaults ETP to TP when unset,
-    # so any mismatch here is an explicit user setting and must be rejected.
+    # so any mismatch is an explicit user setting and must be rejected.
     language_etp = getattr(args, "expert_tensor_parallel_size", None)
     assert language_etp is None or language_etp == (
         language_parallelism.tensor_model_parallel_size
@@ -131,8 +126,7 @@ def validate_mimo_config(
     )
 
     # --vision-micro-batch-size defaults to None in the training entries
-    # (meaning "same as the language micro batch size"); coalesce before use —
-    # getattr's default never applies because the attribute exists.
+    # (meaning "same as the language micro batch size"); coalesce before use.
     vision_micro_batch_size = (
         getattr(args, "vision_micro_batch_size", None) or args.micro_batch_size
     )

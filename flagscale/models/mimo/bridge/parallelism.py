@@ -2,34 +2,23 @@
 
 """MIMO component parallelism layout configuration (FlagScale-native).
 
-Standalone, dependency-free configuration layer for MIMO deployments that are
-*not* colocated: each module (``vision``, ``language``, ...) owns a disjoint,
-contiguous rank span of the distributed world, given by ``rank_offset`` plus
-the module's ``total_ranks``, and together the modules tile ``[0, world_size)``
-exactly - no gaps, no overlaps.  The same config objects also support the
-existing colocated layout, where every module spans the full world.
+Standalone, dependency-free (stdlib-only, no torch/Megatron) configuration
+for MIMO layouts: in the non-colocated layout each module (``vision``,
+``language``, ...) owns a disjoint, contiguous rank span given by
+``rank_offset`` plus ``total_ranks``, and the modules tile ``[0, world_size)``
+exactly; the colocated layout has every module span the full world.  Mirrors
+the API shape of the Megatron-Bridge ``megatron_mimo_config`` (same field
+names and derived sizing helpers) in FlagScale style, with immutable configs
+- all validation happens at construction / ``finalize`` time, no post-hoc
+mutation.
 
-This module mirrors the API shape of the Megatron-Bridge
-``megatron_mimo_config`` (same field names and derived sizing helpers) but is
-written in FlagScale style and has **zero dependencies** (pure stdlib): it can
-be unit-tested on CPU without importing torch or Megatron, and the configs are
-immutable - all per-module validation happens at construction time instead of
-a post-hoc ``finalize`` mutation.
-
-Key API:
-
-- :class:`ModuleParallelismConfig` - frozen, self-validating per-module sizing
-  (``tp``/``cp``/``pp``/``dp``/``ep``/``etp``/``rank_offset``) plus rank/world
-  sizing helpers.
-- :class:`MIMOLayout` - deployment layout enum (``COLOCATED``,
-  ``NON_COLOCATED``, ``AUTO``).
-- :class:`MIMOParallelismConfig` - container holding one config per module;
-  ``finalize(world_size, layout=...)`` validates layout-specific invariants.
-- :func:`classify_layout` - auto-classify a config set as colocated vs
-  non-colocated for a given world size.
-- :func:`parse_module_parallelism` / :func:`parse_module_parallelisms` -
-  parser for repeatable spec strings such as
-  ``language=tp=4,pp=2,dp=2,rank_offset=0``.
+Key API: :class:`ModuleParallelismConfig` (frozen, self-validating per-module
+sizing plus rank/world helpers), :class:`MIMOLayout` (``COLOCATED`` /
+``NON_COLOCATED`` / ``AUTO``), :class:`MIMOParallelismConfig` (one config per
+module; ``finalize(world_size, layout=...)`` validates layout invariants),
+:func:`classify_layout`, and :func:`parse_module_parallelism` /
+:func:`parse_module_parallelisms` (parsers for repeatable spec strings such
+as ``language=tp=4,pp=2,dp=2,rank_offset=0``).
 """
 
 from __future__ import annotations
@@ -43,8 +32,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-# Name of the mandatory language module; kept in sync with the MIMO scheduler
-# and Bridge communicator assumptions.
+# Mandatory language module name; kept in sync with the MIMO scheduler and
+# Bridge communicator assumptions.
 LANGUAGE_MODULE_NAME = "language"
 
 _SIZING_FIELDS = (
@@ -80,11 +69,11 @@ _MODULE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 class ModuleParallelismConfig:
     """Immutable, validated parallelism sizing for a single MIMO module.
 
-    All parallelism sizes are positive integers; ``rank_offset`` is a
-    non-negative integer.  Validation runs in ``__post_init__``, so an invalid
-    config can never be constructed.  Expert parallelism (``ep``/``etp``)
-    subdivides the dense token domain as ``tp * cp * dp = ep * etp * expert_dp``
-    and therefore does not appear in the module's rank span product.
+    All sizes are positive integers and ``rank_offset`` is non-negative;
+    validation runs in ``__post_init__``, so an invalid config can never be
+    constructed.  Expert parallelism (``ep``/``etp``) subdivides the dense
+    token domain as ``tp * cp * dp = ep * etp * expert_dp`` and therefore
+    does not appear in the module's rank span product.
     """
 
     tensor_model_parallel_size: int = 1
@@ -190,11 +179,9 @@ def classify_layout(
 ) -> MIMOLayout:
     """Auto-classify a module set as colocated or non-colocated.
 
-    If every module spans the full world (``rank_offset == 0`` and
-    ``total_ranks == world_size``) the modules share all ranks (colocated);
-    otherwise the modules are expected to tile disjoint rank spans
-    (non-colocated).  Classification is only a heuristic - the exact tiling /
-    full-world invariants are enforced by
+    Colocated when every module spans the full world (``rank_offset == 0``
+    and ``total_ranks == world_size``), non-colocated otherwise.  Only a
+    heuristic - the exact tiling / full-world invariants are enforced by
     :meth:`MIMOParallelismConfig.finalize`.
     """
     if not module_parallelisms:
@@ -210,18 +197,15 @@ def classify_layout(
 class MIMOParallelismConfig:
     """Container of per-module parallelism configs for a MIMO deployment.
 
-    Holds one :class:`ModuleParallelismConfig` per module (the language module
-    is mandatory).  Per-module sizing is validated at construction of the
-    module configs; :meth:`finalize` validates the cross-module invariants for
-    the requested (or auto-classified) :class:`MIMOLayout`:
-
-    - ``NON_COLOCATED``: module rank ranges tile ``[0, world_size)`` exactly -
-      no gaps and no overlaps, covering the full world.
-    - ``COLOCATED``: every module spans the full world (``rank_offset == 0``
-      and ``total_ranks == world_size``).
-    - Both layouts additionally require TP powers of two, pairwise-divisible
-      DP sizes, and dense (EP == ETP == 1) modality modules for cross-module
-      communication compatibility.
+    Holds one :class:`ModuleParallelismConfig` per module (the language
+    module is mandatory).  Per-module sizing is validated at construction of
+    the module configs; :meth:`finalize` validates the cross-module
+    invariants for the requested (or auto-classified) :class:`MIMOLayout`:
+    ``NON_COLOCATED`` requires module rank ranges to tile ``[0, world_size)``
+    exactly (no gaps, no overlaps); ``COLOCATED`` requires every module to
+    span the full world.  Both layouts additionally require TP powers of
+    two, pairwise-divisible DP sizes, and dense (EP == ETP == 1) modality
+    modules for cross-module communication compatibility.
     """
 
     module_parallelisms: Mapping[str, ModuleParallelismConfig]
@@ -238,7 +222,6 @@ class MIMOParallelismConfig:
                     f"module '{name}' must be a ModuleParallelismConfig, got "
                     f"{type(parallelism).__name__}."
                 )
-        # Freeze the mapping so the container is truly immutable.
         object.__setattr__(
             self, "module_parallelisms", MappingProxyType(dict(self.module_parallelisms))
         )
@@ -302,10 +285,10 @@ class MIMOParallelismConfig:
         """Validate the full layout against ``world_size``.
 
         Args:
-            world_size: Total number of ranks in the distributed world.  Must
-                be a positive integer; MIMO requires a distributed environment.
-            layout: Optional override of the container layout.  ``AUTO``
-                (default) classifies the config set via :func:`classify_layout`.
+            world_size: total ranks; must be a positive integer (MIMO
+                requires a distributed environment).
+            layout: optional override of the container layout; ``AUTO``
+                classifies via :func:`classify_layout`.
         """
         if isinstance(world_size, bool) or not isinstance(world_size, int) or world_size < 1:
             raise ValueError(f"world_size must be a positive integer, got {world_size!r}.")
@@ -369,12 +352,11 @@ class MIMOParallelismConfig:
         """Modality (non-language) modules must remain dense.
 
         The mcore MIMO MoE machinery only supports expert parallelism on the
-        language module.  A modality module with EP > 1 or ETP > 1 passes the
-        per-module expert-factorization algebra above but is unsupported at
-        wiring time and would fail obscurely.  Mirror the Megatron-Bridge
+        language module; a modality module with EP/ETP > 1 passes the
+        per-module factorization algebra but is unsupported at wiring time
+        and would fail obscurely.  Mirrors the Megatron-Bridge
         ``MegatronMIMOParallelismConfig._validate_encoder_expert_parallelism``
-        ("Encoder modules must remain dense for MegatronMIMO MoE") until EP > 1
-        modality support lands.
+        until EP > 1 modality support lands.
         """
         for name, parallelism in self.module_parallelisms.items():
             if name == LANGUAGE_MODULE_NAME:
@@ -394,8 +376,8 @@ class MIMOParallelismConfig:
     def _validate_parallelism_constraints(self) -> None:
         """Cross-module communication compatibility constraints.
 
-        - TP sizes must be powers of 2.
-        - DP sizes must be pairwise divisible (one divides the other).
+        TP sizes must be powers of 2; DP sizes must be pairwise divisible
+        (one divides the other).
         """
 
         def is_power_of_two(n: int) -> bool:

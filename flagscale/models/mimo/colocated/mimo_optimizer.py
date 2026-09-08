@@ -23,16 +23,8 @@ from .parallel_state_ctx import switch_parallel_state
 def wrap_mimo_ddp(mimo_model, args) -> None:
     """Wrap vision and language submodules with their own DDP groups.
 
-    Preconditions:
-        - ``mimo_model.vision_pg`` and ``mimo_model.language_pg`` are valid
-          process group collections.
-        - ``args.use_mimo`` is True (caller responsibility).
-
-    The original ``vision_model`` / ``language_model`` attributes are kept
-    unchanged so that the MIMO model's forward and helper methods continue to
-    work.  The DDP wrappers are stored as ``vision_ddp`` / ``language_ddp`` and
-    are used by the training loop for grad-buffer management and by the
-    optimizer builders.
+    Caller must ensure ``args.use_mimo`` is True; the original ``vision_model``
+    / ``language_model`` attributes stay untouched.
     """
     assert mimo_model.vision_pg is not None, "vision_pg must be set"
     assert mimo_model.language_pg is not None, "language_pg must be set"
@@ -87,10 +79,7 @@ def setup_mimo_ddp(model, args, wrap_with_ddp: bool = True):
     if not is_mimo:
         return False, None
 
-    # Lazy import at the call site: ``megatron.training`` is only needed at
-    # training time, and importing it eagerly would drag the whole training
-    # stack into ``flagscale.models.mimo`` at package-import time (breaking
-    # unit-test import isolation).
+    # Keep package imports independent of the full megatron.training stack.
     from megatron.training.utils import print_rank_0
 
     print_rank_0("Colocated MIMO: wrapping vision/language modules with per-module DDP.")
@@ -115,11 +104,7 @@ def _optimizer_state_dict(opt, is_loading: bool = False):
 
 
 class ChainedOptimizer:
-    """Chain multiple Megatron optimizers so the training loop sees one object.
-
-    If Megatron's training loop needs additional methods, add explicit
-    forwarding here.
-    """
+    """Chain multiple Megatron optimizers so the training loop sees one object."""
 
     def __init__(self, optimizers: list):
         assert len(optimizers) > 0, "ChainedOptimizer requires at least one optimizer"
@@ -132,12 +117,8 @@ class ChainedOptimizer:
             opt.zero_grad(set_to_none=set_to_none)
 
     def step(self):
-        """Step all wrapped optimizers and aggregate their return values.
-
-        Each Megatron optimizer returns ``(update_successful, grad_norm,
-        num_zeros_in_grad)``.  For the chained case we return the logical AND
-        of successes, the combined global gradient norm, and the total zero
-        count across all optimizers.
+        """Step all optimizers; return the AND of successes, the combined
+        global grad norm, and the total num_zeros_in_grad.
         """
         successes = []
         grad_norms = []
@@ -150,7 +131,6 @@ class ChainedOptimizer:
 
         update_successful = all(successes)
 
-        # Combine per-optimizer grad norms into a single global norm.
         valid_norms = [gn for gn in grad_norms if gn is not None]
         if valid_norms:
             grad_norm = float(sum(gn * gn for gn in valid_norms) ** 0.5)
@@ -177,9 +157,8 @@ class ChainedOptimizer:
         return all(getattr(opt, "is_stub_optimizer", False) for opt in self.optimizers)
 
     def state_dict(self, is_loading: bool = False):
-        # Stub optimizers (all their params frozen) have no inner optimizer
-        # and Megatron's state_dict/load_state_dict carry no stub guard —
-        # keep a None placeholder so positions stay aligned with load.
+        # Stub optimizers have no inner optimizer and Megatron carries no stub
+        # guard — keep the None placeholder so positions align with load.
         return [
             None
             if getattr(opt, "is_stub_optimizer", False)
@@ -188,15 +167,12 @@ class ChainedOptimizer:
         ]
 
     def sharded_state_dict(self, state_dict=None, **kwargs):
-        """Return sharded state dict for distributed checkpoint formats.
+        """Sharded state dict for distributed checkpoints.
 
-        The wrapped module optimizers live in different data-parallel groups,
-        but each one's ``DistributedOptimizer`` emits the same shard keys
-        (``optimizer.distributed.dp_group_idx_<mp_rank>....``), so the
-        per-module state dicts would collide in the global torch_dist
-        checkpoint.  Prefix every shard key with ``chained_<idx>.`` (matching
-        Megatron's own ``ChainedOptimizer`` prefix hook) and strip the prefix
-        again in :meth:`load_state_dict`.
+        Per-module optimizers live in different DP groups but emit identical
+        shard keys, which would collide in the global torch_dist checkpoint:
+        prefix every key with ``chained_<idx>.`` (Megatron's own ChainedOptimizer
+        hook) and strip it again in :meth:`load_state_dict`.
         """
         sharded_state_dicts = [
             None
@@ -240,10 +216,8 @@ class ChainedOptimizer:
     def _unwrap_distributed_optimizers(opt):
         """Return ALL underlying ``DistributedOptimizer``s of ``opt``.
 
-        A MoE module optimizer is itself a chained optimizer (one
-        ``DistributedOptimizer`` per parameter partition: dense, experts, ...).
-        Each inner optimizer owns disjoint fp32 master-parameter state, so all
-        of them must be saved/loaded.
+        A MoE module optimizer is itself chained (one ``DistributedOptimizer``
+        per parameter partition); each owns disjoint fp32 master-parameter state.
         """
         if hasattr(opt, "chained_optimizers") and opt.chained_optimizers:
             return [
@@ -258,16 +232,11 @@ class ChainedOptimizer:
     def save_parameter_state(self, filename: str):
         """Save each wrapped optimizer's parameter state to a separate file.
 
-        The per-module optimizers live in different data-parallel groups.  The
-        state is gathered on gloo/CPU (Megatron's default) before writing on
-        each group's DP rank 0, so the save does not allocate multi-GiB GPU
-        buffers.
-
-        A module optimizer with a single ``DistributedOptimizer`` keeps the
-        historical single-state file format.  A MoE module optimizer (chained
-        over dense/expert partitions) writes a list of states — one entry per
-        inner ``DistributedOptimizer``, ``None`` where this rank holds nothing
-        or the inner optimizer is a stub — mirroring Megatron's own
+        State is gathered on gloo/CPU (Megatron default) before writing on each
+        group's DP rank 0, so no multi-GiB GPU buffers are allocated.  A single
+        ``DistributedOptimizer`` keeps the historical single-state file format; a
+        MoE chained optimizer writes one list entry per inner optimizer (``None``
+        where this rank holds nothing or it is a stub), mirroring Megatron's
         ``ChainedOptimizer.save_parameter_state``.
         """
         if len(self.optimizers) == 1:
@@ -293,8 +262,7 @@ class ChainedOptimizer:
             save_states = False
             for inner in inners:
                 if getattr(inner, "is_stub_optimizer", False):
-                    # Stub: no parameter state; keep the placeholder so entry
-                    # positions stay aligned with the load side.
+                    # Stub: keep the None placeholder (positions align with load).
                     states.append(None)
                     continue
                 state = inner.get_parameter_state_dp_zero(use_gloo_comm=True)
@@ -323,8 +291,7 @@ class ChainedOptimizer:
             if len(inners) == 1:
                 inner = inners[0]
                 if getattr(inner, "is_stub_optimizer", False):
-                    # Stub DistributedOptimizer (all its params frozen): nothing
-                    # was saved for it and its DP group is uninitialized.
+                    # Stub: nothing was saved and its DP group is uninitialized.
                     continue
                 state = None
                 if inner.data_parallel_group.rank() == 0:
@@ -370,13 +337,10 @@ class ChainedOptimizer:
 def _pad_param_group_collectives():
     """Pad the world collectives of one missing module-optimizer build.
 
-    ``get_megatron_optimizer`` all-gathers param-group keys over the world
-    group in ``_get_param_groups`` (three times per build: dense, MoE and
-    engram filters), so every rank must issue the same NUMBER of
-    ``get_megatron_optimizer`` calls.  Ranks without a vision module (language
-    PP stages beyond the first) pad the missing vision-optimizer call here.
-    If Megatron changes the number of world collectives per optimizer build,
-    this padding must be updated to match.
+    ``get_megatron_optimizer`` all-gathers param-group keys over the world group
+    three times per build, so every rank must issue the same NUMBER of calls;
+    ranks without a vision module pad the missing vision-optimizer call here.
+    If Megatron changes the collectives per build, update this padding to match.
     """
     world = torch.distributed.get_world_size()
     for _ in range(3):
@@ -400,12 +364,9 @@ def build_mimo_optimizer(config, config_overrides, mimo_model, args):
                 dump_param_to_param_group_map=args.dump_param_to_param_group_map,
             )
             optimizers.append(vision_opt)
-        # Grad stats (norm / zero count) must not reduce over groups that
-        # include ranks without a vision optimizer: the default
-        # (intra_dist_opt = vision MP group) spans PP stages at language PP>1
-        # and mismatches there.  Use the vision TP group instead — identical
-        # membership to the vision MP group at vision PP=1 (so PP=1 numerics
-        # are unchanged), and always intra-stage.
+        # Grad stats must not reduce over groups spanning ranks without a vision
+        # optimizer (mismatch at language PP>1); the vision TP group has identical
+        # membership at vision PP=1 and is always intra-stage.
         for opt in getattr(vision_opt, "chained_optimizers", [vision_opt]):
             opt.grad_stats_parallel_group = mimo_model.vision_pg.tp
     else:

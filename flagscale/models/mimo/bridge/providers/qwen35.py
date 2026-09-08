@@ -12,61 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Grid-based Qwen3.5 MIMO model provider (initial version).
+"""Grid-based Qwen3.5 MIMO model provider on ``megatron.core.models.mimo.MimoModel``.
 
-This module builds the Qwen3.5 multimodal model on top of the **actual**
-``megatron.core.models.mimo.MimoModel`` from Megatron-LM-FL, using the existing
-FlagScale Qwen3.5 / Qwen3-VL submodule classes and specs:
-
-- Language module: ``Qwen35LanguageModule`` (hybrid GDN + attention, mRoPE).
-- Images modality: ``Qwen3VisionModel`` wrapped in a
-  :class:`Qwen35VisionSubmodules` (a ``VisionModalitySubmodules`` subclass),
-  registered under the component name ``"images"`` (encoder ``"qwen3_vit"``).
-  The language component always uses the fixed MIMO key ``"language"``
-  (``MIMO_LANGUAGE_MODULE_KEY``).
-
-The provider is *grid-aware*: it accepts a
-prebuilt ``module_to_grid_map`` (``Dict[str, HyperCommGrid]``) and a nullable
-``pg_collection`` (``ProcessGroupCollection``), or a prebuilt "MIMOInfra"
-object (duck-typed interface of
-``flagscale.models.mimo.bridge.infra.MIMOInfra``: attributes
-``module_to_grid_map`` and ``module_to_pg_collection``).  Both are nullable:
-
-- ``module_to_grid_map is None`` -> ``MimoModelConfig.module_to_grid_map`` is
-  ``None`` and ``MimoModel`` derives the default COLOCATED ``RankRole`` (every
-  module on every rank, global parallel state fallbacks).
-- ``pg_collection`` / ``images_pg_collection`` are ``None`` -> threaded through
-  as ``None`` into the language spec / the images submodule spec (Megatron
-  falls back to global parallel state for group lookups).  Each spec receives
-  its own module's collection: on an encoder-only rank the images submodule
-  must get the *vision* collection, not the (absent) language one.
-
-The rank role itself is *derived* by ``MimoModel`` from ``module_to_grid_map``
-(``RankRole.build``): grids spanning the same rank range produce a COLOCATED
-role; grids spanning disjoint rank ranges produce a NON_COLOCATED role with
-per-module PP stage info, which drives selective construction (encoder-only /
-language-only ranks).  The built model exposes ``model.role``; callers that
-already know membership from a ``MIMOInfra`` can use
-``infra.current_module_names()`` to reason about it before construction.
-
-Deepstack auxiliary outputs are handled explicitly, never silently dropped:
-
-- :class:`Qwen35VisionSubmodules` captures the Qwen3-VL deepstack feature
-  lists produced by ``Qwen3VisionModel`` and stashes them on the submodule
-  (``last_deepstack_features``) while the primary embedding tensor flows
-  through the generic MIMO path.
-- In the COLOCATED grid layout the language forward receives them as
-  ``deepstack_visual_embeds`` plus the visual position masks (computed from
-  the batch's ``image_input_mask`` / ``video_input_mask``), mirroring the
-  colocated model.
-- In the NON_COLOCATED layout the MCore bridge has a single tensor channel per
-  modality and cannot transport the auxiliary feature lists, so a
-  deepstack-enabled config fails fast at model build time.
-
-No dependency on ``flagscale.models.mimo`` (the colocated scheduler
-package) and no ``megatron.bridge`` dependency: this is a pure
-``megatron.core.models.mimo`` composition.  The colocated ``Qwen35MIMOModel`` is
-left untouched.
+Composes the FlagScale Qwen3.5 / Qwen3-VL modules (language:
+``Qwen35LanguageModule``, hybrid GDN + attention with mRoPE; images:
+``Qwen3VisionModel`` under ``Qwen35VisionSubmodules``, component ``"images"``,
+encoder ``"qwen3_vit"``) into the grid-aware ``MimoModel``.  The rank role
+(COLOCATED vs NON_COLOCATED, driving selective encoder-only / language-only
+construction) is derived by ``MimoModel`` from ``module_to_grid_map``.
+Deepstack auxiliary features are captured on the vision submodule and either
+injected into the language forward (colocated) or rejected at build time
+(non-colocated: the bridge has a single tensor channel per modality).  This
+module must not import ``flagscale.models.mimo`` (the colocated scheduler
+package) or ``megatron.bridge``; the colocated ``Qwen35MIMOModel`` is left
+untouched.
 """
 
 from typing import Any
@@ -98,10 +57,8 @@ from flagscale.models.mimo.bridge.contracts import (
 # Component names.
 # ---------------------------------------------------------------------------
 
-#: MIMO modality component name for the Qwen3.5 vision encoder.
 VISION_MODALITY_NAME = "images"
 
-#: Encoder name of the Qwen3-VL ViT inside the "images" modality submodule.
 VISION_ENCODER_NAME = "qwen3_vit"
 
 #: MIMO language component name (fixed by MIMO: "language").
@@ -119,37 +76,25 @@ QWEN35_GRID_COMMUNICATOR_CONTRACT = GridCommunicatorContract(
 
 
 class Qwen35VisionSubmodules(VisionModalitySubmodules):
-    """Qwen3.5 vision modality submodule for ``MimoModel``.
+    """Qwen3.5 vision modality submodule for ``MimoModel`` (single encoder
+    ``qwen3_vit`` under the ``"images"`` component).
 
-    Wraps the Qwen3-VL ViT (``Qwen3VisionModel``) as the single encoder
-    ``qwen3_vit`` under the ``"images"`` component.  The ViT's internal
-    multimodal projector already maps the merged patch embeddings to the
-    language hidden size, so no ``input_projections`` are needed.
-
-    The Qwen3-VL deepstack auxiliary feature lists are **captured, not
-    dropped**: :meth:`encode` stashes them on the submodule
-    (``last_deepstack_features``) while returning the primary embedding
-    tensor for the generic MIMO machinery.  The owning model injects them
-    into the language forward (colocated layout) or rejects the config
-    (non-colocated layout, where the bridge has no auxiliary channel).
+    The ViT's internal multimodal projector already maps the merged patch
+    embeddings to the language hidden size, so no ``input_projections`` are
+    needed.  :meth:`encode` stashes the Qwen3-VL deepstack auxiliary feature
+    lists on ``last_deepstack_features`` (captured, not dropped) for the owning
+    model to inject into the language forward (colocated) or reject at build
+    time (non-colocated: the bridge has no auxiliary channel).
     """
 
     def __init__(self, *args, **kwargs) -> None:
-        # The vision transformer config is threaded by the spec builder
-        # (``build_qwen35_images_submodule_spec``) so that per-module DDP
-        # wrapping (``setup_grid_mimo_ddp``) can read ``module.config`` on the
-        # images submodule exactly like it does on the language module.
+        # Config is threaded by the spec builder so per-module DDP wrapping
+        # (setup_grid_mimo_ddp) can read module.config on the images submodule.
         self.config = kwargs.pop("config", None)
         super().__init__(*args, **kwargs)
         self.last_deepstack_features: list | None = None
 
     def encode(self, encoders_data_batch: dict) -> list:
-        """Encode the batch, capturing the deepstack auxiliary feature lists.
-
-        Identical to ``ModalitySubmodules.encode`` except the second element
-        of a ``(embeddings, deepstack_feature_lists)`` tuple return is stashed
-        on ``self.last_deepstack_features`` instead of being dropped.
-        """
         if not encoders_data_batch:
             return []
 
@@ -162,7 +107,6 @@ class Qwen35VisionSubmodules(VisionModalitySubmodules):
             encoder_inputs = encoders_data_batch[name]
             encoder_outputs = encoder(**encoder_inputs)
             # Qwen3VisionModel returns (embeddings, deepstack_feature_lists).
-            # Capture the auxiliary list, keep the primary tensor for MIMO.
             if (
                 isinstance(encoder_outputs, tuple)
                 and encoder_outputs
@@ -193,29 +137,17 @@ def compute_grid_visual_split_sizes(
 ) -> list[int] | None:
     """Per-sample visual-token counts for bridge fan-out, derived from ``grid_thw``.
 
-    Each row of ``grid_thw`` describes one input image as ``(t, h, w)`` in
-    *patch* units (Qwen3-VL convention: h/w are the image grid in units of the
-    ViT patch size).  The encoder output is the merged patch embeddings of all
-    images concatenated in image order, so an image contributes
-    ``t * h * w / spatial_merge_size**2`` tokens (``t`` temporal frames merged
-    spatially as well; Qwen3-VL's ``merge_hidden_size`` projection reduces
-    each ``spatial_merge_size x spatial_merge_size`` patch block to one token).
-
-    Assumptions (the Qwen3.5 grid data pipeline):
-    - One image per language sample (``image_thw_grids`` row i <-> sample i),
-      so per-image token counts ARE the per-sample counts the bridge metadata
-      contract requires (``BridgeCommunicator._split_tensor_at_batch_dim``
-      groups them per destination peer).  Videos fail fast elsewhere in the
-      grid path, so ``grid_thw`` rows never mix image and video units here.
-    - The encoder emits tokens in image order (Qwen3VisionModel flattens the
-      per-image merged patches in batch order).
+    Each ``grid_thw`` row is one image ``(t, h, w)`` in patch units; after
+    spatial merging an image contributes ``t * h * w / spatial_merge_size**2``
+    tokens, emitted in image order.  Assumes one image per language sample
+    (``image_thw_grids`` row i <-> sample i) — the per-image counts ARE the
+    per-sample counts the bridge metadata contract requires.
 
     Returns ``None`` when the counts are uniform (the bridge's uniform
     ``tensor_split`` fallback is then exact) or when there is no visual data.
-    Raises ``ValueError`` (fail-fast) when the counts do not reconcile with
-    the encoder output size or when a grid is not divisible by the merge
-    factor: silently falling back to a uniform split would corrupt
-    variable-resolution fan-out.
+    Raises ``ValueError`` when the counts do not reconcile with the encoder
+    output size or a grid is not divisible by the merge unit: silently falling
+    back to a uniform split would corrupt variable-resolution fan-out.
     """
     if grid_thw is None or not torch.is_tensor(grid_thw) or grid_thw.numel() == 0:
         return None
@@ -248,25 +180,20 @@ def compute_grid_visual_split_sizes(
             "to a uniform split (fail-fast)."
         )
     if len(set(sizes)) <= 1:
-        # Uniform counts: the bridge's uniform tensor_split fallback produces
-        # the same per-peer chunks (micro_batch is divisible by every module's
-        # DP by the grid data contract), so no metadata is needed.
+        # Uniform counts: the bridge's uniform tensor_split fallback produces the
+        # same chunks (micro_batch is divisible by every module's DP).
         return None
     return sizes
 
 
 class Qwen35GridMIMOModel(MimoModel):
-    """Qwen3.5 MIMO model built on ``megatron.core.models.mimo.MimoModel``.
+    """Qwen3.5 MIMO model on ``MimoModel``: adds mRoPE position-index computation
+    and deepstack visual-feature injection; module construction, rank-role
+    handling and forward dispatch live in the parent.
 
-    Adds the Qwen3.5 glue (mRoPE position-index computation and deepstack
-    visual-feature injection) on top of the generic grid-aware MIMO model;
-    module construction, rank-role handling, selective module initialization
-    and forward dispatch all live in the parent ``MimoModel``.
-
-    The forward call accepts the colocated Qwen3.5 batch masks
-    (``image_input_mask`` / ``video_input_mask`` / ``video_start_index``) and
-    uses them to compute the deepstack ``visual_pos_masks`` on the visual
-    token positions of the language sequence.
+    ``forward`` accepts the colocated batch masks (``image_input_mask`` /
+    ``video_input_mask`` / ``video_start_index``) and derives the deepstack
+    ``visual_pos_masks`` from them.
     """
 
     def __init__(
@@ -278,8 +205,7 @@ class Qwen35GridMIMOModel(MimoModel):
         super().__init__(mimo_config, cp_group=cp_group, tp_group=tp_group)
 
         # Non-colocated: the MCore bridge carries one tensor per modality and
-        # cannot transport the deepstack auxiliary feature lists.  Reject the
-        # config explicitly instead of silently dropping the features.
+        # cannot transport the deepstack auxiliary feature lists.
         if self.role.mode is ModuleLayout.NON_COLOCATED:
             vision_config = None
             images_spec = mimo_config.modality_submodules_spec.get(VISION_MODALITY_NAME)
@@ -342,20 +268,15 @@ class Qwen35GridMIMOModel(MimoModel):
         video_input_mask: torch.Tensor | None = None,
         video_start_index: int = 0,
     ):
-        """Qwen3.5 forward: stash the batch masks, then run the MIMO dispatch.
-
-        The extra kwargs are the Qwen3.5 data-plane masks used for the
-        deepstack ``visual_pos_masks`` on the visual token positions (see the
-        colocated ``Qwen35MIMOModel.forward``).  They are a no-op when deepstack
-        is disabled (the default for Qwen3.5 configs).
+        """Qwen3.5 forward: the extra masks feed the deepstack
+        ``visual_pos_masks`` (no-op when deepstack is disabled).
         """
         self._image_input_mask = image_input_mask
         self._video_input_mask = video_input_mask
         self._video_start_index = int(video_start_index or 0)
 
-        # Stash the encoder grid metadata for _attach_modality_split_sizes
-        # (bridge fan-out split sizes are derived from grid_thw, not from
-        # special-token counts - see compute_grid_visual_split_sizes).
+        # Split sizes derive from grid_thw, not special-token counts (see
+        # compute_grid_visual_split_sizes).
         self._current_grid_thw = None
         if modality_inputs is not None:
             images_inputs = modality_inputs.get(VISION_MODALITY_NAME)
@@ -387,12 +308,8 @@ class Qwen35GridMIMOModel(MimoModel):
         )
 
     def _deepstack_visual_pos_masks(self, num_visual_embeds: int | None) -> torch.Tensor | None:
-        """Compute the deepstack visual position mask from the batch masks.
-
-        Mirrors the colocated ``Qwen35MIMOModel.forward`` split logic: with only
-        images (``video_start_index == num_visual_embeds``) the image mask is
-        used; with only videos the video mask; with a mix both are OR-ed.
-        Returns ``None`` when there are no visual tokens or no masks.
+        """Deepstack ``visual_pos_masks`` from the stashed batch masks
+        (mirrors the colocated ``Qwen35MIMOModel`` split logic).
         """
         image_input_mask = self._image_input_mask
         video_input_mask = self._video_input_mask
@@ -422,15 +339,8 @@ class Qwen35GridMIMOModel(MimoModel):
         input_ids: torch.Tensor | None,
         encoder_name: str,
     ) -> None:
-        """Attach per-sample bridge fan-out split sizes for the Qwen3.5 ViT.
-
-        Overrides ``MimoModel._attach_modality_split_sizes``: for the images
-        encoder the per-sample counts are derived from the encoder's own
-        ``grid_thw`` metadata (patches per image after spatial merging), NOT
-        from special-token counts in ``input_ids``.  Any inconsistency with
-        the encoder output size fails fast instead of silently falling back to
-        a uniform ``tensor_split``, which would corrupt variable-resolution
-        fan-out.  See :func:`compute_grid_visual_split_sizes`.
+        """Attach per-sample fan-out split sizes derived from ``grid_thw``
+        (not special-token counts); see :func:`compute_grid_visual_split_sizes`.
         """
         if (
             encoder_name == VISION_MODALITY_NAME
@@ -443,9 +353,8 @@ class Qwen35GridMIMOModel(MimoModel):
                 self.config.spatial_merge_size,
             )
             if split_sizes is not None:
-                # Mirror the upstream fan-in guard: metadata-based fan-out
-                # assumes encoder DP <= language DP (also enforced at config
-                # time by validate_qwen35_grid_config).
+                # Runtime mirror of the config-time guard in
+                # validate_qwen35_grid_config.
                 if (
                     self.role.mode is ModuleLayout.NON_COLOCATED
                     and self.mimo_config.module_to_grid_map
@@ -475,13 +384,8 @@ class Qwen35GridMIMOModel(MimoModel):
     ):
         """Freeze the locally present modules (``Qwen35Model.freeze`` semantics).
 
-        The grid model is rank-selective: an encoder-only rank has no language
-        module and a language-only rank has no images submodule, so each flag
-        only affects the module when it is actually present locally (matching
-        the colocated ``Qwen35MIMOModel`` / ``Qwen35Model`` behavior).  The vision
-        encoder is the images submodule (``Qwen35VisionSubmodules``, which
-        contains the Qwen3-VL ViT); the projection is the ViT's internal
-        multimodal projector.
+        The grid model is rank-selective: each flag applies only when the module
+        is present on this rank (encoder-only / language-only ranks).
         """
         modules = []
         if freeze_language_model and self.language_model is not None:
@@ -516,15 +420,9 @@ class Qwen35GridMIMOModel(MimoModel):
         modality_inputs: dict[str, dict[str, Any]] | None,
         packing_kwargs: dict | None = None,
     ):
-        """Colocated forward with Qwen3.5 deepstack visual-feature injection.
-
-        Identical to ``MimoModel._forward_all_modules`` except that, when the
-        images submodule produced deepstack auxiliary features, they are
-        injected into the language forward as ``deepstack_visual_embeds`` with
-        the visual position masks computed from the batch masks - the same
-        semantics as the colocated ``Qwen35MIMOModel``.
+        """``MimoModel._forward_all_modules`` plus deepstack visual-feature
+        injection into the language forward (colocated semantics).
         """
-        # If packing_kwargs is provided, construct PackedSeqParams
         packed_seq_params = None
         if packing_kwargs is not None:
             for key in packing_kwargs:
@@ -533,7 +431,6 @@ class Qwen35GridMIMOModel(MimoModel):
             packed_seq_params = PackedSeqParams(**packing_kwargs)
             packed_seq_params.qkv_format = "thd"
 
-        # 1. Process each modality to get embeddings
         modality_embeddings = {}
         deepstack_feature_lists: list | None = None
         for modality_name, submodule in self.modality_submodules.items():
@@ -545,8 +442,6 @@ class Qwen35GridMIMOModel(MimoModel):
                 embeddings = submodule.forward(encoder_inputs=modality_inputs[modality_name])
                 if embeddings is not None:
                     modality_embeddings[modality_name] = embeddings
-                # Qwen3.5: capture the deepstack auxiliary features produced by
-                # the images submodule (stashed by Qwen35VisionSubmodules).
                 # The submodule may be DDP-wrapped; unwrap for the type check.
                 inner_submodule = getattr(submodule, "module", submodule)
                 if isinstance(inner_submodule, Qwen35VisionSubmodules) and getattr(
@@ -554,22 +449,18 @@ class Qwen35GridMIMOModel(MimoModel):
                 ):
                     deepstack_feature_lists = inner_submodule.last_deepstack_features
 
-        # Apply colocated communication if configured (no-op when colocated_comms is empty)
         if self.colocated_comms:
             modality_embeddings = self._apply_colocated_comms(modality_embeddings)
 
-        # Get text embeddings
         text_embeddings = self.get_text_embeddings(input_ids, position_ids, self.special_token_ids)
         modality_embeddings["text"] = text_embeddings
 
-        # 2. Merge embeddings from different modalities
         combined_embeddings = self.align_embeddings_by_token_positions(
             modality_embeddings=modality_embeddings,
             input_ids=input_ids,
             special_token_ids=self.special_token_ids,
         )
 
-        # 3. If sharding is needed, apply PartitionAdapter (CP/SP path).
         if self.partition_adapter is not None:
             combined_embeddings = combined_embeddings.transpose(0, 1).contiguous()
             combined_embeddings, labels, loss_mask, _, packed_seq_params = (
@@ -591,11 +482,9 @@ class Qwen35GridMIMOModel(MimoModel):
             num_visual_embeds = primary.size(0) if primary is not None else None
             visual_pos_masks = self._deepstack_visual_pos_masks(num_visual_embeds)
 
-        # 5. Forward pass through language model
         lm_output = self.language_model(
-            # decoder_input replaces the embedding lookup, so input_ids is
-            # unused here; position_ids is still consumed by mRoPE in models
-            # such as Qwen3-VL.
+            # decoder_input replaces the embedding lookup (input_ids unused);
+            # position_ids is still consumed by mRoPE.
             input_ids=None,
             position_ids=position_ids,
             decoder_input=combined_embeddings,
@@ -632,11 +521,10 @@ def build_qwen35_language_model_spec(
     vp_stage: int | None = None,
     pg_collection=None,
 ) -> ModuleSpec:
-    """Build the ``MimoModelConfig`` language module spec for Qwen3.5.
-
-    ``pg_collection`` is nullable: it is threaded into the module constructor
-    and ``MimoModel.sharded_state_dict`` injects ``dp_cp_group`` from it when
-    present (global parallel-state fallback otherwise).
+    """Build the ``MimoModelConfig`` language module spec for Qwen3.5;
+    ``pg_collection`` is nullable (``MimoModel.sharded_state_dict`` injects
+    ``dp_cp_group`` from it when present, global parallel-state fallback
+    otherwise).
     """
     return ModuleSpec(
         module=Qwen35LanguageModule,
@@ -672,10 +560,9 @@ def build_qwen35_images_submodule_spec(
 ) -> ModuleSpec:
     """Build the ``MimoModelConfig`` images modality submodule spec for Qwen3.5.
 
-    The encoder is ``Qwen3VisionModel`` (``qwen3_vit``); its internal
-    projection already produces language-hidden-size embeddings, so the
-    submodule carries no input projections.  ``pg_collection`` is nullable and
-    stored on the built submodule for checkpoint metadata injection.
+    No ``input_projections`` (the encoder's internal projection already emits
+    language-hidden-size embeddings); ``pg_collection`` is nullable and stored
+    on the built submodule for checkpoint metadata injection.
     """
     encoder_spec = ModuleSpec(
         module=Qwen3VisionModel,
@@ -687,19 +574,14 @@ def build_qwen35_images_submodule_spec(
             "projection_type": projection_type,
             "pre_process": True,
             "post_process": True,
-            # Thread the vision module's process groups into the encoder so its
-            # TP-sharded layers use the vision TP group instead of the global
-            # parallel state (which describes the language module in grid mode).
+            # Vision TP-sharded layers must use the vision TP group, not the
+            # global parallel state (which describes the language module).
             "pg_collection": pg_collection,
         },
     )
     return ModuleSpec(
         module=Qwen35VisionSubmodules,
         params={
-            # Thread the vision transformer config into the submodule itself:
-            # per-module DDP wrapping reads ``module.config`` (the language
-            # module carries its own; the images submodule would otherwise have
-            # none, being a ``ModalitySubmodules``).
             "config": transformer_config,
             "pg_collection": pg_collection,
         },
@@ -743,25 +625,18 @@ def build_qwen35_mimo_config(
 
     Args:
         special_token_ids: Per-modality special token ids for embedding
-            alignment, e.g. ``{"images": <image token id>}``.  ``None``
-            defaults to the language config's ``image_token_id``.
-        module_to_grid_map: Prebuilt ``HyperCommGrid`` per component
-            (``"images"`` and ``"language"``).  ``None`` selects the colocated
-            layout (global parallel state, default COLOCATED role).
+            alignment; ``None`` defaults to the language config's ``image_token_id``.
+        module_to_grid_map: Prebuilt ``HyperCommGrid`` per component; ``None``
+            selects the colocated layout (global parallel state, COLOCATED role).
         pg_collection: Nullable ``ProcessGroupCollection`` for the language
             module (threaded into the language spec only).
-        images_pg_collection: Nullable ``ProcessGroupCollection`` for the
-            images modality module (threaded into the images submodule spec
-            only).  Kept separate from ``pg_collection`` so that on an
-            encoder-only rank the images submodule - the one module the rank
-            actually hosts - gets the *vision* collection instead of the
-            language one (which is ``None`` there).  ``None`` leaves the
-            submodule's ``pg_collection`` unset (global parallel-state
-            fallback for checkpoint metadata).
+        images_pg_collection: Nullable ``ProcessGroupCollection`` for the images
+            module (threaded into the images submodule spec only).  Kept separate
+            from ``pg_collection`` so that on an encoder-only rank the images
+            submodule gets the *vision* collection, not the (absent) language one.
         kv_format: Key-value cache format ("sbhd" or "thd").
 
-    The grid-map keys are validated by ``MimoModelConfig.__post_init__``
-    (must be exactly the modality names plus ``"language"``).
+    Grid-map keys are validated by ``MimoModelConfig.__post_init__``.
     """
     if special_token_ids is None:
         special_token_ids = {VISION_MODALITY_NAME: language_transformer_config.image_token_id}
@@ -831,26 +706,14 @@ def qwen35_grid_mimo_model_provider(
 ) -> Qwen35GridMIMOModel:
     """Build the Qwen3.5 grid-based MIMO model (see :func:`build_qwen35_mimo_config`).
 
-    ``mimo_infra`` is an optional prebuilt infrastructure object (duck-typed
-    interface of ``flagscale.models.mimo.bridge.infra.MIMOInfra``) exposing:
-
-    - ``module_to_grid_map``: ``Dict[str, HyperCommGrid]``
-    - ``module_to_pg_collection``: ``Dict[str, Optional[ProcessGroupCollection]]``
-
-    When given, it supplies ``module_to_grid_map`` and the *per-module*
-    ``pg_collection`` values (the language collection into the language spec,
-    the images collection into the images submodule spec; ``None`` for ranks
-    outside the respective grid), and the explicit ``module_to_grid_map`` /
-    ``pg_collection`` / ``images_pg_collection`` arguments must be left unset.
-
-    Without ``mimo_infra``, a single ``pg_collection`` is threaded into both
-    specs (``images_pg_collection`` defaults to it), preserving the colocated
-    single-collection call pattern.
-
-    ``cp_group`` / ``tp_group`` for ``MimoModel``'s partition adapter are
-    derived from the language ``pg_collection`` when present (nullable
-    otherwise).  When ``mimo_grid_state`` is given it is attached to the built
-    model as ``model.mimo_grid_state`` for the training loop.
+    ``mimo_infra`` (duck-typed ``bridge.infra.MIMOInfra``: ``module_to_grid_map``
+    and ``module_to_pg_collection``) supplies the grid map and the per-module
+    ``pg_collection`` values; the explicit ``module_to_grid_map`` /
+    ``pg_collection`` / ``images_pg_collection`` arguments must then be left
+    unset.  Without it, one ``pg_collection`` is threaded into both specs (the
+    colocated single-collection call pattern).  ``cp_group`` / ``tp_group``
+    derive from the language ``pg_collection``; ``mimo_grid_state`` is attached
+    as ``model.mimo_grid_state`` for the training loop.
     """
     if mimo_infra is not None:
         if (
@@ -867,8 +730,6 @@ def qwen35_grid_mimo_model_provider(
         pg_collection = mimo_infra.module_to_pg_collection.get(LANGUAGE_MODULE_NAME)
         images_pg_collection = mimo_infra.module_to_pg_collection.get(VISION_MODALITY_NAME)
     elif images_pg_collection is None:
-        # Direct path: only one collection is supplied; thread it into both
-        # specs (per-module collections only exist via mimo_infra).
         images_pg_collection = pg_collection
 
     mimo_config = build_qwen35_mimo_config(
@@ -906,8 +767,6 @@ def qwen35_grid_mimo_model_provider(
     return model
 
 
-# Import-time registration: ``build_grid_multimodule_communicator`` looks the
-# communicator description up from ``bridge.contracts`` instead of carrying
-# Qwen3.5-specific constants, so importing this provider makes the grid path
-# work for Qwen3.5 without touching the bridge machinery.
+# Import-time registration: build_grid_multimodule_communicator resolves the
+# contract from bridge.contracts, so importing this provider wires the grid path.
 register_grid_communicator_contract("qwen35", QWEN35_GRID_COMMUNICATOR_CONTRACT)
