@@ -1462,8 +1462,17 @@ def validate_args(args, defaults={}):
 
     # disable async_tensor_model_parallel_allreduce when
     # model parallel memory optimization is enabled
-    if (args.tensor_model_parallel_size > 1 or args.context_parallel_size > 1) \
+    ######### FlagScale Begin #########
+    # CUDA_DEVICE_MAX_CONNECTIONS is an NVIDIA CUDA driver environment variable and has
+    # no effect on other runtimes (MUSA, CANN, etc.), so this whole check is CUDA-only.
+    # get_device_arch_version() returns the device property `major`, which only carries
+    # NVIDIA compute-capability semantics (8: Ampere, 9: Hopper, 10: Blackwell) on CUDA;
+    # on other platforms the value belongs to a different numbering scheme and must not
+    # be compared against 10.
+    if cur_platform.name() == "cuda" \
+        and (args.tensor_model_parallel_size > 1 or args.context_parallel_size > 1) \
         and get_device_arch_version() < 10:
+    ######### FlagScale End #########
         # CUDA_DEVICE_MAX_CONNECTIONS requirement no longer exists since the Blackwell architecture
         if args.use_torch_fsdp2 or args.use_megatron_fsdp:
             fsdp_impl = "Torch-FSDP2" if args.use_torch_fsdp2 else "Megatron-FSDP"
