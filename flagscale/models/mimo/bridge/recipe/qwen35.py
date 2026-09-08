@@ -65,7 +65,7 @@ from ..parallelism import (
 )
 
 #: Images module name used in the grid specs (the MIMO modality key, matching
-#: ``qwen35_grid_mimo_model.VISION_MODALITY_NAME``).
+#: ``providers.qwen35.VISION_MODALITY_NAME``).
 IMAGES_MODULE_NAME = "images"
 
 
@@ -368,9 +368,8 @@ def compute_qwen35_grid_sequence_parallel(
     token dimension (per-frame ``cu_seqlens`` summing to the total token
     count).  Enabling SP makes the first column-parallel qkv layer
     all-gather the full sequence along dim 0 (2x tokens with TP2) while the
-    packed seq params still describe the full dimension - silent shape
-    corruption (query dim0 6720 vs cu_seqlens sum 3360 in the reported VTP2
-    failure).  The vision module therefore keeps tensor parallelism but must
+    packed seq params still describe the full dimension, causing silent shape
+    corruption.  The vision module therefore keeps tensor parallelism but must
     never run with sequence parallelism; the vision projection config
     hardcodes ``sequence_parallel = False`` by design
     (``get_vision_projection_config``).

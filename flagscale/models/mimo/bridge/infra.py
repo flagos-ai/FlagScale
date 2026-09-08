@@ -82,7 +82,7 @@ def _is_member_process_group(pg) -> bool:
 # It covers the group set required by
 # ``megatron.core.models.mimo.optimizer._get_pg_collection_for_optimizer``
 # (dp, dp-cp, tp, pp, tp-pp, tp-ep-pp, dp-ep, all dims) plus the groups
-# consumed by ``flagscale.models.mimo.parallel_state_ctx``.
+# consumed by ``flagscale.models.mimo.colocated.parallel_state_ctx``.
 _GRID_PG_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dp", ("dp",)),
     ("dp_cp", ("dp", "cp")),

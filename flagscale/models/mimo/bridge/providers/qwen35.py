@@ -25,7 +25,7 @@ FlagScale Qwen3.5 / Qwen3-VL submodule classes and specs:
   The language component always uses the fixed MIMO key ``"language"``
   (``MIMO_LANGUAGE_MODULE_KEY``).
 
-The provider is *grid-aware* but does not wire CLI/training yet: it accepts a
+The provider is *grid-aware*: it accepts a
 prebuilt ``module_to_grid_map`` (``Dict[str, HyperCommGrid]``) and a nullable
 ``pg_collection`` (``ProcessGroupCollection``), or a prebuilt "MIMOInfra"
 object (duck-typed interface of
@@ -69,7 +69,6 @@ package) and no ``megatron.bridge`` dependency: this is a pure
 left untouched.
 """
 
-from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -107,10 +106,6 @@ VISION_ENCODER_NAME = "qwen3_vit"
 
 #: MIMO language component name (fixed by MIMO: "language").
 LANGUAGE_MODULE_NAME = MIMO_LANGUAGE_MODULE_KEY
-
-#: Module grid dimension order (fastest-varying first), matching
-#: ``flagscale.models.mimo.bridge.infra.MODULE_GRID_DIM_NAMES``.
-MODULE_GRID_DIM_NAMES: tuple[str, ...] = ("tp", "cp", "dp", "ep", "pp")
 
 #: Grid communicator contract for the Qwen3.5 images -> language topology
 #: (images is a source module, language a sink).  The patch-packed vision
@@ -710,38 +705,6 @@ def build_qwen35_images_submodule_spec(
         },
         submodules={"encoders": {VISION_ENCODER_NAME: encoder_spec}},
     )
-
-
-def build_qwen35_module_to_grid_map(
-    module_parallelisms: Mapping[str, Any],
-) -> dict[str, HyperCommGrid]:
-    """Build one ``HyperCommGrid`` per module from parallelism configs.
-
-    ``module_parallelisms`` maps module names (``"images"`` / ``"language"``)
-    to objects exposing ``tensor_model_parallel_size``, ``context_parallel_size``,
-    ``data_parallel_size``, ``expert_model_parallel_size``,
-    ``pipeline_model_parallel_size`` and (optional) ``rank_offset`` — e.g.
-    ``flagscale.models.mimo.bridge.parallelism.ModuleParallelismConfig``.
-
-    Mirrors ``flagscale.models.mimo.bridge.infra.build_module_grids``
-    (same dimension order and rank-layout convention); use the shared helper
-    when that module becomes importable.
-    """
-    grids: dict[str, HyperCommGrid] = {}
-    for module_name, parallelism in module_parallelisms.items():
-        shape = [
-            parallelism.tensor_model_parallel_size,
-            parallelism.context_parallel_size,
-            parallelism.data_parallel_size,
-            parallelism.expert_model_parallel_size,
-            parallelism.pipeline_model_parallel_size,
-        ]
-        grids[module_name] = HyperCommGrid(
-            shape,
-            list(MODULE_GRID_DIM_NAMES),
-            rank_offset=int(getattr(parallelism, "rank_offset", 0) or 0),
-        )
-    return grids
 
 
 # ---------------------------------------------------------------------------

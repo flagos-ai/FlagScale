@@ -20,8 +20,8 @@ Key functions:
 Non-colocated MIMO assigns each rank to exactly one module; every module's
 ``ProcessGroupCollection`` is nullable on ranks that do not participate in it.
 All functions accept plain ``module_to_grid_map`` / ``pg_collections`` dicts
-(duck-typed) so they work with any infra object, e.g. a future FlagScale
-non-colocated infra, without importing it.
+(duck-typed) so they work with any infra object, including FlagScale's
+non-colocated ``bridge.infra``, without importing it.
 
 v0.18.2 adaptation notes (vs. Megatron-Bridge):
 - ``HyperCommGrid`` has no ``get_pg_size()``; DP sizes are derived from
