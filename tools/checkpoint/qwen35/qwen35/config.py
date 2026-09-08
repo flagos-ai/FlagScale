@@ -20,6 +20,7 @@ from pathlib import Path
 
 import torch
 import yaml
+from packaging.version import Version
 
 
 def _flatten_config(raw):
@@ -93,7 +94,10 @@ class Config:
             self.vision_ffn_hidden_size = _require(cfg, "vision_ffn_hidden_size")
             self.patch_size = _require(cfg, "patch_size")
             self.temporal_patch_size = 2  # hardcoded in get_vision_model_config
-            self.use_linear_proj = cfg.get("vision_patch_embed_linear", True)
+            self.use_linear_proj = cfg.get(
+                "vision_patch_embed_linear",
+                Version("2.9.0") < Version(torch.__version__) < Version("2.11.0"),
+            )
         else:
             self.vision_num_layers = 0
             self.vision_hidden_size = 0

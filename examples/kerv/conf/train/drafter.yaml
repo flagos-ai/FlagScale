@@ -1,0 +1,31 @@
+# Train the one-layer KERV drafter with the released DeepSpeed ZeRO-2 recipe.
+resources:
+  nproc_per_node: ${oc.env:KERV_TRAIN_GPUS,4}
+  cuda_visible_devices: ${oc.env:CUDA_VISIBLE_DEVICES,'0,1,2,3'}
+
+system: {}
+
+kerv:
+  stage: drafter
+  source_root: ${oc.env:KERV_SOURCE_ROOT,./KERV}
+  entrypoint: training/train_drafter.py
+  launcher: python
+  work_dir: .
+  python_paths:
+    - ${oc.env:KERV_SOURCE_ROOT,./KERV}/openvla
+  dependencies:
+    - torch
+    - transformers
+    - deepspeed
+    - accelerate
+    - safetensors
+  arguments:
+    base-model: ${oc.env:KERV_BASE_CHECKPOINT,./checkpoints/openvla-libero-goal}
+    data-dir: ${oc.env:KERV_DRAFT_DATA,./outputs/kerv_draft_data/samples}
+    output-dir: ${experiment.exp_dir}/checkpoints
+    drafter-config: ${oc.env:KERV_SOURCE_ROOT,./KERV}/training/drafter_config.json
+    epochs: 200
+    save-every: 10
+    wandb-project: KERV-Drafter
+    wandb-mode: ${oc.env:WANDB_MODE,offline}
+    deepspeed_config: ${oc.env:KERV_SOURCE_ROOT,./KERV}/training/deepspeed_zero2.json

@@ -40,10 +40,6 @@ c550:
       hetero_train: {}
       benchmark:
         qwen3: ["0_6b_metax"]
-      inference:
-        qwen3: ["4b_tp2_metax"]
-      serve:
-        qwen2_5: ["0.5b_metax"]
     unit:
       # Include patterns: "*" for all, or list specific paths
       include: "*"

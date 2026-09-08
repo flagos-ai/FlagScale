@@ -138,7 +138,9 @@ class Qwen2_5VisionModel(VisionModule):
         projection_type: str = "mlp",
 
         pre_process: bool = True,
-        post_process: bool = False
+        post_process: bool = False,
+        pg_collection=None,
+        vp_stage: int=None,
     ) -> None:
         super().__init__(config=transformer_config)
 
@@ -178,6 +180,8 @@ class Qwen2_5VisionModel(VisionModule):
             spec=transformer_layer_spec,
             pre_process=self.pre_process,
             post_process=self.post_process,
+            pg_collection=pg_collection,
+            vp_stage=vp_stage,
             post_layer_norm=True
         )
 

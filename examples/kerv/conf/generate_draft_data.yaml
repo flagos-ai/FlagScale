@@ -1,0 +1,26 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+defaults:
+  - _self_
+  - train: draft_data
+
+experiment:
+  exp_name: kerv_draft_data
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: train
+    backend: native
+    entrypoint: flagscale/train/train_kerv.py
+  runner:
+    hostfile: null
+    nproc_per_node: 1
+    rdzv_backend: static
+  envs:
+    CUDA_VISIBLE_DEVICES: ${oc.env:CUDA_VISIBLE_DEVICES,0}
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
