@@ -3,10 +3,10 @@
 """Generic colocated MIMO model wrapper.
 
 ``ColocatedMIMOModel`` owns all model-agnostic orchestration for colocated
-MIMO training: the microbatch scheduler lifecycle, intra-TP microbatch
-slicing, macro-batch output exchange, and the delayed ViT backward skeleton.
-Model adapters (e.g. Qwen3.5) subclass it, build the two modules, and
-implement the small hook surface below; everything else is generic.
+MIMO training (microbatch scheduler lifecycle, intra-TP microbatch slicing,
+macro-batch output exchange, delayed ViT backward skeleton); model adapters
+(e.g. Qwen3.5) subclass it, build the two modules, and implement the small
+hook surface below.
 
 Vision output entries use the canonical layout ``{"main": Tensor | None,
 "aux": list[Tensor] | None}``: ``main`` is the embedding injected into the
@@ -48,13 +48,11 @@ class ColocatedMIMOModel(MegatronModule):
         self.vision_pg = pg_collections["vision"]
         self.language_pg = pg_collections["language"]
 
-        # Assigned by the subclass after __init__ (built under each module's
-        # own parallel context).
+        # Assigned by the subclass after __init__ (under each module's parallel context).
         self.vision_model = None
         self.language_model = None
 
-        # Set by ``freeze``: a frozen ViT forwards under no_grad and skips the
-        # delayed backward entirely.
+        # Set by ``freeze``: a frozen ViT forwards under no_grad and skips delayed backward.
         self._vision_frozen = False
 
         # Validated once at the training entry by validate_mimo_config (vbf > 1).
@@ -66,9 +64,7 @@ class ColocatedMIMOModel(MegatronModule):
             use_fp32_grad_cache=use_fp32_grad_cache,
         )
 
-    # ------------------------------------------------------------------
     # Model adapter interface: the only model-specific surface.
-    # ------------------------------------------------------------------
     def _count_vision_tokens(self, batches: list[dict[str, Any]]) -> list[int] | None:
         """Return per-microbatch visual token counts over the FULL macro batch.
 
@@ -119,14 +115,12 @@ class ColocatedMIMOModel(MegatronModule):
         """Vision projection module for ``freeze`` (None when not separable)."""
         return None
 
-    # ------------------------------------------------------------------
     # Scheduler orchestration (generic).
-    # ------------------------------------------------------------------
     def next_microbatch(self, data_iterator, get_batch_fn):
         """Return the next LLM microbatch and its vision output from the scheduler.
 
-        Assembles a new ViT macro batch when the current one is exhausted.  All
-        scheduler orchestration lives behind this method so that
+        Assembles a new ViT macro batch when the current one is exhausted;
+        all scheduler orchestration lives behind this method so that
         ``forward_step`` never touches the scheduler directly.
         """
         if self.scheduler.need_new_macro_batch():
@@ -139,11 +133,9 @@ class ColocatedMIMOModel(MegatronModule):
         """Wrap ``get_batch_fn`` to drop vision inputs this rank does not own.
 
         The TP-group broadcast in ``get_batch`` delivers every microbatch's
-        images to all TP peers, but only the owner rank computes on them (see
-        ``get_my_microbatch_range``).  Ranks without a vision module (language
-        PP stages beyond the first) never compute on any of them.  Dropping
-        the non-owned copies at pull time keeps them from being held for the
-        lifetime of the macro batch.
+        images to all TP peers, but only the owner rank computes on them;
+        dropping non-owned copies at pull time keeps them from being held for
+        the lifetime of the macro batch.
         """
         lo, hi = get_my_microbatch_range(self.language_pg, self.vit_batch_factor)
         pull_idx = 0
@@ -179,19 +171,15 @@ class ColocatedMIMOModel(MegatronModule):
             for param in module.parameters():
                 param.requires_grad = False
 
-    # ------------------------------------------------------------------
     # Scheduler callbacks: run ViT on a macro batch and back-propagate later.
-    # ------------------------------------------------------------------
     def _vision_forward_fn(self, batches: list[dict[str, Any]], macro) -> list[dict[str, Any]]:
         """Run one ViT forward over this rank's slice of the macro batch.
 
-        ``batches`` is a list of dictionaries returned by the training loop's
-        ``get_batch``.  This rank extracts and runs only its own microbatch
-        slice (see ``get_my_microbatch_range``), splits the output back into
-        per-microbatch chunks, and exchanges chunks inside the language TP
-        group so every rank holds the full macro batch's outputs (its own
-        slice computed, the rest received from their owner ranks).  The ViT
-        outputs to back-propagate later are stashed on ``macro.ctx``.
+        This rank extracts and runs only its own microbatch slice (see
+        ``get_my_microbatch_range``), splits the output into per-microbatch
+        chunks, and exchanges chunks inside the language TP group so every
+        rank holds the full macro batch's outputs.  The ViT outputs to
+        back-propagate later are stashed on ``macro.ctx``.
         """
         if self.vision_model is None:
             return [{"main": None, "aux": None} for _ in batches]
@@ -220,8 +208,7 @@ class ColocatedMIMOModel(MegatronModule):
 
         macro.ctx = (macro_main, macro_aux)
 
-        # Entries outside this rank's slice are empty receive buffers that
-        # the exchange below fills from their owner ranks.
+        # Entries outside this rank's slice are empty receive buffers the exchange fills.
         hidden_size = self._embed_hidden_size()
         dtype = macro_main.dtype if macro_main is not None else self.config.params_dtype
         device = torch.cuda.current_device()
@@ -240,8 +227,8 @@ class ColocatedMIMOModel(MegatronModule):
         if macro_main is not None:
             my_outputs = split_visual_embeds(macro_main, macro_aux, token_counts[lo:hi], dim=0)
         else:
-            # This rank's slice has no visual data; zero-token entries keep the
-            # exchange below collective-consistent with the other slices.
+            # Zero-token entries keep the exchange collective-consistent
+            # with the other slices when this rank's slice has no visual data.
             my_outputs = [_empty_entry(0) for _ in range(lo, hi)]
 
         entries = []
@@ -254,8 +241,8 @@ class ColocatedMIMOModel(MegatronModule):
                 entries.append(_empty_entry(token_counts[i]))
 
         # A frozen ViT skips the requires_grad marking: no hooks are
-        # registered, so the exhausted macro batch is dropped silently and the
-        # delayed ViT backward never runs.
+        # registered, so the exhausted macro batch is dropped silently and
+        # the delayed ViT backward never runs.
         exchange_macro_outputs(
             entries,
             self.language_pg,
@@ -268,13 +255,12 @@ class ColocatedMIMOModel(MegatronModule):
         """Run ViT backward after all microbatch gradients are collected.
 
         Each rank's captured gradient for a microbatch is already the complete
-        dL/d(main): the LM's TP boundary collectives (all-reduce, or all-gather
-        for sequence parallel) aggregate input gradients before they reach the
-        embedding injection point, so every language TP peer holds an identical
-        copy.  No reduce/broadcast is needed — each rank simply backwards
-        the gradients of its own microbatch slice through its own ViT forward,
-        and vision DDP then averages parameter gradients over disjoint slices
-        (equivalent to averaging over the full global batch).
+        dL/d(main): the LM's TP-boundary collectives (all-reduce, or
+        all-gather for sequence parallel) aggregate input gradients before
+        they reach the embedding injection point, so every language TP peer
+        holds an identical copy.  Each rank simply backwards its own slice
+        through its own ViT forward, and vision DDP then averages parameter
+        gradients over disjoint slices (equivalent to the full global batch).
         """
         if self.vision_model is None:
             return
@@ -297,16 +283,16 @@ class ColocatedMIMOModel(MegatronModule):
 
         def _assemble_slice_grad(key: str) -> torch.Tensor:
             # Microbatches without visual data contribute ``None`` gradient
-            # dicts; skip them so the concatenated gradient matches this
-            # rank's slice of the macro output.
+            # dicts; skipping them keeps the concatenated gradient aligned
+            # with this rank's slice of the macro output.
             if not any(g is not None and key in g for g in my_gradients):
                 return None
             return concatenate_visual_grads(my_gradients, key=key, dim=0)
 
         main_grad = _assemble_slice_grad("main")
         if main_grad is None:
-            # No gradients for this slice; release the graph so the macro does
-            # not pin the ViT activations.
+            # No gradients for this slice; release the graph so the macro
+            # does not pin the ViT activations.
             macro.ctx = None
             return
 
@@ -327,9 +313,7 @@ class ColocatedMIMOModel(MegatronModule):
 
         macro.ctx = None
 
-    # ------------------------------------------------------------------
     # Forward helpers for the subclass (generic).
-    # ------------------------------------------------------------------
     def _register_vision_output_hooks(self, vision_output: dict[str, Any]):
         """Detach a served vision output and register gradient hooks.
 
@@ -345,9 +329,7 @@ class ColocatedMIMOModel(MegatronModule):
             ]
         return main, aux
 
-    # ------------------------------------------------------------------
     # Exit-time cleanup.
-    # ------------------------------------------------------------------
     def release_training_state(self) -> None:
         """Release scheduler-held training state ahead of an exit checkpoint save.
 

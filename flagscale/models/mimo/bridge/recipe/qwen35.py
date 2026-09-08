@@ -2,49 +2,12 @@
 
 """Qwen3.5 non-colocated grid configuration contract (FlagScale-native).
 
-This module defines the *training-time* contract of the non-colocated grid
-path on top of the dependency-free layout layer in
-:mod:`flagscale.models.mimo.bridge.parallelism`:
-
-- A fail-fast validator (:func:`validate_qwen35_grid_config`) that rejects
-  anything outside this stage's capability boundary with an explicit error.
-- A builder (:func:`build_qwen35_grid_config_from_args`) that turns the
-  repeatable ``--mimo-module-specs`` string into a finalized, validated
-  :class:`MIMOParallelismConfig`.
-
-Capability boundary of this stage — any layout satisfying ALL of the
-following predicates is accepted; the validator checks mechanism support,
-not a list of previously tested combinations:
-
-1. Exactly two modules: the images (vision) module and the language
-   module (the Qwen3.5 grid adapter's scope this stage).
-2. The generic invariants of :meth:`MIMOParallelismConfig.finalize`:
-   NON_COLOCATED exact tiling (no gaps / no overlaps / full-world
-   coverage), TP sizes are powers of two, DP sizes pairwise divisible,
-   modality-side EP=ETP=1.
-3. Dense scope: both modules use CP=1, EP=1, ETP=1.
-4. The vision module is not pipelined (PP=1).
-5. Vision DP <= language DP (variable visual tokens fan out from the
-   encoder to the language DP replicas; fan-in of variable per-sample
-   visual token counts is not supported by the MCore bridge).
-6. ``num_layers`` >= language PP (at least one layer per pipeline stage;
-   non-divisible counts are handled by MCore's uneven pipeline
-   allocation, which the grid provider encodes via
-   ``num_layers_in_first/last_pipeline_stage``).
-7. ``num_mtp_layers`` == 0 (the grid path has no MTP wiring).
-
-Sequence parallelism is conservatively disabled for BOTH modules in this
-grid path (:func:`compute_qwen35_grid_sequence_parallel`): the grid language
-forward cannot shard the embeddings (``QwenVLLanguageModelEmbedding``
-asserts no scatter-to-SP) and the mRoPE freqs stay full-length, so an
-SP-enabled TP2 language module would all-gather the full sequence at the
-first column-parallel qkv (dim0 2x tokens) against full-length freqs - the
-4096-vs-2048 shape corruption.  The vision encoder has the same packed-seq
-limitation.  Requested global SP therefore resolves to per-module False for
-every accepted layout; tensor parallelism itself is unaffected.
-
-The module keeps the pure-stdlib dependency rule of
-``mimo_parallelism_config``: it imports only that module plus stdlib, so the
+Defines the training-time contract of the non-colocated grid path on
+:mod:`flagscale.models.mimo.bridge.parallelism`: a fail-fast validator
+(:func:`validate_qwen35_grid_config`; capability boundary in its docstring)
+and a builder (:func:`build_qwen35_grid_config_from_args`) that turns the
+repeatable ``--mimo-module-specs`` string into a finalized, validated
+:class:`MIMOParallelismConfig`.  Imports only that module plus stdlib, so the
 validator stays CPU-testable without torch or Megatron.
 """
 
@@ -102,35 +65,21 @@ def validate_qwen35_grid_config(
     """Validate a MIMO parallelism config for the non-colocated Qwen3.5 grid path.
 
     Fail-fast predicate checks (in order):
-
     1. Exactly two modules: the images module and the language module.
-    2. The layout resolves to :class:`MIMOLayout.NON_COLOCATED` and the
-       module rank ranges tile ``[0, world_size)`` exactly (no
-       gaps/overlaps, full-world coverage).  ``finalize`` also enforces the
-       generic invariants: TP powers of two, pairwise-divisible DP sizes,
-       dense modality modules.
-    3. CP == 1, EP == 1 and ETP == 1 for every module (dense stage scope).
-    4. The vision module is not pipelined (PP == 1).
+    2. NON_COLOCATED layout whose module rank ranges tile ``[0, world_size)``
+       exactly; ``finalize`` enforces the generic invariants (TP powers of two,
+       pairwise-divisible DP sizes, dense modality modules).
+    3. CP == 1, EP == 1 and ETP == 1 for every module.
+    4. Vision PP == 1.
     5. Vision DP <= language DP (variable visual tokens require fan-out).
-    6. ``num_layers`` (when given) is at least the language PP (one layer per
-       pipeline stage).  Divisibility is NOT required: MCore's uneven pipeline
-       allocation (set by the grid provider) gives the first stage
-       ``base + remainder`` layers and the last stage ``base`` (32 layers ->
-       PP3 12/10/10, PP6 7/5/5/5/5/5).
-    7. ``num_mtp_layers`` (when given) is 0: the grid path has no MTP wiring.
+    6. ``num_layers`` >= language PP (one layer per pipeline stage;
+       divisibility is NOT required — MCore's uneven pipeline allocation
+       handles it).
+    7. ``num_mtp_layers`` == 0 (the grid path has no MTP wiring).
 
-    Args:
-        config: The MIMO parallelism config (``finalize`` is called
-            internally, so a non-finalized config is accepted too).
-        world_size: Distributed world size.
-        images_module_name: Name of the modality module in the config.
-        num_layers: Language module layer count (``config.num_layers``);
-            ``None`` skips the PP-divisibility check.
-        num_mtp_layers: Language MTP layer count (``args.mtp_num_layers``);
-            ``None`` skips the MTP check.
-
-    Raises:
-        ValueError: On any violated constraint, with an explicit message.
+    ``finalize`` is called internally, so a non-finalized config is accepted;
+    ``num_layers`` / ``num_mtp_layers`` = ``None`` skips the respective check.
+    Raises ``ValueError`` on any violated constraint.
     """
     if images_module_name not in config.module_parallelisms:
         raise ValueError(
@@ -163,7 +112,6 @@ def validate_qwen35_grid_config(
     images = config.module_parallelisms[images_module_name]
     language = config.module_parallelisms[LANGUAGE_MODULE_NAME]
 
-    # Dense stage scope: CP / EP / ETP must be 1 everywhere.
     _require_dense(images_module_name, images)
     _require_dense(LANGUAGE_MODULE_NAME, language)
 
@@ -185,12 +133,9 @@ def validate_qwen35_grid_config(
             f"language DP={language.data_parallel_size} (fail-fast)."
         )
 
-    # Language layer-count bound.  MCore's uneven pipeline allocation
-    # (``num_layers_in_first_pipeline_stage`` / ``num_layers_in_last_pipeline_stage``)
-    # gives the first stage ``base + remainder`` layers and the last stage
-    # ``base`` (32 layers -> PP3 12/10/10, PP6 7/5/5/5/5/5); the grid provider
-    # sets those fields.  Only the trivial bound holds: at least one layer per
-    # pipeline stage (``pp <= num_layers``).
+    # Only the trivial bound holds (at least one layer per stage); the uneven
+    # split is MCore's, encoded by the grid provider (see
+    # compute_qwen35_pipeline_layer_split).
     if num_layers is not None:
         if isinstance(num_layers, bool) or not isinstance(num_layers, int) or num_layers < 1:
             raise ValueError(f"num_layers must be a positive integer, got {num_layers!r}.")
@@ -205,8 +150,7 @@ def validate_qwen35_grid_config(
                 "language PP (fail-fast)."
             )
 
-    # MTP: the grid path has no MTP wiring (the MCore MimoModel is built from
-    # the language spec directly; no MultiTokenPredictionBlock support).
+    # MTP: the MCore MimoModel grid path has no MTP wiring.
     if num_mtp_layers is not None:
         if (
             isinstance(num_mtp_layers, bool)
@@ -233,20 +177,10 @@ def build_qwen35_grid_config_from_args(
 ) -> MIMOParallelismConfig:
     """Build and validate the non-colocated grid config from ``--mimo-module-specs``.
 
-    Args:
-        module_specs: Repeatable spec string, e.g.
-            ``"images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2"``.
-        world_size: Distributed world size.
-        num_layers: Language module layer count; threaded into the validator
-            for the PP-divisibility check (see :func:`validate_qwen35_grid_config`).
-        num_mtp_layers: Language MTP layer count; threaded into the validator
-            for the MTP fail-fast check.
-
-    Returns:
-        The finalized, validated config (see :func:`validate_qwen35_grid_config`).
-
-    Raises:
-        ValueError: On parse or validation failure (fail-fast).
+    ``module_specs`` is a repeatable spec string, e.g.
+    ``"images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2"``.  Raises
+    ``ValueError`` on parse or validation failure; see
+    :func:`validate_qwen35_grid_config` for the checked contract.
     """
     module_parallelisms = parse_module_parallelisms(module_specs)
     config = MIMOParallelismConfig(
@@ -280,22 +214,10 @@ def compute_qwen35_pipeline_layer_split(
 ) -> list[int]:
     """Per-stage language layer counts for an (possibly uneven) PP split.
 
-    Mirrors the allocation the grid provider encodes into the language
-    transformer config (``num_layers_in_first_pipeline_stage`` /
-    ``num_layers_in_last_pipeline_stage``): ``base = num_layers // pp``,
-    ``remainder = num_layers % pp``; the first stage gets ``base + remainder``
-    layers and every other stage (including the last) gets ``base``.  The
-    middle stages split evenly by construction, which is exactly what MCore's
-    uneven-pipeline machinery requires.
-
-    Examples: 32 layers with PP3 -> [12, 10, 10]; with PP6 -> [7, 5, 5, 5, 5, 5].
-
-    Args:
-        num_layers: Total language decoder layer count.
-        pipeline_model_parallel_size: Language pipeline depth.
-
-    Returns:
-        Per-stage layer counts (one entry per PP stage, first stage first).
+    Mirrors the allocation the grid provider encodes via
+    ``num_layers_in_first/last_pipeline_stage``: ``base = num_layers // pp``;
+    the first stage gets ``base + remainder``, every other stage ``base``.
+    Example: 32 layers with PP3 -> [12, 10, 10]; with PP6 -> [7, 5, 5, 5, 5, 5].
     """
     if isinstance(num_layers, bool) or not isinstance(num_layers, int) or num_layers < 1:
         raise ValueError(f"num_layers must be a positive integer, got {num_layers!r}.")
@@ -327,55 +249,27 @@ def compute_qwen35_grid_sequence_parallel(
 ) -> dict[str, bool]:
     """Per-module sequence-parallel flags for the grid path.
 
-    Grid mode forces the *global* parallel state to TP=1 and the global
-    ``args.sequence_parallel`` to False (``ModelParallelConfig`` rejects
-    sequence parallelism without tensor parallelism), so the user's requested
-    value - preserved in the grid-specific ``args.mimo_sequence_parallel`` -
-    must be applied per module:
+    Grid mode forces the global parallel state to TP=1 and global
+    ``args.sequence_parallel`` to False (``ModelParallelConfig`` rejects SP
+    without TP), so the requested value (``args.mimo_sequence_parallel``) is
+    applied per module: ``module_sp = requested && module_tp > 1 &&
+    module_sp_capable``.  ``sp_capable_modules`` defaults to empty — an explicit
+    opt-in for a future capable implementation.
 
-        ``module_sequence_parallel = requested && module_tp > 1 && module_sp_capable``
+    The language module is not SP-capable: the grid forward does not shard
+    embeddings (``QwenVLLanguageModelEmbedding`` asserts no scatter-to-SP) and
+    the mRoPE freqs stay full-length, so with SP the first column-parallel qkv
+    all-gathers the full sequence (2x tokens per rank) against full-length
+    freqs — a ``(2S, ...)`` query times ``(S, ...)`` freqs: silent shape
+    corruption.
 
-    ``sp_capable_modules`` names the modules whose implementation supports
-    sequence parallelism.  The default is **no module**: in this grid path
-    both implementations are SP-incapable, so any requested global SP
-    resolves to per-module False for every accepted layout (language TP2
-    included) while tensor parallelism itself is untouched.
-
-    The language module is not SP-capable in the non-colocated grid for two
-    coupled reasons:
-
-    - The grid language forward does not shard the embeddings: the Qwen3.5
-      language module's ``QwenVLLanguageModelEmbedding`` asserts no
-      scatter-to-SP (``scatter_to_sequence_parallel == False``), so every TP
-      rank feeds the FULL sequence into the transformer stack.
-    - The mRoPE freqs stay full-length: ``Qwen35LanguageRotaryEmbedding``
-      builds ``emb`` of shape ``(S, bs, 1, 2*dim)`` from the full-length
-      ``position_ids`` ``(3, bs, S)``.
-
-    With SP enabled on a TP2 language module, the first column-parallel qkv
-    layer would all-gather along dim 0 - the full sequence on every rank
-    (2x tokens with TP2, e.g. 4096 for S=2048) - while the mRoPE freqs still
-    describe S positions: ``apply_rotary_pos_emb_absolute`` then multiplies
-    a ``(2S, ...)`` query against ``(S, ...)`` freqs (silent broadcast
-    failure / shape corruption).  SP is therefore disabled for the language
-    module too until the grid forward shards embeddings and slices freqs per
-    SP rank; ``sp_capable_modules`` remains as an explicit opt-in escape
-    hatch for a future capable implementation.
-
-    The vision module is likewise not SP-capable: the Qwen3-VL vision
-    encoder's patch and position embeddings produce full-sequence
-    activations and its packed-seq attention / rotary operate on the full
-    token dimension (per-frame ``cu_seqlens`` summing to the total token
-    count).  Enabling SP makes the first column-parallel qkv layer
-    all-gather the full sequence along dim 0 (2x tokens with TP2) while the
-    packed seq params still describe the full dimension, causing silent shape
-    corruption.  The vision module therefore keeps tensor parallelism but must
-    never run with sequence parallelism; the vision projection config
-    hardcodes ``sequence_parallel = False`` by design
+    The vision module is likewise not SP-capable: its patch/position embeddings
+    and packed-seq attention/rotary operate on the full token dimension, so SP
+    causes the same all-gather mismatch.  Tensor parallelism is unaffected; the
+    vision projection config hardcodes ``sequence_parallel = False``
     (``get_vision_projection_config``).
 
-    Returns:
-        ``{module_name: sequence_parallel}`` for every module in the config.
+    Returns ``{module_name: sequence_parallel}`` for every module.
     """
     if sp_capable_modules is None:
         sp_capable_modules = set()
@@ -400,15 +294,11 @@ def qwen35_grid_data_contract(
 ) -> dict[str, int]:
     """Validate batch-size divisibility against every module DP (fail-fast).
 
-    In the non-colocated grid path every data-loading rank samples the same
-    global micro-batch and per-module DP slicing happens in the forward step,
-    so ``micro_batch_size`` and ``global_batch_size`` must be divisible by
-    every module's DP and ``num_microbatches * micro_batch_size`` must equal
-    ``global_batch_size`` (the num-microbatches calculator runs with
-    data_parallel_size == 1 in grid mode).
-
-    Returns:
-        ``{module_name: dp_size}`` for the config's modules.
+    Every data-loading rank samples the same global micro-batch and per-module
+    DP slicing happens in the forward step, so both batch sizes must be
+    divisible by every module's DP and ``num_microbatches * micro_batch_size``
+    must equal ``global_batch_size`` (the calculator runs with
+    data_parallel_size == 1).  Returns ``{module_name: dp_size}``.
     """
     if num_microbatches * micro_batch_size != global_batch_size:
         raise ValueError(

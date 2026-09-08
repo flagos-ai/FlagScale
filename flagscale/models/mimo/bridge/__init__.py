@@ -2,29 +2,13 @@
 
 """Megatron-Bridge-style adapter layer for MCore-based MIMO training.
 
-This subpackage plays the same role for FlagScale that Megatron-Bridge plays
-for Megatron-LM: it adapts FlagScale's launcher/config/model/data/training
-lifecycle onto the MIMO infrastructure provided by Megatron-LM-FL's
-``megatron.core`` (``MimoModel`` / ``HyperCommGrid`` /
-``MultiModulePipelineCommunicator`` / ``MimoOptimizer``), instead of
-re-implementing the machinery in FlagScale.
-
-Module map:
-
-- ``parallelism``: component layout config (``ModuleParallelismConfig`` /
-  ``MIMOParallelismConfig``), layout classification and spec parsing; stdlib
-  only, torch-free.
-- ``infra``: ``HyperCommGrid`` construction and nullable per-module
-  ``ProcessGroupCollection`` creation (``MIMOInfra``).
-- ``runtime``: rank-role-aware runtime helpers (active-module PG selection,
-  multimodule grad finalization, schedule PG collections).
-- ``data``: rank-role-aware sampling and module-local DP batch slicing.
-- ``training``: grid training wiring (per-module DDP, multimodule
-  communicator, grid optimizer, checkpoint state).
-- ``recipe/qwen35``: Qwen3.5 grid recipe contract (predicate-validated
-  capability boundary, fail-fast validation, data contract).
-- ``providers/qwen35``: ``Qwen35GridMIMOModel`` provider on MCore
-  ``MimoModel``.
+Adapts FlagScale's launcher/config/model/data/training lifecycle onto
+Megatron-LM-FL's ``megatron.core`` MIMO infrastructure (``MimoModel`` /
+``HyperCommGrid``) instead of re-implementing it.  Submodules: ``parallelism``
+(layout config, stdlib-only/torch-free), ``infra`` (grid and per-module PG
+construction), ``runtime``, ``data``, ``training`` (grid wiring),
+``recipe/qwen35`` (fail-fast layout contract) and ``providers/qwen35``
+(``Qwen35GridMIMOModel``).
 """
 
 from .data import (

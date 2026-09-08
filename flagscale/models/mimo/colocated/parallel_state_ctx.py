@@ -2,26 +2,17 @@
 
 """Runtime parallel-state context switching for colocated MIMO modules.
 
-WARNING: The current implementation replaces
-``megatron.plugin.hetero.parallel_context._GLOBAL_PARALLEL_CONTEXT`` at
-runtime.  This is the simplest way to make ``megatron.core.parallel_state``
-getters return module-local process groups, but it has caveats:
+WARNING: replaces ``megatron.plugin.hetero.parallel_context._GLOBAL_PARALLEL_CONTEXT``
+at runtime so ``megatron.core.parallel_state`` getters return module-local
+process groups.  Caveats: not thread-safe (main training thread only); code
+caching parallel-state values across a switch sees stale data (rank/world size
+are computed dynamically from the underlying groups to mitigate this); depends
+on Megatron-LM-FL internals.
 
-1. It is not thread-safe.  Only the main training thread should call
-   ``switch_parallel_state``.
-2. Any code that caches parallel-state values across a ``switch`` will see
-   stale data.  We mitigate this by computing rank/world-size dynamically from
-   the underlying groups.
-3. It depends on Megatron-LM-FL internals.  A future refactor should move to
-   a proper ``ParallelContext`` plugin or push the module-local group selection
-   into Megatron core.
-
-The class below supports only CP=1.  Expert parallelism (EP > 1) is
-supported for the language module (the vision module is dense and keeps
-singleton expert groups).  PP > 1 is supported for the language module
-(the vision module stays on first-stage ranks).  Methods that only make
-sense for other configurations raise
-``NotImplementedError`` instead of returning a silently wrong default.
+Supports only CP=1; EP > 1 and PP > 1 for the language module only (the vision
+module is dense and stays on first-stage ranks).  Methods that only make sense
+for other configurations raise ``NotImplementedError`` instead of returning a
+silently wrong default.
 """
 
 from contextlib import contextmanager
@@ -34,16 +25,14 @@ from megatron.core.utils import GlobalMemoryBuffer
 
 
 class _ModuleParallelContext:
-    """Lightweight parallel context wrapping a single module's ProcessGroupCollection.
-
-    This class implements the subset of ``megatron.plugin.hetero.parallel_context.ParallelContext``
-    methods that are reachable from ``megatron.core.parallel_state`` getters. Rank and world size
-    are computed dynamically from the underlying process groups to avoid stale cached values.
+    """Parallel context over one module's ``ProcessGroupCollection``: implements
+    the ``ParallelContext`` methods reachable from ``megatron.core.parallel_state``
+    getters, with rank/world size computed dynamically from the groups (no
+    stale cached values).
     """
 
     def __init__(self, pg_collection: ProcessGroupCollection):
         self.pg_collection = pg_collection
-        # Memory buffer is lazily created on first access.
         self._global_memory_buffer = None
 
     # ------------------------------------------------------------------
@@ -103,9 +92,8 @@ class _ModuleParallelContext:
         return self.pg_collection.tp
 
     def get_tensor_and_data_parallel_group(self, with_context_parallel=False):
-        # tp_dp_cp is the real TPxDP group (fixed pp) built by
-        # ``build_colocated_pg_collections``; with CP=1 the
-        # with/without-context-parallel variants coincide.
+        # tp_dp_cp is the real TPxDP group built by build_colocated_pg_collections;
+        # with CP=1 the with/without-context-parallel variants coincide.
         return self.pg_collection.tp_dp_cp
 
     def get_tensor_and_context_parallel_group(self, check_initialized=True):
@@ -338,15 +326,10 @@ class _ModuleParallelContext:
 
 @contextmanager
 def switch_parallel_state(pg_collection: ProcessGroupCollection):
-    """Switch the global parallel_state context to the given module's process groups.
+    """Switch the global parallel_state context to the given module's groups.
 
-    WARNING: This mutates a Megatron global.  See the module docstring for the
-    list of caveats.  The caller must ensure that no other thread is reading
-    ``parallel_state`` during the switched region.
-
-    Usage:
-        with switch_parallel_state(vision_pg):
-            vision_embeds = vision_module(...)
+    WARNING: mutates a Megatron global (see the module docstring caveats); no
+    other thread may read ``parallel_state`` inside the switched region.
     """
     saved = hetero_ctx._GLOBAL_PARALLEL_CONTEXT
     hetero_ctx._GLOBAL_PARALLEL_CONTEXT = _ModuleParallelContext(pg_collection)

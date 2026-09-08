@@ -4,7 +4,7 @@
 
 Vision and language modules colocate on the same world ranks with different
 parallel layouts; a macro/micro-batch scheduler with delayed ViT backward
-drives throughput.  This is the production path behind ``--use-mimo`` with
+drives throughput.  Production path behind ``--use-mimo`` with
 ``--mimo-layout=colocated``.
 """
 

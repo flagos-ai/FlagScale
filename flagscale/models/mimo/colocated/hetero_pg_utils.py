@@ -138,17 +138,16 @@ def _create_module_pg_collection(
             pg_collection.mp = group
 
     # TP+DP groups (fixed pp), matching Megatron's
-    # ``get_tensor_and_data_parallel_group`` semantics (with CP=1 the
-    # with/without-CP variants coincide).
+    # ``get_tensor_and_data_parallel_group`` semantics (CP=1 variants coincide).
     for ranks in groups["tp_dp"]:
         group = dist.new_group(ranks)
         if rank in ranks:
             pg_collection.tp_dp_cp = group
 
     # Singleton groups for all unused dimensions (CP=1, EP=1).  Every rank
-    # must participate in the same set of ``new_group`` calls, so we create
-    # one singleton group per global rank in a deterministic order and keep
-    # the group that contains the current rank.
+    # must issue the same set of ``new_group`` calls, so we create one
+    # singleton group per global rank in a deterministic order and keep the
+    # group that contains the current rank.
     singleton_group = None
     for r in range(world_size):
         group = dist.new_group(ranks=[r])
@@ -159,8 +158,7 @@ def _create_module_pg_collection(
     if build_embedding_groups and cfg.pipeline_model_parallel_size > 1:
         # Tied embedding/output weights live on the first and last PP ranks;
         # the init-time weight sync needs a real group over each PP column's
-        # endpoint pair.  Middle stages belong to no endpoint pair and keep
-        # the singleton (their all-reduce is a no-op), matching vanilla.
+        # endpoint pair.  Middle stages keep the singleton (no-op all-reduce).
         embd_group = singleton_group
         for ranks in groups["pp"]:
             endpoints = [ranks[0], ranks[-1]]
@@ -176,10 +174,10 @@ def _create_module_pg_collection(
     pg_collection.tp_cp = singleton_group
     pg_collection.hcp = [singleton_group]
 
-    # Expert groups.  EP subdivides the module's DP domain following
-    # Megatron's expert RankGenerator ('tp-ep-dp-pp') semantics: with
-    # dp = ep * edp, the DP index d decomposes as d = edp_idx * ep + ep_idx.
-    # The vision module is dense (ep == 1) and keeps singleton fallbacks.
+    # Expert groups: EP subdivides the module's DP domain following Megatron's
+    # expert RankGenerator ('tp-ep-dp-pp') semantics - with dp = ep * edp, the
+    # DP index d decomposes as d = edp_idx * ep + ep_idx.  The vision module
+    # is dense (ep == 1) and keeps singleton fallbacks.
     ep_size = cfg.expert_model_parallel_size
     if ep_size > 1:
         tp_size = cfg.tensor_model_parallel_size
@@ -269,9 +267,9 @@ def _validate_colocated_rank_mapping(
     """Verify that language TP-first ranks map one-to-one to vision DP ranks.
 
     ``mimo_bridge.get_source_vision_rank`` assumes that the first rank of each
-    language TP group is also a valid vision rank, and that cycling through
-    these first ranks covers all vision DP replicas.  This function checks the
-    assumption and fails early if the rank layout is unexpected.
+    language TP group is also a valid vision rank and that cycling through
+    these first ranks covers all vision DP replicas; this check fails early
+    if the rank layout breaks the assumption.
     """
     language_tp_first_ranks = set()
     for ranks in _compute_rank_groups(
@@ -311,21 +309,16 @@ def build_colocated_pg_collections(
 ) -> dict[str, ProcessGroupCollection]:
     """Build ProcessGroupCollection objects for colocated vision and language modules.
 
-    Args:
-        vision_parallelism: Parallelism config for the vision module.
-        language_parallelism: Parallelism config for the language module.
-        world_size: Total number of ranks.
-
     Returns:
         Dict mapping module names to ProcessGroupCollection.
     """
     _validate_module_parallelism("vision", vision_parallelism, world_size)
     _validate_module_parallelism("language", language_parallelism, world_size)
 
-    # Create vision groups first, then language groups, to keep a deterministic
-    # global creation order across all ranks.  Only the language module needs
-    # real embedding groups (tied embedding/output weights across PP stages);
-    # the vision module is never pipelined and keeps singletons.
+    # Vision groups first, then language groups, for a deterministic global
+    # creation order across all ranks.  Only language needs real embedding
+    # groups (tied embedding/output weights across PP stages); vision is
+    # never pipelined and keeps singletons.
     vision_pg, _, _ = _create_module_pg_collection("vision", vision_parallelism, world_size)
     language_pg, _, _ = _create_module_pg_collection(
         "language", language_parallelism, world_size, build_embedding_groups=True

@@ -2,32 +2,24 @@
 
 """Non-colocated grid training lifecycle helpers (FlagScale-native).
 
-This module wires grid-mode MIMO into the FlagScale training lifecycle,
-mirroring the Megatron-Bridge ``megatron_mimo`` setup against the
-FlagScale / Megatron-LM-FL v0.18.2 APIs:
+Wires grid-mode MIMO into the FlagScale training lifecycle, mirroring the
+Megatron-Bridge ``megatron_mimo`` setup against the FlagScale /
+Megatron-LM-FL v0.18.2 APIs:
 
-- :func:`setup_grid_mimo_ddp` — per-module DDP wrapping (one wrapper per
-  module the rank participates in, no outer DDP) plus delegation of the
-  DDP-ish methods on the outer Float16Module wrapper (reusing the colocated
-  ``patch_mimo_model_chunk`` machinery so the training loop's
-  duck-typed calls keep working).
+- :func:`setup_grid_mimo_ddp` — per-module DDP wrapping (no outer DDP) plus
+  delegation of the DDP-ish methods on the outer wrapper.
 - :func:`build_grid_multimodule_communicator` — the
   ``MultiModulePipelineCommunicator`` described by the registered model
-  contract (module topology / tensor layout / output dims; see
-  :mod:`.contracts`).
+  contract (see :mod:`.contracts`).
 - :func:`configure_grid_model_config_hooks` — ``no_sync_func`` /
   ``finalize_model_grads_func`` bound to the per-module gradient helpers.
-- :class:`GridTrainingState` — everything the training loop needs for grid
-  mode, attached to the model chunk as ``mimo_grid_state``.
+- :class:`GridTrainingState` — grid-mode training state, attached to the
+  model chunk as ``mimo_grid_state``.
 
-Design invariants:
-
-- Process groups are created once, by ``build_mimo_infra``, in deterministic
-  global module order on every world rank; this module never creates PGs.
-- Only modules whose ``ProcessGroupCollection`` is non-None on this rank get
-  a DDP wrapper; stub ranks are rejected at config time.
-- Gradient normalization uses per-module PGs (language is authoritative for
-  token counts), see ``finalize_model_grads_multimodule``.
+Invariants: process groups are created once by ``build_mimo_infra`` (never
+here); only modules whose ``ProcessGroupCollection`` is non-None on this
+rank get a DDP wrapper; gradient normalization uses per-module PGs
+(language is authoritative for token counts).
 """
 
 from __future__ import annotations
@@ -89,27 +81,21 @@ def build_language_forward_kwargs(
 ) -> dict[str, Any]:
     """Assemble the exact ``Qwen35GridMIMOModel.forward`` kwargs for a language rank.
 
-    Language-only ranks (non-colocated) consume encoder outputs from the MIMO
-    bridge, so the raw modality inputs are dropped before the module-local DP
-    slice (their leading dimension is not the language sample batch).  The
-    returned dict contains exactly the model's accepted keyword arguments:
-
-    - ``input_ids`` is only set on the first PP stage (embedding lives there),
-    - ``labels`` / ``loss_mask`` only on the last PP stage (loss lives there),
-    - ``modality_inputs`` / ``packing_kwargs`` are always ``None`` in grid mode,
-    - ``image_input_mask`` / ``video_input_mask`` / ``video_start_index`` are
-      kept for the deepstack / video fail-fast handling in the model forward.
-
-    The batch keys the model does NOT accept (``imgs``, ``videos``,
-    ``image_thw_grids``, ``video_thw_grids``, ...) are never emitted, even as
-    nulled entries - the grid forward step splats the dict into the model call.
-
-    The raw modality tensors are dropped BEFORE the sample-DP slice: they are
+    Language-only ranks consume encoder outputs from the MIMO bridge, so raw
+    modality inputs are dropped BEFORE the module-local DP slice: they are
     patch-packed (``imgs`` dim 0 is the total patch count across the batch's
     images, not the sample count), so the generic sample-DP slicer must never
-    see them (e.g. 3080 patches with language DP 6 is not divisible by 6).
-    Only the sample-aligned keys (``tokens``, ``labels``, ``loss_mask``,
-    ``position_ids``, the input masks, ...) are sliced by the module-local DP.
+    see them.  Only sample-aligned keys (``tokens``, ``labels``, ``loss_mask``, ``position_ids``, the input
+    masks, ...) are sliced.
+
+    The returned dict holds exactly the model's accepted kwargs:
+    ``input_ids`` only on the first PP stage (embedding lives there),
+    ``labels`` / ``loss_mask`` only on the last (loss lives there),
+    ``modality_inputs`` / ``packing_kwargs`` always ``None`` in grid mode,
+    and the image/video masks plus ``video_start_index`` for the deepstack /
+    video fail-fast handling.  Keys the model does NOT accept (``imgs``,
+    ``image_thw_grids``, ...) are never emitted, even nulled - the grid
+    forward step splats the dict into the model call.
     """
     data_batch = drop_modality_inputs(batch)
     data_batch = slice_batch_for_module_dp(data_batch, dp_rank, dp_size)
@@ -140,23 +126,18 @@ def build_vision_forward_kwargs(
 ) -> dict[str, Any]:
     """Assemble the exact ``Qwen35GridMIMOModel.forward`` kwargs for a vision rank.
 
-    Vision ranks slice the global micro-batch for the vision module's DP
-    (e.g. vision DP 2 layouts).  The raw modality tensors are patch-packed -
-    ``imgs`` / ``videos`` dim 0 is the TOTAL patch count across the batch's
-    images and ``image_thw_grids`` / ``video_thw_grids`` rows are the images -
-    so they cannot be sliced by the sample dimension.  They are packed into
-    the patch-packed dict form (``{hidden_states, grid_thw}``) that
-    ``slice_batch_for_module_dp`` routes to the joint per-image slicer
-    (``_slice_patch_packed_visual_dict``); every other (sample-aligned) key is
-    sliced by sample as usual.
+    Raw modality tensors are patch-packed - ``imgs`` / ``videos`` dim 0 is
+    the TOTAL patch count across the batch's images and the grid rows are
+    the images - so they cannot be sample-sliced; they are packed into the
+    ``{hidden_states, grid_thw}`` dict form that ``slice_batch_for_module_dp``
+    routes to the joint per-image slicer, while every other (sample-aligned)
+    key is sliced by sample as usual.  Videos are not supported by the grid
+    path yet - fail fast instead of producing a silent embedding-count
+    mismatch.
 
-    Videos are not supported by the grid path yet - fail fast instead of
-    producing a silent embedding-count mismatch.
-
-    Returns:
-        Dict with exactly the keys ``Qwen35GridMIMOModel.forward`` accepts,
-        ``modality_inputs`` carrying the DP-sliced ``vision_data`` / ``grid_thw``
-        for the ``qwen3_vit`` encoder.
+    Returns exactly the keys ``Qwen35GridMIMOModel.forward`` accepts, with
+    ``modality_inputs`` carrying the DP-sliced ``vision_data`` / ``grid_thw``
+    for the ``qwen3_vit`` encoder.
     """
     image_data = batch.get("imgs")
     video_data = batch.get("videos")
@@ -227,20 +208,14 @@ def build_vision_forward_kwargs(
 def reconfigure_grid_num_microbatches_calculator(args) -> None:
     """Reconfigure the global num-microbatches calculator to grid-mode DP=1.
 
-    The calculator is initialized at *parse time* (FlagScale's
-    ``parse_and_validate_args`` -> ``set_global_variables``) with the YAML's
-    global data parallel size: e.g. gbs=48 / mbs=6 with DP=4 (YAML TP2 on 8
-    ranks) yields 2 microbatches.  Grid mode then forces the global parallel
-    state to DP=1 (module-local DP slicing happens in the forward step), so
-    the calculator must be updated to DP=1 *before* the grid batch contract
-    (``qwen35_grid_data_contract``) and the schedule consume it - 48/6 with
-    DP=1 yields 8 microbatches (8 * 6 == 48).
-
-    Uses the public ``reconfigure_num_microbatches_calculator`` API with the
-    same parameters the parse-time init used (only the DP - already forced to
-    1 by the caller - differs); the global batch size, micro batch size and
-    any step-batch-size schedule are preserved.  The colocated (non-grid) path
-    never calls this helper and keeps the parse-time calculator untouched.
+    Parse time initializes the calculator with the YAML's global data
+    parallel size, but grid mode forces the global parallel state to DP=1
+    (module-local DP slicing happens in the forward step), so the calculator
+    must be rebased to DP=1 before the grid batch contract
+    (``qwen35_grid_data_contract``) and the schedule consume it.  Uses the
+    public API with the same parameters as the parse-time init (only the DP
+    differs); gbs/mbs and any step schedule are preserved.  The colocated
+    path never calls this helper.
     """
     reconfigure_num_microbatches_calculator(
         rank=args.rank,
@@ -261,14 +236,12 @@ def get_logical_iteration_samples(args, num_microbatches: int) -> int | None:
 
 
 def _legacy_parallel_arg(args, name: str):
-    """Read a legacy parallel arg from the top-level or a nested namespace.
+    """Read a legacy parallel arg from the top level or a nested namespace.
 
     The FlagScale runner flattens parallel sizes to top-level CLI flags; the
     megatron-native ``--yaml-cfg`` format nests them under
-    ``args.model_parallel`` (``load_yaml`` itself preserves whatever structure
-    the yaml declares).  Probe both shapes: top-level first, then the nested
-    ``model_parallel`` namespace -- the dual-probe behavior is correct for
-    either input shape.
+    ``args.model_parallel``.  Probe both shapes (top-level first) - correct
+    for either input shape.
     """
     value = getattr(args, name, None)
     if value is None:
@@ -284,29 +257,22 @@ def apply_grid_parse_time_contract(args) -> None:
     Must run before Megatron's argument validation, which silently rewrites
     conflicting values (``validate_yaml`` clamps PP via ``min``; both
     validators force ``sequence_parallel=False`` when TP == 1), so conflicts
-    are reported against the user's actual input.
-
-    Both parse entries are covered: ``FSTrainArguments.pre_validate_args``
-    calls this before the validation fork, whether validation goes through
-    ``validate_args`` (runner/CLI-flattened) or ``validate_yaml``
-    (experimental ``--yaml-cfg``).  Grid flags are read as top-level
-    attributes everywhere downstream, so a ``--yaml-cfg`` config that engages
-    grid mode carries them top-level and reaches this contract;
-    ``_legacy_parallel_arg`` additionally probes the nested
-    ``model_parallel`` namespace that ``load_yaml`` produces.  As a backstop
-    the grid entry point pins the legacy parallel sizes to 1
-    (train_qwen35.py).
+    are reported against the user's actual input.  Covers both parse entries:
+    ``FSTrainArguments.pre_validate_args`` calls this before the validation
+    fork, whether validation goes through ``validate_args`` (runner/CLI
+    flattened) or ``validate_yaml`` (``--yaml-cfg``).  Grid flags are read as
+    top-level attributes everywhere downstream; ``_legacy_parallel_arg`` also
+    probes the nested ``model_parallel`` namespace, and the grid entry point
+    (train_qwen35.py) pins the legacy parallel sizes to 1 as a backstop.
 
     In grid mode the module layouts come exclusively from
-    ``--mimo-module-specs`` and the global parallel state runs with
+    ``--mimo-module-specs`` and the global parallel state runs
     TP=1/PP=1/DP=1; a non-default legacy parallel size only contradicts the
-    specs.  ``data_parallel_size`` is exempt: validation derives it from the
-    world size.
-
-    Also preserves the user's sequence-parallel intent in
-    ``args.mimo_sequence_parallel``: the forced global TP=1 makes Megatron
-    validation drop ``sequence_parallel``, while the grid path resolves SP
-    per module at model build time.
+    specs.  ``data_parallel_size`` is exempt (validation derives it from the
+    world size).  The user's sequence-parallel intent is preserved in
+    ``args.mimo_sequence_parallel``: forced global TP=1 makes Megatron drop
+    ``sequence_parallel``, while the grid path resolves SP per module at
+    model build time.
     """
     offenders = {}
     for name in (
@@ -323,13 +289,11 @@ def apply_grid_parse_time_contract(args) -> None:
         value = _legacy_parallel_arg(args, name)
         if value is not None:
             offenders[name] = value
-    # ``dualpipev_pipeline_model_parallel_size`` is not an argparse attribute
-    # -- it is derived from the user-facing ``--use-dualpipev`` switch in
-    # ``post_validate_args``, which runs strictly after this parse-time
-    # contract, so probe the switch itself (top-level, plus the nested
-    # ``model_parallel`` namespace for consistency with the probe above).
-    # Only truthy values are offenders: the default (False / unset) must not
-    # trip the contract.
+    # ``dualpipev_pipeline_model_parallel_size`` is not an argparse attribute:
+    # it is derived from the ``--use-dualpipev`` switch in
+    # ``post_validate_args``, which runs after this parse-time contract, so
+    # probe the switch itself.  Only truthy values are offenders: the
+    # default (False / unset) must not trip the contract.
     use_dualpipev = getattr(args, "use_dualpipev", False)
     if not use_dualpipev:
         use_dualpipev = _legacy_parallel_arg(args, "use_dualpipev")
@@ -378,15 +342,14 @@ class GridTrainingState:
     """Grid-mode training state attached to the model chunk (``mimo_grid_state``).
 
     Attributes:
-        infra: The built ``MIMOInfra`` (grids + nullable PG collections).
-        module_to_grid_tuple: ``(ddp_module, grid)`` pairs for the modules this
-            rank participates in (gradient sync / zero-buffer helpers).
-        multimodule_pg_collection: Schedule PG collection
-            (``MultiModuleProcessGroupCollection``).
-        multimodule_communicator: Schedule P2P communicator.
-        active_module_name: The single module this rank participates in.
-        local_pg_collection: That module's ``ProcessGroupCollection``.
-        world_size: Distributed world size.
+        infra: the built ``MIMOInfra`` (grids + nullable PG collections).
+        module_to_grid_tuple: ``(ddp_module, grid)`` pairs for the modules
+            this rank participates in (gradient sync / zero-buffer helpers).
+        multimodule_pg_collection / multimodule_communicator: schedule PG
+            collection and P2P communicator.
+        active_module_name / local_pg_collection: the single module this rank
+            participates in and its ``ProcessGroupCollection``.
+        world_size: distributed world size.
     """
 
     infra: MIMOInfra
@@ -443,22 +406,17 @@ def _grid_module_from_model(mimo_model, module_name: str):
 def setup_grid_mimo_ddp(model, args, wrap_with_ddp: bool = True):
     """Wrap each local grid submodule with per-module DDP (in place).
 
-    Returns ``(is_grid, grid_state)``: whether ``model`` is a non-colocated
-    grid MIMO model whose per-module DDP setup was performed, and the
-    :class:`GridTrainingState` (``None`` when not grid).
-
-    Mirrors the Megatron-Bridge per-module DDP wiring: each submodule the rank
-    participates in is **replaced in place** by its ``DistributedDataParallel``
-    wrapper (``mimo_model.language_model`` /
-    ``mimo_model.modality_submodules[...]``), so the MIMO forward, the
-    optimizer builder (``get_mimo_optimizer``) and ``MimoModel.sharded_state_dict``
-    (which unwraps DDP children) all see the wrapped modules.  The wrappers are
-    additionally aliased as ``language_ddp`` / ``vision_ddp`` via
-    ``object.__setattr__`` (NOT registered as nn children - that would emit
-    duplicate parameter keys into torch_dist checkpoints) so the colocated
-    ``get_mimo_ddp_wrappers`` / ``set_mimo_force_all_reduce`` /
-    ``patch_mimo_model_chunk`` helpers keep working.
+    Returns ``(is_grid, grid_state)`` (``grid_state`` is ``None`` when not
+    grid).  Mirrors the Megatron-Bridge per-module DDP wiring: each submodule
+    the rank participates in is **replaced in place** by its
+    ``DistributedDataParallel`` wrapper, so the MIMO forward, the optimizer
+    builder (``get_mimo_optimizer``) and ``MimoModel.sharded_state_dict`` all
+    see the wrapped modules.  The wrappers are additionally aliased as
+    ``language_ddp`` / ``vision_ddp`` via ``object.__setattr__`` (NOT
+    registered as nn children - that would emit duplicate parameter keys into
+    torch_dist checkpoints) so the colocated DDP helpers keep working.
     """
+    # Keep package imports independent of the full megatron.training stack.
     from megatron.training.utils import print_rank_0
 
     unwrapped_model = unwrap_model(model)
@@ -491,11 +449,9 @@ def setup_grid_mimo_ddp(model, args, wrap_with_ddp: bool = True):
             )
         dp_size = pg_collection.dp.size()
         ddp_config = build_mimo_ddp_config(args, module, dp_world_size=dp_size)
-        # Per-module DDP needs a transformer config.  The language module
-        # carries its own; the images submodule gets the vision transformer
-        # config threaded by ``build_qwen35_images_submodule_spec``.  Fall
-        # back to the model config (the language config) for robustness.
-        # ``get_model_config`` rejects lists, so pass the unwrapped chunk.
+        # Per-module DDP needs a transformer config: language carries its
+        # own, images gets the vision config threaded by its submodule spec;
+        # fall back to the model config (``get_model_config`` rejects lists).
         module_config = getattr(module, "config", None)
         if module_config is None and mimo_model is not None:
             module_config = get_model_config(mimo_model)
@@ -505,22 +461,20 @@ def setup_grid_mimo_ddp(model, args, wrap_with_ddp: bool = True):
             module=module,
             pg_collection=pg_collection,
         )
-        # MCore's DDP does not proxy arbitrary module methods; the MIMO
-        # forward path calls language_model.set_input_tensor on non-first PP
-        # stages, so proxy it on the wrapper (Bridge does the same).
+        # MCore DDP does not proxy module methods; proxy set_input_tensor,
+        # which the MIMO forward calls on non-first PP stages (Bridge does
+        # the same).
         if hasattr(module, "set_input_tensor"):
             ddp.set_input_tensor = module.set_input_tensor
 
-        # Replace the submodule in place with its DDP wrapper.
         if module_name == MIMO_LANGUAGE_MODULE_KEY:
             mimo_model.language_model = ddp
         else:
             mimo_model.modality_submodules[module_name] = ddp
 
-        # Colocated-compatible attribute names: get_mimo_ddp_wrappers /
-        # set_mimo_force_all_reduce / patch_mimo_model_chunk key on these.
-        # object.__setattr__ keeps them out of named_children() (the DDP
-        # wrapper is already a child under its real submodule name).
+        # Colocated helpers (get_mimo_ddp_wrappers / set_mimo_force_all_reduce
+        # / patch_mimo_model_chunk) key on these names; object.__setattr__
+        # keeps them out of named_children() (the wrapper is already a child).
         if module_name == MIMO_LANGUAGE_MODULE_KEY:
             object.__setattr__(mimo_model, "language_ddp", ddp)
         else:
@@ -610,29 +564,24 @@ def configure_grid_model_config_hooks(grid_state: GridTrainingState, model) -> N
 def build_grid_optimizer(mimo_model, optimizer_config) -> object:
     """Build the MCore ``MimoOptimizer`` for the grid path (module-namespaced).
 
-    The MCore ``MimoOptimizer`` builds one inner optimizer per module, each
-    bound to its module's process groups.  Its ``sharded_state_dict`` nests
-    the per-module optimizer state under ``{module_name: module_sd}``, but the
-    inner ``DistributedOptimizer`` shard keys themselves are *not* namespaced:
-    both modules emit identical keys of the form
-    ``optimizer.distributed.dp_group_idx_<mp_rank>.{...}`` (``dp_group_idx``
-    is the module-local model-parallel rank).  With heterogeneous module
-    layouts (e.g. images TP2 on ranks [0, 2) and language TP1/DP6 on
-    [2, 8)), the same key then describes *different* global tensors on
-    different ranks, so the torch_dist save-time sharding validation fails
-    with duplicate ShardedObject keys and ShardedTensor global-shape
-    mismatches.  This function wraps the MCore optimizer with
-    :class:`GridMimoOptimizer`, which namespaces the
-    ``optimizer.distributed.*`` shard keys by module on save and strips the
-    namespace again on load.
+    MCore builds one inner optimizer per module, each bound to its module's
+    process groups.  The inner ``DistributedOptimizer`` shard keys themselves
+    are *not* namespaced - both modules emit identical
+    ``optimizer.distributed.dp_group_idx_<mp_rank>.*`` keys - so with
+    heterogeneous module layouts (e.g. images TP2 on ranks [0, 2) and
+    language TP1/DP6 on [2, 8)) the same key describes *different* global
+    tensors on different ranks and the torch_dist save-time sharding
+    validation fails with duplicate ShardedObject keys and ShardedTensor
+    global-shape mismatches.  The MCore optimizer is therefore wrapped in
+    :class:`GridMimoOptimizer`, which namespaces those shard keys by module
+    on save and strips the namespace again on load.
     """
     mimo_optimizer = get_mimo_optimizer(mimo_model, optimizer_config)
     return GridMimoOptimizer(mimo_optimizer.module_infos, mimo_optimizer.config)
 
 
-#: Prefix of the shard keys emitted by ``DistributedOptimizer`` (see
-#: ``megatron.core.optimizer.distrib_optimizer``).  These keys carry no module
-#: information and collide across the per-module optimizers of a MIMO model.
+#: Shard-key prefix emitted by ``DistributedOptimizer``; carries no module
+#: information and collides across a MIMO model's per-module optimizers.
 _OPT_DIST_KEY_PREFIX = "optimizer.distributed."
 
 
@@ -640,11 +589,10 @@ def _namespace_module_opt_keys(module_sharded_sd, module_name: str) -> None:
     """Insert ``module_name`` into ``optimizer.distributed.*`` shard keys (in place).
 
     ``optimizer.distributed.dp_group_idx_0.optimizer`` becomes
-    ``optimizer.distributed.<module_name>.dp_group_idx_0.optimizer``.
-    Keys that already carry module information (``optimizer.mimo.*`` extracted
-    by MCore, ``optimizer.state.*`` model-space keys that embed the unique
-    model parameter path) are left untouched.  The renaming is idempotent for
-    the same module name.
+    ``optimizer.distributed.<module_name>.dp_group_idx_0.optimizer``.  Keys
+    that already carry module information (``optimizer.mimo.*`` extracted by
+    MCore, ``optimizer.state.*`` model-space keys) are left untouched;
+    idempotent for the same module name.
     """
     namespaced_prefix = f"{_OPT_DIST_KEY_PREFIX}{module_name}."
 
@@ -680,18 +628,15 @@ def _unnamespace_module_opt_keys(module_sharded_sd, module_name: str) -> None:
 class GridMimoOptimizer(MimoOptimizer):
     """MCore ``MimoOptimizer`` with module-namespaced distributed-optimizer keys.
 
-    MCore's ``MimoOptimizer.sharded_state_dict`` nests each module's optimizer
-    state dict under ``{module_name: module_sd}`` but leaves the inner
-    ``optimizer.distributed.dp_group_idx_*`` shard keys identical across
-    modules.  Because the shard key (not the dict nesting) is what the
-    torch_dist checkpoint uses to identify global tensors, the images and
-    language optimizers collide: the save-time validation reports duplicate
-    ShardedObject keys and ShardedTensor global-shape mismatches for the same
-    key.  This subclass namespaces those keys per module on save
+    MCore nests each module's optimizer state under ``{module_name: module_sd}``
+    but leaves the inner ``optimizer.distributed.dp_group_idx_*`` shard keys
+    identical across modules - and the shard key (not the dict nesting) is
+    what the torch_dist checkpoint uses to identify global tensors, so the
+    images and language optimizers collide at save-time validation.  This
+    subclass namespaces those keys per module on save
     (``optimizer.distributed.<module>.dp_group_idx_*``) and restores the
-    un-namespaced form before delegating to each inner optimizer's
-    ``load_state_dict`` on load, so save and load stay symmetric without
-    touching MCore.
+    un-namespaced form before each inner optimizer's ``load_state_dict`` on
+    load, keeping save and load symmetric without touching MCore.
     """
 
     def sharded_state_dict(self, model_sharded_state_dict, is_loading: bool = False, **kwargs):
@@ -710,22 +655,16 @@ class GridMimoOptimizer(MimoOptimizer):
 def sync_grid_optimizer_param_group_lr(optimizer, args) -> bool:
     """Re-sync per-param-group ``max_lr``/``min_lr`` after optimizer checkpoint load.
 
-    Grid-mode resume with ``--override-opt-param-scheduler``: the optimizer
-    checkpoint load restores every param group's ``max_lr``/``min_lr`` (and
-    ``lr``) from the saved state, and ``OptimizerParamScheduler.get_lr``
-    prefers the param-group values over the scheduler's own configured fields,
-    so a configured ``lr``/``min_lr`` of 0 (e.g. a zero-LR fine-tune) would be
-    silently ignored after resume.  This walks the ``GridMimoOptimizer`` /
-    ``MimoOptimizer`` module nesting (skipping inactive modules) and any inner
-    ``ChainedOptimizer`` (e.g. MoE module optimizers), resetting each active
-    inner optimizer param group's ``max_lr``/``min_lr`` to the configured
-    override values (``args.lr`` / ``args.min_lr``) - the same values the
-    scheduler keeps when overriding.  No other hyperparameters (``lr``,
-    ``weight_decay``, ``wd_mult``, ...) are touched.
-
-    No-op (returns False) when ``args.override_opt_param_scheduler`` is not
-    set, mirroring the scheduler's own override semantics; also a no-op for a
-    ``None`` optimizer (e.g. skip-train mode).
+    Grid-mode resume with ``--override-opt-param-scheduler``: the checkpoint
+    load restores every param group's ``max_lr``/``min_lr`` (and ``lr``), and
+    ``OptimizerParamScheduler.get_lr`` prefers the param-group values over
+    the scheduler's configured fields, so a configured ``lr``/``min_lr`` of 0
+    (e.g. a zero-LR fine-tune) would be silently ignored after resume.  Walks
+    the ``MimoOptimizer`` module nesting (skipping inactive modules) and any
+    inner ``ChainedOptimizer``, resetting each active param group to
+    ``args.lr`` / ``args.min_lr`` (the same values the scheduler keeps when
+    overriding); no other hyperparameters are touched.  No-op (returns False)
+    without the override flag or for a ``None`` optimizer (skip-train mode).
     """
     if optimizer is None or not getattr(args, "override_opt_param_scheduler", False):
         return False
@@ -736,12 +675,10 @@ def sync_grid_optimizer_param_group_lr(optimizer, args) -> bool:
 def _reset_param_group_lr(optimizer, max_lr, min_lr) -> None:
     """Set ``max_lr``/``min_lr`` on every param group of ``optimizer``.
 
-    Recurses through the public nesting surface used by the surrounding
-    checkpointing code: ``MimoOptimizer.module_infos`` (one inner optimizer
-    per module, ``is_active`` gating) and Megatron's
-    ``ChainedOptimizer.chained_optimizers`` (one inner optimizer per
-    parameter partition, e.g. dense/expert splits).  Anything else is
-    treated as a plain Megatron optimizer exposing ``param_groups``.
+    Recurses through the public nesting surface used by the checkpointing
+    code: ``MimoOptimizer.module_infos`` (``is_active`` gating) and Megatron's
+    ``ChainedOptimizer.chained_optimizers``; anything else is treated as a
+    plain Megatron optimizer exposing ``param_groups``.
     """
     if optimizer is None:
         return

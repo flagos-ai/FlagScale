@@ -30,7 +30,6 @@ def drop_mimo_completed_macros(model) -> None:
 
     Safe while training continues: macros with outstanding gradients are
     never dropped, and the next ``advance()`` re-establishes serving state.
-    Duck-typed like ``release_mimo_training_state``.
     """
     for model_chunk in model:
         if hasattr(model_chunk, "drop_completed_macros"):
@@ -44,12 +43,12 @@ def compute_microbatch_token_counts(
     """Return the number of visual tokens for each microbatch.
 
     Args:
-        grid_thw_list: List of ``[N, 3]`` tensors, one per microbatch.  Each
+        grid_thw_list: List of ``[N, 3]`` tensors, one per microbatch; each
             row is ``(t, h, w)`` for one image/video.  ``None`` entries are
             treated as microbatches with no visual data.
-        merge_unit: Optional spatial/temporal merge unit used by the vision
-            encoder (e.g. Qwen3-VL ``spatial_merge_unit``).  The raw token
-            count is divided by this value before splitting.
+        merge_unit: Spatial/temporal merge unit of the vision encoder (e.g.
+            Qwen3-VL ``spatial_merge_unit``); the raw token count is divided
+            by it before splitting.
 
     Returns:
         Token counts per microbatch as Python ints.
@@ -74,8 +73,8 @@ def split_visual_embeds(
 
     Args:
         main_embeds: Concatenated visual embeddings.
-        aux_features: Optional list of auxiliary (deepstack-like) tensors with
-            the same token layout as ``main_embeds``.
+        aux_features: Optional auxiliary (deepstack-like) tensors with the
+            same token layout as ``main_embeds``.
         token_counts: Token count for each microbatch.
         dim: Dimension along which tokens are concatenated.
 
@@ -108,8 +107,8 @@ def concatenate_visual_grads(
 ) -> torch.Tensor:
     """Concatenate per-microbatch gradients back into a macro gradient.
 
-    ``key`` names the gradient slot (canonical keys are ``"main"`` and
-    ``"aux_{i}"``).  ``None`` entries (microbatches without visual data) are
+    ``key`` names the gradient slot (canonical keys: ``"main"``,
+    ``"aux_{i}"``); ``None`` entries (microbatches without visual data) are
     skipped.
     """
     grads = [g[key] for g in gradients if g is not None and key in g]

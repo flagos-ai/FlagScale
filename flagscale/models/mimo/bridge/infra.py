@@ -5,41 +5,35 @@
 Colocated (and, in the future, non-colocated) multi-module training needs one
 coherent answer to "which ranks run which module, and which process groups
 does each module use".  This module builds that answer on top of
-Megatron-LM-FL's ``HyperCommGrid`` and mirrors the bridge/optimizer builder
+Megatron-LM-FL's ``HyperCommGrid``, mirroring the bridge/optimizer builder
 convention from ``megatron.core.models.mimo``: the grid owns process-group
-creation via ``create_pg`` (see ``ColocatedBridgeCommunicator`` and
-``_get_pg_collection_for_optimizer``), and a ``ProcessGroupCollection`` is
-materialized from a pre-created grid.
+creation via ``create_pg``, and a ``ProcessGroupCollection`` is materialized
+from a pre-created grid.
 
 Design invariants
 -----------------
-* Every rank builds from the *same* ordered module list, so the build is
-  deterministic: modules are processed in global module order (the insertion
-  order of ``module_configs``).
+* Every rank builds from the *same* ordered module list (the insertion order
+  of ``module_configs``), so the build is deterministic.
 * Every world rank participates in every collective call, for every module,
   including modules whose rank range it does not belong to.  Membership only
   decides what a rank *stores*, never what it calls.  This keeps
   ``dist.new_subgroups_by_enumeration`` / ``dist.new_group`` hang-free for
   grids with a non-zero ``rank_offset`` (disjoint rank ranges).
 * Ranks outside a module's grid range get ``None`` as that module's
-  ``ProcessGroupCollection`` (``module_to_pg_collection[module] is None``).
-* Grids may overlap (colocated, e.g. vision and language on the same ranks
-  with different TP/DP) or be disjoint (non-colocated modules).
+  ``ProcessGroupCollection``.
+* Grids may overlap (colocated) or be disjoint (non-colocated modules).
 
 Grid layout
 -----------
-A module grid has dim_names ``["tp", "cp", "dp", "ep", "pp"]`` with the
-corresponding shape; grid rank ``r`` maps to indices
-
-    r = rank_offset + tp + cp*TP + dp*TP*CP + ep*TP*CP*DP + pp*TP*CP*DP*EP
-
+A module grid has dim_names ``["tp", "cp", "dp", "ep", "pp"]``; grid rank
+``r`` maps to indices
+``r = rank_offset + tp + cp*TP + dp*TP*CP + ep*TP*CP*DP + pp*TP*CP*DP*EP``.
 With CP = EP = 1 this reproduces the colocated layout
 ``rank = pp*TP*DP + dp*TP + tp`` of ``hetero_pg_utils``, so TP/DP/PP group
 memberships are identical.  EP is modeled as an independent grid dimension
-(Megatron-LM-FL convention); the colocated builder instead subdivides DP as
-``dp = ep * edp``, so ``expt_dp`` memberships differ when EP > 1.  With
-EP = 1 both conventions coincide.  The EP reconciliation is left to a
-follow-up.
+(Megatron-LM-FL convention) while the colocated builder subdivides DP as
+``dp = ep * edp``, so ``expt_dp`` memberships differ when EP > 1 (with EP = 1
+both coincide); reconciliation is left to a follow-up.
 """
 
 from collections.abc import Iterable, Mapping
@@ -52,14 +46,13 @@ from megatron.core.process_groups_config import ProcessGroupCollection
 
 from .parallelism import ModuleParallelismConfig
 
-# Dimension order of a module grid.  The first dim varies fastest, the last
+# Dimension order of a module grid: the first dim varies fastest, the last
 # (pp) slowest, matching the colocated rank layout.
 MODULE_GRID_DIM_NAMES: tuple[str, ...] = ("tp", "cp", "dp", "ep", "pp")
 
-#: Sentinel returned by ``torch.distributed.new_group`` on ranks that are not
-#: members of the created group (``GroupMember.NON_GROUP_MEMBER``, an int).
-#: The nullable contract of this module maps it to ``None`` wherever a
-#: non-member must not hold a group.
+#: Sentinel returned by ``torch.distributed.new_group`` on non-member ranks
+#: (``GroupMember.NON_GROUP_MEMBER``, an int); this module's nullable contract
+#: maps it to ``None`` wherever a non-member must not hold a group.
 _NON_GROUP_MEMBER = dist.GroupMember.NON_GROUP_MEMBER
 
 
@@ -67,10 +60,10 @@ def _is_member_process_group(pg) -> bool:
     """True when ``pg`` is an actual process group of the current rank.
 
     ``dist.new_group`` returns ``GroupMember.NON_GROUP_MEMBER`` (an int
-    sentinel, -100) on non-member ranks instead of ``None``.  Every field of a
+    sentinel) on non-member ranks instead of ``None``.  Every field of a
     ``ProcessGroupCollection`` - including the directly-created gloo and
-    endpoint groups - must be either a real process group or ``None``, never
-    the sentinel: MCore's ``get_pg_size`` would call ``group.size()`` on it
+    endpoint groups - must be a real process group or ``None``, never the
+    sentinel: MCore's ``get_pg_size`` would call ``group.size()`` on it
     (AttributeError: 'int' object has no attribute 'size') during gradient
     finalization.
     """
@@ -79,8 +72,7 @@ def _is_member_process_group(pg) -> bool:
 
 # (ProcessGroupCollection field, grid dims) pairs.  The list order IS the
 # deterministic creation order every world rank must follow, for every module.
-# It covers the group set required by
-# ``megatron.core.models.mimo.optimizer._get_pg_collection_for_optimizer``
+# It covers the group set required by ``_get_pg_collection_for_optimizer``
 # (dp, dp-cp, tp, pp, tp-pp, tp-ep-pp, dp-ep, all dims) plus the groups
 # consumed by ``flagscale.models.mimo.colocated.parallel_state_ctx``.
 _GRID_PG_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -105,8 +97,8 @@ class ModuleGridConfig:
     """Per-module input for grid construction.
 
     ``rank_offset`` is the global rank where this module's grid starts.  When
-    left ``None``, it is read from ``parallelism.rank_offset`` if present
-    (defensive: the parallelism config may grow that field), else ``0``.
+    left ``None``, it is read from ``parallelism.rank_offset`` if present,
+    else ``0``.
     """
 
     module_name: str
@@ -142,12 +134,10 @@ class MIMOInfra:
     def destroy(self) -> None:
         """Destroy every process group created by this infra's grids.
 
-        Covers both the grid-owned groups (``HyperCommGrid.destroy``) and the
-        groups this infra creates directly via ``dist.new_group`` (the gloo
-        DP / expert-DP groups and the tied-embedding endpoint groups), which
-        the grid does not track and which would otherwise leak.  Group
-        creation order is untouched: the directly-created groups are only
-        recorded as they are created.
+        Covers grid-owned groups (``HyperCommGrid.destroy``) and the groups
+        this infra creates directly via ``dist.new_group`` (gloo DP /
+        expert-DP and tied-embedding endpoint groups), which the grid does
+        not track and which would otherwise leak.
         """
         for grid in self.module_to_grid_map.values():
             grid.destroy()
@@ -169,11 +159,10 @@ def _normalize_module_configs(
     (not just ``dict``) is required: read-only mappings such as
     ``MIMOParallelismConfig.module_parallelisms`` (a ``MappingProxyType``)
     must work.  The canonical module order is the deterministic input order -
-    the mapping's insertion order (or the iterable's order), which is the
-    global module order every world rank must agree on.
+    the global module order every world rank must agree on.
 
-    Raises on empty input or duplicate module names; when a mapping value is a
-    ``ModuleGridConfig`` its ``module_name`` must match the mapping key.
+    Raises on empty input or duplicate module names; when a mapping value is
+    a ``ModuleGridConfig``, its ``module_name`` must match the mapping key.
     """
     if isinstance(module_configs, Mapping):
         items: list[tuple[str, ModuleParallelismConfig | ModuleGridConfig]] = list(
@@ -207,8 +196,7 @@ def _normalize_module_configs(
 
 
 def _validate_parallelism(module_name: str, cfg: ModuleParallelismConfig) -> None:
-    """Duck-type validation of the parallelism config (works for the future
-    sibling module's type too)."""
+    """Duck-type validation of the parallelism config (works for future sibling module types too)."""
     for attr in (
         "tensor_model_parallel_size",
         "context_parallel_size",
@@ -280,16 +268,14 @@ def _create_pp_endpoint_groups(
       on the first stage); with PP == 1 this is the same singleton as
       ``embd``.
 
-    ``direct_pgs`` (optional): list to record the created groups into.  These
-    groups are created directly via ``dist.new_group`` and are NOT tracked by
-    the grid, so ``MIMOInfra.destroy`` needs the record to release them.
-    Only real groups are recorded - non-member ranks receive the
-    ``GroupMember.NON_GROUP_MEMBER`` int sentinel from ``dist.new_group``,
+    ``direct_pgs`` (optional): list to record the created groups into, so
+    ``MIMOInfra.destroy`` can release them - they are created directly via
+    ``dist.new_group`` and are NOT tracked by the grid.  Only real groups are
+    recorded: non-member ranks receive the ``NON_GROUP_MEMBER`` int sentinel,
     which the nullable contract maps to ``None`` (see
-    :func:`_is_member_process_group`).
-    Every world rank issues the same ``new_group`` calls for every stage,
-    including ranks outside the grid and middle PP stages; membership only
-    decides what is stored.
+    :func:`_is_member_process_group`).  Every world rank issues the same
+    ``new_group`` calls for every stage, including ranks outside the grid and
+    middle PP stages; membership only decides what is stored.
     """
     pp_size = grid.shape[grid.dim_names.index("pp")]
     rank = dist.get_rank()
@@ -300,9 +286,8 @@ def _create_pp_endpoint_groups(
         pos_embd_group = dist.new_group([first])
         if direct_pgs is not None and _is_member_process_group(pos_embd_group):
             direct_pgs.append(pos_embd_group)
-        # Tied embedding/output weights are shared between the first and last
-        # stages; with PP == 1 both endpoints are the same rank, so the
-        # singleton doubles as the embedding group.
+        # Tied embedding/output weights span the first and last stages; with
+        # PP == 1 the singleton doubles as the embedding group.
         embd_group = pos_embd_group if pp_size <= 1 else dist.new_group([first, last])
         if (
             embd_group is not pos_embd_group
@@ -311,9 +296,8 @@ def _create_pp_endpoint_groups(
         ):
             direct_pgs.append(embd_group)
         # Never store the NON_GROUP_MEMBER sentinel: non-members must hold
-        # None (the per-rank singleton columns of PP == 1 grids make every
-        # member rank the ``first`` of its own column, so member ranks always
-        # get real groups here).
+        # None (the per-rank singleton columns of PP == 1 grids give member
+        # ranks real groups here).
         embd = (
             embd_group
             if (pp_size <= 1 or rank in (first, last)) and _is_member_process_group(embd_group)
@@ -332,11 +316,9 @@ def create_module_pg_collection(grid: HyperCommGrid) -> ProcessGroupCollection |
     Collective: every world rank must call this, in the same global module
     order, including ranks outside the grid's range.  Ranks outside the grid
     range return ``None``; member ranks return a fully populated
-    ``ProcessGroupCollection``.
-
-    The created group set is ``_GRID_PG_SPECS`` plus gloo DP / expert-DP
-    groups and the tied-embedding endpoint groups (first-stage position
-    singletons included), mirroring ``hetero_pg_utils._create_module_pg_collection``.
+    ``ProcessGroupCollection``.  The created group set is ``_GRID_PG_SPECS``
+    plus gloo DP / expert-DP groups and the tied-embedding endpoint groups,
+    mirroring ``hetero_pg_utils._create_module_pg_collection``.
     """
     for _, dims in _GRID_PG_SPECS:
         grid.create_pg(list(dims))
@@ -355,15 +337,9 @@ def create_module_pg_collection(grid: HyperCommGrid) -> ProcessGroupCollection |
 
     # Tied-embedding endpoint groups and first-stage position-embedding
     # groups.  Must run on every world rank before the membership early
-    # return below.
-    #
-    # The gloo / endpoint groups are created directly via dist.new_group and
-    # are invisible to HyperCommGrid; record them on the grid so
-    # ``MIMOInfra.destroy`` releases them too (deduplicated by identity -
-    # e.g. the PP==1 case aliases pos_embd and embd).  Non-member ranks
-    # receive the NON_GROUP_MEMBER int sentinel from ``dist.new_group`` and
-    # are filtered out - the record (like every PG field) holds only real
-    # groups.
+    # return below.  They are created directly via dist.new_group and are
+    # invisible to HyperCommGrid; record real groups (sentinels filtered out)
+    # on the grid so ``MIMOInfra.destroy`` releases them too.
     direct_pgs: list[dist.ProcessGroup] = []
     for group in dp_gloo_groups + expt_dp_gloo_groups:
         if _is_member_process_group(group):
@@ -377,19 +353,17 @@ def create_module_pg_collection(grid: HyperCommGrid) -> ProcessGroupCollection |
     for field, dims in _GRID_PG_SPECS:
         setattr(pg, field, grid.get_pg(list(dims)))
 
-    # Aliases matching the colocated builder (CP=1): dp_cp doubles as the
-    # intra-DP-CP group; the distributed optimizer maps model-parallel to
-    # intra and data-parallel to inter.  Expert TP spans TP x EP (grid
-    # convention, cf. mcore expert groups).
+    # Aliases matching the colocated builder (CP=1): the distributed
+    # optimizer maps model-parallel to intra and data-parallel to inter;
+    # expert TP spans TP x EP (grid convention, cf. mcore expert groups).
     pg.intra_dp_cp = pg.dp_cp
     pg.inter_dist_opt = pg.dp
     pg.expt_tp = pg.tp_ep
     pg.intra_expt_dp = pg.expt_dp
 
-    # Gloo groups: keep the group containing the current rank.  For member
-    # ranks exactly one entry per enumeration is a real group; the other
-    # entries are the NON_GROUP_MEMBER int sentinel (not None) and are
-    # filtered out so the field is a real group or None - never an int.
+    # Gloo groups: for member ranks exactly one entry per enumeration is a
+    # real group; the other entries are the NON_GROUP_MEMBER int sentinel
+    # (not None) and are filtered out - a real group or None, never an int.
     pg.dp_gloo = next((g for g in dp_gloo_groups if _is_member_process_group(g)), None)
     pg.expt_dp_gloo = next((g for g in expt_dp_gloo_groups if _is_member_process_group(g)), None)
     if pg.expt_dp_gloo is None:
@@ -417,10 +391,8 @@ def create_module_pg_collection(grid: HyperCommGrid) -> ProcessGroupCollection |
     pg.hcp = [pg.cp]
 
     # Deduplicate the directly-created groups by identity (PP==1 aliases
-    # pos_embd/embd to the same singleton) and record them on the grid so
-    # ``MIMOInfra.destroy`` can release them.  The record lives on the grid
-    # object (owned by the infra) instead of the collection: it must survive
-    # on ranks that return ``None`` above.
+    # pos_embd/embd) and record them on the grid - not the collection - so
+    # the record survives on ranks that return ``None`` above.
     seen: set = set()
     unique_direct: list[dist.ProcessGroup] = []
     for group in direct_pgs:
@@ -439,8 +411,8 @@ def build_module_pg_collections(
     """Create all modules' process groups in global module order.
 
     Collective: every world rank must call with the same ordered grid map.
-    Returns an ordered dict mapping module names to ``ProcessGroupCollection``
-    (``None`` for modules whose grid range does not contain the current rank).
+    Returns an ordered dict mapping module names to collections (``None``
+    for modules whose grid range does not contain the current rank).
     """
     collections: dict[str, ProcessGroupCollection | None] = {}
     for module_name, grid in module_to_grid_map.items():

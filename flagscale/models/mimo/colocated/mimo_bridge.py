@@ -3,7 +3,7 @@
 """Colocated cross-rank utilities for MIMO module communication.
 
 The helpers here assume the deterministic rank ordering produced by
-``flagscale.models.mimo.hetero_pg_utils``.
+``flagscale.models.mimo.colocated.hetero_pg_utils``.
 """
 
 import torch.distributed as dist
@@ -31,8 +31,7 @@ def get_source_vision_rank(language_pg, forward_idx_in_round, vit_batch_factor):
 
     Within a language TP group, every member is also a ViT rank because vision
     TP size is 1.  The group's macro batch is split into whole microbatches
-    (see ``get_my_microbatch_range``): TP member j computes and supplies the
-    microbatches in its slice.
+    (see ``get_my_microbatch_range``): TP member j supplies its slice.
     """
     assert forward_idx_in_round >= 0, (
         f"forward_idx_in_round must be non-negative, got {forward_idx_in_round}"
@@ -54,9 +53,8 @@ def get_my_microbatch_range(language_pg, num_micro):
 
     The language TP group splits the macro batch into whole microbatches:
     TP rank j owns ``[j*num/tp, (j+1)*num/tp)``.  Each rank's ViT forward
-    therefore covers exactly ``vision_micro_batch_size`` samples (vbs) and
-    the TP group jointly covers the ``vbf * mbs`` samples of one entity's
-    macro batch.
+    therefore covers exactly ``vision_micro_batch_size`` samples (vbs), and
+    the TP group jointly covers the ``vbf * mbs`` samples of one macro batch.
     """
     tp_size = max(1, dist.get_world_size(language_pg.tp))
     assert num_micro % tp_size == 0, (
@@ -72,24 +70,23 @@ def get_my_microbatch_range(language_pg, num_micro):
 def exchange_macro_outputs(entries, language_pg, vit_batch_factor, mark_requires_grad=True):
     """Exchange per-microbatch vision outputs inside the language TP group.
 
-    Each microbatch entry is computed by its owner rank (see
-    ``get_my_microbatch_range``) and broadcast to the other group members;
-    non-owned entries must be preallocated receive buffers.  After the
-    exchange every served tensor is marked requires_grad so the scheduler
-    registers a grad hook per microbatch — its macro-batch completion trigger
-    relies on a hook firing for *every* microbatch.  Set after the broadcast
-    to avoid in-place writes into requires-grad leaves.  Gradients captured
-    for microbatches this rank does not own are unused.
+    Each entry is computed by its owner rank (see ``get_my_microbatch_range``)
+    and broadcast to the other group members; non-owned entries must be
+    preallocated receive buffers.  After the exchange every served tensor is
+    marked requires_grad so the scheduler registers a grad hook per
+    microbatch — its macro-batch completion trigger relies on a hook firing
+    for *every* microbatch.  Marking happens after the broadcast to avoid
+    in-place writes into requires-grad leaves; gradients captured for
+    microbatches this rank does not own are unused.
 
     Args:
         entries: List of ``{"main": Tensor, "aux": list[Tensor] | None}``
-            dicts, one per microbatch in the macro batch; modified in place.
+            dicts, one per microbatch; modified in place.
         language_pg: Language module process group collection.
         vit_batch_factor: Microbatches per macro batch (owner mapping).
-        mark_requires_grad: Whether to mark served tensors requires_grad.
-            Pass False when the ViT is frozen: without hooks no gradients are
-            expected, the exhausted macro batch is dropped silently, and the
-            delayed ViT backward never triggers.
+        mark_requires_grad: Pass False when the ViT is frozen: without hooks
+            no gradients are expected, the exhausted macro batch is dropped
+            silently, and the delayed ViT backward never triggers.
     """
     for forward_idx, entry in enumerate(entries):
         src_rank = get_source_vision_rank(language_pg, forward_idx, vit_batch_factor)
@@ -112,15 +109,9 @@ def exchange_macro_outputs(entries, language_pg, vit_batch_factor, mark_requires
 def broadcast_to_language_tp(tensor, language_pg, src_rank):
     """Broadcast ``tensor`` from ``src_rank`` to all ranks in the language TP group.
 
-    Args:
-        tensor: Tensor on the current rank.  Only meaningful on ``src_rank``
-            before the call; after the call every rank in the TP group holds
-            the same data.
-        language_pg: Language module process group collection.
-        src_rank: Global rank of the source within the language TP group.
-
-    Returns:
-        Tensor after broadcast.
+    Only meaningful on ``src_rank`` before the call; after the call every
+    rank in the TP group holds the same data.  Returns the tensor after
+    broadcast.
     """
     if language_pg is None or language_pg.tp is None:
         return tensor

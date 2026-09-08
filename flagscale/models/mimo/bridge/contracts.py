@@ -3,21 +3,15 @@
 """Per-model grid communicator contracts and their registry (model-agnostic).
 
 ``build_grid_multimodule_communicator`` (``bridge.training``) needs three
-model-specific values to construct the MCore
-``MultiModulePipelineCommunicator``:
+model-specific values to construct the MCore ``MultiModulePipelineCommunicator``:
+the module dependency graph, the schedule-tensor axis layout, and each
+module's output dimensionality.  Those are properties of the *model*, so the
+model's provider module registers one contract here at import time; adding a
+new model to the grid path touches only its own providers module, never this
+file or ``bridge.training``.
 
-- the module dependency graph (which module feeds which),
-- the schedule-tensor axis layout (where s/b/h live),
-- each module's output dimensionality.
-
-Those values are properties of the *model*, not of the grid machinery, so
-they are registered here by the model's provider module (import-time
-registration) instead of being hardcoded in ``bridge.training``.  Adding a
-new model to the grid path means registering one contract from its own
-providers/recipe module; this file and ``bridge.training`` stay untouched.
-
-This module is a stdlib-only leaf: it must not import ``bridge.training``,
-the providers, or torch, so both sides can import it without cycles.
+Stdlib-only leaf: must not import ``bridge.training``, the providers, or
+torch, so both sides can import it without cycles.
 """
 
 from __future__ import annotations
@@ -54,8 +48,7 @@ class GridCommunicatorContract:
 
 
 #: Megatron-wide default axis layout for seq-first (SBH) schedule tensors;
-#: model contracts should reuse this unless their tensors are laid out
-#: differently.
+#: reuse unless a model's tensors are laid out differently.
 SBH_DIM_MAPPING = {"s": 0, "b": 1, "h": 2}
 
 _GRID_COMMUNICATOR_CONTRACTS: dict[str, GridCommunicatorContract] = {}
@@ -87,9 +80,8 @@ def get_grid_communicator_contract(
     """Look up a registered contract.
 
     With ``key=None`` (the common case: one model per process) the single
-    registered contract is returned.  Lookup fails fast with an actionable
-    message when nothing is registered (the model's providers module was not
-    imported) or when several contracts are registered and no key is given.
+    registered contract is returned; lookup fails fast with an actionable
+    message when nothing (or several, with no key) is registered.
 
     Raises:
         KeyError: ``key`` given but not registered.

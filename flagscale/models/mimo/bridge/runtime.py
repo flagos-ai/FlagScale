@@ -2,20 +2,9 @@
 
 """Multi-module process group utilities for NON-colocated MIMO heterogeneous parallel training.
 
-This module is adapted from Megatron-Bridge ``training/megatron_mimo_parallel_utils.py``
-(NVIDIA, 2025) against the actual Megatron-LM-FL v0.18.2 APIs, with no dependency
-on Megatron-Bridge.  It provides utilities for building process group structures
-and handling gradients across modules with different parallelism configurations.
-
-Key functions:
-- unwrap_mimo_model(): Unwrap Float16Module/DDP to get the underlying MimoModel
-- get_active_module_pg(): Get the single active (module, pg_collection) pair on this rank
-- build_pg_collection_for_schedule(): Build pg_collection compatible with the schedule
-- multimodule_no_sync(): Context manager for gradient sync during microbatch accumulation
-- finalize_model_grads_multimodule(): Finalize gradients for each module
-- zero_grad_buffer_for_multimodule(): Reset gradient buffers for all modules
-- validate_no_stub_ranks(): Ensure every rank participates in at least one module
-- validate_data_loader_contract(): Validate data loading constraints
+Adapted from Megatron-Bridge ``training/megatron_mimo_parallel_utils.py``
+(NVIDIA, 2025) against the actual Megatron-LM-FL v0.18.2 APIs, with no
+dependency on Megatron-Bridge.
 
 Non-colocated MIMO assigns each rank to exactly one module; every module's
 ``ProcessGroupCollection`` is nullable on ranks that do not participate in it.
@@ -58,8 +47,8 @@ logger = logging.getLogger(__name__)
 def _get_dp_size_from_grid(grid: HyperCommGrid) -> int:
     """Get the DP dimension size from a grid's shape metadata.
 
-    Uses ``grid.shape`` / ``grid.dim_names`` rather than process groups so that
-    it works on ALL ranks, including those outside the grid.
+    Uses ``grid.shape`` / ``grid.dim_names`` rather than process groups so it
+    works on all ranks, including those outside the grid.
     """
     dp_idx = grid.dim_names.index("dp")
     return grid.shape[dp_idx]
@@ -68,9 +57,9 @@ def _get_dp_size_from_grid(grid: HyperCommGrid) -> int:
 def unwrap_mimo_model(model) -> MimoModel:
     """Unwrap Float16Module/DDP wrappers to get the underlying MimoModel.
 
-    When using mixed precision (bf16/fp16), models are wrapped in Float16Module.
-    This function unwraps the model to access MimoModel-specific attributes
-    like ``role``, ``mimo_config``, ``language_model``, ``modality_submodules``, etc.
+    Mixed-precision training wraps models in Float16Module; unwrapping exposes
+    MimoModel-specific attributes (``role``, ``mimo_config``,
+    ``language_model``, ``modality_submodules``, ...).
 
     Args:
         model: A MimoModel or a wrapped version (Float16Module, DDP).
@@ -90,14 +79,7 @@ def unwrap_mimo_model(model) -> MimoModel:
 
 
 def is_current_rank_in_grid(grid: HyperCommGrid) -> bool:
-    """Check if the current rank participates in the given grid.
-
-    Args:
-        grid: HyperCommGrid to check participation in.
-
-    Returns:
-        True if the current rank is within the grid's rank range.
-    """
+    """Check if the current rank participates in the given grid."""
     current_rank = dist.get_rank()
     return grid.rank_offset <= current_rank < (grid.rank_offset + grid.size)
 
@@ -107,16 +89,8 @@ def get_active_module_pg(
 ) -> tuple[str, ProcessGroupCollection]:
     """Return the (module_name, pg_collection) for the single active module on this rank.
 
-    Non-colocated MIMO assigns each rank to exactly one module.  This helper
-    extracts that module's name and ``ProcessGroupCollection`` from a nullable
-    collection map (entries for non-participating modules are ``None``).
-
-    Args:
-        pg_collections: Mapping of module names to ProcessGroupCollection or
-            None for modules this rank does not participate in.
-
-    Returns:
-        (module_name, pg_collection) of the single active module.
+    Non-colocated MIMO assigns each rank to exactly one module; entries for
+    non-participating modules are ``None``.
 
     Raises:
         AssertionError: If more or fewer than one module is active on this rank.
@@ -135,21 +109,14 @@ def get_module_to_grid_tuple(
 ) -> list[tuple]:
     """Build a list of (module, grid) tuples for all modules the current rank participates in.
 
-    Args:
-        mimo_model: The MimoModel instance (possibly wrapped in Float16Module/DDP).
-        module_to_grid_map: Mapping of module names to their HyperCommGrids.
-
-    Returns:
-        List of (module, grid) tuples for modules this rank participates in.
-
     Note:
         The returned modules are the RAW unwrapped submodules (Float16Module /
         DDP wrappers stripped).  ``multimodule_no_sync`` and
         ``zero_grad_buffer_for_multimodule`` call DDP-only methods
         (``no_sync`` / ``zero_grad_buffer``), so callers must wrap each
-        submodule in ``DistributedDataParallel`` (or substitute the wrapped
-        module) before consuming this tuple; the utilities fail fast when the
-        DDP-only methods are missing instead of silently skipping.
+        submodule in ``DistributedDataParallel`` before consuming this tuple;
+        the utilities fail fast when the DDP-only methods are missing instead
+        of silently skipping.
     """
     module_to_grid_tuple = []
 
@@ -185,24 +152,15 @@ def build_pg_collection_for_schedule(
     Uses ``MultiModuleProcessGroupCollection`` (it allows missing LLM PG on
     encoder-only ranks), built directly from the filtered non-None
     collections.  There is deliberately NO try/except fallback: a genuine
-    configuration error (e.g. a constructor validation failure) must propagate
-    instead of silently downgrading to a plain list of collections, which the
-    schedule consumes with different semantics - exactly the class of silent
-    failure that rots distributed training.
-
-    IMPORTANT: Uses pg_collections directly. Do NOT rebuild PGs.
-
-    Args:
-        pg_collections: Mapping of module names to ProcessGroupCollection or
-            None for modules this rank does not participate in.
-
-    Returns:
-        MultiModuleProcessGroupCollection.
+    configuration error must propagate instead of silently downgrading to a
+    plain list of collections, which the schedule consumes with different
+    semantics - exactly the class of silent failure that rots distributed
+    training.  IMPORTANT: uses pg_collections directly; do NOT rebuild PGs.
 
     Raises:
         ValueError: If no module has a non-None collection on this rank (a
-            stub rank - the setup-time ``validate_no_stub_ranks`` guard should
-            have rejected this configuration already).
+            stub rank - the setup-time ``validate_no_stub_ranks`` guard
+            should have rejected this configuration already).
     """
     module_pgs = {k: v for k, v in pg_collections.items() if v is not None}
     if not module_pgs:
@@ -220,22 +178,18 @@ def build_pg_collection_for_schedule(
 def multimodule_no_sync(*, module_to_grid_tuple: list[tuple]):
     """Context manager to disable gradient sync for all modules during microbatch accumulation.
 
-    This function is designed to be used with functools.partial() to pre-bind
-    the module_to_grid_tuple parameter, since the schedule calls no_sync_func()
-    with no arguments.
+    Designed for functools.partial() pre-binding of ``module_to_grid_tuple``,
+    since the schedule calls no_sync_func() with no arguments.
 
     Args:
-        module_to_grid_tuple: List of (module, grid) tuples (keyword-only, bound via partial).
-
-    Yields:
-        None - context manager for gradient sync control.
+        module_to_grid_tuple: List of (module, grid) tuples (keyword-only,
+            bound via partial).
 
     Raises:
         AttributeError: If a participating module is not DDP-wrapped
             (missing ``no_sync``).  ``get_module_to_grid_tuple`` returns RAW
-            unwrapped modules, so every tuple module must be wrapped in
-            ``DistributedDataParallel`` first; failing fast beats silently
-            running without gradient-sync control.
+            unwrapped modules; failing fast beats silently running without
+            gradient-sync control.
     """
     contexts = []
     for module, grid in module_to_grid_tuple:
@@ -272,21 +226,21 @@ def finalize_model_grads_multimodule(
 ):
     """Finalize gradients for each module using module-local pg_collections.
 
-    IMPORTANT: Signature matches the schedule's call pattern:
+    Signature matches the schedule's call pattern:
         config.finalize_model_grads_func([model], num_tokens, pg_collection, force_all_reduce=flag)
 
-    The `module_to_grid_map`, `pg_collections` and `module_to_grid_tuple`
-    parameters are pre-bound via partial().  We ignore the schedule-provided
-    `pg_collection` and use per-module PGs.  The schedule-provided
-    `force_all_reduce` flag is forwarded to MCore's standard finalizer for
+    ``module_to_grid_map`` / ``pg_collections`` / ``module_to_grid_tuple`` are
+    pre-bound via partial().  The schedule-provided ``pg_collection`` is
+    ignored in favour of per-module PGs; the schedule-provided
+    ``force_all_reduce`` flag is forwarded to MCore's standard finalizer for
     each active module.
 
     When encoder DP > LLM DP (heterogeneous), the LLM's loss normalization
     divides by tokens for ALL samples it processes, but after non-colocated
-    fan-out each encoder DP rank only carries gradient for (encoder_dp / llm_dp)
-    fewer samples.  This makes encoder gradients too small by a factor of
-    encoder_dp / llm_dp.  We compensate after DDP finalization by scaling
-    encoder gradients back up.
+    fan-out each encoder DP rank only carries gradient for
+    (encoder_dp / llm_dp) fewer samples, so encoder gradients are too small
+    by that factor.  We compensate after DDP finalization by scaling encoder
+    gradients back up.
 
     Args:
         model: Model list (passed by schedule, ignored - we use module_to_grid_tuple).
@@ -311,23 +265,20 @@ def finalize_model_grads_multimodule(
     if num_tokens is not None and llm_grid is not None:
         # calculate_per_token_loss=True path.
         #
-        # Only LLM last-PP-stage ranks accumulated non-zero num_tokens.
-        # _finalize_model_grads does PP broadcast + DP all-reduce on
-        # num_tokens internally, which works correctly for the LLM because
-        # each DP rank still holds its own distinct accumulated count.
+        # Only LLM last-PP-stage ranks accumulated non-zero num_tokens;
+        # _finalize_model_grads does PP broadcast + DP all-reduce on num_tokens
+        # internally, which works for the LLM because each DP rank still holds
+        # its own distinct count.  We must NOT broadcast num_tokens globally
+        # before calling it — that would overwrite every rank with one DP
+        # rank's value, and the subsequent DP all-reduce would sum dp_size
+        # identical copies instead of distinct per-rank counts.
         #
-        # We must NOT broadcast num_tokens globally before calling
-        # _finalize_model_grads — that would overwrite every rank with one
-        # DP rank's value, and the subsequent DP all-reduce would sum
-        # dp_size identical copies instead of distinct per-rank counts.
-        #
-        # Encoder ranks have num_tokens=0 (they don't compute loss).  We
-        # pass num_tokens=None for them to skip the broken normalization,
-        # then broadcast the correct total from LLM and apply it manually.
-        #
-        # With gradient_scaling_factor=1.0 (calculate_per_token_loss=True),
-        # DDP does a plain SUM.  After dividing by the global token count
-        # the gradient is correct — no DP compensation factor needed.
+        # Encoder ranks have num_tokens=0 (they don't compute loss): pass
+        # num_tokens=None for them to skip the broken normalization, then
+        # broadcast the correct total from LLM and apply it manually.  With
+        # gradient_scaling_factor=1.0 (calculate_per_token_loss=True) DDP does
+        # a plain SUM, so after dividing by the global token count the
+        # gradient is correct — no DP compensation factor needed.
 
         # Phase 1: gradient all-reduce for each module.  Only the LLM gets
         # num_tokens so _finalize_model_grads can PP-broadcast + DP-all-reduce
@@ -352,8 +303,8 @@ def finalize_model_grads_multimodule(
                         )
 
         # Phase 2: broadcast the correct global total from LLM to encoder
-        # ranks.  _finalize_model_grads updated num_tokens in-place on LLM
-        # ranks (PP broadcast + DP all-reduce → true global total).
+        # ranks (_finalize_model_grads updated num_tokens in-place on LLM
+        # ranks: PP broadcast + DP all-reduce → true global total).
         llm_last_rank = llm_grid.rank_offset + llm_grid.size - 1
         dist.broadcast(num_tokens, src=llm_last_rank)
 
@@ -390,17 +341,11 @@ def finalize_model_grads_multimodule(
 def zero_grad_buffer_for_multimodule(module_to_grid_tuple: list[tuple]):
     """Reset gradient buffers for all DDP-wrapped modules.
 
-    Args:
-        module_to_grid_tuple: List of (module, grid) tuples.
-
     Raises:
         AttributeError: If a participating module is not DDP-wrapped
-            (missing ``zero_grad_buffer``).  ``get_module_to_grid_tuple``
-            returns RAW unwrapped modules, so every tuple module must be
-            wrapped in ``DistributedDataParallel`` first.  A missing
-            ``zero_grad_buffer`` must raise rather than be silently skipped:
-            otherwise gradient buffers are never reset and gradients
-            silently accumulate across optimizer steps.
+            (missing ``zero_grad_buffer``).  It must raise rather than be
+            silently skipped: otherwise gradient buffers are never reset and
+            gradients silently accumulate across optimizer steps.
     """
     for module, grid in module_to_grid_tuple:
         if module is not None and is_current_rank_in_grid(grid):
@@ -417,8 +362,8 @@ def zero_grad_buffer_for_multimodule(module_to_grid_tuple: list[tuple]):
 def validate_no_stub_ranks(module_to_grid_map: dict[str, HyperCommGrid], world_size: int):
     """Ensure every rank participates in at least one module.
 
-    Stub ranks (ranks not participating in any module) are NOT supported.
-    This validation runs at setup time to fail fast with a clear error.
+    Stub ranks (ranks not participating in any module) are NOT supported;
+    validation runs at setup time to fail fast with a clear error.
 
     Args:
         module_to_grid_map: Mapping of module names to their HyperCommGrids.
@@ -429,7 +374,6 @@ def validate_no_stub_ranks(module_to_grid_map: dict[str, HyperCommGrid], world_s
     """
     participating_ranks = set()
     for module_name, grid in module_to_grid_map.items():
-        # Add all ranks in this grid's range.
         for rank in range(grid.rank_offset, grid.rank_offset + grid.size):
             participating_ranks.add(rank)
 
@@ -457,12 +401,6 @@ def validate_data_loader_contract(
     - Global batch size divisible by all module DP sizes
     - num_microbatches * micro_batch_size == global_batch_size
 
-    Args:
-        module_to_grid_map: Mapping of module names to their HyperCommGrids.
-        global_batch_size: Total MIMO batch size per optimizer step.
-        micro_batch_size: Global MIMO batch size per microbatch before module-local DP slicing.
-        num_microbatches: Number of microbatches per iteration.
-
     Raises:
         ValueError: If any constraint is violated.
     """
@@ -474,8 +412,6 @@ def validate_data_loader_contract(
         )
 
     for module_name, grid in module_to_grid_map.items():
-        # Get DP size from the grid's shape metadata (no process groups needed,
-        # so this works on all ranks including those outside the grid).
         dp_size = _get_dp_size_from_grid(grid)
 
         if micro_batch_size % dp_size != 0:
@@ -483,7 +419,6 @@ def validate_data_loader_contract(
                 f"Micro batch size {micro_batch_size} not divisible by {module_name} DP size {dp_size}"
             )
 
-        # Check global batch divisibility.
         if global_batch_size % dp_size != 0:
             raise ValueError(
                 f"Global batch size {global_batch_size} not divisible by {module_name} DP size {dp_size}"

@@ -3,30 +3,25 @@
 """Rank-aware data-loading utilities for MIMO (FlagScale-native).
 
 Port of the Megatron-Bridge ``data/megatron_mimo/dp_utils.py`` concepts with
-**no Bridge or distributed dependency**: sampling info, data-needed-by-role
+no Bridge or distributed dependency: sampling info, data-needed-by-role
 decisions, and DP slicing of a global micro-batch into module-local shards.
-Everything here is a pure function of explicit dataclasses and tensors, so it
-can be unit-tested on CPU without process groups.
+Pure functions of explicit dataclasses and tensors, unit-testable on CPU
+without process groups.
 
-Conventions kept from the Bridge:
+Conventions:
 
-- Every data-loading rank samples the *same* global micro-batch
-  (:class:`SamplingInfo` always returns ``sampler_dp_size=1``); per-module DP
-  sub-sharding is deferred to :func:`slice_batch_for_module_dp` in the
-  forward step, so slices match the contiguous batch-dimension
-  split/concatenate routing of the MIMO bridge communication.
-- Qwen-VL/Qwen3-VL MRoPE ``position_ids`` are ``[3, batch, seq]`` instead of
-  ``[batch, seq]``; their batch dimension is 1
-  (:func:`_batch_dim_for_tensor`).
-- Patch-packed visual encoder inputs (``{hidden_states, grid_thw, ...}``)
-  use dim 0 for different units across fields (patches vs images) and must
-  be sliced jointly along per-image boundaries
-  (:func:`is_patch_packed_visual_dict` and
-  :func:`_slice_patch_packed_visual_dict`).
+- Every data-loading rank samples the same global micro-batch
+  (``sampler_dp_size=1``); per-module DP sub-sharding is deferred to
+  :func:`slice_batch_for_module_dp` in the forward step, matching the
+  bridge's contiguous batch-dimension split/concatenate routing.
+- Qwen-VL/Qwen3-VL MRoPE ``position_ids`` are ``[3, batch, seq]``; their
+  batch dimension is 1 (:func:`_batch_dim_for_tensor`).
+- Patch-packed visual inputs (``{hidden_states, grid_thw, ...}``) use dim 0
+  for different units across fields (patches vs images) and are sliced
+  jointly (:func:`is_patch_packed_visual_dict`).
 - Language-only ranks (non-colocated layouts) consume encoder outputs from
-  the bridge, not raw modality inputs; the raw inputs are dropped before DP
-  slicing (:func:`should_drop_modality_inputs` /
-  :func:`prepare_batch_for_module`).
+  the bridge; raw modality inputs are dropped before DP slicing
+  (:func:`should_drop_modality_inputs`).
 """
 
 from __future__ import annotations
@@ -52,10 +47,9 @@ from .parallelism import (
 class ModuleDataRole:
     """Rank-aware role describing what data a rank must load.
 
-    ``module_name`` names the module whose data this rank loads (e.g.
-    ``"vision"`` or ``"language"``).  ``pp_rank`` / ``pp_size`` locate the
-    rank within that module's pipeline group (modality modules are never
-    pipelined in MIMO and use ``pp_size=1, pp_rank=0``).
+    ``module_name`` names the module whose data this rank loads; ``pp_rank`` /
+    ``pp_size`` locate the rank within that module's pipeline group (modality
+    modules are never pipelined: ``pp_size=1, pp_rank=0``).
     """
 
     module_name: str
@@ -97,11 +91,9 @@ def needs_data_for_role(role: ModuleDataRole) -> bool:
     """Decide whether a rank must load a data batch for its module.
 
     Language: every PP stage needs batch metadata - first stages consume
-    ``input_ids``, last stages consume ``labels``/``loss_mask``, and models
-    with position-dependent decoder blocks (e.g. Qwen3-VL MRoPE) need
-    ``position_ids`` on intermediate PP stages as well.
-    Modality modules (e.g. vision): only the first PP stage needs raw
-    modality inputs.
+    ``input_ids``, last stages consume ``labels``/``loss_mask``, and MRoPE-style
+    models also need ``position_ids`` on intermediate PP stages. Modality
+    modules: only the first PP stage needs raw modality inputs.
     """
     if role.is_language:
         return True
@@ -112,15 +104,11 @@ def needs_data_for_role(role: ModuleDataRole) -> bool:
 class SamplingInfo:
     """Sampler-level DP settings for a data-loading rank.
 
-    Mirrors the Bridge's ``get_megatron_mimo_sampling_info``: every
-    data-loading rank samples with ``sampler_dp_size=1`` so all ranks load
-    identical global micro-batches; module-local DP slicing is deferred to
-    :func:`slice_batch_for_module_dp` in the forward step.
-
-    .. note::
-        Do **not** use these values to construct a ``DistributedSampler``
-        directly for per-module sharding - they are deliberately
-        un-sharded at the sampler level.
+    Every data-loading rank samples with ``sampler_dp_size=1`` so all ranks
+    load identical global micro-batches; module-local DP slicing is deferred
+    to :func:`slice_batch_for_module_dp` in the forward step. Do **not** use
+    these values to construct a ``DistributedSampler`` for per-module
+    sharding - they are deliberately un-sharded at the sampler level.
     """
 
     sampler_dp_rank: int = 0
@@ -145,10 +133,9 @@ class SamplingInfo:
 def get_sampling_info(role: ModuleDataRole) -> SamplingInfo:
     """Return the sampler settings for a rank's module role.
 
-    All data-loading ranks share the same sampler settings
-    (``sampler_dp_rank=0``, ``sampler_dp_size=1``) so they stay synchronised
-    on the same sample order; :func:`slice_batch_for_module_dp` performs the
-    per-module sub-sharding later, in the forward step.
+    All data-loading ranks share ``sampler_dp_rank=0, sampler_dp_size=1`` so
+    they stay synchronised on the same sample order; the per-module
+    sub-sharding happens later in :func:`slice_batch_for_module_dp`.
     """
     return SamplingInfo(
         sampler_dp_rank=0,
@@ -160,8 +147,8 @@ def get_sampling_info(role: ModuleDataRole) -> SamplingInfo:
 def _batch_dim_for_tensor(key: str, value: torch.Tensor) -> int:
     """Return the batch dimension for a known MIMO batch tensor.
 
-    Qwen-VL/Qwen3-VL MRoPE ``position_ids`` are ``[3, batch, seq]`` instead
-    of ``[batch, seq]``, so their batch dimension is 1.
+    Qwen-VL/Qwen3-VL MRoPE ``position_ids`` are ``[3, batch, seq]``, so their
+    batch dimension is 1.
     """
     if key == "position_ids" and value.dim() >= 3 and value.size(0) == 3:
         return 1
@@ -172,14 +159,11 @@ def is_patch_packed_visual_dict(value: Any) -> bool:
     """Detect a patch-packed visual encoder input layout.
 
     Some VLM adapters pack all image patches of a microbatch into one flat
-    tensor while keeping per-image grid metadata:
-
-    - ``hidden_states``: ``[sum(patches_across_images), patch_feature_dim]``
-    - ``grid_thw``:      ``[num_images, 3]``
-
-    Dim 0 of these two tensors means different things (patches vs images), so
-    they cannot be sliced independently by DP; they must be sliced jointly
-    along per-image boundaries.
+    tensor plus per-image grid metadata: ``hidden_states`` is
+    ``[sum(patches_across_images), patch_feature_dim]`` and ``grid_thw`` is
+    ``[num_images, 3]``. Dim 0 of the two tensors means different things
+    (patches vs images), so they cannot be DP-sliced independently; they must
+    be sliced jointly along per-image boundaries.
     """
     return (
         isinstance(value, dict)
@@ -197,16 +181,14 @@ def _slice_patch_packed_visual_dict(
     """Joint-slice a patch-packed ``{hidden_states, grid_thw, ...}`` dict.
 
     Shards by image count, then derives the patch range from
-    ``cumsum(grid_thw.prod(dim=-1))``.  Other keys in the dict pass through
-    unchanged because they are treated as global encoder metadata.
+    ``cumsum(grid_thw.prod(dim=-1))``; other keys pass through unchanged as
+    global encoder metadata.
 
     Constraints:
 
     - ``num_images`` (rows of ``grid_thw``) must be divisible by ``dp_size``.
-      For the encoder rank, ``num_images_per_microbatch`` is set by the
-      training-time MIMO MBS and the dataset's images-per-sample.  With
-      single-image-per-sample data and the MIMO MBS divisible by the encoder
-      DP, this always holds.
+      With single-image-per-sample data and the MIMO MBS divisible by the
+      encoder DP, this always holds.
     - ``hidden_states`` dim 0 must equal ``sum(grid_thw.prod(dim=-1))``.
     """
     assert dp_size >= 1, f"dp_size must be >= 1, got {dp_size}."
@@ -241,9 +223,7 @@ def _slice_patch_packed_visual_dict(
         elif key == "hidden_states":
             out[key] = hs[patch_lo:patch_hi].contiguous()
         else:
-            # Other entries (encoder kwargs, attention masks, etc.) pass
-            # through as global metadata - same convention as the outer
-            # slicer's non-divisible list branch.
+            # Other entries pass through as global metadata.
             out[key] = sub_value
     return out
 
@@ -256,30 +236,21 @@ def slice_batch_for_module_dp(
     """Slice a global micro-batch for this rank's module-local DP shard.
 
     All data-loading ranks receive the same global micro-batch (the sampler
-    uses ``sampler_dp_size=1``).  This function contiguously slices it so
-    each module-local DP replica processes the correct subset.  The slicing
-    is contiguous to match the MIMO bridge's batch-dimension split /
-    concatenate logic for fan-out and fan-in routing.
-
-    Handles nested dicts (e.g. ``modality_inputs``) by recursing, and
-    patch-packed ``{hidden_states, grid_thw}`` visual inputs by joint
-    slicing (see :func:`is_patch_packed_visual_dict`).
+    uses ``sampler_dp_size=1``); the slicing is contiguous to match the MIMO
+    bridge's batch-dimension split/concatenate fan-out and fan-in routing.
+    Nested dicts (e.g. ``modality_inputs``) are recursed into; patch-packed
+    ``{hidden_states, grid_thw}`` visual inputs are joint-sliced (see
+    :func:`is_patch_packed_visual_dict`).
 
     Args:
         batch: Global batch dict with tensors of shape ``[global_batch, ...]``,
             except known layouts such as Qwen-VL MRoPE ``position_ids``
-            shaped ``[3, global_batch, seq]``.  May contain nested dicts
-            (e.g. ``modality_inputs -> encoder -> kwargs``).
+            shaped ``[3, global_batch, seq]``.
         dp_rank: This rank's position in its module-local DP group.
         dp_size: Size of the module-local DP group.
 
     Returns:
         Dict with tensors sliced to shape ``[global_batch // dp_size, ...]``.
-
-    Example:
-        >>> global_batch = {"tokens": torch.randn(12, 2048)}
-        >>> local_batch = slice_batch_for_module_dp(global_batch, dp_rank=1, dp_size=3)
-        >>> local_batch["tokens"].shape  # torch.Size([4, 2048])
     """
     assert isinstance(dp_size, int) and not isinstance(dp_size, bool) and dp_size >= 1, (
         f"dp_size must be a positive integer, got {dp_size!r}."
@@ -309,10 +280,8 @@ def slice_batch_for_module_dp(
             index[batch_dim] = builtins.slice(start_idx, end_idx)
             sliced[key] = value[tuple(index)]
         elif isinstance(value, dict):
-            # Patch-packed visual encoder inputs use dim 0 for different
-            # units across fields (patches for hidden_states, images for
-            # grid_thw), so they need joint slicing instead of normal
-            # recursive tensor slicing.
+            # Patch-packed visual inputs use dim 0 for different units
+            # across fields (patches vs images), so slice jointly.
             if is_patch_packed_visual_dict(value):
                 sliced[key] = _slice_patch_packed_visual_dict(value, dp_rank, dp_size)
             else:
@@ -342,12 +311,11 @@ def should_drop_modality_inputs(
 ) -> bool:
     """Decide whether this rank must drop raw modality inputs from its batch.
 
-    In a non-colocated layout the language module owns disjoint ranks that
-    never host a modality module: those language-only ranks consume encoder
-    outputs from the MIMO bridge instead of raw modality inputs, so the raw
-    inputs are dropped before DP slicing (their leading dimension is not the
-    language sample batch).  In a colocated layout the language ranks also
-    host the vision module and keep the raw inputs.
+    In a non-colocated layout, language-only ranks consume encoder outputs
+    from the MIMO bridge instead of raw modality inputs, so the raw inputs
+    are dropped before DP slicing (their leading dimension is not the
+    language sample batch). Colocated language ranks also host the vision
+    module and keep the raw inputs.
     """
     assert role.is_language, (
         f"should_drop_modality_inputs is only meaningful for language ranks, "
@@ -364,15 +332,12 @@ def drop_modality_inputs(batch: Mapping[str, Any]) -> dict[str, Any]:
     """Return a copy of ``batch`` with the raw modality inputs set to None.
 
     Language-only ranks (non-colocated layouts) receive encoder outputs via
-    the MIMO bridge, not raw modality inputs.  Dropping them avoids
-    DP-slicing modality tensors whose leading dimension is not the language
-    sample batch.  This covers both the nested ``modality_inputs`` key and the
+    the MIMO bridge. This covers the nested ``modality_inputs`` key and the
     raw Qwen-VL batch keys (``imgs`` / ``videos`` / ``image_thw_grids`` /
     ``video_thw_grids``): they are patch-packed - ``imgs`` dim 0 is the total
     patch count across the batch's images, not the sample count - so the
-    generic sample-DP slicer must never see them (e.g. 3080 patches with
-    language DP 6 is not divisible by 6).  The batch dict is shallow-copied;
-    tensors are shared.
+    generic sample-DP slicer must never see them. The batch dict is
+    shallow-copied; tensors are shared.
     """
     out = dict(batch)
     out["modality_inputs"] = None
@@ -391,9 +356,9 @@ def prepare_batch_for_module(
 ) -> dict[str, Any]:
     """Prepare a global micro-batch for a rank's module-local DP shard.
 
-    1. Drop ``modality_inputs`` on language-only ranks (non-colocated
-       layout): they consume encoder outputs from the bridge, and the raw
-       modality tensors' leading dimension is not the language sample batch.
+    1. Drop modality inputs on language-only ranks (non-colocated layout):
+       they consume encoder outputs from the bridge, and the raw modality
+       tensors' leading dimension is not the language sample batch.
     2. Contiguously slice the batch for the module-local DP shard (see
        :func:`slice_batch_for_module_dp`).
 

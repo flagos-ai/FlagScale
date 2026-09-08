@@ -5,10 +5,8 @@
 Both execution paths wrap each local submodule with its own
 ``DistributedDataParallel`` instance and skip the outer DDP wrapper, so the
 DDP-config construction and the outer-chunk method patching live here once:
-
-- ``colocated/mimo_optimizer.py`` uses them inside ``switch_parallel_state``
-  for the colocated model;
-- ``bridge/training.py`` uses them for the MCore-MimoModel-based grid path.
+``colocated/mimo_optimizer.py`` uses them in ``switch_parallel_state``;
+``bridge/training.py`` uses them for the MCore-MimoModel grid path.
 """
 
 import dataclasses
@@ -25,11 +23,10 @@ def build_mimo_ddp_config(
 ) -> DistributedDataParallelConfig:
     """Build a ``DistributedDataParallelConfig`` matching Megatron's default path.
 
-    The implementation is kept in sync with ``megatron.training.training.get_model``
-    so that MIMO modules see the same DDP behavior as a non-MIMO model.
-
-    ``dp_world_size`` overrides the default bucket-size heuristic; use it when the
-    module's data-parallel size differs from the global default.
+    Kept in sync with ``megatron.training.training.get_model`` so MIMO modules
+    see the same DDP behavior as a non-MIMO model.  ``dp_world_size``
+    overrides the default bucket-size heuristic; use it when the module's
+    data-parallel size differs from the global default.
     """
     kwargs = {}
     num_parameters = sum(p.nelement() for p in model.parameters())
@@ -93,14 +90,14 @@ def get_mimo_ddp_wrappers(model_chunk):
 def patch_mimo_model_chunk(model_chunk):
     """Bind DDP-like grad-sync and param-sync methods on the outer Float16Module wrapper.
 
-    MIMO skips the outer DDP wrapper, so the training loop / Megatron
-    helpers that call ``model_chunk.finish_grad_sync()`` etc. would otherwise
-    fail.  The methods are delegated to the inner vision/language DDP modules.
+    MIMO skips the outer DDP wrapper, so the training loop / Megatron helpers
+    that call ``model_chunk.finish_grad_sync()`` etc. would otherwise fail;
+    the methods delegate to the inner vision/language DDP modules.
     """
     ddp_wrappers = get_mimo_ddp_wrappers(model_chunk)
     if ddp_wrappers:
-        # Use the language DDP config as the representative config; vision uses
-        # the same settings.
+        # The language DDP config (last wrapper) is representative; vision
+        # uses the same settings.
         model_chunk.ddp_config = ddp_wrappers[-1].ddp_config
         # Megatron overlap code checks this attribute before registering hooks.
         model_chunk.remove_forward_pre_hook_handles = []
@@ -140,11 +137,11 @@ def patch_mimo_model_chunk(model_chunk):
 
     model_chunk.no_sync = types.MethodType(_no_sync, model_chunk)
 
-    # Expose the exit-time training-state cleanup on the outer wrapper so the
+    # Expose the exit-time training-state cleanup on the outer wrapper for the
     # training loop's duck-typed pre-save cleanup (hasattr checks in
-    # ``training.py``) can call it before checkpoint saves.  Bound by plain
-    # attribute assignment (not ``types.MethodType``) so ``self`` stays the
-    # unwrapped model, which owns ``self.scheduler``.
+    # ``training.py``).  Bound by plain attribute assignment (not
+    # ``types.MethodType``) so ``self`` stays the unwrapped model, which owns
+    # ``self.scheduler``.
     unwrapped = unwrap_model(model_chunk)
     for name in ("release_training_state", "drop_completed_macros"):
         if hasattr(unwrapped, name):

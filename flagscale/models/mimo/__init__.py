@@ -2,17 +2,15 @@
 
 """MIMO building blocks: colocated in-house path + MCore bridge adapter.
 
-- ``colocated/``: the production colocated MIMO implementation (macro/micro
-  batch scheduling, delayed ViT backward), behind ``--mimo-layout=colocated``.
-- ``bridge/``: the Megatron-Bridge-style adapter layer over Megatron-LM-FL's
-  ``megatron.core`` MIMO infrastructure (MimoModel / HyperCommGrid /
-  MultiModulePipelineCommunicator / MimoOptimizer), behind
-  ``--mimo-layout=grid``; supports non-colocated component layouts.
+- ``colocated/``: production colocated MIMO implementation (macro/micro batch
+  scheduling, delayed ViT backward), behind ``--mimo-layout=colocated``.
+- ``bridge/``: Megatron-Bridge-style adapter layer over Megatron-LM-FL's
+  ``megatron.core`` MIMO infrastructure, behind ``--mimo-layout=grid``;
+  supports non-colocated component layouts.
 - ``ddp_utils``: per-module DDP helpers shared by both paths.
 
-The package-level exports intentionally remain the colocated public
-API for backward compatibility; bridge consumers import from
-``flagscale.models.mimo.bridge`` explicitly.
+Package exports intentionally remain the colocated public API for backward
+compatibility; bridge consumers import from ``flagscale.models.mimo.bridge``.
 """
 
 from .colocated import (
