@@ -40,7 +40,8 @@ from megatron.core.utils import StragglerDetector
 
 from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
-from megatron.training.arguments import core_transformer_config_from_args
+from megatron.training.argument_utils import pretrain_cfg_container_from_args
+from megatron.training.arguments import core_transformer_config_from_args, parse_and_validate_args
 
 from megatron.training.yaml_arguments import core_transformer_config_from_yaml
 
@@ -596,13 +597,18 @@ def add_multimodal_extra_args(parser):
 if __name__ == "__main__":
     train_valid_test_dataloaders_provider.is_distributed = True
 
+    args = parse_and_validate_args(
+        extra_args_provider=add_multimodal_extra_args,
+        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
+    )
+    full_config = pretrain_cfg_container_from_args(args)
+
     pretrain(
+        full_config,
         train_valid_test_dataloaders_provider,
         model_provider,
         ModelType.encoder_or_decoder,
         forward_step,
-        args_defaults={'tokenizer_type': 'Qwen2VLTokenizer'},
-        extra_args_provider=add_multimodal_extra_args,
         process_non_loss_data_func=write_online_eval_to_tensorboard,
         non_loss_data_func=run_online_eval,
     )

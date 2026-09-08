@@ -14,10 +14,11 @@ from megatron.core.config import set_experimental_flag
 from megatron.core.energy_monitor import EnergyMonitor
 from megatron.core.jit import disable_jit_fuser
 from megatron.core.num_microbatches_calculator import init_num_microbatches_calculator, unset_num_microbatches_calculator
-from megatron.training.tokenizer import build_tokenizer ########## FlagScale Add ##########
+from megatron.core.tokenizers.utils.build_tokenizer import build_tokenizer
 from megatron.training.dist_signal_handler import DistributedSignalHandler
 
 ########## FlagScale Begin ##########
+from megatron.training.tokenizer import build_tokenizer
 from megatron.training.spiky_loss import SpikyLossDetector
 from megatron.plugin.utils import get_device_type_for_comm
 ########## FlagScale End ##########
@@ -36,7 +37,6 @@ _GLOBAL_SIGNAL_HANDLER = None
 _GLOBAL_SPIKY_LOSS_DETECTOR = None
 _GLOBAL_EXTRA_VALID_DATASETS = None
 ########## FlagScale End ##########
-
 
 
 def get_args():
@@ -114,7 +114,7 @@ def _graceful_shutdown(signum, frame):
             # synchronize all ranks before exiting
             try:
                 # avoid deadlock if ranks don't all reach here
-                torch.distributed.barrier(timeout=timedelta(seconds=5))
+                torch.distributed.barrier()
             except Exception:
                 pass
 
@@ -133,16 +133,23 @@ def set_global_variables(args, build_tokenizer=True):
     _ensure_var_is_not_initialized(_GLOBAL_ARGS, 'args')
     set_args(args)
 
+    if args.step_batch_size_schedule is not None:
+        print(f'> using step batch size schedule: {args.step_batch_size_schedule}')
+
     init_num_microbatches_calculator(
-        args.rank,
-        args.rampup_batch_size,
-        args.global_batch_size,
-        args.micro_batch_size,
-        args.data_parallel_size,
-        args.decrease_batch_size_if_needed,
+        rank=args.rank,
+        global_batch_size=args.global_batch_size,
+        micro_batch_size=args.micro_batch_size,
+        data_parallel_size=args.data_parallel_size,
+        decrease_batch_size_if_needed=args.decrease_batch_size_if_needed,
+        step_batch_size_schedule=args.step_batch_size_schedule,
+        seq_length=args.seq_length,
     )
     if build_tokenizer:
         _ = _build_tokenizer(args)
+    # _set_tensorboard_writer(args)
+    # _set_wandb_writer(args)
+    # _set_one_logger(args)
     _set_adlr_autoresume(args)
     _set_timers(args)
     _set_energy_monitor(args)
@@ -161,6 +168,7 @@ def set_global_variables(args, build_tokenizer=True):
         disable_jit_fuser()
 
 
+########## FlagScale Begin ##########
 def set_global_writers(args):
     """Set tensorboard-writer and wandb writer.
 
@@ -193,6 +201,7 @@ def set_global_writers(args):
         torch.distributed.all_reduce(ranks_tensor, group=group)
     if torch.distributed.get_rank() in ranks_tensor.tolist():
         _set_wandb_writer(args)
+########## FlagScale End ##########
 
 
 def unset_global_variables():
@@ -269,7 +278,7 @@ def _set_wandb_writer(args):
     global _GLOBAL_WANDB_WRITER
     _ensure_var_is_not_initialized(_GLOBAL_WANDB_WRITER,
                                    'wandb writer')
-    if getattr(args, 'wandb_project', ''):
+    if getattr(args, 'wandb_project', '') and args.rank == (args.world_size - 1):
         if args.wandb_exp_name == '':
             raise ValueError("Please specify the wandb experiment name!")
 
@@ -285,6 +294,7 @@ def _set_wandb_writer(args):
             # settings were.
             with open(wandb_config['kitchen_config_file'], "r") as f:
                 wandb_config['kitchen_config_file_contents'] = f.read()
+        ########## FlagScale Begin ##########
         rank = torch.distributed.get_rank()
         save_dir = os.path.join(save_dir, "rank-{}".format(rank))
         wandb_id = f"{args.wandb_exp_name}-rank-{rank}"
@@ -305,6 +315,7 @@ def _set_wandb_writer(args):
         if args.wandb_mode == 'online' or args.wandb_api_key:
             assert args.wandb_api_key, 'wandb_api_key is required for online mode'
             wandb.login(key=args.wandb_api_key)
+        ########## FlagScale End ##########
         wandb.init(**wandb_kwargs)
         _GLOBAL_WANDB_WRITER = wandb
 

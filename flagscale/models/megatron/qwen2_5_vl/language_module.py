@@ -41,7 +41,6 @@ class QwenVLLanguageModelEmbedding(LanguageModelEmbedding):
         assert scatter_to_sequence_parallel == False, "QwenVLLanguageModelEmbedding does not support scatter_to_sequence_parallel"
         super().__init__(config, vocab_size, max_sequence_length, position_embedding_type, num_tokentypes, scatter_to_sequence_parallel, tp_group)
 
-
     def forward(
         self,
         input_ids: Tensor,
@@ -152,25 +151,35 @@ class QwenVLLanguageModel(GPTModel):
         scatter_embedding_sequence_parallel: bool = True,
         seq_len_interpolation_factor: Optional[float] = None,
         mtp_block_spec: Optional[ModuleSpec] = None,
+        pg_collection=None,
+        vp_stage=None,
     ) -> None:
-        super().__init__(config=config, transformer_layer_spec=transformer_layer_spec,
-                         vocab_size=vocab_size, max_sequence_length=max_sequence_length,
-                         pre_process=pre_process, post_process=post_process,
-                         fp16_lm_cross_entropy=fp16_lm_cross_entropy,
-                         parallel_output=parallel_output,
-                         share_embeddings_and_output_weights=share_embeddings_and_output_weights,
-                         position_embedding_type=position_embedding_type,
-                         rotary_percent=rotary_percent,
-                         rotary_base=rotary_base,
-                         rope_scaling=rope_scaling,
-                         rope_scaling_factor=rope_scaling_factor,
-                         scatter_embedding_sequence_parallel=scatter_embedding_sequence_parallel,
-                         seq_len_interpolation_factor=seq_len_interpolation_factor,
-                         mtp_block_spec=mtp_block_spec)
+        super().__init__(
+            config=config,
+            transformer_layer_spec=transformer_layer_spec,
+            vocab_size=vocab_size,
+            max_sequence_length=max_sequence_length,
+            pre_process=pre_process,
+            post_process=post_process,
+            fp16_lm_cross_entropy=fp16_lm_cross_entropy,
+            parallel_output=parallel_output,
+            share_embeddings_and_output_weights=share_embeddings_and_output_weights,
+            position_embedding_type=position_embedding_type,
+            rotary_percent=rotary_percent,
+            rotary_base=rotary_base,
+            rope_scaling=rope_scaling,
+            rope_scaling_factor=rope_scaling_factor,
+            scatter_embedding_sequence_parallel=scatter_embedding_sequence_parallel,
+            seq_len_interpolation_factor=seq_len_interpolation_factor,
+            mtp_block_spec=mtp_block_spec,
+            pg_collection=pg_collection,
+            vp_stage=vp_stage,
+        )
         if self.pre_process:
             self.embedding = QwenVLLanguageModelEmbedding(
                 config=self.config,
                 vocab_size=self.vocab_size,
                 max_sequence_length=self.max_sequence_length,
                 position_embedding_type=position_embedding_type,
+                tp_group=self.pg_collection.tp,
             )

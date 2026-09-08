@@ -24,10 +24,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
 from torch import Tensor
-from megatron.core.inference.contexts import BaseInferenceContext
-from megatron.core.packed_seq_params import PackedSeqParams
+
 from rwkvfla.modules.token_shift import token_shift
 from rwkvfla.ops.rwkv7.fused_addcmul import fused_addcmul_rwkv7
 from rwkvfla.ops.rwkv7.fused_k_update import fused_k_rwkv7

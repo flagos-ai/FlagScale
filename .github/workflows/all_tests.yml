@@ -44,9 +44,11 @@ on:
           - all
           - cuda
           - ascend
+          - enflame
           - hygon
           - metax
           - musa
+          - kunlunxin
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
@@ -66,6 +68,13 @@ jobs:
     uses: ./.github/workflows/all_tests_common.yml
     with:
       platform: ascend
+
+  enflame_tests:
+    name: Enflame tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'enflame'
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: enflame
 
   hygon_tests:
     name: Hygon tests
@@ -88,14 +97,23 @@ jobs:
     with:
       platform: musa
 
+  kunlunxin_tests:
+    name: Kunlunxin P800 tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'kunlunxin'
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: kunlunxin
+
   all_tests:
     name: all_tests
     needs:
       - cuda_tests
       - ascend_tests
+      - enflame_tests
       - hygon_tests
       - metax_tests
       - musa_tests
+      - kunlunxin_tests
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -115,6 +133,12 @@ jobs:
             failed=true
           fi
 
+          if [ "${{ needs.enflame_tests.result }}" != "success" ] && \
+             [ "${{ needs.enflame_tests.result }}" != "skipped" ]; then
+            echo "Enflame tests failed"
+            failed=true
+          fi
+
           if [ "${{ needs.hygon_tests.result }}" != "success" ] && \
              [ "${{ needs.hygon_tests.result }}" != "skipped" ]; then
             echo "Hygon tests failed"
@@ -130,6 +154,12 @@ jobs:
           if [ "${{ needs.musa_tests.result }}" != "success" ] && \
              [ "${{ needs.musa_tests.result }}" != "skipped" ]; then
             echo "MThreads MUSA tests failed"
+            failed=true
+          fi
+
+          if [ "${{ needs.kunlunxin_tests.result }}" != "success" ] && \
+             [ "${{ needs.kunlunxin_tests.result }}" != "skipped" ]; then
+            echo "Kunlunxin P800 tests failed"
             failed=true
           fi
 

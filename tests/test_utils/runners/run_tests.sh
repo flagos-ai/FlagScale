@@ -38,7 +38,7 @@ Usage: $(basename "$0") [OPTIONS]
 Run FlagScale tests with platform-specific configurations.
 
 OPTIONS:
-    --platform PLATFORM    Platform: cuda (REQUIRED)
+    --platform PLATFORM    Platform: cuda, ascend, metax, musa, kunlunxin (REQUIRED)
                            See tests/test_utils/config/platforms/ for available platforms
                            Use template.yaml to create new platform configurations
     --device DEVICE        Device type: a100, a800 (optional)
@@ -97,7 +97,7 @@ fi
 
 # Require platform to be specified
 if [ -z "$PLATFORM" ]; then
-    log_error "Platform must be specified with --platform. Available platforms: cuda"
+    log_error "Platform must be specified with --platform. Available platforms: cuda, ascend, metax, musa, kunlunxin"
     log_error "See tests/test_utils/config/platforms/template.yaml to create new platforms"
     exit 1
 fi

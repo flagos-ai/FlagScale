@@ -12,14 +12,16 @@ This directory provides a unified entry point for bidirectional Qwen3.5 checkpoi
 
 ## Usage
 
+Run the following commands from this directory (`tools/checkpoint/qwen35`).
+
 ### HF → Megatron
 
 ```bash
 ./run.sh hf2meg \
-    --yaml /workspace/FlagScale/examples/qwen35/conf/train/4b_nv_baseline.yaml \
+    --yaml ../../../examples/qwen35/conf/train/4b.yaml \
     --hf-path Qwen/Qwen3.5-4B \
-    --meg-path /path/to/output \
-    [--ref-path /path/to/ref/megatron]
+    --meg-path ./output \
+    [--ref-path ./ref/megatron]
 ```
 
 For `hf2meg`, `--hf-path` can be either a local HF checkpoint directory or a ModelScope model ID (e.g. `Qwen/Qwen3.5-4B`). When the path is not found locally, the converter automatically downloads it from ModelScope.
@@ -28,10 +30,10 @@ For `hf2meg`, `--hf-path` can be either a local HF checkpoint directory or a Mod
 
 ```bash
 ./run.sh meg2hf \
-    --yaml /workspace/FlagScale/examples/qwen35/conf/train/4b_nv_baseline.yaml \
-    --meg-path /path/to/megatron/checkpoint \
-    --hf-path /path/to/output \
-    [--ref-path /path/to/ref/hf]
+    --yaml ../../../examples/qwen35/conf/train/4b.yaml \
+    --meg-path ./megatron/checkpoint \
+    --hf-path ./output \
+    [--ref-path ./ref/hf]
 ```
 
 ### Direct Python Invocation
@@ -63,21 +65,11 @@ python convert_qwen35.py --direction meg2hf --meg-path ... --hf-path ... --yaml 
 - Use `compare_two_ckpts.py` for stricter per-tensor value comparison:
 
 ```bash
-python compare_two_ckpts.py --ref /path/to/ref/release --gen /path/to/gen/release --tp 2
+python compare_two_ckpts.py --ref ./ref/release --gen ./gen/release --tp 2
 ```
 
-## WARNING
+## Vision patch embedding layout
 
-If torch version < 2.9, maybe need modify (tools/checkpoint/qwen35/qwen35/config.py)
+The converter automatically follows the runtime model's Torch-version check for linear versus Conv3D patch embedding. When converting for a different training environment, set `vision_patch_embed_linear` explicitly in the conversion YAML to match that environment. No source edit is needed.
 
-```python
-self.use_linear_proj = cfg.get("vision_patch_embed_linear", True)
-```
-
-to
-
-```python
-self.use_linear_proj = cfg.get("vision_patch_embed_linear", False)
-```
-
-because qwen_vl will use linear instead of conv3d when torch version >= 2.9.
+See [the Qwen3.5 training example](../../../examples/qwen35/README.md) for official 4B weights, auxiliary MTP, short training, checkpoint recovery, and export.

@@ -139,7 +139,7 @@ def save_megatron_release_checkpoint(shards_dict, save_dir, cfg):
         ckpt_dir = os.path.join(release_dir, name)
         os.makedirs(ckpt_dir, exist_ok=True)
         save_path = os.path.join(ckpt_dir, "model_optim_rng.pt")
-        torch.save({"model": shard}, save_path)
+        torch.save({"model": shard, "checkpoint_version": 3.0, "iteration": 0}, save_path)
 
     tracker_path = os.path.join(save_dir, "latest_checkpointed_iteration.txt")
     with open(tracker_path, "w") as f:
