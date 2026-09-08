@@ -45,13 +45,16 @@ from typing import Any, Optional
 
 import torch
 
-########## FlagScale Begin ##########
-from flagscale.train import gpu_heartbeat
-########## FlagScale End ##########
-
-from . import arguments, global_vars
+from . import arguments
+from . import global_vars
 from .async_utils import is_empty_async_queue
 from .utils import is_rank0, print_rank_0
+
+########## FlagScale Begin ##########
+from flagscale.train import gpu_heartbeat
+from megatron.plugin.platform import get_platform
+cur_platform = get_platform()
+########## FlagScale End ##########
 
 _GLOBAL_RANK_MONITOR_CLIENT = None
 
@@ -67,8 +70,6 @@ _curr_eval_iter_idx = 0
 _NUM_WARMUP_ITERS = 1  # Will be set by --ft-num-warmup-iters (default: 5)
 _MIN_ITERS_FOR_STEP_TIMEOUT_UPDATE = 16
 
-from megatron.plugin.platform import get_platform
-cur_platform = get_platform()
 
 def get_rank_monitor_client() -> Optional[Any]:
     """Returns the underlying fault tolerance client instance
@@ -390,7 +391,7 @@ def maybe_setup_simulated_fault() -> None:
     rank = torch.distributed.get_rank()
     rand_rank = rng.randint(0, torch.distributed.get_world_size() - 1)
     rank_to_fail = rank_to_fail if rank_to_fail is not None else rand_rank
-    rank_to_fail = torch.tensor([rank_to_fail], device=cur_platform.current_device())
+    rank_to_fail = torch.tensor([rank_to_fail], device=cur_platform.current_device())  # FlagScale
     torch.distributed.broadcast(rank_to_fail, 0)
     rank_to_fail = int(rank_to_fail.item())
 

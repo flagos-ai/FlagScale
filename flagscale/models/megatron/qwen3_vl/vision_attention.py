@@ -100,6 +100,7 @@ class VisionSelfAttention(Attention):
         attn_mask_type=AttnMaskType.padding,
         cp_comm_type: str = None,
         pg_collection: ProcessGroupCollection = None,
+        name: str = None,
     ):
         super().__init__(
             config=config,
@@ -109,6 +110,7 @@ class VisionSelfAttention(Attention):
             attention_type="self",
             cp_comm_type=cp_comm_type,
             pg_collection=pg_collection,
+            name=name,
         )
 
         self.linear_qkv = build_module(
@@ -123,6 +125,7 @@ class VisionSelfAttention(Attention):
             is_expert=False,
             tp_comm_buffer_name='qkv',
             tp_group=self.pg_collection.tp,
+            name=(name + ".linear_qkv") if name is not None else None,
         )
 
         if submodules.q_layernorm is not None:

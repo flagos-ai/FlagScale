@@ -42,5 +42,4 @@ EXTRA_STATE_KEYS = {
     "decoder.final_layernorm",
     "vision_model.projection.encoder.linear_fc1",
     "vision_model.projection.encoder.linear_fc2",
-    "mtp.layers",
 }

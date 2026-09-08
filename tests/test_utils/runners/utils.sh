@@ -29,6 +29,31 @@ log_success() {
     echo -e "\033[0;32m[SUCCESS] $(date +'%Y-%m-%d %H:%M:%S') - $*\033[0m" >&2
 }
 
+# Run configuration-only Python helpers without processing site .pth files on
+# Enflame. The vendor image auto-loads torch_gcu from a .pth hook, which can
+# initialize the accelerator (and abort) even for pure YAML/JSON parsing.
+run_config_python() {
+    local platform="$1"
+    shift
+
+    if [ "$platform" = "enflame" ]; then
+        local script="$1"
+        shift
+        python -S -E -c '
+import runpy
+import sys
+import sysconfig
+
+sys.path.insert(0, sysconfig.get_path("purelib"))
+script = sys.argv[1]
+sys.argv = sys.argv[1:]
+runpy.run_path(script, run_name="__main__")
+' "$script" "$@"
+    else
+        python "$@"
+    fi
+}
+
 # Validation
 validate_platform() {
     local platform="$1"
@@ -62,7 +87,8 @@ validate_device() {
     local device="$2"
     local script_dir="$3"
 
-    local available_devices=$(python "${script_dir}/parse_config.py" --platform "$platform" --type device_types 2>/dev/null)
+    local available_devices
+    available_devices=$(run_config_python "$platform" "${script_dir}/parse_config.py" --platform "$platform" --type device_types 2>/dev/null)
 
     if [ $? -ne 0 ] || [ -z "$available_devices" ]; then
         log_error "Failed to query device types for platform '$platform'"
@@ -82,7 +108,7 @@ get_device_types() {
     local platform="$1"
     local script_dir="$2"
 
-    python "${script_dir}/parse_config.py" --platform "$platform" --type device_types 2>/dev/null
+    run_config_python "$platform" "${script_dir}/parse_config.py" --platform "$platform" --type device_types 2>/dev/null
 }
 
 # GPU Management

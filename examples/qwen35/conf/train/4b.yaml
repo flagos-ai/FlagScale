@@ -127,12 +127,12 @@ model:
 data:
   no_use_system_prompt: True
   vocab_size: 248320
-  data_path: /workspace/data/qwen/qwen_wds/wds-1
-  vision_root: /
+  data_path: ${oc.env:QWEN35_DATA_PATH,./data/qwen35/wds-1}
+  vision_root: ${oc.env:QWEN35_VISION_ROOT,./data/qwen35/images}
   dataloader_type: external
   split: 100,0,0
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
-    tokenizer_path: /workspace/data/qwen/qwen2vl_tokenizer
+    tokenizer_path: ${oc.env:QWEN35_HF_PATH,./models/Qwen3.5-4B}
     extra_vocab_size: 0
     make_vocab_size_divisible_by: 64
