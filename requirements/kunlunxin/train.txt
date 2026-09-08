@@ -1,0 +1,22 @@
+# Kunlunxin train-specific dependencies
+
+sentencepiece==0.2.1
+transformers==4.57.6
+tiktoken==0.12.0
+
+# for robotics
+# peft==0.18.1 pulls torch/accelerate; on the Kunlunxin vendor image the
+# vendor torch (torch_xmlir) is a non-standard wheel pip does not see as
+# satisfying the torch dep, so pip reinstalls stock PyPI torch, whose own
+# dep is stock triton 3.5.0 -- overwriting the image's kunlunxin triton
+# 3.0.0 (+triton.language.extra.xpu.libdevice). tl_extra_shim then falls
+# back to triton.language.math (no pow) and flag_gems import crashes
+# (geglu.py:12). peft runtime deps (torch/accelerate/transformers/numpy/
+# pyyaml) are already satisfied by the training base image, so
+# --no-deps only blocks the destructive torch/triton pull. Ascend avoids
+# this because torch_npu satisfies pip's torch dep.
+# [--no-deps]
+peft==0.18.1
+
+# --no-base skips common.txt; install flagos-specific deps via shared pin.
+-r _flagos_common.txt

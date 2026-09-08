@@ -90,6 +90,7 @@ class Qwen35Model(MegatronModule):
         language_share_embeddings_and_output_weights: bool = False,
         vp_stage: int = None,
         mtp_block_spec=None,
+        pg_collection=None,
     ) -> None:
         super().__init__(config=language_transformer_config)
 
@@ -102,6 +103,7 @@ class Qwen35Model(MegatronModule):
         self.add_encoder = add_encoder
         self.add_decoder = add_decoder
         self.enable_vision = enable_vision
+        self.vp_stage = vp_stage
 
         self.encoder_hidden_state = None
         self.vision_model = None
@@ -143,6 +145,7 @@ class Qwen35Model(MegatronModule):
             rope_scaling=False,
             mtp_block_spec=mtp_block_spec,
             vp_stage=vp_stage,
+            pg_collection=pg_collection,
         )
 
         self.share_embeddings_and_output_weights = (

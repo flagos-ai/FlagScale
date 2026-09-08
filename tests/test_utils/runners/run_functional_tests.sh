@@ -27,6 +27,18 @@ source "$SCRIPT_DIR/utils.sh"
 # generating the launch script, so this propagates to the torchrun workers.
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
+# Preserve dependency paths selected by the image or environment setup.
+# Source-only Megatron installations may not exist in site-packages.
+
+# trust_remote_code tokenizers are copied into this cache. Train and benchmark
+# jobs can start together on the same runner, so a shared modules directory is
+# unsafe and can produce partial QWenTokenizer imports.
+export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/hub}"
+export HF_MODULES_CACHE="${HF_HOME}/modules_${GITHUB_RUN_ID:-$$}_$(date +%s)_$$"
+mkdir -p "$HF_MODULES_CACHE"
+log_info "Using isolated transformers cache: $HF_MODULES_CACHE"
+
 # Defaults
 PLATFORM="default"
 DEVICE=""
@@ -276,13 +288,13 @@ get_test_configs() {
     local list="$4"
 
     local cmd=(
-        python "$SCRIPT_DIR/parse_config.py"
+        "$SCRIPT_DIR/parse_config.py"
         --platform "$PLATFORM" --device "$device"
         --type functional --task "$task"
     )
     [ -n "$model" ] && cmd+=(--model "$model")
     [ -n "$list" ] && cmd+=(--list "$list")
-    "${cmd[@]}" 2>/dev/null || echo ""
+    run_config_python "$PLATFORM" "${cmd[@]}" 2>/dev/null || echo ""
 }
 
 # Parse and run tests using helper module
@@ -298,7 +310,7 @@ run_tests_from_json() {
             log_error "FAIL: $task/$model/$config"
             failed=1
         fi
-    done < <(echo "$tests_json" | python "$SCRIPT_DIR/helpers.py" parse-test-cases)
+    done < <(echo "$tests_json" | run_config_python "$PLATFORM" "$SCRIPT_DIR/helpers.py" parse-test-cases)
 
     return $failed
 }
@@ -379,7 +391,7 @@ else
     log_info "Running tests for all devices: $DEVICE_TYPES"
 
     # Parse device types using helper
-    DEVICES=$(echo "$DEVICE_TYPES" | python "$SCRIPT_DIR/helpers.py" parse-devices)
+    DEVICES=$(echo "$DEVICE_TYPES" | run_config_python "$PLATFORM" "$SCRIPT_DIR/helpers.py" parse-devices)
 
     OVERALL_EXIT_CODE=0
     for device in $DEVICES; do

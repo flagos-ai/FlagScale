@@ -1,0 +1,54 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+defaults:
+  - _self_
+  - train: 0_6b_kunlunxin
+
+experiment:
+  exp_name: 0_6b_kunlunxin
+  exp_dir: tests/functional_tests/train/qwen3/test_results/0_6b_kunlunxin
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_gpt.py
+  runner:
+    ssh_port: null
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    CUBLAS_WORKSPACE_CONFIG: ":4096:8"
+    NCCL_ALGO: "Ring"
+    NVTE_APPLY_QK_LAYER_SCALING: 0
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    NVTE_FLASH_ATTN: 0
+    NVTE_FUSED_ATTN: 0
+    CUDNN_BENCHMARK: "false"
+    CUDNN_DETERMINISTIC: "true"
+  cmds:
+    before_start: ''
+
+test:
+  training_smoke:
+    enabled: true
+    metric: "lm loss:"
+    min_values: 10
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

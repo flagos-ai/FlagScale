@@ -90,6 +90,18 @@ def extract_metrics_from_log(lines, metric_keys=None):
     return results
 
 
+def aggregate_metric_values(values, aggregation="mean"):
+    """Aggregate benchmark samples according to the metric's semantics."""
+    if aggregation == "mean":
+        return np.mean(values)
+    if aggregation == "harmonic_mean":
+        if any(value <= 0 for value in values):
+            return 0.0
+        values_array = np.asarray(values, dtype=float)
+        return len(values_array) / np.sum(1.0 / values_array)
+    raise ValueError(f"Unsupported benchmark aggregation: {aggregation}")
+
+
 def find_latest_stdout_log(start_path):
     """
     Find the latest stdout.log file in the latest attempt directory.
@@ -335,6 +347,11 @@ def test_inference_equal(path, task, model, case):
     print("Gold Result: ", gold_value_lines)
     print("len(result_lines), (gold_value_lines): ", len(result_lines), len(gold_value_lines))
 
+    if not result_lines and gold_value_lines:
+        print("\nInference log tail:")
+        for line in lines[-120:]:
+            print(line.rstrip("\n"))
+
     assert len(result_lines) == len(gold_value_lines)
 
     # Compare actual output and golden reference output line by line (ignoring newline character differences)
@@ -559,6 +576,7 @@ def test_benchmark_equal(path, task, model, case, platform, device):
         threshold_config = gold_entry.get("threshold", {})
         threshold_type = threshold_config.get("type", "upper_bound")
         tolerance = threshold_config.get("tolerance", 0.1)
+        aggregation = threshold_config.get("aggregation", "mean")
 
         print(f"\n{'=' * 70}")
         print(f"Metric: {key}")
@@ -576,7 +594,7 @@ def test_benchmark_equal(path, task, model, case, platform, device):
         # If no gold values, this is the first run - just report
         if len(gold_values) == 0:
             stable_values = result_values[5:] if len(result_values) > 5 else result_values
-            avg_value = np.mean(stable_values)
+            avg_value = aggregate_metric_values(stable_values, aggregation)
             print(f"No baseline set. Current average (excluding warmup): {avg_value:.4f}")
             print(f"ACTUAL VALUES ({len(result_values)} values): {result_values}")
             print("Please update gold_values with baseline data from this run")
@@ -594,9 +612,10 @@ def test_benchmark_equal(path, task, model, case, platform, device):
             print("WARNING: Not enough values after skipping warmup")
             continue
 
-        result_avg = np.mean(result_stable)
-        gold_avg = np.mean(gold_stable)
+        result_avg = aggregate_metric_values(result_stable, aggregation)
+        gold_avg = aggregate_metric_values(gold_stable, aggregation)
 
+        print(f"Aggregation: {aggregation}")
         print(f"BASELINE average (post-warmup): {gold_avg:.4f}")
         print(f"CURRENT average (post-warmup): {result_avg:.4f}")
 
