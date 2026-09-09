@@ -1,6 +1,7 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
 
+import importlib.machinery
 import os
 import sys
 from pathlib import Path
@@ -11,9 +12,11 @@ from omegaconf import OmegaConf
 from flagscale.inference.inference_kerv import main as inference_main
 from flagscale.models.kerv.entrypoint import (
     KERVEntrypointError,
+    _python_paths,
     build_inprocess_argv,
     run_kerv_entrypoint,
 )
+from flagscale.models.kerv.ops import bundled_runtime_path
 from flagscale.train.train_kerv import main as train_main
 
 
@@ -74,6 +77,67 @@ def test_build_inprocess_argv_matches_upstream_cli_contract():
         "--threshold",
         "4",
     ]
+
+
+def test_bundled_runtime_precedes_source_checkout(tmp_path):
+    root = tmp_path / "KERV"
+    external_runtime = root / "runtime_opt"
+    external_package = external_runtime / "KERVRuntimeOptimization"
+    external_package.mkdir(parents=True)
+    (external_package / "__init__.py").write_text("ORIGIN = 'external'\n", encoding="utf-8")
+    config = _config(
+        root,
+        "entry.py:main",
+        python_paths=[str(external_runtime)],
+    )
+
+    paths = _python_paths(config, root)
+    spec = importlib.machinery.PathFinder.find_spec("KERVRuntimeOptimization", paths)
+
+    assert paths[0] == str(bundled_runtime_path())
+    assert spec is not None
+    assert spec.origin is not None
+    assert Path(spec.origin).is_relative_to(bundled_runtime_path())
+
+
+def test_kerv_entrypoint_imports_bundled_optimization_runtime(tmp_path):
+    root = tmp_path / "KERV"
+    external_runtime = root / "runtime_opt"
+    external_package = external_runtime / "KERVRuntimeOptimization"
+    external_package.mkdir(parents=True)
+    (external_package / "__init__.py").write_text(
+        "raise RuntimeError('external runtime must not be imported')\n",
+        encoding="utf-8",
+    )
+    entrypoint = root / "entry.py"
+    entrypoint.write_text(
+        "def main():\n"
+        "    import KERVRuntimeOptimization\n"
+        "    from KERVRuntimeOptimization import adaptive_linear_fusion\n"
+        "    from KERVRuntimeOptimization import adaptive_rms_norm\n"
+        "    from KERVRuntimeOptimization import adaptive_rotary_fusion\n"
+        "    from KERVRuntimeOptimization import fused_logsoftmax_topk\n"
+        "    from KERVRuntimeOptimization import rotary_cache\n"
+        "    from KERVRuntimeOptimization import tree_attention_mask\n"
+        "    from KERVRuntimeOptimization import embodied_ops\n"
+        "    return [module.__file__ for module in (\n"
+        "        KERVRuntimeOptimization, adaptive_linear_fusion,\n"
+        "        adaptive_rms_norm, adaptive_rotary_fusion,\n"
+        "        fused_logsoftmax_topk, rotary_cache,\n"
+        "        tree_attention_mask, embodied_ops)]\n",
+        encoding="utf-8",
+    )
+    config = _config(
+        root,
+        "entry.py:main",
+        python_paths=[str(external_runtime)],
+        dependencies=["KERVRuntimeOptimization"],
+    )
+
+    module_paths = run_kerv_entrypoint(config)
+
+    assert len(module_paths) == 8
+    assert all(Path(path).is_relative_to(bundled_runtime_path()) for path in module_paths)
 
 
 def test_script_function_runs_in_current_process_and_restores_context(tmp_path):

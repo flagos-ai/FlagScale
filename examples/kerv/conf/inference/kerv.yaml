@@ -7,12 +7,13 @@ kerv:
   work_dir: .
   python_paths:
     - ${oc.env:KERV_SOURCE_ROOT,./KERV}/openvla
-    - ${oc.env:KERV_SOURCE_ROOT,./KERV}/runtime_opt
   dependencies:
     - torch
     - transformers
     - draccus
     - libero
+    # KERVRuntimeOptimization is bundled under flagscale/models/kerv/ops and
+    # is prepended to PYTHONPATH by the FlagScale KERV entrypoint.
     - KERVRuntimeOptimization
   env:
     LIBERO_CONFIG_PATH: ${oc.env:LIBERO_CONFIG_PATH,./.libero}

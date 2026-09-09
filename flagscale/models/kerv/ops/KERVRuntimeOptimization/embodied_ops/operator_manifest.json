@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "namespace": "flagos_embodied",
+  "target_workload": "KERV batch-one speculative verification",
+  "operators": [
+    {"name": "kerv_silu_mul", "kind": "elementwise_fusion", "default_backend": "native"},
+    {"name": "kerv_add_rms_norm", "kind": "residual_norm_fusion", "default_backend": "native"},
+    {"name": "kerv_verify_accept_control", "kind": "verification_reduction", "default_backend": "native"},
+    {"name": "kerv_static_tree_pack", "kind": "resident_template_pack", "default_backend": "native"},
+    {"name": "kerv_static_tree_attention", "kind": "prefix_ancestor_attention", "default_backend": "triton-auto"},
+    {"name": "kerv_action_projection_select", "kind": "action_vocab_projection", "default_backend": "native"},
+    {"name": "kerv_value_cache_store", "kind": "value_cache_write", "default_backend": "native"},
+    {"name": "kerv_kv_commit", "kind": "resident_cache_commit", "default_backend": "native"},
+    {"name": "kerv_tree_embed_pack", "kind": "tree_embedding_pack", "default_backend": "native"},
+    {"name": "kerv_rope_kv_store", "kind": "rope_and_resident_kv_write", "default_backend": "triton-auto"},
+    {"name": "kerv_action_verify_accept", "kind": "action_projection_and_accept", "default_backend": "native"},
+    {"name": "kerv_draft_action_topk", "kind": "action_projection_topk", "default_backend": "native"},
+    {"name": "kerv_kv_accept_commit", "kind": "accepted_path_commit", "default_backend": "native"},
+    {"name": "kerv_vision_add_layer_norm", "kind": "vision_residual_norm_fusion", "default_backend": "native"},
+    {"name": "kerv_vision_bias_gelu", "kind": "vision_bias_activation_fusion", "default_backend": "native"},
+    {"name": "kerv_o_proj_residual_rms_norm", "kind": "experimental_gemm_epilogue", "default_backend": "opt-in"},
+    {"name": "kerv_down_proj_residual_rms_norm", "kind": "experimental_gemm_epilogue", "default_backend": "opt-in"},
+    {"name": "kerv_logical_kv_commit", "kind": "experimental_logical_cache_commit", "default_backend": "opt-in"}
+  ],
+  "selection_policy": "auto selects only measured fixed-shape kernels; all other inputs use the exact platform-native implementation. Mainline phase-two interfaces are opt-in by include list and experimental interfaces are never enabled implicitly.",
+  "performance_gate": {"min_local_speedup": 1.05, "target_e2e_speedup": 1.08},
+  "supported_profile": {"batch": 1, "dtype": ["float16", "bfloat16"], "head_dim": 128, "verify_paths": [48, 49], "tree_depth": [4, 5, 8]}
+}

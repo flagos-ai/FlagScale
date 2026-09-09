@@ -72,7 +72,7 @@ def load_kerv_task_config(config_path: str | Path) -> DictConfig:
 def _render_value(value: Any) -> str:
     if isinstance(value, bool):
         return "True" if value else "False"
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
         return ",".join(str(item) for item in value)
     return str(value)
 
@@ -131,10 +131,13 @@ def _resolve_script(root: Path, target: str) -> Path | None:
 
 
 def _python_paths(kerv: Mapping[str, Any], root: Path) -> list[str]:
+    bundled_runtime = str((Path(__file__).resolve().parent / "ops").resolve())
     configured = [
         str(Path(str(value)).expanduser().resolve()) for value in kerv.get("python_paths", [])
     ]
-    return list(dict.fromkeys((str(root), *configured)))
+    # Keep the bundled runtime first so the KERV source checkout consumes the
+    # exact operator implementation shipped with this FlagScale integration.
+    return list(dict.fromkeys((bundled_runtime, str(root), *configured)))
 
 
 @contextmanager
@@ -172,13 +175,23 @@ def _check_dependencies(kerv: Mapping[str, Any]) -> None:
     if isinstance(dependencies, str):
         dependencies = [dependencies]
     for module_name in dependencies:
+        module_name = str(module_name)
         try:
-            importlib.import_module(str(module_name))
+            module = importlib.import_module(module_name)
         except ModuleNotFoundError as error:
             raise KERVEntrypointError(
                 f"KERV stage '{kerv.get('stage')}' requires Python module "
                 f"'{module_name}', but it is not installed in {sys.executable}."
             ) from error
+        if module_name == "KERVRuntimeOptimization":
+            module_file = Path(str(getattr(module, "__file__", ""))).resolve()
+            bundled_runtime = (Path(__file__).resolve().parent / "ops").resolve()
+            if not module_file.is_relative_to(bundled_runtime):
+                raise KERVEntrypointError(
+                    "KERVRuntimeOptimization was imported from an unexpected location: "
+                    f"{module_file}. Start a fresh FlagScale worker so the bundled KERV "
+                    "runtime can be loaded before any external copy."
+                )
 
 
 def _load_script_module(script: Path) -> ModuleType:

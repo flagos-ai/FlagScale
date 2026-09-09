@@ -40,6 +40,8 @@ include = ["flagscale*"]
 
 [tool.setuptools.package-data]
 "flagscale" = ["**/*.yaml", "**/*.yml"]
+"flagscale.models.kerv.ops" = ["README.md"]
+"flagscale.models.kerv.ops.KERVRuntimeOptimization.embodied_ops" = ["operator_manifest.json"]
 
 [tool.ruff]
 line-length = 100
