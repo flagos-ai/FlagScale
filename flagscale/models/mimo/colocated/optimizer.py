@@ -3,7 +3,9 @@
 """Per-module DDP and optimizer helpers for colocated MIMO deployment."""
 
 import inspect
+import logging
 import os
+from contextlib import contextmanager
 
 import torch
 
@@ -14,10 +16,50 @@ from megatron.core.dist_checkpointing.utils import (
 )
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.optimizer import get_megatron_optimizer
-from megatron.core.utils import unwrap_model
+from megatron.core.optimizer.clip_grads import (
+    clip_grad_by_total_norm_fp32,
+    get_grad_norm_fp32,
+)
+from megatron.core.utils import log_single_rank, unwrap_model
+from megatron.plugin.platform import get_platform
 
 from ..ddp_utils import build_mimo_ddp_config, get_mimo_ddp_wrappers, patch_mimo_model_chunk
 from .parallel_state_ctx import switch_parallel_state
+
+logger = logging.getLogger(__name__)
+
+
+def _optimizer_leaves(opt):
+    """Flatten ``opt`` into its leaf optimizers, recursing through nested
+    Megatron ``ChainedOptimizer`` wrappers."""
+    nested = getattr(opt, "chained_optimizers", None)
+    if not nested:
+        return [opt]
+    return [leaf for inner in nested for leaf in _optimizer_leaves(inner)]
+
+
+@contextmanager
+def _module_grad_stats_scope(opt):
+    """Run one module optimizer's own collectives on its overflow-safe group.
+
+    The joint step keeps ``grad_stats_parallel_group`` on WORLD for the single
+    combined norm; the per-optimizer overflow and zero-count reduces must stay
+    within the ranks that host this optimizer (``_mimo_local_stats_group``),
+    because ranks without the module issue no per-module collectives.
+    """
+    group = getattr(opt, "_mimo_local_stats_group", None)
+    if group is None:
+        yield
+        return
+    leaves = _optimizer_leaves(opt)
+    saved = [leaf.grad_stats_parallel_group for leaf in leaves]
+    for leaf in leaves:
+        leaf.grad_stats_parallel_group = group
+    try:
+        yield
+    finally:
+        for leaf, previous in zip(leaves, saved):
+            leaf.grad_stats_parallel_group = previous
 
 
 def wrap_mimo_ddp(mimo_model, args) -> None:
@@ -116,29 +158,85 @@ class ChainedOptimizer:
         for opt in self.optimizers:
             opt.zero_grad(set_to_none=set_to_none)
 
+    @torch.no_grad()
     def step(self):
-        """Step all optimizers; return the AND of successes, the combined
-        global grad norm, and the total num_zeros_in_grad.
-        """
-        successes = []
-        grad_norms = []
-        num_zeros = []
+        """Step every module with one global gradient norm and clip coefficient."""
+        leaves = [leaf for opt in self.optimizers for leaf in _optimizer_leaves(opt)]
+        found_inf = False
         for opt in self.optimizers:
-            success, grad_norm, zeros = opt.step()
-            successes.append(success)
-            grad_norms.append(grad_norm)
-            num_zeros.append(zeros)
+            with _module_grad_stats_scope(opt):
+                found_inf |= opt.prepare_grads()
 
-        update_successful = all(successes)
+        if any(getattr(leaf, "grad_scaler", None) is not None for leaf in leaves):
+            found_inf_tensor = torch.tensor(
+                [found_inf], dtype=torch.float32, device=get_platform().device_name()
+            )
+            torch.distributed.all_reduce(
+                found_inf_tensor,
+                op=torch.distributed.ReduceOp.MAX,
+                group=torch.distributed.group.WORLD,
+            )
+            found_inf = found_inf_tensor.item() > 0
+        if found_inf:
+            return False, None, None
 
-        valid_norms = [gn for gn in grad_norms if gn is not None]
-        if valid_norms:
-            grad_norm = float(sum(gn * gn for gn in valid_norms) ** 0.5)
+        active_leaves = [
+            leaf
+            for leaf in leaves
+            if not getattr(leaf, "is_stub_optimizer", False) and leaf.get_parameters()
+        ]
+        grads_for_norm = [
+            grad for leaf in active_leaves for grad in leaf.get_main_grads_for_grad_norm()
+        ]
+        if grads_for_norm:
+            grad_norm = get_grad_norm_fp32(
+                grads_for_norm, grad_stats_parallel_group=torch.distributed.group.WORLD
+            )
         else:
-            grad_norm = None
+            norm = torch.zeros(1, dtype=torch.float32, device=get_platform().device_name())
+            torch.distributed.all_reduce(norm, group=torch.distributed.group.WORLD)
+            grad_norm = 0.0
 
-        valid_zeros = [z for z in num_zeros if z is not None]
-        num_zeros_in_grad = sum(valid_zeros) if valid_zeros else None
+        should_skip = False
+        for leaf in active_leaves:
+            params = leaf.get_parameters()
+            if leaf.config.clip_grad > 0.0:
+                clip_grad_by_total_norm_fp32(
+                    params,
+                    max_norm=leaf.config.clip_grad,
+                    total_norm=grad_norm,
+                    use_decoupled_grad=(
+                        leaf.config.use_precision_aware_optimizer_no_fp8_or_ds_fp8
+                        or (
+                            leaf.config.use_precision_aware_optimizer
+                            and getattr(params[0], "__fsdp_param__", False)
+                        )
+                    ),
+                )
+            if grad_norm > leaf.config.grad_norm_skip_threshold:
+                log_single_rank(
+                    logger,
+                    logging.INFO,
+                    "skipping update because grad norm is too large %s",
+                    grad_norm,
+                )
+                should_skip = True
+
+        num_zeros_in_grad = None
+        if self.get_config().log_num_zeros_in_grad:
+            num_zeros_in_grad = 0
+            for opt in self.optimizers:
+                with _module_grad_stats_scope(opt):
+                    for leaf in _optimizer_leaves(opt):
+                        if not getattr(leaf, "is_stub_optimizer", False):
+                            num_zeros_in_grad += leaf.count_zeros()
+
+        if should_skip:
+            return False, grad_norm, num_zeros_in_grad
+
+        update_successful = True
+        for opt in self.optimizers:
+            update_successful &= opt.step_with_ready_grads()
 
         return update_successful, grad_norm, num_zeros_in_grad
 
@@ -157,6 +255,8 @@ class ChainedOptimizer:
         return all(getattr(opt, "is_stub_optimizer", False) for opt in self.optimizers)
 
     def state_dict(self, is_loading: bool = False):
+        if len(self.optimizers) == 1:
+            return _optimizer_state_dict(self.optimizers[0], is_loading=is_loading)
         # Stub optimizers have no inner optimizer and Megatron carries no stub
         # guard — keep the None placeholder so positions align with load.
         return [
@@ -167,13 +267,9 @@ class ChainedOptimizer:
         ]
 
     def sharded_state_dict(self, state_dict=None, **kwargs):
-        """Sharded state dict for distributed checkpoints.
-
-        Per-module optimizers live in different DP groups but emit identical
-        shard keys, which would collide in the global torch_dist checkpoint:
-        prefix every key with ``chained_<idx>.`` (Megatron's own ChainedOptimizer
-        hook) and strip it again in :meth:`load_state_dict`.
-        """
+        """Return optimizer state with collision-free module prefixes."""
+        if len(self.optimizers) == 1:
+            return self.optimizers[0].sharded_state_dict(state_dict, **kwargs)
         sharded_state_dicts = [
             None
             if getattr(opt, "is_stub_optimizer", False)
@@ -185,7 +281,11 @@ class ChainedOptimizer:
                 add_prefix_for_sharding(opt_sd, f"chained_{idx}.")
         return sharded_state_dicts
 
-    def load_state_dict(self, state_dicts: list):
+    def load_state_dict(self, state_dicts):
+        if len(self.optimizers) == 1:
+            state = state_dicts[0] if isinstance(state_dicts, list) and len(state_dicts) == 1 else state_dicts
+            self.optimizers[0].load_state_dict(state)
+            return
         assert len(state_dicts) == len(self.optimizers), (
             f"expected {len(self.optimizers)} optimizer state dicts, got {len(state_dicts)}"
         )
@@ -330,8 +430,8 @@ class ChainedOptimizer:
         return self.optimizers[0].get_loss_scale()
 
     def get_config(self):
-        """Return the optimizer config of the first optimizer."""
-        return self.optimizers[0].get_config()
+        """Return the first leaf optimizer's configuration."""
+        return _optimizer_leaves(self.optimizers[0])[0].config
 
 
 def _pad_param_group_collectives():
@@ -349,7 +449,13 @@ def _pad_param_group_collectives():
 
 
 def build_mimo_optimizer(config, config_overrides, mimo_model, args):
-    """Build separate optimizers for vision and language modules."""
+    """Build module optimizers with WORLD-wide joint gradient statistics."""
+    assert args.use_distributed_optimizer, (
+        "colocated MIMO joint gradient clipping requires the distributed optimizer"
+    )
+    assert not args.dump_param_to_param_group_map, (
+        "colocated MIMO does not support dumping parameter-group maps"
+    )
     optimizers = []
 
     vision_ddp = getattr(mimo_model, "vision_ddp", None)
@@ -364,11 +470,7 @@ def build_mimo_optimizer(config, config_overrides, mimo_model, args):
                 dump_param_to_param_group_map=args.dump_param_to_param_group_map,
             )
             optimizers.append(vision_opt)
-        # Grad stats must not reduce over groups spanning ranks without a vision
-        # optimizer (mismatch at language PP>1); the vision TP group has identical
-        # membership at vision PP=1 and is always intra-stage.
-        for opt in getattr(vision_opt, "chained_optimizers", [vision_opt]):
-            opt.grad_stats_parallel_group = mimo_model.vision_pg.tp
+        setattr(vision_opt, "_mimo_local_stats_group", mimo_model.vision_pg.tp_dp_cp)
     else:
         _pad_param_group_collectives()
 
@@ -383,7 +485,11 @@ def build_mimo_optimizer(config, config_overrides, mimo_model, args):
             dump_param_to_param_group_map=args.dump_param_to_param_group_map,
         )
         optimizers.append(language_opt)
+    setattr(language_opt, "_mimo_local_stats_group", mimo_model.language_pg.tp_dp_cp)
 
-    if len(optimizers) == 1:
-        return optimizers[0]
+    world_group = torch.distributed.group.WORLD
+    for opt in optimizers:
+        for leaf in _optimizer_leaves(opt):
+            leaf.grad_stats_parallel_group = world_group
+
     return ChainedOptimizer(optimizers)
