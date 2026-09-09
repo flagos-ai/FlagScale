@@ -1,14 +1,15 @@
 # Copyright (c) 2026, BAAI. All rights reserved.
 
-"""Megatron-Bridge-style adapter layer for MCore-based MIMO training.
+"""Non-colocated grid layer for MCore-based MIMO training.
 
 Adapts FlagScale's launcher/config/model/data/training lifecycle onto
 Megatron-LM-FL's ``megatron.core`` MIMO infrastructure (``MimoModel`` /
 ``HyperCommGrid``) instead of re-implementing it.  Submodules: ``parallelism``
-(layout config, stdlib-only/torch-free), ``infra`` (grid and per-module PG
-construction), ``runtime``, ``data``, ``training`` (grid wiring),
-``recipe/qwen35`` (fail-fast layout contract) and ``providers/qwen35``
-(``Qwen35GridMIMOModel``).
+(layout config and generic layout algorithms, stdlib-only/torch-free),
+``infra`` (grid and per-module PG construction), ``runtime``, ``data``,
+``training`` (grid wiring).  Per-model builders live in ``providers/``; they
+register their communicator contract and batch preparer here at import time
+and are imported by the model entry, never by this package.
 """
 
 from .data import (
@@ -31,21 +32,19 @@ from .infra import (
     build_module_pg_collections,
     create_module_pg_collection,
     grids_are_colocated,
+    set_per_module_random_seed,
 )
 from .parallelism import (
     LANGUAGE_MODULE_NAME,
     MIMOLayout,
     MIMOParallelismConfig,
     classify_layout,
+    compute_pipeline_layer_split,
+    describe_grid_modules,
     parse_module_parallelism,
     parse_module_parallelisms,
-)
-from .recipe.qwen35 import (
-    IMAGES_MODULE_NAME,
-    build_qwen35_grid_config_from_args,
-    describe_qwen35_grid_modules,
-    qwen35_grid_data_contract,
-    validate_qwen35_grid_config,
+    resolve_module_sequence_parallel,
+    validate_grid_batch_divisibility,
 )
 from .runtime import (
     build_pg_collection_for_schedule,
@@ -67,11 +66,15 @@ from .training import (
     configure_grid_model_config_hooks,
     destroy_grid_training_states,
     finalize_grid_training_state,
+    get_grid_batch_preparer,
     get_logical_iteration_samples,
     grid_training_state_from_model_chunk,
+    prepare_grid_batch,
+    register_grid_batch_preparer,
+    reconfigure_grid_num_microbatches_calculator,
     setup_grid_mimo_ddp,
     sync_grid_optimizer_param_group_lr,
-    validate_qwen35_grid_runtime_contract,
+    validate_grid_runtime_contract,
 )
 
 __all__ = [
@@ -80,8 +83,12 @@ __all__ = [
     "MIMOLayout",
     "MIMOParallelismConfig",
     "classify_layout",
+    "compute_pipeline_layer_split",
+    "describe_grid_modules",
     "parse_module_parallelism",
     "parse_module_parallelisms",
+    "resolve_module_sequence_parallel",
+    "validate_grid_batch_divisibility",
     # infra
     "MODULE_GRID_DIM_NAMES",
     "ModuleGridConfig",
@@ -91,6 +98,7 @@ __all__ = [
     "build_module_pg_collections",
     "build_mimo_infra",
     "grids_are_colocated",
+    "set_per_module_random_seed",
     # runtime
     "unwrap_mimo_model",
     "is_current_rank_in_grid",
@@ -112,12 +120,6 @@ __all__ = [
     "should_drop_modality_inputs",
     "drop_modality_inputs",
     "prepare_batch_for_module",
-    # recipe (Qwen3.5 grid contract)
-    "IMAGES_MODULE_NAME",
-    "validate_qwen35_grid_config",
-    "build_qwen35_grid_config_from_args",
-    "describe_qwen35_grid_modules",
-    "qwen35_grid_data_contract",
     # training
     "GridTrainingState",
     "setup_grid_mimo_ddp",
@@ -126,8 +128,12 @@ __all__ = [
     "configure_grid_model_config_hooks",
     "destroy_grid_training_states",
     "get_logical_iteration_samples",
-    "validate_qwen35_grid_runtime_contract",
+    "prepare_grid_batch",
+    "register_grid_batch_preparer",
+    "get_grid_batch_preparer",
     "apply_grid_parse_time_contract",
+    "validate_grid_runtime_contract",
+    "reconfigure_grid_num_microbatches_calculator",
     "finalize_grid_training_state",
     "grid_training_state_from_model_chunk",
     "sync_grid_optimizer_param_group_lr",

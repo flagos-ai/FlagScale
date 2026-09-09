@@ -104,11 +104,9 @@ class FSTrainArguments:
             # (validate_yaml PP clamp) and drop sequence_parallel under the
             # forced global TP=1.  Function-level import: keeps the module
             # import surface unchanged for non-MIMO training paths.
-            from flagscale.models.mimo.bridge.training import (
-                apply_grid_parse_time_contract,
-            )
+            from flagscale.models.mimo import apply_parse_time_contract
 
-            apply_grid_parse_time_contract(self.args)
+            apply_parse_time_contract(self.args)
 
         if self._rank_mapper is None:
             self._build_rank_mapper()
@@ -1114,7 +1112,7 @@ def _add_flagscale_specific_args(parser):
     # consulted when MIMO is on).  ``colocated`` (default) runs the in-house
     # colocated macro/micro-batch scheduler exactly; ``grid`` selects the
     # MCore grid path (this stage: non-colocated Qwen3.5 2+6 dense TP/PP/DP
-    # layouts, see flagscale/models/mimo/bridge/recipe/qwen35.py).
+    # layouts, see flagscale/models/mimo/grid/providers/qwen35.py).
     group.add_argument(
         '--mimo-layout',
         type=str,

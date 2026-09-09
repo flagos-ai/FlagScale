@@ -2,15 +2,15 @@
 
 """Per-model grid communicator contracts and their registry (model-agnostic).
 
-``build_grid_multimodule_communicator`` (``bridge.training``) needs three
+``build_grid_multimodule_communicator`` (``grid.training``) needs three
 model-specific values to construct the MCore ``MultiModulePipelineCommunicator``:
 the module dependency graph, the schedule-tensor axis layout, and each
 module's output dimensionality.  Those are properties of the *model*, so the
 model's provider module registers one contract here at import time; adding a
 new model to the grid path touches only its own providers module, never this
-file or ``bridge.training``.
+file or ``grid.training``.
 
-Stdlib-only leaf: must not import ``bridge.training``, the providers, or
+Stdlib-only leaf: must not import ``grid.training``, the providers, or
 torch, so both sides can import it without cycles.
 """
 
@@ -101,7 +101,7 @@ def get_grid_communicator_contract(
     if not _GRID_COMMUNICATOR_CONTRACTS:
         raise RuntimeError(
             "no grid communicator contract registered; import the model's "
-            "providers module (e.g. bridge.providers.<model>) so it registers "
+            "providers module (e.g. grid.providers.<model>) so it registers "
             "its contract before building the grid communicator"
         )
     if len(_GRID_COMMUNICATOR_CONTRACTS) > 1:

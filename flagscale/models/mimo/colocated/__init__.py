@@ -9,15 +9,15 @@ drives throughput.  Production path behind ``--use-mimo`` with
 """
 
 from .hetero_pg_utils import build_colocated_pg_collections
-from .mimo_config import ModuleParallelismConfig, validate_mimo_config
-from .mimo_model import ColocatedMIMOModel
-from .mimo_optimizer import (
+from .config import ModuleParallelismConfig, validate_mimo_config
+from .model import ColocatedMIMOModel
+from .optimizer import (
     ChainedOptimizer,
     build_mimo_optimizer,
     set_mimo_force_all_reduce,
     setup_mimo_ddp,
 )
-from .mimo_utils import (
+from .utils import (
     compute_microbatch_token_counts,
     drop_mimo_completed_macros,
     release_mimo_training_state,

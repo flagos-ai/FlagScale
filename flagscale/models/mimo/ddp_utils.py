@@ -1,12 +1,10 @@
 # Copyright (c) 2025, BAAI. All rights reserved.
 
-"""Per-module DDP helpers shared by the colocated and bridge MIMO paths.
+"""Per-module DDP helpers shared by the colocated and grid MIMO paths.
 
 Both execution paths wrap each local submodule with its own
 ``DistributedDataParallel`` instance and skip the outer DDP wrapper, so the
-DDP-config construction and the outer-chunk method patching live here once:
-``colocated/mimo_optimizer.py`` uses them in ``switch_parallel_state``;
-``bridge/training.py`` uses them for the MCore-MimoModel grid path.
+DDP-config construction and the outer-chunk method patching live here once.
 """
 
 import dataclasses

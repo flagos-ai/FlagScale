@@ -13,6 +13,10 @@ Megatron-LM-FL v0.18.2 APIs:
   contract (see :mod:`.contracts`).
 - :func:`configure_grid_model_config_hooks` — ``no_sync_func`` /
   ``finalize_model_grads_func`` bound to the per-module gradient helpers.
+- :func:`prepare_grid_batch` — module-role batch preparation, delegated to
+  the batch preparer registered by the model's grid provider.
+- :func:`apply_grid_parse_time_contract` / :func:`validate_grid_runtime_contract`
+  — layout-generic fail-fast contracts on the training args.
 - :class:`GridTrainingState` — grid-mode training state, attached to the
   model chunk as ``mimo_grid_state``.
 
@@ -27,7 +31,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import torch
 import torch.distributed as dist
@@ -47,11 +51,6 @@ from megatron.core.utils import get_model_config, unwrap_model
 
 from ..ddp_utils import build_mimo_ddp_config, patch_mimo_model_chunk
 from .contracts import get_grid_communicator_contract
-from .data import (
-    ModuleDataRole,
-    drop_modality_inputs,
-    slice_batch_for_module_dp,
-)
 from .runtime import (
     build_pg_collection_for_schedule,
     finalize_model_grads_multimodule,
@@ -71,138 +70,63 @@ logger = logging.getLogger(__name__)
 _GRID_TRAINING_STATES: list[GridTrainingState] = []
 
 
-def build_language_forward_kwargs(
-    batch: dict[str, Any],
-    *,
-    dp_rank: int,
-    dp_size: int,
-    pp_rank: int,
-    pp_size: int,
-) -> dict[str, Any]:
-    """Assemble the exact ``Qwen35GridMIMOModel.forward`` kwargs for a language rank.
+#: Model-specific grid batch preparers, keyed like the communicator contracts
+#: in :mod:`.contracts`.  The forward kwargs of a grid model are a property of
+#: the model, so its provider module registers the preparer at import time;
+#: adding a model to the grid path touches only its own providers module.
+_GRID_BATCH_PREPARERS: dict[str, Callable[[dict, "GridTrainingState"], dict]] = {}
 
-    Language-only ranks consume encoder outputs from the MIMO bridge, so raw
-    modality inputs are dropped BEFORE the module-local DP slice: they are
-    patch-packed (``imgs`` dim 0 is the total patch count across the batch's
-    images, not the sample count), so the generic sample-DP slicer must never
-    see them.  Only sample-aligned keys (``tokens``, ``labels``, ``loss_mask``, ``position_ids``, the input
-    masks, ...) are sliced.
 
-    The returned dict holds exactly the model's accepted kwargs:
-    ``input_ids`` only on the first PP stage (embedding lives there),
-    ``labels`` / ``loss_mask`` only on the last (loss lives there),
-    ``modality_inputs`` / ``packing_kwargs`` always ``None`` in grid mode,
-    and the image/video masks plus ``video_start_index`` for the deepstack /
-    video fail-fast handling.  Keys the model does NOT accept (``imgs``,
-    ``image_thw_grids``, ...) are never emitted, even nulled - the grid
-    forward step splats the dict into the model call.
+def register_grid_batch_preparer(key: str, preparer) -> None:
+    """Register ``preparer`` as the grid batch preparer for ``key``.
+
+    ``preparer(batch, grid_state)`` must return the forward kwargs for the
+    local module role.  Raises ``ValueError`` on duplicate registration
+    (almost always a copy-paste error).
     """
-    data_batch = drop_modality_inputs(batch)
-    data_batch = slice_batch_for_module_dp(data_batch, dp_rank, dp_size)
-    role = ModuleDataRole(module_name=MIMO_LANGUAGE_MODULE_KEY, pp_rank=pp_rank, pp_size=pp_size)
-    image_input_mask = data_batch.get("image_input_mask")
-    video_start_index = (
-        int(image_input_mask.sum().item()) if torch.is_tensor(image_input_mask) else 0
-    )
-    return {
-        "input_ids": data_batch.get("tokens") if role.is_first_stage else None,
-        "position_ids": data_batch.get("position_ids"),
-        "attention_mask": data_batch.get("attention_mask"),
-        "loss_mask": data_batch.get("loss_mask") if role.is_last_stage else None,
-        "labels": data_batch.get("labels") if role.is_last_stage else None,
-        "modality_inputs": None,
-        "packing_kwargs": None,
-        "image_input_mask": image_input_mask,
-        "video_input_mask": data_batch.get("video_input_mask"),
-        "video_start_index": video_start_index,
-    }
-
-
-def build_vision_forward_kwargs(
-    batch: dict[str, Any],
-    *,
-    dp_rank: int,
-    dp_size: int,
-) -> dict[str, Any]:
-    """Assemble the exact ``Qwen35GridMIMOModel.forward`` kwargs for a vision rank.
-
-    Raw modality tensors are patch-packed - ``imgs`` / ``videos`` dim 0 is
-    the TOTAL patch count across the batch's images and the grid rows are
-    the images - so they cannot be sample-sliced; they are packed into the
-    ``{hidden_states, grid_thw}`` dict form that ``slice_batch_for_module_dp``
-    routes to the joint per-image slicer, while every other (sample-aligned)
-    key is sliced by sample as usual.  Videos are not supported by the grid
-    path yet - fail fast instead of producing a silent embedding-count
-    mismatch.
-
-    Returns exactly the keys ``Qwen35GridMIMOModel.forward`` accepts, with
-    ``modality_inputs`` carrying the DP-sliced ``vision_data`` / ``grid_thw``
-    for the ``qwen3_vit`` encoder.
-    """
-    image_data = batch.get("imgs")
-    video_data = batch.get("videos")
-    image_grid = batch.get("image_thw_grids")
-    video_grid = batch.get("video_thw_grids")
-    data_tensors = [t for t in (image_data, video_data) if torch.is_tensor(t)]
-    grid_tensors = [t for t in (image_grid, video_grid) if torch.is_tensor(t)]
-    if not data_tensors or not grid_tensors:
+    if not callable(preparer):
+        raise TypeError("grid batch preparer must be callable")
+    if key in _GRID_BATCH_PREPARERS:
         raise ValueError(
-            "Qwen3.5 non-colocated grid requires tensor-valued visual data and "
-            "grid metadata; use empty tensors for text-only batches."
+            f"grid batch preparer '{key}' is already registered; refusing to overwrite"
         )
-    vision_data = torch.cat(data_tensors, dim=0)
-    vision_grid = torch.cat(grid_tensors, dim=0)
-    video_mask = batch.get("video_input_mask")
-    if video_mask is not None and bool(video_mask.any().item()):
-        raise NotImplementedError(
-            "Qwen3.5 non-colocated grid: video inputs are not supported in "
-            "this stage; the images modality covers image data only "
-            "(fail-fast)."
+    _GRID_BATCH_PREPARERS[key] = preparer
+
+
+def get_grid_batch_preparer(key: str | None = None):
+    """Look up a registered batch preparer (single-registration fast path)."""
+    if key is not None:
+        try:
+            return _GRID_BATCH_PREPARERS[key]
+        except KeyError:
+            registered = sorted(_GRID_BATCH_PREPARERS) or ["<none>"]
+            raise KeyError(
+                f"no grid batch preparer registered under '{key}' (registered: "
+                f"{registered}); import the model's providers module to register it"
+            ) from None
+    if not _GRID_BATCH_PREPARERS:
+        raise RuntimeError(
+            "no grid batch preparer registered; import the model's providers "
+            "module so it registers its batch preparer before preparing batches"
         )
+    if len(_GRID_BATCH_PREPARERS) > 1:
+        raise RuntimeError(
+            f"multiple grid batch preparers registered ({sorted(_GRID_BATCH_PREPARERS)}); "
+            "pass an explicit key"
+        )
+    return next(iter(_GRID_BATCH_PREPARERS.values()))
 
-    image_mask = batch.get("image_input_mask")
-    if torch.is_tensor(image_mask):
-        samples_with_images = int(image_mask.any(dim=-1).sum().item())
-        num_images = int(image_grid.size(0)) if torch.is_tensor(image_grid) else 0
-        if samples_with_images != num_images:
-            raise ValueError(
-                "Qwen3.5 non-colocated grid currently requires at most one image per "
-                "sample; image grid rows must match the number of samples containing "
-                f"image tokens (images={num_images}, samples={samples_with_images})."
-            )
 
-    # Remove the raw modality keys (they are patch-packed and must not be
-    # touched by the sample-DP slicer) and add the packed dict form in their
-    # place; the slicer routes it to the joint per-image slicing.
-    sliceable = {
-        key: value
-        for key, value in batch.items()
-        if key not in ("imgs", "videos", "image_thw_grids", "video_thw_grids")
-    }
-    sliceable["vision_packed"] = {"hidden_states": vision_data, "grid_thw": vision_grid}
-    sliced = slice_batch_for_module_dp(sliceable, dp_rank, dp_size)
-    packed = sliced.pop("vision_packed")
+def prepare_grid_batch(batch: dict[str, Any], grid_state: "GridTrainingState") -> dict[str, Any]:
+    """Prepare the global micro-batch for this rank's grid module role.
 
-    modality_inputs = (
-        {
-            "images": {
-                "qwen3_vit": {
-                    "vision_data": packed["hidden_states"],
-                    "grid_thw": packed["grid_thw"],
-                }
-            }
-        }
-        if packed["grid_thw"] is not None and packed["grid_thw"].numel() > 0
-        else None
-    )
-    return {
-        "input_ids": sliced.get("tokens"),
-        "position_ids": None,
-        "attention_mask": None,
-        "loss_mask": None,
-        "labels": None,
-        "modality_inputs": modality_inputs,
-    }
+    Every data-loading rank samples the *same* global micro-batch
+    (``args.data_parallel_size == 1``, broadcast over the world TP group).
+    Delegates to the batch preparer registered by the model's grid provider
+    (see :func:`register_grid_batch_preparer`), which applies the module-local
+    DP slice and assembles the exact kwargs the model forward accepts.
+    """
+    return get_grid_batch_preparer()(batch, grid_state)
 
 
 def reconfigure_grid_num_microbatches_calculator(args) -> None:
@@ -212,9 +136,9 @@ def reconfigure_grid_num_microbatches_calculator(args) -> None:
     parallel size, but grid mode forces the global parallel state to DP=1
     (module-local DP slicing happens in the forward step), so the calculator
     must be rebased to DP=1 before the grid batch contract
-    (``qwen35_grid_data_contract``) and the schedule consume it.  Uses the
-    public API with the same parameters as the parse-time init (only the DP
-    differs); gbs/mbs and any step schedule are preserved.  The colocated
+    (``validate_grid_batch_divisibility``) and the schedule consume it.  Uses
+    the public API with the same parameters as the parse-time init (only the
+    DP differs); gbs/mbs and any step schedule are preserved.  The colocated
     path never calls this helper.
     """
     reconfigure_num_microbatches_calculator(
@@ -262,8 +186,8 @@ def apply_grid_parse_time_contract(args) -> None:
     fork, whether validation goes through ``validate_args`` (runner/CLI
     flattened) or ``validate_yaml`` (``--yaml-cfg``).  Grid flags are read as
     top-level attributes everywhere downstream; ``_legacy_parallel_arg`` also
-    probes the nested ``model_parallel`` namespace, and the grid entry point
-    (train_qwen35.py) pins the legacy parallel sizes to 1 as a backstop.
+    probes the nested ``model_parallel`` namespace, and the training entry
+    point pins the legacy parallel sizes to 1 as a backstop.
 
     In grid mode the module layouts come exclusively from
     ``--mimo-module-specs`` and the global parallel state runs
@@ -310,8 +234,8 @@ def apply_grid_parse_time_contract(args) -> None:
     args.mimo_sequence_parallel = bool(_legacy_parallel_arg(args, "sequence_parallel") or False)
 
 
-def validate_qwen35_grid_runtime_contract(args) -> None:
-    """Reject runtime features not supported by the Qwen3.5 grid adapter."""
+def validate_grid_runtime_contract(args) -> None:
+    """Reject runtime features not supported by the non-colocated grid layout."""
     if getattr(args, "cuda_graph_impl", "none") == "full_iteration":
         raise ValueError(
             "--mimo-layout=grid does not support full-iteration CUDA graphs: "

@@ -13,7 +13,8 @@
 # limitations under the License.
 
 system:
-  # mimo config
+  # Colocated MIMO: vision and language colocate on every rank with their own
+  # TP/PP sizes (default layout; `mimo_layout` omitted).
   use_mimo: true
   vision_tensor_model_parallel_size: 1
   vision_micro_batch_size: 8
@@ -68,14 +69,14 @@ model:
   eval_iters: 0
   eval_interval: 1000
   micro_batch_size: 1
-  global_batch_size: 16
+  global_batch_size: 64
   allow_missing_vision_projection_checkpoint: False
   apply_layernorm_1p: False
   group_query_attention: True
   no_masked_softmax_fusion: True
   untie_embeddings_and_output_weights: False
 
-  # Position embedding: Qwen3.5 uses mRoPE with partial rotary
+  # Position embedding
   position_embedding_type: mrope
   rotary_percent: 0.25
   rotary_base: 10000000

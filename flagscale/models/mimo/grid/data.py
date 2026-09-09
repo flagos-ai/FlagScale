@@ -13,14 +13,14 @@ Conventions:
 - Every data-loading rank samples the same global micro-batch
   (``sampler_dp_size=1``); per-module DP sub-sharding is deferred to
   :func:`slice_batch_for_module_dp` in the forward step, matching the
-  bridge's contiguous batch-dimension split/concatenate routing.
-- Qwen-VL/Qwen3-VL MRoPE ``position_ids`` are ``[3, batch, seq]``; their
+  MIMO bridge's contiguous batch-dimension split/concatenate routing.
+- Multimodal MRoPE ``position_ids`` are ``[3, batch, seq]``; their
   batch dimension is 1 (:func:`_batch_dim_for_tensor`).
 - Patch-packed visual inputs (``{hidden_states, grid_thw, ...}``) use dim 0
   for different units across fields (patches vs images) and are sliced
   jointly (:func:`is_patch_packed_visual_dict`).
 - Language-only ranks (non-colocated layouts) consume encoder outputs from
-  the bridge; raw modality inputs are dropped before DP slicing
+  the MIMO bridge; raw modality inputs are dropped before DP slicing
   (:func:`should_drop_modality_inputs`).
 """
 
@@ -147,7 +147,7 @@ def get_sampling_info(role: ModuleDataRole) -> SamplingInfo:
 def _batch_dim_for_tensor(key: str, value: torch.Tensor) -> int:
     """Return the batch dimension for a known MIMO batch tensor.
 
-    Qwen-VL/Qwen3-VL MRoPE ``position_ids`` are ``[3, batch, seq]``, so their
+    Multimodal MRoPE ``position_ids`` are ``[3, batch, seq]``, so their
     batch dimension is 1.
     """
     if key == "position_ids" and value.dim() >= 3 and value.size(0) == 3:
@@ -244,7 +244,7 @@ def slice_batch_for_module_dp(
 
     Args:
         batch: Global batch dict with tensors of shape ``[global_batch, ...]``,
-            except known layouts such as Qwen-VL MRoPE ``position_ids``
+            except known layouts such as multimodal MRoPE ``position_ids``
             shaped ``[3, global_batch, seq]``.
         dp_rank: This rank's position in its module-local DP group.
         dp_size: Size of the module-local DP group.
@@ -333,7 +333,7 @@ def drop_modality_inputs(batch: Mapping[str, Any]) -> dict[str, Any]:
 
     Language-only ranks (non-colocated layouts) receive encoder outputs via
     the MIMO bridge. This covers the nested ``modality_inputs`` key and the
-    raw Qwen-VL batch keys (``imgs`` / ``videos`` / ``image_thw_grids`` /
+    raw visual batch keys (``imgs`` / ``videos`` / ``image_thw_grids`` /
     ``video_thw_grids``): they are patch-packed - ``imgs`` dim 0 is the total
     patch count across the batch's images, not the sample count - so the
     generic sample-DP slicer must never see them. The batch dict is

@@ -17,25 +17,21 @@
 import argparse
 import logging
 import os
-import random
 import sys
 from copy import deepcopy
 from functools import partial
 from typing import Dict, List, Optional, Union
 
-import numpy as np
 import torch
 import torch._dynamo
-import torch.distributed as dist
 
 from argparse import Namespace
 
-from megatron.core import parallel_state, tensor_parallel
+from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import StragglerDetector, get_attr_wrapped_model, unwrap_model
-from megatron.core.pipeline_parallel.utils import is_pp_first_stage, is_pp_last_stage
 
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
@@ -55,12 +51,9 @@ from megatron.training.training import pretrain
 stimer = StragglerDetector()
 
 # Qwen2.5-VL data handling
-from megatron.core.num_microbatches_calculator import get_num_microbatches
 torch._dynamo.config.suppress_errors = True
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_rank,
-    get_pipeline_model_parallel_world_size,
-    get_pipeline_model_parallel_rank,
 )
 from megatron.energon import (
     LimitDataset,
@@ -78,13 +71,7 @@ from megatron.training.global_vars import get_tokenizer
 from flagscale.models.megatron.qwen2_5_vl.tensor_parallel import broadcast_data
 
 from flagscale.models.megatron.qwen35.qwen35_model import Qwen35Model
-from flagscale.models.megatron.qwen35.qwen35_mimo_model import Qwen35MIMOModel
-from flagscale.models.mimo.bridge.data import ModuleDataRole
-from flagscale.models.mimo.bridge.providers.qwen35 import (
-    LANGUAGE_MODULE_NAME,
-    VISION_MODALITY_NAME,
-    qwen35_grid_mimo_model_provider,
-)
+from flagscale.models.megatron.qwen35.qwen35_mimo_model import build_qwen35_mimo_model
 from flagscale.models.megatron.qwen35.transformer_config import (
     Qwen35TransformerConfig,
     get_vision_model_config,
@@ -98,28 +85,10 @@ from flagscale.models.megatron.qwen35.layer_specs import (
 from flagscale.models.megatron.qwen3_vl.layer_specs import get_qwen3vl_vision_model_spec
 
 from flagscale.models.mimo import (
-    ModuleParallelismConfig,
-    build_colocated_pg_collections,
-    validate_mimo_config,
+    get_dataloader_shard_policy,
+    prepare_mimo_batch,
+    setup_mimo_runtime,
 )
-from flagscale.models.mimo.bridge.recipe.qwen35 import (
-    build_qwen35_grid_config_from_args,
-    compute_qwen35_grid_sequence_parallel,
-    compute_qwen35_pipeline_layer_split,
-    describe_qwen35_grid_modules,
-    qwen35_grid_data_contract,
-)
-from flagscale.models.mimo.bridge.training import (
-    GridTrainingState,
-    build_grid_multimodule_communicator,
-    build_language_forward_kwargs,
-    build_vision_forward_kwargs,
-    finalize_grid_training_state,
-    reconfigure_grid_num_microbatches_calculator,
-    validate_qwen35_grid_runtime_contract,
-)
-from flagscale.models.mimo.bridge.infra import build_mimo_infra
-from flagscale.models.mimo.bridge.runtime import validate_no_stub_ranks
 
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
@@ -210,288 +179,24 @@ def model_provider(
             "--use-mimo requires the vision module; it is incompatible with "
             "--no-enable-vision"
         )
-        # ``--mimo-layout`` is a subordinate selector of ``--use-mimo``: both
-        # layouts are first-class, explicitly named branches; anything else is
-        # a bug (argparse ``choices`` normally guarantees the value set).
-        mimo_layout = getattr(args, "mimo_layout", "colocated")
-        if mimo_layout == "grid":
-            # Non-colocated grid MIMO (MCore MimoModel / HyperCommGrid path).
-            # Every rank participates in exactly one module; the language module
-            # config mirrors the global args (TP/PP below are the language's).
-            if getattr(args, "mtp_num_layers", None):
-                raise ValueError(
-                    "Qwen3.5 non-colocated grid: MTP (mtp_num_layers > 0) is not "
-                    "supported in this stage - the MCore MimoModel grid path has "
-                    "no MTP wiring. Set mtp_num_layers=0 (fail-fast)."
-                )
-            world_size = torch.distributed.get_world_size()
-            mimo_config = build_qwen35_grid_config_from_args(
-                args.mimo_module_specs,
-                world_size,
-                num_layers=config.num_layers,
-                num_mtp_layers=getattr(args, "mtp_num_layers", None),
-            )
-
-            # Batch contract: the sampler is unsharded (data_parallel_size == 1)
-            # and module-local DP slicing happens in the forward step.
-            num_microbatches = get_num_microbatches()
-            per_module_dp = qwen35_grid_data_contract(
-                mimo_config,
-                micro_batch_size=args.micro_batch_size,
-                global_batch_size=args.global_batch_size,
-                num_microbatches=num_microbatches,
-            )
-            print_rank_0(
-                f"Non-colocated grid MIMO: {describe_qwen35_grid_modules(mimo_config)}; "
-                f"module DP: {per_module_dp}"
-            )
-
-            # Grid + nullable process groups.  Collective on every world rank.
-            infra = build_mimo_infra(mimo_config.module_parallelisms)
-            validate_no_stub_ranks(infra.module_to_grid_map, world_size)
-
-            # Grid mode runs the num-microbatches calculator with DP=1; the
-            # module-level contract was validated above by qwen35_grid_data_contract.
-            language_parallelism = mimo_config.get_parallelism(LANGUAGE_MODULE_NAME)
-            vision_parallelism = mimo_config.get_parallelism(VISION_MODALITY_NAME)
-
-            # The language transformer config must describe the *language* module
-            # (per-stage layer slicing via pipeline_model_parallel_size), while the
-            # global parallel state is initialized with TP=1/PP=1 in grid mode.
-            config.tensor_model_parallel_size = language_parallelism.tensor_model_parallel_size
-            config.pipeline_model_parallel_size = language_parallelism.pipeline_model_parallel_size
-            config.data_parallel_size = language_parallelism.data_parallel_size
-            config.context_parallel_size = 1
-            config.expert_model_parallel_size = 1
-
-            # Uneven pipeline layer allocation: MCore supports explicit first/last
-            # stage layer counts (TransformerConfig.num_layers_in_first/last_pipeline_stage),
-            # so non-divisible layer counts (e.g. 32 layers with PP3/PP6) are valid
-            # - the first stage gets base+remainder layers, the last stage base
-            # (32 layers -> PP3 12/10/10, PP6 7/5/5/5/5/5; the middle stages split
-            # evenly by construction).  Even splits leave the fields None (the
-            # default MCore even split).  The user-facing pipeline-allocation
-            # overrides that would conflict with this are rejected at startup
-            # (see __main__).
-            split = compute_qwen35_pipeline_layer_split(
-                config.num_layers, config.pipeline_model_parallel_size
-            )
-            if len(set(split)) > 1:
-                config.num_layers_in_first_pipeline_stage = split[0]
-                config.num_layers_in_last_pipeline_stage = split[-1]
-
-            # The vision encoder TP-shards by its own module TP (config field +
-            # per-module pg_collection), not by the global parallel state.
-            vision_config.tensor_model_parallel_size = vision_parallelism.tensor_model_parallel_size
-            vision_config.context_parallel_size = 1
-            vision_config.expert_model_parallel_size = 1
-            vision_projector_config.tensor_model_parallel_size = (
-                vision_parallelism.tensor_model_parallel_size
-            )
-            vision_projector_config.context_parallel_size = 1
-            vision_projector_config.expert_model_parallel_size = 1
-            # Vision is never pipelined in MIMO; the ViT asserts post_process.
-            vision_config.pipeline_model_parallel_size = 1
-
-            # Sequence parallelism is a per-module property in grid mode: the
-            # global parallel state is TP=1 and the global args.sequence_parallel
-            # was forced False at startup, so the user's requested value
-            # (preserved in args.mimo_sequence_parallel) applies only where a
-            # module has TP > 1 AND its implementation supports SP.
-            # ``compute_qwen35_grid_sequence_parallel`` conservatively marks BOTH
-            # modules SP-incapable in this grid path (its default is the empty
-            # capable set): the language module cannot use SP because the grid
-            # forward does not shard the embeddings (QwenVLLanguageModelEmbedding
-            # asserts no scatter-to-SP) and the mRoPE freqs stay full-length - an
-            # SP-enabled TP2 qkv would all-gather dim 0 to 2x the sequence (4096
-            # vs freqs 2048).  The Qwen3-VL vision encoder has the same packed-seq
-            # limitation (6720-vs-3360).  Requested global SP therefore resolves
-            # to per-module False for every accepted layout; TP itself is
-            # unaffected (language-TP2 layouts remain valid).
-            requested_sp = bool(getattr(args, "mimo_sequence_parallel", False))
-            per_module_sp = compute_qwen35_grid_sequence_parallel(mimo_config, requested_sp)
-            config.sequence_parallel = per_module_sp[LANGUAGE_MODULE_NAME]
-            vision_config.sequence_parallel = per_module_sp[VISION_MODALITY_NAME]
-            if requested_sp and not any(per_module_sp.values()):
-                print_rank_0(
-                    "Non-colocated grid MIMO: requested sequence parallelism is "
-                    "disabled for BOTH modules. The language module cannot use SP "
-                    "in this grid path: the grid forward does not shard the "
-                    "embeddings and the mRoPE freqs remain full-length, so the "
-                    "TP2 column-parallel qkv all-gather would double dim 0 "
-                    "(4096 tokens vs freqs 2048). The Qwen3-VL vision encoder "
-                    "likewise cannot use SP (packed-seq attention/rotary operate "
-                    "on the full token dimension). Both modules keep tensor "
-                    "parallelism with SP disabled (fail-safe)."
-                )
-
-            # Per-module RNG: the standard path seeds by the *global* TP/PP ranks
-            # (all zero in grid mode), which would initialize TP-sharded module
-            # weights differently across a module's TP group.  Re-seed by each
-            # module's own TP/PP/EP ranks (Bridge-style) before building.
-            _set_per_module_random_seed(args, infra)
-
-            # Per-rank language PP stage flags: the language module is built per
-            # stage (embedding on the first stage, output layer on the last).  The
-            # layer count per stage comes from the language config's
-            # pipeline_model_parallel_size (== language_parallelism.PP).
-            language_grid = infra.module_to_grid_map.get(LANGUAGE_MODULE_NAME)
-            language_pg = infra.module_to_pg_collection.get(LANGUAGE_MODULE_NAME)
-            # Language PP rank of this rank (0 for encoder-only ranks, where the
-            # language module is never built).  Mirrors the safe pattern in
-            # ``_set_per_module_random_seed``: never call ``get_group_rank`` on a
-            # nullable module collection - ``None`` means the rank is outside the
-            # language grid, not that the language module has PP=1.
-            language_pp_rank = 0
-            if language_pg is not None:
-                pre_process = is_pp_first_stage(language_pg.pp)
-                post_process = is_pp_last_stage(language_pg.pp)
-                if language_grid is not None and language_grid.is_current_rank_in_grid():
-                    language_pp_rank = torch.distributed.get_group_rank(
-                        language_pg.pp, torch.distributed.get_rank()
-                    )
-            else:
-                # Encoder-only rank: no language module is built (role-driven).
-                pre_process = post_process = True
-
-            # The language layer spec must describe *this* rank's PP stage.  It
-            # was built above from the pre-mutation config, when the global
-            # parallel state (TP=1/PP=1 in grid mode) made every stage slice all
-            # ``config.num_layers`` layer specs: both stages would build the full
-            # stack and save overlapping checkpoint keys (e.g. layers 12..23 for
-            # a 24-layer model with PP2).  Rebuild it now with the language
-            # module's explicit PP rank so each stage slices exactly its own
-            # layers (24 layers -> PP2: 12 + 12 at global offsets 0 and 12;
-            # 32 layers -> PP3: 12/10/10 at offsets 0/12/22).  The offset/count
-            # come from the language config's pipeline fields set above, and the
-            # built layers still get the same global numbering at construction
-            # time (``TransformerLayer.layer_number``), so checkpoint keys stay
-            # non-overlapping across stages.
-            language_layer_spec = get_qwen35_language_model_spec(
-                config, pp_rank=language_pp_rank
-            )
-
-            model = qwen35_grid_mimo_model_provider(
-                language_transformer_config=config,
-                language_transformer_layer_spec=language_layer_spec,
-                language_vocab_size=args.padded_vocab_size,
-                language_max_sequence_length=args.max_position_embeddings,
-                vision_transformer_config=vision_config,
-                vision_transformer_layer_spec=vision_model_spec,
-                vision_projection_config=vision_projector_config,
-                vision_projection_layer_spec=vision_projector_spec,
-                vision_projection_type='mlp',
-                language_position_embedding_type=args.position_embedding_type,
-                language_rotary_percent=args.rotary_percent,
-                language_rotary_base=args.rotary_base,
-                pre_process=pre_process,
-                post_process=post_process,
-                fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
-                parallel_output=True,
-                language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
-                mtp_block_spec=mtp_block_spec,
-                mimo_infra=infra,
-            )
-
-            # Training-lifecycle state: schedule PGs / communicator + the local
-            # module's collection for logging/checkpoint reductions.
-            grid_state = GridTrainingState(
-                infra=infra,
-                parallelism_config=mimo_config,
-                world_size=world_size,
-            )
-            finalize_grid_training_state(grid_state)
-            model.mimo_grid_state = grid_state
-            model.pg_collection = grid_state.local_pg_collection
-            build_grid_multimodule_communicator(grid_state, model)
-            print_rank_0(
-                f"Rank {torch.distributed.get_rank()}: grid module "
-                f"'{grid_state.active_module_name}' ("
-                f"tp={torch.distributed.get_world_size(grid_state.local_pg_collection.tp)}, "
-                f"dp={torch.distributed.get_world_size(grid_state.local_pg_collection.dp)}, "
-                f"pp={torch.distributed.get_world_size(grid_state.local_pg_collection.pp)})"
-            )
-        elif mimo_layout == "colocated":
-            # Colocated MIMO: vision and language modules run under different
-            # parallel configurations on the same ranks.
-            world_size = torch.distributed.get_world_size()
-            vision_tp = getattr(args, "vision_tensor_model_parallel_size", None) or args.tensor_model_parallel_size
-            vision_pp = getattr(args, "vision_pipeline_model_parallel_size", None) or args.pipeline_model_parallel_size
-            # Vision DP is always derived, never set manually (same as Megatron DP).
-            vision_dp = world_size // vision_tp // vision_pp
-            vision_parallelism = ModuleParallelismConfig(
-                tensor_model_parallel_size=vision_tp,
-                pipeline_model_parallel_size=vision_pp,
-                data_parallel_size=vision_dp,
-            )
-            language_parallelism = ModuleParallelismConfig(
-                tensor_model_parallel_size=args.tensor_model_parallel_size,
-                pipeline_model_parallel_size=args.pipeline_model_parallel_size,
-                data_parallel_size=world_size // args.tensor_model_parallel_size // args.pipeline_model_parallel_size,
-                expert_model_parallel_size=getattr(args, "expert_model_parallel_size", 1),
-            )
-            pg_collections = build_colocated_pg_collections(
-                vision_parallelism, language_parallelism, world_size
-            )
-            pg_summary = ", ".join(
-                f"{name}(tp={dist.get_world_size(pgs.tp)}, "
-                f"dp={dist.get_world_size(pgs.dp)}, "
-                f"pp={dist.get_world_size(pgs.pp)})"
-                for name, pgs in pg_collections.items()
-            )
-            print_rank_0(f"MIMO process group collections: {pg_summary}")
-
-            # Single-point validation of model-agnostic MIMO config constraints.
-            vit_batch_factor = validate_mimo_config(
-                args, vision_parallelism, language_parallelism, get_num_microbatches()
-            )
-            print_rank_0(
-                f"MIMO vit_batch_factor={vit_batch_factor} "
-                f"(vision_dp={vision_parallelism.data_parallel_size}, "
-                f"language_dp={language_parallelism.data_parallel_size}, "
-                f"num_microbatches={get_num_microbatches()})"
-            )
-
-            model = Qwen35MIMOModel(
-                language_transformer_config=config,
-                language_transformer_layer_spec=language_layer_spec,
-                language_vocab_size=args.padded_vocab_size,
-                language_max_sequence_length=args.max_position_embeddings,
-
-                vision_transformer_config=vision_config,
-                vision_transformer_layer_spec=vision_model_spec,
-                vision_projection_config=vision_projector_config,
-                vision_projection_layer_spec=vision_projector_spec,
-                pg_collections=pg_collections,
-                vision_parallelism=vision_parallelism,
-                language_parallelism=language_parallelism,
-
-                vision_projection_type='mlp',
-                language_position_embedding_type=args.position_embedding_type,
-                language_rotary_percent=args.rotary_percent,
-                language_rotary_base=args.rotary_base,
-
-                pre_process=pre_process,
-                post_process=post_process,
-                add_decoder=add_decoder,
-                add_encoder=add_encoder,
-
-                fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
-                parallel_output=True,
-                language_share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
-                mtp_block_spec=mtp_block_spec,
-                vit_batch_factor=vit_batch_factor,
-                use_fp32_grad_cache=getattr(args, "mimo_fp32_grad_cache", False),
-            )
-
-            # Attach the language pg_collection to the wrapper for compatibility with
-            # code that expects a top-level pg_collection attribute.
-            model.pg_collection = pg_collections["language"]
-        else:
-            assert False, (
-                f"Unsupported --mimo-layout {mimo_layout!r}: "
-                "expected 'colocated' or 'grid'"
-            )
+        # ``--mimo-layout`` is a subordinate selector of ``--use-mimo``;
+        # build_qwen35_mimo_model is the unified construction entry for both
+        # layouts and fails fast on unknown values.
+        model = build_qwen35_mimo_model(
+            args,
+            mimo_layout=getattr(args, "mimo_layout", "colocated"),
+            language_transformer_config=config,
+            language_transformer_layer_spec=language_layer_spec,
+            vision_transformer_config=vision_config,
+            vision_transformer_layer_spec=vision_model_spec,
+            vision_projection_config=vision_projector_config,
+            vision_projection_layer_spec=vision_projector_spec,
+            mtp_block_spec=mtp_block_spec,
+            pre_process=pre_process,
+            post_process=post_process,
+            add_encoder=add_encoder,
+            add_decoder=add_decoder,
+        )
     else:
         model = Qwen35Model(
             language_transformer_config=config,
@@ -530,44 +235,6 @@ def model_provider(
     )
 
     return model
-
-
-def _set_per_module_random_seed(args, infra) -> None:
-    """Re-seed Python/NumPy/torch/MCore RNG by the rank's module TP/PP ranks.
-
-    In grid mode the global parallel state is initialized with TP=1/PP=1, so
-    the standard seed path gives every rank the same seed; TP-sharded module
-    weights would then be initialized differently across a module's TP group.
-    Mirror the Megatron-Bridge ``_set_per_module_random_seeds``: seed by the
-    module's own PP rank (different stages get different seeds) and fork the
-    MCore CUDA RNG tracker with the module's TP/EP/ETP ranks.
-    """
-    seed = args.seed
-    tp_rank = ep_rank = etp_rank = 0
-    pp_rank = 0
-    for module_name, grid in infra.module_to_grid_map.items():
-        if not grid.is_current_rank_in_grid():
-            continue
-        pg_collection = infra.module_to_pg_collection.get(module_name)
-        if pg_collection is None:
-            continue
-        current_rank = torch.distributed.get_rank()
-        tp_rank = torch.distributed.get_group_rank(pg_collection.tp, current_rank)
-        pp_rank = torch.distributed.get_group_rank(pg_collection.pp, current_rank)
-        if getattr(pg_collection, "ep", None) is not None:
-            ep_rank = torch.distributed.get_group_rank(pg_collection.ep, current_rank)
-        if getattr(pg_collection, "expt_tp", None) is not None:
-            etp_rank = torch.distributed.get_group_rank(pg_collection.expt_tp, current_rank)
-        break
-
-    pp_seed = seed + (100 * pp_rank)
-    random.seed(pp_seed)
-    np.random.seed(pp_seed)
-    torch.manual_seed(pp_seed)
-    if torch.cuda.device_count() > 0:
-        tensor_parallel.model_parallel_cuda_manual_seed(
-            pp_seed, tp_rank=tp_rank, ep_rank=ep_rank, etp_rank=etp_rank
-        )
 
 
 def get_ltor_masks_and_position_ids(
@@ -749,55 +416,6 @@ def loss_func(
     return (loss, num_tokens, {'lm loss': reporting_loss})
 
 
-def _grid_prepare_batch(batch, model, grid_state) -> Dict:
-    """Prepare the global micro-batch for this rank's grid module role.
-
-    Every data-loading rank samples the *same* global micro-batch
-    (``args.data_parallel_size == 1`` in grid mode, broadcast over the world
-    TP group).  This function then:
-
-    1. drops the raw modality inputs on language-only ranks (they consume
-       encoder outputs from the MIMO bridge) and assembles the exact kwargs
-       accepted by ``Qwen35GridMIMOModel.forward`` (no leftover batch keys),
-    2. contiguously slices the batch for the module-local DP shard,
-    3. nulls out fields the module does not consume (input_ids on non-first
-       language PP stages; labels/loss_mask on non-last stages),
-    4. assembles ``modality_inputs`` for vision ranks.
-    """
-    module_name = grid_state.active_module_name
-    grid = grid_state.infra.module_to_grid_map[module_name]
-    dp_size = grid.shape[grid.dim_names.index("dp")]
-    pg_collection = grid_state.local_pg_collection
-    dp_rank = torch.distributed.get_group_rank(pg_collection.dp, torch.distributed.get_rank())
-    pp_size = pg_collection.pp.size()
-    pp_rank = torch.distributed.get_group_rank(pg_collection.pp, torch.distributed.get_rank())
-    role = ModuleDataRole(module_name=module_name, pp_rank=pp_rank, pp_size=pp_size)
-
-    if role.is_language:
-        # Language-only ranks (non-colocated) get encoder outputs from the
-        # bridge.  build_language_forward_kwargs emits exactly the keyword
-        # arguments the model forward accepts - nulled leftovers such as
-        # ``imgs`` / ``videos`` / ``image_thw_grids`` / ``video_thw_grids``
-        # would make ``model(**data_batch)`` raise TypeError.  The raw
-        # patch-packed modality tensors are dropped before the sample-DP slice
-        # (their leading dim is the total patch count, not the sample batch).
-        return build_language_forward_kwargs(
-            batch,
-            dp_rank=dp_rank,
-            dp_size=dp_size,
-            pp_rank=pp_rank,
-            pp_size=pp_size,
-        )
-
-    # Vision ranks: build_vision_forward_kwargs slices the global micro-batch
-    # for the vision module's DP - the patch-packed raw modality tensors are
-    # sliced JOINTLY along per-image boundaries (vision DP 2 layouts), all
-    # other keys by sample - and assembles ``modality_inputs``.  Videos are
-    # not supported by the grid path yet - fail fast instead of producing a
-    # silent embedding-count mismatch.
-    return build_vision_forward_kwargs(batch, dp_rank=dp_rank, dp_size=dp_size)
-
-
 def forward_step(data_iterator, model):
     """Forward training step."""
     args = get_args()
@@ -811,17 +429,17 @@ def forward_step(data_iterator, model):
     if args.use_mimo:
         mimo_layout = getattr(args, "mimo_layout", "colocated")
         if mimo_layout == "grid":
-            # Non-colocated grid path: all ranks load the same global micro-batch
-            # and slice it for their module-local DP shard; the MCore MimoModel
-            # dispatches by rank role (encoder forward on vision ranks, language
-            # forward on language ranks) and the multi-module pipeline schedule
-            # moves activations between the modules.
+            # Non-colocated grid path: all ranks load the same global micro-batch;
+            # the facade prepares it for this rank's module role (module-local DP
+            # slice + exact forward kwargs), the MCore MimoModel dispatches by
+            # rank role (encoder forward on vision ranks, language forward on
+            # language ranks) and the multi-module pipeline schedule moves
+            # activations between the modules.
             with stimer(bdata=True):
                 batch = get_batch(data_iterator, model=unwrapped)
             timers('batch-generator').stop()
-            grid_state = getattr(unwrapped, "mimo_grid_state", None)
+            data_batch, grid_state = prepare_mimo_batch(unwrapped, batch)
             assert grid_state is not None, "grid forward step requires mimo_grid_state"
-            data_batch = _grid_prepare_batch(batch, unwrapped, grid_state)
 
             output = unwrapped(**data_batch)
             if isinstance(output, tuple):
@@ -1040,23 +658,13 @@ def train_valid_test_dataloaders_provider(train_val_test_num_samples):
     # Baseline and the colocated layout shard the sampler by the (global) DP
     # group; the grid layout instead loads the same global micro-batch on every
     # data-loading rank (module-local DP slicing happens in the forward step),
-    # so the grid sampler must not shard.
+    # so the grid sampler must not shard - the facade returns that override.
     rank = parallel_state.get_data_parallel_rank()
     world_size = parallel_state.get_data_parallel_world_size()
     data_parallel_group = parallel_state.get_data_parallel_group()
-    if args.use_mimo:
-        mimo_layout = getattr(args, "mimo_layout", "colocated")
-        if mimo_layout == "colocated":
-            pass  # colocated: standard DP-sharded sampler (same as baseline)
-        elif mimo_layout == "grid":
-            rank = 0
-            world_size = 1
-            data_parallel_group = torch.distributed.group.WORLD
-        else:
-            assert False, (
-                f"Unsupported --mimo-layout {mimo_layout!r}: "
-                "expected 'colocated' or 'grid'"
-            )
+    shard_override = get_dataloader_shard_policy(args)
+    if shard_override is not None:
+        rank, world_size, data_parallel_group = shard_override
 
     worker_config = WorkerConfig(
         rank=rank,
@@ -1222,108 +830,10 @@ if __name__ == "__main__":
         args_defaults={'tokenizer_type': 'Qwen2VLTokenizer' if _enable_vision else 'HFTokenizerFS'},
     )
     if args.use_mimo:
-        mimo_layout = getattr(args, "mimo_layout", "colocated")
-        if mimo_layout == "colocated":
-            # Colocated layout: no global-state overrides; the colocated path
-            # never touches the num-microbatches calculator.
-            pass
-        elif mimo_layout == "grid":
-            # Non-colocated grid mode: the global parallel state and the
-            # num-microbatches calculator run with TP=1/PP=1/DP=1.  The language
-            # module's own TP/PP/DP come from --mimo-module-specs and are applied
-            # to the language transformer config in model_provider; all module
-            # communication uses the per-module grid process groups.
-            validate_qwen35_grid_runtime_contract(args)
-            if args.mimo_module_specs is None:
-                raise ValueError(
-                    "--mimo-layout=grid requires --mimo-module-specs, e.g. "
-                    "'images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2'."
-                )
-            if args.ckpt_format != "torch_dist":
-                raise ValueError(
-                    "--mimo-layout=grid requires --ckpt-format=torch_dist (the "
-                    "grid path saves via MCore sharded state dicts)."
-                )
-            if args.rampup_batch_size is not None:
-                raise ValueError(
-                    "--mimo-layout=grid does not support rampup_batch_size "
-                    "(fail-fast)."
-                )
-            # Pipeline-allocation overrides are incompatible with the grid path:
-            # the language module's PP layout / layer split is computed from
-            # --mimo-module-specs and --num-layers (with an uneven first/last
-            # stage allocation when non-divisible), so a user-supplied custom PP
-            # layout or per-endpoint layer counts would silently conflict.
-            if args.pipeline_model_parallel_layout is not None:
-                raise ValueError(
-                    "--mimo-layout=grid does not support --pipeline-model-parallel-layout: "
-                    "the grid path allocates the language pipeline stages itself "
-                    "(even or uneven first/last split from --num-layers and the "
-                    "language PP in --mimo-module-specs) (fail-fast)."
-                )
-            if (
-                getattr(args, "decoder_first_pipeline_num_layers", None) is not None
-                or getattr(args, "decoder_last_pipeline_num_layers", None) is not None
-            ):
-                raise ValueError(
-                    "--mimo-layout=grid does not support "
-                    "--decoder-first-pipeline-num-layers / "
-                    "--decoder-last-pipeline-num-layers: the grid path computes "
-                    "the first/last stage layer counts itself (base+remainder / "
-                    "base when the layer count is not divisible by the language "
-                    "PP) (fail-fast)."
-                )
-            if getattr(args, "account_for_embedding_in_pipeline_split", False) or getattr(
-                args, "account_for_loss_in_pipeline_split", False
-            ):
-                raise ValueError(
-                    "--mimo-layout=grid does not support "
-                    "--account-for-embedding-in-pipeline-split / "
-                    "--account-for-loss-in-pipeline-split: MCore's uneven "
-                    "pipeline allocation (used when the layer count is not "
-                    "divisible by the language PP) is incompatible with "
-                    "standalone embedding/loss stages (fail-fast)."
-                )
-            # Defensive defaults: the parse-time contract
-            # (apply_grid_parse_time_contract, run by pre_validate_args)
-            # already rejected non-default legacy parallel sizes, so these
-            # assignments only pin the forced global state.
-            args.tensor_model_parallel_size = 1
-            args.pipeline_model_parallel_size = 1
-            args.data_parallel_size = 1
-            args.context_parallel_size = 1
-            args.expert_model_parallel_size = 1
-            # Sequence parallelism cannot survive the forced global TP=1
-            # (ModelParallelConfig rejects SP without TP: "Cannot use sequence
-            # parallelism without tensor parallelism").  The parse-time
-            # contract normally preserved the user's requested value in
-            # args.mimo_sequence_parallel; fall back to the raw value if that
-            # hook did not run.  model_provider resolves the intent per module
-            # as ``requested && module TP > 1 && module SP-capable``, and the
-            # grid SP policy marks BOTH modules SP-incapable for now (the
-            # language forward does not shard embeddings and mRoPE freqs stay
-            # full-length), so requested SP resolves to False for every accepted
-            # layout - with an explicit rank-0 message at model build time.
-            if not hasattr(args, "mimo_sequence_parallel"):
-                args.mimo_sequence_parallel = args.sequence_parallel
-            args.sequence_parallel = False
-            # The num-microbatches calculator was initialized at parse time with
-            # the YAML's global data_parallel_size (e.g. 4 for TP2 on 8 ranks),
-            # but grid mode runs the sampler and calculator with DP=1 (module-local
-            # DP slicing happens in the forward step).  Reconfigure it to the
-            # forced DP=1 before the grid batch contract and the schedule read it:
-            # 48/6 yields 2 microbatches at DP=4 but 8 at DP=1 (8 * 6 == 48).
-            # The colocated path never touches the calculator.
-            reconfigure_grid_num_microbatches_calculator(args)
-            print_rank_0(
-                "> non-colocated grid MIMO: global parallel state forced to "
-                "TP=1/PP=1/DP=1; module layouts from --mimo-module-specs"
-            )
-        else:
-            assert False, (
-                f"Unsupported --mimo-layout {mimo_layout!r}: "
-                "expected 'colocated' or 'grid'"
-            )
+        # Layout runtime contract + global-state setup, owned by the MIMO
+        # facade (grid: fail-fast contract, parallel-state pinning to
+        # TP=1/PP=1/DP=1 and num-microbatches rebase; colocated: no-op).
+        setup_mimo_runtime(args)
     full_config = pretrain_cfg_container_from_args(args)
 
     if _enable_vision:
