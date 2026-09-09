@@ -16,6 +16,7 @@ stay deferred so non-grid runs never pay for the MCore MIMO stack.
 import functools
 
 import torch.distributed
+
 from megatron.core.pipeline_parallel.schedules import (
     forward_backward_pipelining_without_interleaving,
 )
@@ -85,9 +86,7 @@ def setup_mimo_runtime(args) -> None:
     if layout == "colocated":
         return
     if layout != "grid":
-        raise ValueError(
-            f"Unsupported --mimo-layout {layout!r}: expected 'colocated' or 'grid'"
-        )
+        raise ValueError(f"Unsupported --mimo-layout {layout!r}: expected 'colocated' or 'grid'")
     validate_grid_runtime_contract(args)
     if args.mimo_module_specs is None:
         raise ValueError(
@@ -189,9 +188,7 @@ def build_mimo_optimizer(config, config_overrides, model, args):
     shard keys) — see ``grid.training.build_grid_optimizer``.
     """
     unwrapped_model = unwrap_model(model)
-    mimo_model = (
-        unwrapped_model[0] if isinstance(unwrapped_model, list) else unwrapped_model
-    )
+    mimo_model = unwrapped_model[0] if isinstance(unwrapped_model, list) else unwrapped_model
     if _is_grid(args):
         return build_grid_optimizer(mimo_model, config)
     return build_colocated_optimizer(config, config_overrides, mimo_model, args)

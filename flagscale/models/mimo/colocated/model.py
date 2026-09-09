@@ -21,9 +21,9 @@ import torch.distributed as dist
 from megatron.core.transformer import MegatronModule
 
 from .macro_exchange import exchange_macro_outputs, get_my_microbatch_range
+from .parallel_state_ctx import switch_parallel_state
 from .scheduler import MIMOMicrobatchScheduler
 from .utils import concatenate_visual_grads, split_visual_embeds
-from .parallel_state_ctx import switch_parallel_state
 
 
 class ColocatedMIMOModel(MegatronModule):

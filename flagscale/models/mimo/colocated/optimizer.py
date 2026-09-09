@@ -283,7 +283,11 @@ class ChainedOptimizer:
 
     def load_state_dict(self, state_dicts):
         if len(self.optimizers) == 1:
-            state = state_dicts[0] if isinstance(state_dicts, list) and len(state_dicts) == 1 else state_dicts
+            state = (
+                state_dicts[0]
+                if isinstance(state_dicts, list) and len(state_dicts) == 1
+                else state_dicts
+            )
             self.optimizers[0].load_state_dict(state)
             return
         assert len(state_dicts) == len(self.optimizers), (
@@ -470,7 +474,7 @@ def build_mimo_optimizer(config, config_overrides, mimo_model, args):
                 dump_param_to_param_group_map=args.dump_param_to_param_group_map,
             )
             optimizers.append(vision_opt)
-        setattr(vision_opt, "_mimo_local_stats_group", mimo_model.vision_pg.tp_dp_cp)
+        vision_opt._mimo_local_stats_group = mimo_model.vision_pg.tp_dp_cp
     else:
         _pad_param_group_collectives()
 
@@ -485,7 +489,7 @@ def build_mimo_optimizer(config, config_overrides, mimo_model, args):
             dump_param_to_param_group_map=args.dump_param_to_param_group_map,
         )
         optimizers.append(language_opt)
-    setattr(language_opt, "_mimo_local_stats_group", mimo_model.language_pg.tp_dp_cp)
+    language_opt._mimo_local_stats_group = mimo_model.language_pg.tp_dp_cp
 
     world_group = torch.distributed.group.WORLD
     for opt in optimizers:

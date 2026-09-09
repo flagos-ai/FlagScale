@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.distributed as dist
@@ -59,6 +59,8 @@ from .runtime import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from megatron.core.process_groups_config import (
         MultiModuleProcessGroupCollection,
         ProcessGroupCollection,
@@ -74,7 +76,7 @@ _GRID_TRAINING_STATES: list[GridTrainingState] = []
 #: in :mod:`.contracts`.  The forward kwargs of a grid model are a property of
 #: the model, so its provider module registers the preparer at import time;
 #: adding a model to the grid path touches only its own providers module.
-_GRID_BATCH_PREPARERS: dict[str, Callable[[dict, "GridTrainingState"], dict]] = {}
+_GRID_BATCH_PREPARERS: dict[str, Callable[[dict, GridTrainingState], dict]] = {}
 
 
 def register_grid_batch_preparer(key: str, preparer) -> None:
@@ -117,7 +119,7 @@ def get_grid_batch_preparer(key: str | None = None):
     return next(iter(_GRID_BATCH_PREPARERS.values()))
 
 
-def prepare_grid_batch(batch: dict[str, Any], grid_state: "GridTrainingState") -> dict[str, Any]:
+def prepare_grid_batch(batch: dict[str, Any], grid_state: GridTrainingState) -> dict[str, Any]:
     """Prepare the global micro-batch for this rank's grid module role.
 
     Every data-loading rank samples the *same* global micro-batch
