@@ -1191,8 +1191,7 @@ def build_qwen35_grid_mimo_model(
         num_microbatches=num_microbatches,
     )
     print_rank_0(
-        f"Non-colocated grid MIMO: {describe_grid_modules(mimo_config)}; "
-        f"module DP: {per_module_dp}"
+        f"Non-colocated grid MIMO: {describe_grid_modules(mimo_config)}; module DP: {per_module_dp}"
     )
 
     # Grid + nullable process groups.  Collective on every world rank.
@@ -1215,9 +1214,7 @@ def build_qwen35_grid_mimo_model(
     # Uneven pipeline layer allocation via MCore's explicit first/last stage
     # counts (e.g. 32 layers -> PP3 12/10/10); even splits leave the fields
     # None (default MCore even split).
-    split = compute_pipeline_layer_split(
-        config.num_layers, config.pipeline_model_parallel_size
-    )
+    split = compute_pipeline_layer_split(config.num_layers, config.pipeline_model_parallel_size)
     if len(set(split)) > 1:
         config.num_layers_in_first_pipeline_stage = split[0]
         config.num_layers_in_last_pipeline_stage = split[-1]
@@ -1272,9 +1269,7 @@ def build_qwen35_grid_mimo_model(
         pre_process = is_pp_first_stage(language_pg.pp)
         post_process = is_pp_last_stage(language_pg.pp)
         if language_grid is not None and language_grid.is_current_rank_in_grid():
-            language_pp_rank = dist.get_group_rank(
-                language_pg.pp, dist.get_rank()
-            )
+            language_pp_rank = dist.get_group_rank(language_pg.pp, dist.get_rank())
     else:
         pre_process = post_process = True
 
@@ -1295,7 +1290,7 @@ def build_qwen35_grid_mimo_model(
         vision_transformer_layer_spec=vision_transformer_layer_spec,
         vision_projection_config=vision_projection_config,
         vision_projection_layer_spec=vision_projection_layer_spec,
-        vision_projection_type='mlp',
+        vision_projection_type="mlp",
         language_position_embedding_type=args.position_embedding_type,
         language_rotary_percent=args.rotary_percent,
         language_rotary_base=args.rotary_base,

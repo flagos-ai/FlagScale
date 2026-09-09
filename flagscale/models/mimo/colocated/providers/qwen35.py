@@ -14,7 +14,7 @@
 
 """Colocated Qwen3.5 MIMO model provider."""
 
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -49,8 +49,7 @@ def build_qwen35_colocated_parallelism(
     """
     world_size = dist.get_world_size()
     vision_tp = (
-        getattr(args, "vision_tensor_model_parallel_size", None)
-        or args.tensor_model_parallel_size
+        getattr(args, "vision_tensor_model_parallel_size", None) or args.tensor_model_parallel_size
     )
     vision_pp = (
         getattr(args, "vision_pipeline_model_parallel_size", None)
@@ -73,7 +72,7 @@ def build_qwen35_colocated_parallelism(
     return vision_parallelism, language_parallelism
 
 
-def _cat_imgs_videos(batch: Dict[str, Any]):
+def _cat_imgs_videos(batch: dict[str, Any]):
     """Concat image and video tensors along the sample dimension."""
     imgs = batch.get("imgs")
     videos = batch.get("videos")
@@ -84,8 +83,8 @@ def _cat_imgs_videos(batch: Dict[str, Any]):
     return torch.cat([imgs, videos], dim=0)
 
 
-def _cat_grids(batch: Dict[str, Any]):
-    """Concat image and video THW grids along the sample dimension."""
+def _cat_grids(batch: dict[str, Any]):
+    """Concat image and video T/H/W grids along the sample dimension."""
     image_grids = batch.get("image_thw_grids")
     video_grids = batch.get("video_thw_grids")
     if image_grids is None:
@@ -114,7 +113,7 @@ class Qwen35ColocatedMIMOModel(ColocatedMIMOModel):
         vision_transformer_layer_spec: ModuleSpec,
         vision_projection_config: TransformerConfig,
         vision_projection_layer_spec: ModuleSpec,
-        pg_collections: Dict[str, object],
+        pg_collections: dict[str, object],
         vision_parallelism,
         language_parallelism,
         vit_batch_factor: int,
@@ -184,7 +183,7 @@ class Qwen35ColocatedMIMOModel(ColocatedMIMOModel):
     # ------------------------------------------------------------------
     # ColocatedMIMOModel hooks (Qwen3.5 data layout).
     # ------------------------------------------------------------------
-    def _count_vision_tokens(self, batches: List[Dict[str, Any]]) -> List[int] | None:
+    def _count_vision_tokens(self, batches: list[dict[str, Any]]) -> list[int] | None:
         per_batch_grids = [_cat_grids(b) for b in batches]
         if not any(t is not None for t in per_batch_grids):
             return None
@@ -192,14 +191,14 @@ class Qwen35ColocatedMIMOModel(ColocatedMIMOModel):
         merge_unit = getattr(self.vision_model, "spatial_merge_unit", 1)
         return compute_microbatch_token_counts(per_batch_grids, merge_unit=merge_unit)
 
-    def _drop_vision_data(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    def _drop_vision_data(self, batch: dict[str, Any]) -> dict[str, Any]:
         # Keep the grid metadata: _count_vision_tokens needs it for the full
         # macro batch; only the pixel tensors are safe to drop here.
         batch["imgs"] = None
         batch["videos"] = None
         return batch
 
-    def _extract_vision_inputs(self, my_batches: List[Dict[str, Any]]):
+    def _extract_vision_inputs(self, my_batches: list[dict[str, Any]]):
         imgs_videos = [t for t in (_cat_imgs_videos(b) for b in my_batches) if t is not None]
         grids = [t for t in (_cat_grids(b) for b in my_batches) if t is not None]
         if not grids:
@@ -248,8 +247,8 @@ class Qwen35ColocatedMIMOModel(ColocatedMIMOModel):
         loss_mask: torch.Tensor | None = None,
         inference_params: InferenceParams = None,
         packed_seq_params: PackedSeqParams = None,
-        extra_block_kwargs: dict = None,
-        vision_output: dict = None,
+        extra_block_kwargs: dict | None = None,
+        vision_output: dict | None = None,
     ) -> torch.Tensor:
         """Forward function of Qwen3.5 MIMO model."""
         use_inference_kv_cache = (
@@ -409,7 +408,6 @@ def build_qwen35_colocated_mimo_model(
         language_transformer_layer_spec=language_transformer_layer_spec,
         language_vocab_size=args.padded_vocab_size,
         language_max_sequence_length=args.max_position_embeddings,
-
         vision_transformer_config=vision_transformer_config,
         vision_transformer_layer_spec=vision_transformer_layer_spec,
         vision_projection_config=vision_projection_config,
@@ -417,7 +415,6 @@ def build_qwen35_colocated_mimo_model(
         pg_collections=pg_collections,
         vision_parallelism=vision_parallelism,
         language_parallelism=language_parallelism,
-
         language_position_embedding_type=args.position_embedding_type,
         language_rotary_percent=args.rotary_percent,
         language_rotary_base=args.rotary_base,
