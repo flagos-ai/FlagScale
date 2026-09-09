@@ -4,9 +4,9 @@
 
 ``ColocatedMIMOModel`` owns all model-agnostic orchestration for colocated
 MIMO training (microbatch scheduler lifecycle, intra-TP microbatch slicing,
-macro-batch output exchange, delayed ViT backward skeleton); model adapters
-(e.g. Qwen3.5) subclass it, build the two modules, and implement the small
-hook surface below.
+macro-batch output exchange, delayed ViT backward skeleton); model providers
+(``colocated/providers/``) subclass it, build the two modules, and implement
+the small hook surface below.
 
 Vision output entries use the canonical layout ``{"main": Tensor | None,
 "aux": list[Tensor] | None}``: ``main`` is the embedding injected into the
@@ -20,9 +20,9 @@ import torch.distributed as dist
 
 from megatron.core.transformer import MegatronModule
 
-from .mimo_bridge import exchange_macro_outputs, get_my_microbatch_range
-from .mimo_scheduler import MIMOMicrobatchScheduler
-from .mimo_utils import concatenate_visual_grads, split_visual_embeds
+from .macro_exchange import exchange_macro_outputs, get_my_microbatch_range
+from .scheduler import MIMOMicrobatchScheduler
+from .utils import concatenate_visual_grads, split_visual_embeds
 from .parallel_state_ctx import switch_parallel_state
 
 

@@ -5,7 +5,7 @@
 Colocated (and, in the future, non-colocated) multi-module training needs one
 coherent answer to "which ranks run which module, and which process groups
 does each module use".  This module builds that answer on top of
-Megatron-LM-FL's ``HyperCommGrid``, mirroring the bridge/optimizer builder
+Megatron-LM-FL's ``HyperCommGrid``, mirroring the grid/optimizer builder
 convention from ``megatron.core.models.mimo``: the grid owns process-group
 creation via ``create_pg``, and a ``ProcessGroupCollection`` is materialized
 from a pre-created grid.
@@ -36,11 +36,15 @@ memberships are identical.  EP is modeled as an independent grid dimension
 both coincide); reconciliation is left to a follow-up.
 """
 
+import random
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+import numpy as np
+import torch
 import torch.distributed as dist
 
+from megatron.core import tensor_parallel
 from megatron.core.hyper_comm_grid import HyperCommGrid
 from megatron.core.process_groups_config import ProcessGroupCollection
 
@@ -446,3 +450,41 @@ def grids_are_colocated(module_to_grid_map: dict[str, HyperCommGrid]) -> bool:
         return True
     first = grids[0]
     return all(g.rank_offset == first.rank_offset and g.size == first.size for g in grids[1:])
+
+
+def set_per_module_random_seed(args, infra: MIMOInfra) -> None:
+    """Re-seed Python/NumPy/torch/MCore RNG by the rank's module TP/PP ranks.
+
+    In grid mode the global parallel state is initialized with TP=1/PP=1, so
+    the standard seed path gives every rank the same seed; TP-sharded module
+    weights would then be initialized differently across a module's TP group.
+    Mirror the Megatron-Bridge ``_set_per_module_random_seeds``: seed by the
+    module's own PP rank (different stages get different seeds) and fork the
+    MCore CUDA RNG tracker with the module's TP/EP/ETP ranks.
+    """
+    seed = args.seed
+    tp_rank = ep_rank = etp_rank = 0
+    pp_rank = 0
+    for module_name, grid in infra.module_to_grid_map.items():
+        if not grid.is_current_rank_in_grid():
+            continue
+        pg_collection = infra.module_to_pg_collection.get(module_name)
+        if pg_collection is None:
+            continue
+        current_rank = torch.distributed.get_rank()
+        tp_rank = torch.distributed.get_group_rank(pg_collection.tp, current_rank)
+        pp_rank = torch.distributed.get_group_rank(pg_collection.pp, current_rank)
+        if getattr(pg_collection, "ep", None) is not None:
+            ep_rank = torch.distributed.get_group_rank(pg_collection.ep, current_rank)
+        if getattr(pg_collection, "expt_tp", None) is not None:
+            etp_rank = torch.distributed.get_group_rank(pg_collection.expt_tp, current_rank)
+        break
+
+    pp_seed = seed + (100 * pp_rank)
+    random.seed(pp_seed)
+    np.random.seed(pp_seed)
+    torch.manual_seed(pp_seed)
+    if torch.cuda.device_count() > 0:
+        tensor_parallel.model_parallel_cuda_manual_seed(
+            pp_seed, tp_rank=tp_rank, ep_rank=ep_rank, etp_rank=etp_rank
+        )

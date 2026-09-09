@@ -47,7 +47,7 @@ def compute_microbatch_token_counts(
             row is ``(t, h, w)`` for one image/video.  ``None`` entries are
             treated as microbatches with no visual data.
         merge_unit: Spatial/temporal merge unit of the vision encoder (e.g.
-            Qwen3-VL ``spatial_merge_unit``); the raw token count is divided
+            its ``spatial_merge_unit``); the raw token count is divided
             by it before splitting.
 
     Returns:

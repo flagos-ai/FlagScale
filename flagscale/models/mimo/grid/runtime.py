@@ -2,23 +2,15 @@
 
 """Multi-module process group utilities for NON-colocated MIMO heterogeneous parallel training.
 
-Adapted from Megatron-Bridge ``training/megatron_mimo_parallel_utils.py``
-(NVIDIA, 2025) against the actual Megatron-LM-FL v0.18.2 APIs, with no
-dependency on Megatron-Bridge.
-
 Non-colocated MIMO assigns each rank to exactly one module; every module's
 ``ProcessGroupCollection`` is nullable on ranks that do not participate in it.
 All functions accept plain ``module_to_grid_map`` / ``pg_collections`` dicts
 (duck-typed) so they work with any infra object, including FlagScale's
-non-colocated ``bridge.infra``, without importing it.
+non-colocated ``grid.infra``, without importing it.
 
-v0.18.2 adaptation notes (vs. Megatron-Bridge):
-- ``HyperCommGrid`` has no ``get_pg_size()``; DP sizes are derived from
-  ``grid.shape`` / ``grid.dim_names`` (works on all ranks, including those
-  outside the grid).
-- ``_finalize_model_grads`` broadcasts num_tokens inside each module's own PP
-  group and all-reduces it inside the module's DP-CP group; the cross-module
-  broadcast of the global total still goes over the default (world) group.
+``HyperCommGrid`` exposes no ``get_pg_size()``; DP sizes are derived from
+``grid.shape`` / ``grid.dim_names`` (works on all ranks, including those
+outside the grid).
 """
 
 from __future__ import annotations

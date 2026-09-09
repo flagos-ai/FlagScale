@@ -7,7 +7,7 @@ import torch.distributed as dist
 
 from megatron.core.process_groups_config import ProcessGroupCollection
 
-from .mimo_config import ModuleParallelismConfig
+from .config import ModuleParallelismConfig
 
 
 def _validate_module_parallelism(
@@ -266,7 +266,7 @@ def _validate_colocated_rank_mapping(
 ):
     """Verify that language TP-first ranks map one-to-one to vision DP ranks.
 
-    ``mimo_bridge.get_source_vision_rank`` assumes that the first rank of each
+    ``macro_exchange.get_source_vision_rank`` assumes that the first rank of each
     language TP group is also a valid vision rank and that cycling through
     these first ranks covers all vision DP replicas; this check fails early
     if the rank layout breaks the assumption.

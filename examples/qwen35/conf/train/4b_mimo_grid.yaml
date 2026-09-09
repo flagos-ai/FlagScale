@@ -12,22 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Qwen3.5 non-colocated grid MIMO (world 8, images ranks [0,2), language [2,8)).
-#
-# Preset layout: Vision TP2/DP1 (images ranks [0,2)) + Language TP1/PP1/DP6
-# (ranks [2,8)); any spec inside the validator's predicate boundary works.
-# Batch contract: micro_batch_size (6) divisible by every module DP (1, 6);
-# global_batch_size = micro_batch_size * num_microbatches (grid mode runs the
-# num-microbatches calculator with data_parallel_size == 1).  With the legacy
-# parallel sizes at their defaults (1), the parse-time derived data parallel
-# size is world / (1*1*1) = 8 and 48 % (6 * 8) == 0.
-#
-# The global parallel state runs with TP=1/PP=1/DP=1 in grid mode; the
-# per-module layouts come from `mimo_module_specs`.  Legacy parallel sizes
-# must stay at their defaults (1 / None) — the parse-time contract fail-fasts
-# otherwise.  `sequence_parallel: True` records user intent only (carried via
-# mimo_sequence_parallel); the grid path resolves SP per module, currently
-# disabled for both.
+# Qwen3.5 non-colocated grid MIMO (world 8): vision TP2/DP1 on ranks [0,2),
+# language TP1/PP1/DP6 on ranks [2,8), via `mimo_module_specs`.
 
 system:
   use_mimo: true
@@ -40,7 +26,7 @@ system:
   context_parallel_size: 1
   use_flash_attn: True
   use_distributed_optimizer: True
-  sequence_parallel: True  # intent only; resolved per module via mimo_sequence_parallel
+  sequence_parallel: True
   tp_comm_overlap: False
   overlap_grad_reduce: False
   overlap_param_gather: False
@@ -54,8 +40,6 @@ system:
     log_interval: 1
   checkpoint:
     save_interval: 10000
-    # The grid path saves/loads via MCore sharded state dicts (MimoModel /
-    # MimoOptimizer); torch_dist is mandatory (fail-fast otherwise).
     ckpt_format: torch_dist
 
 model:
@@ -83,9 +67,6 @@ model:
   train_iters: 5000
   eval_iters: 0
   eval_interval: 1000
-  # Grid batch contract: micro_batch_size must be divisible by every module's
-  # DP (6 for the language module here); global_batch_size =
-  # micro_batch_size * num_microbatches (8 microbatches below).
   micro_batch_size: 6
   global_batch_size: 48
   allow_missing_vision_projection_checkpoint: False
@@ -94,7 +75,7 @@ model:
   no_masked_softmax_fusion: True
   untie_embeddings_and_output_weights: False
 
-  # Position embedding: Qwen3.5 uses mRoPE with partial rotary
+  # Position embedding
   position_embedding_type: mrope
   rotary_percent: 0.25
   rotary_base: 10000000
@@ -109,8 +90,7 @@ model:
   freeze_ViT: False
   disable_vision_class_token: True
 
-  # mtp (disabled for the grid path in this stage: the MCore MimoModel does
-  # not forward loss_mask into the language forward, so MTP loss is unsupported)
+  # mtp (unsupported by the grid path)
   mtp_num_layers: 0
 
   # Recompute

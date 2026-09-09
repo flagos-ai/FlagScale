@@ -477,3 +477,120 @@ def parse_module_parallelisms(specs: str | Iterable[str]) -> dict:
             raise ValueError(f"duplicate module name {name!r} in specs {specs!r}.")
         result[name] = config
     return result
+
+
+def compute_pipeline_layer_split(
+    num_layers: int,
+    pipeline_model_parallel_size: int,
+) -> list[int]:
+    """Per-stage layer counts for a (possibly uneven) PP split.
+
+    ``base = num_layers // pp``; the first stage gets ``base + remainder``,
+    every other stage ``base``.  Example: 32 layers with PP3 -> [12, 10, 10];
+    with PP6 -> [7, 5, 5, 5, 5, 5].
+    """
+    if isinstance(num_layers, bool) or not isinstance(num_layers, int) or num_layers < 1:
+        raise ValueError(f"num_layers must be a positive integer, got {num_layers!r}.")
+    if (
+        isinstance(pipeline_model_parallel_size, bool)
+        or not isinstance(pipeline_model_parallel_size, int)
+        or pipeline_model_parallel_size < 1
+    ):
+        raise ValueError(
+            "pipeline_model_parallel_size must be a positive integer, got "
+            f"{pipeline_model_parallel_size!r}."
+        )
+    if num_layers < pipeline_model_parallel_size:
+        raise ValueError(
+            f"num_layers ({num_layers}) must be at least pipeline_model_parallel_size "
+            f"({pipeline_model_parallel_size}); every PP stage needs at least one layer."
+        )
+    base, remainder = divmod(num_layers, pipeline_model_parallel_size)
+    split = [base] * pipeline_model_parallel_size
+    split[0] += remainder
+    return split
+
+
+def resolve_module_sequence_parallel(
+    config: MIMOParallelismConfig,
+    requested_sequence_parallel: bool,
+    *,
+    sp_capable_modules: Iterable[str] | None = None,
+) -> dict[str, bool]:
+    """Per-module sequence-parallel flags for a grid path.
+
+    Grid mode forces the global parallel state to TP=1 (``ModelParallelConfig``
+    rejects SP without TP), so the requested value is applied per module:
+    ``module_sp = requested && module_tp > 1 && module_sp_capable``.
+    ``sp_capable_modules`` defaults to empty — an explicit opt-in for a
+    capable implementation.
+
+    Returns ``{module_name: sequence_parallel}`` for every module.
+    """
+    if sp_capable_modules is None:
+        sp_capable_modules = set()
+    else:
+        sp_capable_modules = set(sp_capable_modules)
+    return {
+        name: (
+            bool(requested_sequence_parallel)
+            and parallelism.tensor_model_parallel_size > 1
+            and name in sp_capable_modules
+        )
+        for name, parallelism in config.module_parallelisms.items()
+    }
+
+
+def validate_grid_batch_divisibility(
+    config: MIMOParallelismConfig,
+    *,
+    micro_batch_size: int,
+    global_batch_size: int,
+    num_microbatches: int,
+) -> dict[str, int]:
+    """Validate batch-size divisibility against every module DP (fail-fast).
+
+    Every data-loading rank samples the same global micro-batch and per-module
+    DP slicing happens in the forward step, so both batch sizes must be
+    divisible by every module's DP and ``num_microbatches * micro_batch_size``
+    must equal ``global_batch_size`` (the calculator runs with
+    data_parallel_size == 1).  Returns ``{module_name: dp_size}``.
+    """
+    if num_microbatches * micro_batch_size != global_batch_size:
+        raise ValueError(
+            f"MIMO grid batch contract: {num_microbatches} "
+            f"microbatches * {micro_batch_size} = "
+            f"{num_microbatches * micro_batch_size} != global_batch_size "
+            f"({global_batch_size}). In grid mode the sampler is unsharded "
+            "(data_parallel_size == 1), so num_microbatches = "
+            "global_batch_size / micro_batch_size must hold exactly."
+        )
+    per_module_dp: dict[str, int] = {}
+    for name, parallelism in config.module_parallelisms.items():
+        dp_size = parallelism.data_parallel_size
+        per_module_dp[name] = dp_size
+        for batch_size, label in (
+            (micro_batch_size, "micro_batch_size"),
+            (global_batch_size, "global_batch_size"),
+        ):
+            if batch_size % dp_size != 0:
+                raise ValueError(
+                    f"MIMO grid batch contract: {label} "
+                    f"({batch_size}) is not divisible by module '{name}' DP "
+                    f"({dp_size}). Per-module DP slicing of the global "
+                    "micro-batch requires divisibility (fail-fast)."
+                )
+    return per_module_dp
+
+
+def describe_grid_modules(config: MIMOParallelismConfig) -> str:
+    """Human-readable per-module summary of a validated grid config."""
+    parts = []
+    for name, parallelism in config.module_parallelisms.items():
+        parts.append(
+            f"{name} tp={parallelism.tensor_model_parallel_size} "
+            f"pp={parallelism.pipeline_model_parallel_size} "
+            f"dp={parallelism.data_parallel_size} "
+            f"ranks [{parallelism.rank_offset}, {parallelism.rank_end})"
+        )
+    return "; ".join(parts)
