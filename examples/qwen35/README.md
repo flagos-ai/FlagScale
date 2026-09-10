@@ -8,7 +8,7 @@
 
 先进入你自己的 FlagScale 仓库根目录，并激活已安装训练后端的 Python 环境。本文验证环境为 Python 3.12、Torch 2.7.1+cu128，使用 NVIDIA GPU；其他芯片厂商尚未经过本例验证。
 
-需要当前升级分支对应的 Megatron-LM-FL v0.18.2 代码和匹配的 CUDA/TransformerEngine-FL 训练环境；不能仅安装 FlagScale CLI 就开始训练。基础环境入口见 [环境说明](../../docs/getting-started.md)，其中旧版本 Megatron 示例不能直接替代本分支的后端。在已经可用的训练环境中，补齐本教程用到的 Python 依赖：
+本教程所需的 Qwen3.5 适配已随 PR #1284（`Upgrade/megatron v0.18.2`）合入 FlagScale `main`，对应提交为 `b5741d04760a3fcdd33c70524697540b1322a3fe`。本文以该主干提交为代码基准；使用后续版本时，请确认仍包含该适配。还需准备兼容 Megatron-LM-FL v0.18.2 的 CUDA/TransformerEngine-FL 训练环境；不能仅安装 FlagScale CLI 就开始训练。基础环境入口见 [环境说明](../../docs/getting-started.md)，其中旧版本 Megatron 示例不能直接替代本教程验证的后端。在已经可用的训练环境中，补齐本教程用到的 Python 依赖：
 
 ```bash
 python -m pip install -e . --no-deps
@@ -348,10 +348,10 @@ PY
 | --- | --- |
 | 找不到图片 | 用 `vision_root / JSON中的image` 拼接路径；不能将 `vision_root` 设置为 wds 目录 |
 | Energon 找不到数据或 split | `data_path` 应直接指向含 `.nv-meta` 的目录；确认 `split.yaml` 的 train 非空 |
-| `av_decode` 参数错误 | 使用本分支的 ChatML decoder 和 Energon 6.0.1，不能混用 Energon 7 的 API |
+| `av_decode` 参数错误 | 使用 FlagScale `main` 中的 ChatML decoder 和 Energon 6.0.1，不能混用 Energon 7 的 API |
 | `No module named tools` / 模型导入错误 | 从仓库根目录执行，并设置本教程的 `PYTHONPATH` |
 | 下载失败但本地已有模型 | 检查模型全部分片和配置是否完整，再启用 HF/Transformers 离线模式 |
-| MTP 报不支持 mRoPE | 确认包含本次校验修复；上游 Qwen3.5 已支持该组合 |
+| MTP 报不支持 mRoPE | 使用已合入 Qwen3.5 适配的 FlagScale `main`，该组合已支持 |
 
 扩大到全部数据时，移除第 4 步的 `[:5000]`，解压全部所需图片，第 6 步将固定数量断言改为实际标注数；使用新的输出目录重新转换。若要划分验证集，应准备足够数量的 tar 分片，调整 train/val 比例和 `eval_iters`，不能只打开评估却不建立 val split。正式训练还需独立设置训练步数、学习率计划、图像分辨率和序列长度；本教程只验证短程链路，不代表完整收敛。
 
@@ -372,7 +372,7 @@ PY
 | TP overlap / DP 梯度归约与参数收集 overlap | 开启 |
 | 训练步数 / 统计窗口 | 15 / 第 6–15 步 |
 
-TP overlap 要求 TransformerEngine-FL 包含 `12595d06`（`fix(plugin): align vendor communication overlap factory arguments`）或等效修复；该修复属于 TE-FL 仓库。非 CUDA 后端还需确认厂商原生 overlap 实现可用，接口兼容测试不能替代真机验证。
+TP overlap 要求配套 TransformerEngine-FL 正确转发 `use_cublasmp`、`comm_type` 等 overlap 构造参数，且普通 overlap 构造函数不存在位置参数错位；仅更新 FlagScale 不能替代 TE-FL 后端更新。非 CUDA 后端还需确认厂商原生 overlap 实现可用，接口兼容测试不能替代真机验证。
 
 先按第 1–7 步准备环境、数据及 TP2 release 权重，确认 8 张卡空闲，然后执行：
 

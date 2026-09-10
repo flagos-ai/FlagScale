@@ -2,7 +2,7 @@
 
 最新的 8 卡性能对比见 [吞吐报告](throughput_report.md)，统一使用固定序列长度并直接统计第 6–15 步日志。本文保留早期 2 卡接入、权重及恢复验证记录。
 
-日期：2026-09-07。基于 FlagScale `upgrade/megatron-v0.18.2`，起始 HEAD `1c718d947d37129980e52008da8c9a877ecb1442`，加本次工作区修复。
+验证日期：2026-09-07。本文记录 Qwen3.5 适配过程中的实测结果；相关 FlagScale 代码已随 PR #1284 合入 `main`，主干代码基准为 `b5741d04760a3fcdd33c70524697540b1322a3fe`。复现时使用该提交或包含该适配的后续版本及下述配套环境。合入主干不代表重新执行过本文测试。
 
 ## 模型与验证范围
 
@@ -14,7 +14,7 @@
 
 ## 上游 MTP + mRoPE 支持
 
-本地 `origin/main` 的 `09295660ba4c325c17d58c9e72cfadbf7538b586` 和初始 Qwen3.5 提交 `c8f60479da199974308b376388e6cde6b5ebf1f0` 均允许 MTP 使用 mRoPE。升级提交 `84aac3dcdb80556eaf1c51f136819cd0928e8b35` 将前面一处参数校验恢复成仅允许 rope/none，但后面的校验及模型实现仍支持 mRoPE。本次恢复了该上游行为，并适配 v0.18.2 的 `mtp_on_this_rank` 参数接口。
+FlagScale `main` 中的 Qwen3.5 支持 MTP 与 mRoPE 同时使用。接入时恢复了升级过程中遗漏的 mRoPE 参数校验支持，并适配 Megatron-LM-FL v0.18.2 的 `mtp_on_this_rank` 参数接口；无需再按历史提交单独应用修复。
 
 ## 实际训练与恢复
 

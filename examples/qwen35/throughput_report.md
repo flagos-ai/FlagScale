@@ -33,7 +33,7 @@
 
 - 移除 Qwen3.5 数据读取路径在满长度 microbatch 上调用 `empty_cache()` 的行为，允许缓存分配器复用显存。
 - 吞吐配置开启 native 交叉熵融合、梯度归约和参数收集 overlap。native 融合与原交叉熵的 loss/gradient 对比已在八个 rank 上通过，loss 最大绝对差约 9.54e-7；梯度容差 rtol=0.01、atol=1e-5。native 路径仍包含 FP32 计算。
-- TP overlap 依赖 TransformerEngine-FL 提交 `12595d06` 或等效修复，修正 CUDA 构造参数转发，并对齐五个其他 vendor 的 Python 接口。CUDA 路径完成此次八卡训练；其他 vendor 仅完成接口回归测试。
+- FlagScale 侧的训练改动已随 PR #1284 合入 `main`，主干代码基准为 `b5741d04760a3fcdd33c70524697540b1322a3fe`；这里保留合入前的实测结果，未在该主干提交上重新测量。TP overlap 仍需配套 TransformerEngine-FL 正确转发 CUDA 构造参数，并对齐其他 vendor 的 Python 接口。CUDA 路径完成此次八卡训练；其他 vendor 仅完成接口回归测试。
 
 ## 显存与指标边界
 
