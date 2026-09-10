@@ -78,10 +78,14 @@ def wrap_mimo_ddp(mimo_model, args) -> None:
             vision_ddp_config = build_mimo_ddp_config(
                 args, mimo_model.vision_model, dp_world_size=vision_dp_size
             )
-            mimo_model.vision_ddp = DDP(
-                config=mimo_model.vision_model.config,
-                ddp_config=vision_ddp_config,
-                module=mimo_model.vision_model,
+            object.__setattr__(
+                mimo_model,
+                "vision_ddp",
+                DDP(
+                    config=mimo_model.vision_model.config,
+                    ddp_config=vision_ddp_config,
+                    module=mimo_model.vision_model,
+                ),
             )
             module_to_ddp["vision"] = mimo_model.vision_ddp
 
@@ -90,10 +94,14 @@ def wrap_mimo_ddp(mimo_model, args) -> None:
         language_ddp_config = build_mimo_ddp_config(
             args, mimo_model.language_model, dp_world_size=language_dp_size
         )
-        mimo_model.language_ddp = DDP(
-            config=mimo_model.language_model.config,
-            ddp_config=language_ddp_config,
-            module=mimo_model.language_model,
+        object.__setattr__(
+            mimo_model,
+            "language_ddp",
+            DDP(
+                config=mimo_model.language_model.config,
+                ddp_config=language_ddp_config,
+                module=mimo_model.language_model,
+            ),
         )
         module_to_ddp["language"] = mimo_model.language_ddp
     object.__setattr__(mimo_model, "module_to_ddp", module_to_ddp)
