@@ -1,0 +1,27 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+
+defaults:
+  - _self_
+  - inference: kerv
+
+experiment:
+  exp_name: kerv_inference
+  exp_dir: outputs/${experiment.exp_name}
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/inference_kerv.py
+  runner:
+    hostfile: null
+  envs:
+    CUDA_VISIBLE_DEVICES: ${oc.env:CUDA_VISIBLE_DEVICES,0}
+    LIBERO_CONFIG_PATH: ${oc.env:LIBERO_CONFIG_PATH,./.libero}
+    PYOPENGL_PLATFORM: ${oc.env:PYOPENGL_PLATFORM,egl}
+    MUJOCO_GL: ${oc.env:MUJOCO_GL,egl}
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

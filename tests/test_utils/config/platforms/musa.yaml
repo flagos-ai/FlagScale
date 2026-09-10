@@ -25,10 +25,6 @@ s5000:
         qwen3: ["0_6b_musa"]
       hetero_train: {}
       benchmark: {}
-      inference:
-        qwen3: ["4b_tp2_musa"]
-      serve:
-        qwen2_5: ["0.5b_musa"]
       rl: {}
     unit:
       nproc_per_node: 2

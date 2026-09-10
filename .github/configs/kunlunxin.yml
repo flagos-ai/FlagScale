@@ -1,0 +1,62 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kunlunxin P800 Hardware Configuration
+
+hardware_name: kunlunxin
+display_name: "Kunlunxin P800 Tests"
+
+# Validated task-specific P800 images.
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20260817-kunlunxin-p800-dev
+
+runner_labels: ["flagscale-kunlun-p800-gpu8"]
+
+image_build:
+  enabled: true
+  registry: harbor.baai.ac.cn
+  target: dev
+  network: default
+  max_parallel: 1
+  registry_login: true
+  runner_labels: ["flagscale-kunlun-p800-gpu8"]
+  build_args:
+    PIP_INDEX_URL: https://pypi.org/simple
+    PIP_DEFAULT_TIMEOUT: '300'
+  tasks:
+    train:
+      dockerfile: docker/kunlunxin/Dockerfile.train
+      image: flagos-dev/flagscale-train
+      base_image: harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260812-kunlunxin-p800-dev
+      test_roles: [train]
+      build_args:
+        PKG_MGR: conda
+      source_refs:
+        FLAGSCALE_MEGATRON_REF: megatron_lm_fl
+
+container_volumes:
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data
+  - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers
+
+container_options: >-
+  --hostname=flagscale-ci
+  --privileged
+  --ipc=host
+  --shm-size=64g
+  --user root
+  --ulimit nofile=65535:65535
+
+pkg_mgr: "conda"
+env_path: "/root/miniconda"
+env_names:
+  train: "python310_torch29_cuda"

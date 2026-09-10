@@ -1,0 +1,9 @@
+# Kunlunxin: FlagScale-specific packages skipped by --no-base.
+# Dockerfiles pass --no-base, so install_base skips common.txt entirely.
+# Vendor/runtime base images already ship the data-science deps
+# (numpy/scipy/pandas/pyyaml/tqdm/...), but lack these flagos-specific ones.
+# Pinned here so the training task installs them when --no-base is used.
+hydra-core==1.3.2
+omegaconf==2.3.0
+wandb==0.19.1
+typer>=0.9.0

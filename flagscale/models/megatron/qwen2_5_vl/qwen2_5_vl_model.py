@@ -8,6 +8,7 @@ from typing import List
 import torch
 
 from megatron.core import InferenceParams
+from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer import MegatronModule
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_config import TransformerConfig
@@ -16,7 +17,6 @@ from megatron.core.packed_seq_params import PackedSeqParams
 
 from flagscale.models.megatron.qwen2_5_vl.vit_model import Qwen2_5VisionModel
 from flagscale.models.megatron.qwen2_5_vl.language_module import QwenVLLanguageModel
-
 # Note: This is under development and may be missing features.
 class Qwen2_5VLModel(MegatronModule):
     """Qwen2.5VL multi-modal model.
@@ -59,7 +59,6 @@ class Qwen2_5VLModel(MegatronModule):
         vision_projection_config: TransformerConfig,
         vision_projection_layer_spec: ModuleSpec,
         vision_projection_type: str = "mlp",
-
         allow_missing_vision_projection_checkpoint: bool = False,
         parallel_output: bool = True,
         language_position_embedding_type: str = 'rope',
@@ -70,7 +69,9 @@ class Qwen2_5VLModel(MegatronModule):
         add_decoder: bool = True,
         language_rotary_base: int = 10000,
         fp16_lm_cross_entropy: bool = False,
-        language_share_embeddings_and_output_weights: bool=False
+        language_share_embeddings_and_output_weights: bool=False,
+        pg_collection: ProcessGroupCollection = None,
+        vp_stage: int = None,
     ) -> None:
         super().__init__(config=language_transformer_config)
 
@@ -82,6 +83,11 @@ class Qwen2_5VLModel(MegatronModule):
         self.post_process = post_process
         self.add_encoder = add_encoder
         self.add_decoder = add_decoder
+        self.vp_stage = vp_stage
+
+        if pg_collection is None:
+            pg_collection = ProcessGroupCollection.use_mpu_process_groups()
+        self.pg_collection = pg_collection
 
         self.encoder_hidden_state = None
         self.vision_model = None
@@ -93,7 +99,7 @@ class Qwen2_5VLModel(MegatronModule):
         # This attribute is needed to check if an all-reduce is required
         # on the word embeddings inside `finalize_model_grads._allreduce_word_embedding_grads`.
         self.share_embeddings_and_output_weights = False
-        if self.pre_process:
+        if self.add_encoder:
             self.vision_model = Qwen2_5VisionModel(
                 vision_transformer_config,
                 vision_transformer_layer_spec,
@@ -101,26 +107,31 @@ class Qwen2_5VLModel(MegatronModule):
                 vision_projection_layer_spec,
                 projection_type=vision_projection_type,
                 pre_process=True,
-                post_process=True
+                post_process=True,
+                pg_collection=self.pg_collection,
+                vp_stage=self.vp_stage,
             )
 
-        self.language_model = QwenVLLanguageModel(
-            config=language_transformer_config,
-            transformer_layer_spec=language_transformer_layer_spec,
-            vocab_size=language_vocab_size,
-            max_sequence_length=language_max_sequence_length,
-            parallel_output=parallel_output,
-            position_embedding_type=language_position_embedding_type,
-            rotary_percent=language_rotary_percent,
-            pre_process=self.pre_process,
-            post_process=self.post_process,
-            rotary_base=language_rotary_base,
-            fp16_lm_cross_entropy=fp16_lm_cross_entropy,
-            share_embeddings_and_output_weights=language_share_embeddings_and_output_weights
-        )
-        self.share_embeddings_and_output_weights = (
-            self.language_model.share_embeddings_and_output_weights
-        )
+        if self.add_decoder:
+            self.language_model = QwenVLLanguageModel(
+                config=language_transformer_config,
+                transformer_layer_spec=language_transformer_layer_spec,
+                vocab_size=language_vocab_size,
+                max_sequence_length=language_max_sequence_length,
+                parallel_output=parallel_output,
+                position_embedding_type=language_position_embedding_type,
+                rotary_percent=language_rotary_percent,
+                pre_process=self.pre_process,
+                post_process=self.post_process,
+                rotary_base=language_rotary_base,
+                fp16_lm_cross_entropy=fp16_lm_cross_entropy,
+                share_embeddings_and_output_weights=language_share_embeddings_and_output_weights,
+                pg_collection=self.pg_collection,
+                vp_stage=self.vp_stage,
+            )
+            self.share_embeddings_and_output_weights = (
+                self.language_model.share_embeddings_and_output_weights
+            )
 
     def shared_embedding_or_output_weight(self):
         """This is a convenience method to surface the language model's word embeddings, which is
@@ -136,7 +147,11 @@ class Qwen2_5VLModel(MegatronModule):
             input_tensor = [input_tensor]
         assert len(input_tensor) == 1, 'input_tensor should only be length 1 for Qwen2VL'
 
-        if self.pre_process:
+        if self.add_encoder and self.add_decoder:
+            self.vision_model.set_input_tensor(input_tensor[0])
+        elif self.add_encoder:
+            self.vision_model.set_input_tensor(input_tensor[0])
+        elif self.pre_process:
             self.encoder_hidden_state = input_tensor[0]
         else:
             self.language_model.set_input_tensor(input_tensor[0])
@@ -158,8 +173,12 @@ class Qwen2_5VLModel(MegatronModule):
             modules.append(self.language_model)
         if freeze_vision_model and self.vision_model is not None:
             modules.append(self.vision_model)
-        if freeze_vision_projection and self.vision_projection is not None:
-            modules.append(self.vision_projection)
+        if (
+            freeze_vision_projection
+            and self.vision_model is not None
+            and self.vision_model.projection is not None
+        ):
+            modules.append(self.vision_model.projection)
 
         for module in modules:
             for param in module.parameters():
@@ -174,7 +193,6 @@ class Qwen2_5VLModel(MegatronModule):
         video_start_index: int = -1,
         image_input_mask: torch.Tensor = None,
         video_input_mask: torch.Tensor = None,
-
         attention_mask: torch.Tensor = None,
         labels: torch.Tensor = None,
         inference_params: InferenceParams = None,
@@ -200,14 +218,23 @@ class Qwen2_5VLModel(MegatronModule):
             output (torch.Tensor): Loss of shape [b, s] if labels are provided, otherwise logits of shape [b, s, vocab_size].
         """
 
-        use_inference_kv_cache = (
-            inference_params is not None
-            and "image_tokens_count" in inference_params.key_value_memory_dict
-        )
-        if use_inference_kv_cache:
-            raise NotImplementedError()
+        inference_context = deprecate_inference_params(inference_context, inference_params)
 
-        if self.pre_process:
+        use_inference_kv_cache = inference_context is not None and (
+            "image_tokens_count" in inference_context.key_value_memory_dict
+            or "sound_tokens_count" in inference_context.key_value_memory_dict
+        )
+        has_vision = vision_data is not None and vision_data.shape[0] > 0
+        is_packed_dynamic_res = False
+
+        if inference_params is not None or use_inference_kv_cache:
+            raise NotImplementedError("Not Implemented")
+
+        if self.add_encoder and not has_vision:
+            vision_embeds = torch.tensor([], dtype=images.dtype, device=images.device).reshape(
+                0, 0, 0
+            )
+        elif self.add_encoder and has_vision:
             vision_embeds = None
             if vision_grid_thw.shape[0] > 0:
                 # NOTE(lizhiyu): Reference https://github.com/huggingface/transformers/blob/40a493c7ed4f19f08eadb0639cf26d49bfa5e180/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py#L1612
@@ -219,24 +246,14 @@ class Qwen2_5VLModel(MegatronModule):
                     vision_data=vision_data, # If None, vision model should use intermediate outputs (EPP > 1)
                     grid_thw=vision_grid_thw # should provided in each EPP stage
                 )
+        else:
+            vision_embeds = self.encoder_hidden_state
 
-            # If running inference, the language model KV cache will be updated for image token positions.
-            # Here we store the image tokens sequence length, which can be used as an offset to the KV cache later.
-            if inference_params is not None:
-                raise NotImplementedError()
-                # inference_params.key_value_memory_dict["image_tokens_count"] = (
-                #     vision_embeddings.shape[0]
-                # )
+        if not self.add_decoder:
+            return vision_embeds
 
-            # If running inference, we can skip image token computation if they were computed already earlier for this sample.
-            if use_inference_kv_cache:
-                language_embeddings: torch.Tensor = self.language_model.embedding(
-                input_ids=input_ids,
-                position_ids=None # NOTE: disable
-                )  # [text_seq_len, b, h_language]
-                # NOTE: why not cat here? is it the combined embeddings useless?
-                combined_embeddings = language_embeddings
-            elif vision_embeds is not None:
+        if self.pre_process:
+            if vision_embeds is not None:
                 if video_start_index == 0:
                     image_embeds = None
                     video_embeds = vision_embeds
@@ -266,6 +283,7 @@ class Qwen2_5VLModel(MegatronModule):
                     input_ids=input_ids,
                     position_ids=None # NOTE: disable
                 )  # [text_seq_len, b, h_language]
+
         else:
             combined_embeddings = None
         output = self.language_model(
