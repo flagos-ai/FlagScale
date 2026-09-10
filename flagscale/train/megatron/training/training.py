@@ -295,6 +295,13 @@ stimer = StragglerDetector()
 from megatron.training.global_vars import get_spiky_loss_detector
 from megatron.training.peft import PEFT # Import PEFT from peft module
 from megatron.plugin.hetero.parallel_context import get_parallel_context
+from flagscale.models.mimo import (
+    build_mimo_optimizer,
+    setup_mimo_ddp,
+    set_mimo_force_all_reduce,
+    drop_mimo_completed_macros,
+    release_mimo_training_state,
+)
 from flagscale.runner.straggler import (
     OptionalSectionContext,
     StragglerConfig as FSStragglerConfig,
@@ -1706,6 +1713,11 @@ def pretrain(
 
         if not args.auto_tune:
             if not cfg_container.validation.skip_train and cfg_container.checkpoint.save and iteration != 0 and iteration % cfg_container.checkpoint.save_interval != 0:
+                ########## FlagScale Begin ##########
+                if args.use_mimo:  # Give the exit save extra GPU headroom.
+                    release_mimo_training_state(model)
+                    cur_platform.empty_cache()
+                ########## FlagScale End ##########
                 save_checkpoint_and_time(
                     iteration,
                     model,
@@ -2135,6 +2147,11 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
     # After TE2.x: Below function is an empty function and does nothing.
     correct_amax_history_if_needed(model)
 
+    ########## FlagScale Begin ##########
+    if wrap_with_ddp and args.use_mimo:
+        wrap_with_ddp = False
+    ########## FlagScale End ##########
+
     if wrap_with_ddp:
         if args.use_torch_fsdp2:
             assert HAVE_FSDP2, "Torch FSDP2 requires torch>=2.4.0"
@@ -2357,7 +2374,13 @@ def setup_model_and_optimizer(
     model = get_model(model_provider_func, model_type, wrap_with_ddp=wrap_with_ddp)
     unwrapped_model = unwrap_model(model)
 
-    one_logger and one_logger.log_metrics({"app_build_optimzer_start_time": one_logger_utils.get_timestamp_in_ms()})
+    one_logger and one_logger.log_metrics(
+        {"app_build_optimzer_start_time": one_logger_utils.get_timestamp_in_ms()}
+    )
+    ########## FlagScale Begin ##########
+    is_mimo, mimo_model = setup_mimo_ddp(model, args, wrap_with_ddp)
+    ########## FlagScale End ##########
+
     if skip_optimizer:
         optimizer, opt_param_scheduler = None, None
         # In RL inference-only mode, train_iters must still be set despite having no optimizer.
@@ -2387,13 +2410,18 @@ def setup_model_and_optimizer(
             if mup_overrides:
                 config_overrides = {**(config_overrides or {}), **mup_overrides}
 
-        optimizer = get_megatron_optimizer(
-            config,
-            model,
-            config_overrides=config_overrides,
-            use_gloo_process_groups=args.use_gloo_process_groups,
-            dump_param_to_param_group_map=args.dump_param_to_param_group_map,
-        )
+        if is_mimo:
+            optimizer = build_mimo_optimizer(
+                config, config_overrides, mimo_model, args
+            )
+        else:
+            optimizer = get_megatron_optimizer(
+                config,
+                model,
+                config_overrides=config_overrides,
+                use_gloo_process_groups=args.use_gloo_process_groups,
+                dump_param_to_param_group_map=args.dump_param_to_param_group_map,
+            )
         opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
 
     one_logger and one_logger.log_metrics({"app_build_optimzer_finish_time": one_logger_utils.get_timestamp_in_ms()})
@@ -2599,12 +2627,24 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                                      (iteration + 1) % args.save_wgrads_interval == 0)
     save_dgrads_in_this_iteration = (args.save_dgrads_interval is not None and
                                      (iteration + 1) % args.save_dgrads_interval == 0)
+
+    ########## FlagScale Begin ##########
+    def _zero_grad_buffer(model_chunk):
+        """Zero the grad buffer."""
+        if hasattr(model_chunk, 'zero_grad_buffer'):
+            model_chunk.zero_grad_buffer()
+    ########## FlagScale End ##########
+
     while rerun_state_machine.should_run_forward_backward(data_iterator):
         # Set grad to zero.
         for model_chunk in model:
-            model_chunk.zero_grad_buffer()
+            _zero_grad_buffer(model_chunk)
             # If saving main_grads in this iteration, then all-reduce instead of reduce-scatter.
             model_chunk.force_all_reduce = save_wgrads_in_this_iteration
+            ########## FlagScale Begin ##########
+            if args.use_mimo:
+                set_mimo_force_all_reduce(model_chunk, save_wgrads_in_this_iteration)
+            ########## FlagScale End ##########
         optimizer.zero_grad()
 
         if has_nvidia_modelopt:
@@ -2681,6 +2721,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         # Reset force_all_reduce field.
         for model_chunk in model:
             model_chunk.force_all_reduce = False
+            ########## FlagScale Begin ##########
+            if args.use_mimo:
+                set_mimo_force_all_reduce(model_chunk, False)
+            ########## FlagScale End ##########
 
     def _save_state_dict(attr_name, label):
         # Collect state_dict of the given attribute for each parameter.
@@ -3303,6 +3347,10 @@ def save_checkpoint_and_time(
     for model_chunk in model:
         if hasattr(model_chunk, 'free_overlap_buffers'):
             model_chunk.free_overlap_buffers()
+    ########## FlagScale Begin ##########
+    if args.use_mimo:  # Don't pin the MIMO scheduler's trailing no-hook macro through the save.
+        drop_mimo_completed_macros(model)
+    ########## FlagScale End ##########
     cur_platform.empty_cache()  # FlagScale Modify
 
     global num_checkpoints_memory_reported, MAX_NUM_CHECKPOINTS_MEMORY_REPORTED
