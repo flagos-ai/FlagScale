@@ -49,6 +49,8 @@ model:
   qk_layernorm: True
   attention_backend: flash
   disable_bias_linear: True
+  cross_entropy_loss_fusion: True
+  cross_entropy_fusion_impl: native
   num_layers: 32
   hidden_size: 2560
   ffn_hidden_size: 9216
