@@ -20,7 +20,7 @@ import torch.distributed
 from megatron.core.pipeline_parallel.schedules import (
     forward_backward_pipelining_without_interleaving,
 )
-from megatron.core.utils import unwrap_model
+from megatron.core.utils import get_model_config, unwrap_model
 
 from .colocated.optimizer import (
     build_mimo_optimizer as build_colocated_optimizer,
@@ -207,16 +207,28 @@ def sync_optimizer_param_group_lr(optimizer, args) -> bool:
 
 
 def configure_model_config_hooks(model, args) -> None:
-    """Bind layout-specific gradient-sync hooks on the model config (grid only).
-
-    Colocated grad-sync hooks live on the per-module DDP wrappers; grid binds
-    per-module ``no_sync`` / grad finalization on the model config.
-    """
-    if not _is_grid(args):
+    """Bind gradient synchronization hooks for the selected MIMO layout."""
+    model_chunk = model[0]
+    if _is_grid(args):
+        grid_state = grid_training_state_from_model_chunk(model_chunk)
+        assert grid_state is not None, "grid mode requires mimo_grid_state on the model"
+        configure_grid_model_config_hooks(grid_state, model_chunk)
         return
-    grid_state = grid_training_state_from_model_chunk(model[0])
-    assert grid_state is not None, "grid mode requires mimo_grid_state on the model"
-    configure_grid_model_config_hooks(grid_state, model[0])
+    if not _use_mimo(args):
+        return
+    if not hasattr(model_chunk, "no_sync"):
+        return
+    config = get_model_config(model_chunk)
+
+    # The standard training loop only installs these hooks for an outer DDP.
+    # Colocated MIMO owns per-module DDP wrappers behind a Float16Module.
+    if args.overlap_grad_reduce:
+        assert config.no_sync_func is None, (
+            "colocated MIMO requires an unset no_sync_func when overlap_grad_reduce is enabled"
+        )
+        config.no_sync_func = model_chunk.no_sync
+    if args.overlap_param_gather and args.align_param_gather:
+        config.param_sync_func = model_chunk.start_param_sync
 
 
 def get_mimo_forward_backward_func(model, args):

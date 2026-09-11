@@ -3319,19 +3319,19 @@ def compute_throughputs_and_append_to_progress_log(iteration, num_floating_point
 
 def enable_forward_pre_hook(model_chunks):
     for model_chunk in model_chunks:
-        assert isinstance(model_chunk, DDP)
+        assert isinstance(model_chunk, DDP) or hasattr(model_chunk, "enable_forward_pre_hook")
         model_chunk.enable_forward_pre_hook()
 
 
 def disable_forward_pre_hook(model_chunks, param_sync=True):
     for model_chunk in model_chunks:
-        assert isinstance(model_chunk, DDP)
+        assert isinstance(model_chunk, DDP) or hasattr(model_chunk, "disable_forward_pre_hook")
         model_chunk.disable_forward_pre_hook(param_sync=param_sync)
 
 
 def force_param_sync(model_chunks: list[DDP]) -> None:
     for model_chunk in model_chunks:
-        assert isinstance(model_chunk, DDP)
+        assert isinstance(model_chunk, DDP) or hasattr(model_chunk, "start_param_sync")
         model_chunk.start_param_sync(force_sync=True)
 
 # Only report memory for first 3 checkpoint saves.

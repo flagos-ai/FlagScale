@@ -68,10 +68,6 @@ def validate_mimo_config(
         "requires num_microbatches to stay divisible by vit_batch_factor "
         "throughout training, which a batch-size ramp cannot guarantee."
     )
-    assert not (args.overlap_param_gather or args.overlap_grad_reduce), (
-        "MIMO per-module DDP overlap is not yet validated; "
-        "disable --overlap-param-gather and --overlap-grad-reduce."
-    )
     assert args.ckpt_format == "torch", (
         "ChainedOptimizer returns a list of optimizer state dicts, which only the "
         "legacy 'torch' checkpoint path handles; torch_dist support is future work."
@@ -97,6 +93,14 @@ def validate_mimo_config(
         f"Colocated MIMO currently requires vision TP=1, got "
         f"vision tp={vision_parallelism.tensor_model_parallel_size}."
     )
+    if getattr(args, "tp_comm_overlap", False):
+        assert getattr(args, "sequence_parallel", False), (
+            "Colocated MIMO tp_comm_overlap requires sequence_parallel=True."
+        )
+        assert language_parallelism.tensor_model_parallel_size == args.tensor_model_parallel_size, (
+            "Colocated MIMO tp_comm_overlap requires the language TP size to match "
+            "the global tensor_model_parallel_size used for UserBuffer initialization."
+        )
     # EP subdivides the language DP domain (dp = ep * expert_dp) and never
     # applies to the dense vision module.  MoE token dispatch runs in the
     # language forward, which every rank enters for every microbatch, so the
