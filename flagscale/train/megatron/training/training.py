@@ -295,6 +295,19 @@ stimer = StragglerDetector()
 from megatron.training.global_vars import get_spiky_loss_detector
 from megatron.training.peft import PEFT # Import PEFT from peft module
 from megatron.plugin.hetero.parallel_context import get_parallel_context
+from flagscale.models.mimo import (
+    build_mimo_optimizer,
+    configure_model_config_hooks,
+    destroy_mimo_training_states,
+    drop_mimo_completed_macros,
+    get_logical_iteration_samples,
+    get_mimo_forward_backward_func,
+    get_mimo_loss_reduction_context,
+    release_mimo_training_state,
+    set_mimo_force_all_reduce,
+    setup_mimo_ddp,
+    sync_optimizer_param_group_lr,
+)
 from flagscale.runner.straggler import (
     OptionalSectionContext,
     StragglerConfig as FSStragglerConfig,
@@ -380,6 +393,7 @@ from megatron.core.msc_utils import MultiStorageClientFeature, open_file
 
 
 def destroy_global_state():
+    destroy_mimo_training_states()
     destroy_global_vars()
     destroy_num_microbatches_calculator()
     destroy_global_memory_buffer()
@@ -1706,6 +1720,11 @@ def pretrain(
 
         if not args.auto_tune:
             if not cfg_container.validation.skip_train and cfg_container.checkpoint.save and iteration != 0 and iteration % cfg_container.checkpoint.save_interval != 0:
+                ########## FlagScale Begin ##########
+                if args.use_mimo:  # Give the exit save extra GPU headroom.
+                    release_mimo_training_state(model)
+                    cur_platform.empty_cache()
+                ########## FlagScale End ##########
                 save_checkpoint_and_time(
                     iteration,
                     model,
@@ -2135,6 +2154,11 @@ def get_model(model_provider_func, model_type=ModelType.encoder_or_decoder, wrap
     # After TE2.x: Below function is an empty function and does nothing.
     correct_amax_history_if_needed(model)
 
+    ########## FlagScale Begin ##########
+    if wrap_with_ddp and args.use_mimo:
+        wrap_with_ddp = False
+    ########## FlagScale End ##########
+
     if wrap_with_ddp:
         if args.use_torch_fsdp2:
             assert HAVE_FSDP2, "Torch FSDP2 requires torch>=2.4.0"
@@ -2357,7 +2381,14 @@ def setup_model_and_optimizer(
     model = get_model(model_provider_func, model_type, wrap_with_ddp=wrap_with_ddp)
     unwrapped_model = unwrap_model(model)
 
-    one_logger and one_logger.log_metrics({"app_build_optimzer_start_time": one_logger_utils.get_timestamp_in_ms()})
+    one_logger and one_logger.log_metrics(
+        {"app_build_optimzer_start_time": one_logger_utils.get_timestamp_in_ms()}
+    )
+    ########## FlagScale Begin ##########
+    # Layout-aware per-module DDP setup is owned by the MIMO facade.
+    is_mimo, _ = setup_mimo_ddp(model, args, wrap_with_ddp)
+    ########## FlagScale End ##########
+
     if skip_optimizer:
         optimizer, opt_param_scheduler = None, None
         # In RL inference-only mode, train_iters must still be set despite having no optimizer.
@@ -2387,13 +2418,17 @@ def setup_model_and_optimizer(
             if mup_overrides:
                 config_overrides = {**(config_overrides or {}), **mup_overrides}
 
-        optimizer = get_megatron_optimizer(
-            config,
-            model,
-            config_overrides=config_overrides,
-            use_gloo_process_groups=args.use_gloo_process_groups,
-            dump_param_to_param_group_map=args.dump_param_to_param_group_map,
-        )
+        if is_mimo:
+            # Layout-specific optimizer construction is owned by the MIMO facade.
+            optimizer = build_mimo_optimizer(config, config_overrides, model, args)
+        else:
+            optimizer = get_megatron_optimizer(
+                config,
+                model,
+                config_overrides=config_overrides,
+                use_gloo_process_groups=args.use_gloo_process_groups,
+                dump_param_to_param_group_map=args.dump_param_to_param_group_map,
+            )
         opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
 
     one_logger and one_logger.log_metrics({"app_build_optimzer_finish_time": one_logger_utils.get_timestamp_in_ms()})
@@ -2473,6 +2508,16 @@ def setup_model_and_optimizer(
     else:
         args.iteration = 0
         args.num_floating_point_operations_so_far = 0
+
+    # Grid MIMO resume with --override-opt-param-scheduler: the optimizer
+    # checkpoint load restores every param group's max_lr/min_lr from the
+    # saved state, and OptimizerParamScheduler.get_lr prefers the param-group
+    # values over the scheduler's own configured fields - so a configured
+    # lr/min_lr of 0 would be silently ignored after resume.  The facade
+    # re-syncs the active module optimizers' param groups to the configured
+    # override values after the load (no-op unless the override flag is set,
+    # and outside grid mode entirely).
+    sync_optimizer_param_group_lr(optimizer, args)
 
     # Validate that the world size can accommodate the current batch size.
     # This catches the case where GPUs were scaled up mid-training but the
@@ -2599,12 +2644,24 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                                      (iteration + 1) % args.save_wgrads_interval == 0)
     save_dgrads_in_this_iteration = (args.save_dgrads_interval is not None and
                                      (iteration + 1) % args.save_dgrads_interval == 0)
+
+    ########## FlagScale Begin ##########
+    def _zero_grad_buffer(model_chunk):
+        """Zero the grad buffer."""
+        if hasattr(model_chunk, 'zero_grad_buffer'):
+            model_chunk.zero_grad_buffer()
+    ########## FlagScale End ##########
+
     while rerun_state_machine.should_run_forward_backward(data_iterator):
         # Set grad to zero.
         for model_chunk in model:
-            model_chunk.zero_grad_buffer()
+            _zero_grad_buffer(model_chunk)
             # If saving main_grads in this iteration, then all-reduce instead of reduce-scatter.
             model_chunk.force_all_reduce = save_wgrads_in_this_iteration
+            ########## FlagScale Begin ##########
+            if args.use_mimo:
+                set_mimo_force_all_reduce(model_chunk, save_wgrads_in_this_iteration)
+            ########## FlagScale End ##########
         optimizer.zero_grad()
 
         if has_nvidia_modelopt:
@@ -2681,6 +2738,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         # Reset force_all_reduce field.
         for model_chunk in model:
             model_chunk.force_all_reduce = False
+            ########## FlagScale Begin ##########
+            if args.use_mimo:
+                set_mimo_force_all_reduce(model_chunk, False)
+            ########## FlagScale End ##########
 
     def _save_state_dict(attr_name, label):
         # Collect state_dict of the given attribute for each parameter.
@@ -2780,6 +2841,12 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     is_last_stage = mpu.is_pipeline_last_stage(ignore_virtual=True)
     if args.use_dualpipev:
         is_last_stage = mpu.is_pipeline_first_stage(ignore_virtual=True)
+    # Grid overrides the loss stage + reduction group (only the language
+    # module's last PP stage produced losses; reduce within the language
+    # DP-CP group).  Facade no-ops for the standard contract.
+    mimo_last_stage, loss_dp_group = get_mimo_loss_reduction_context(model, args)
+    if mimo_last_stage is not None:
+        is_last_stage = mimo_last_stage
     ########## FlagScale End ##########
     if is_last_stage:  # FlagScale Modify
         # Average loss across microbatches.
@@ -2791,10 +2858,13 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                 # there is one dict per microbatch. in new reporting, we average
                 # over the total number of tokens across the global batch.
                 val = torch.vstack(val).sum(dim=0)
-                torch.distributed.all_reduce(
-                    val,
-                    group=mpu.get_data_parallel_group(with_context_parallel=True)
-                )
+                if loss_dp_group is not None:
+                    torch.distributed.all_reduce(val, group=loss_dp_group)
+                else:
+                    torch.distributed.all_reduce(
+                        val,
+                        group=mpu.get_data_parallel_group(with_context_parallel=True)
+                    )
                 loss_reduced[key] = val[0] / val[1]
             elif val[0].numel() == 1:
                 # legacy behavior, we average over the number of microbatches
@@ -3249,19 +3319,19 @@ def compute_throughputs_and_append_to_progress_log(iteration, num_floating_point
 
 def enable_forward_pre_hook(model_chunks):
     for model_chunk in model_chunks:
-        assert isinstance(model_chunk, DDP)
+        assert isinstance(model_chunk, DDP) or hasattr(model_chunk, "enable_forward_pre_hook")
         model_chunk.enable_forward_pre_hook()
 
 
 def disable_forward_pre_hook(model_chunks, param_sync=True):
     for model_chunk in model_chunks:
-        assert isinstance(model_chunk, DDP)
+        assert isinstance(model_chunk, DDP) or hasattr(model_chunk, "disable_forward_pre_hook")
         model_chunk.disable_forward_pre_hook(param_sync=param_sync)
 
 
 def force_param_sync(model_chunks: list[DDP]) -> None:
     for model_chunk in model_chunks:
-        assert isinstance(model_chunk, DDP)
+        assert isinstance(model_chunk, DDP) or hasattr(model_chunk, "start_param_sync")
         model_chunk.start_param_sync(force_sync=True)
 
 # Only report memory for first 3 checkpoint saves.
@@ -3303,6 +3373,10 @@ def save_checkpoint_and_time(
     for model_chunk in model:
         if hasattr(model_chunk, 'free_overlap_buffers'):
             model_chunk.free_overlap_buffers()
+    ########## FlagScale Begin ##########
+    if args.use_mimo:  # Don't pin the MIMO scheduler's trailing no-hook macro through the save.
+        drop_mimo_completed_macros(model)
+    ########## FlagScale End ##########
     cur_platform.empty_cache()  # FlagScale Modify
 
     global num_checkpoints_memory_reported, MAX_NUM_CHECKPOINTS_MEMORY_REPORTED
@@ -3745,6 +3819,12 @@ def train(
             config.param_sync_func = config.param_sync_func[0]
     config.finalize_model_grads_func = finalize_model_grads
 
+    ########## FlagScale Begin ##########
+    # Layout-specific gradient-sync hooks (grid binds per-module no_sync /
+    # grad finalization on the config; facade no-ops for the other layouts).
+    configure_model_config_hooks(model, args)
+    ########## FlagScale End ##########
+
     if args.log_energy:
         energy_monitor.setup()
         energy_monitor.resume()
@@ -3806,6 +3886,13 @@ def train(
     ########## FlagScale End ##########
     # Wrap forward_backward_func for Full iteration CUDA graph
     forward_backward_func = get_forward_backward_func()
+    ########## FlagScale Begin ##########
+    # Grid drives the multi-module pipeline schedule (facade returns None for
+    # the standard schedules).
+    mimo_forward_backward_func = get_mimo_forward_backward_func(model, args)
+    if mimo_forward_backward_func is not None:
+        forward_backward_func = mimo_forward_backward_func
+    ########## FlagScale End ##########
     if args.cuda_graph_impl == "full_iteration":
         forward_backward_func = FullCudaGraphWrapper(
             forward_backward_func,
@@ -4009,7 +4096,8 @@ def train(
             if iteration == start_iteration:
                 start_iteration = iteration + 1
             iteration += 1
-            batch_size = (
+            logical_samples = get_logical_iteration_samples(args, get_num_microbatches())
+            batch_size = logical_samples or (
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
             )
             args.consumed_train_samples += batch_size
@@ -4179,7 +4267,8 @@ def train(
             )
             args.consumed_train_bins += bin_count
         else:
-            batch_size = (
+            logical_samples = get_logical_iteration_samples(args, get_num_microbatches())
+            batch_size = logical_samples or (
                 mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
             )
             iteration_sequences = batch_size
@@ -4503,6 +4592,13 @@ def evaluate(
     eval_micro_batch_size = args.eval_micro_batch_size
     eval_num_microbatches = eval_batch_size // (eval_micro_batch_size * args.data_parallel_size)
     forward_backward_func = get_forward_backward_func()
+    ########## FlagScale Begin ##########
+    # Grid drives the multi-module pipeline schedule (see train(); facade
+    # returns None for the standard schedules).
+    mimo_forward_backward_func = get_mimo_forward_backward_func(model, args)
+    if mimo_forward_backward_func is not None:
+        forward_backward_func = mimo_forward_backward_func
+    ########## FlagScale End ##########
     if args.cuda_graph_impl == "full_iteration":
         forward_backward_func = FullCudaGraphWrapper(
             forward_backward_func,
@@ -4570,7 +4666,14 @@ def evaluate(
             if args.empty_unused_memory_level >= 1:
                 cur_platform.empty_cache()  # FlagScale Modify
 
-            if mpu.is_pipeline_last_stage(ignore_virtual=True):
+            mimo_eval_last_stage, eval_dp_group = get_mimo_loss_reduction_context(model, args)
+            if mimo_eval_last_stage is not None:
+                is_eval_loss_rank = mimo_eval_last_stage
+            else:
+                is_eval_loss_rank = mpu.is_pipeline_last_stage(ignore_virtual=True)
+                eval_dp_group = mpu.get_data_parallel_group(with_context_parallel=True)
+
+            if is_eval_loss_rank:
                 # Reduce across processes.
                 for key in loss_dicts[0].keys():
                     if key not in total_loss_dict:
@@ -4583,21 +4686,13 @@ def evaluate(
                             val = torch.vstack(val)
                             val = val[:, 0] / val[:, 1].clamp(min=1)
                             val = val.mean()
-                            torch.distributed.all_reduce(
-                                val,
-                                group=mpu.get_data_parallel_group(with_context_parallel=True)
-                            )
-                            val /= torch.distributed.get_world_size(
-                                group=mpu.get_data_parallel_group(with_context_parallel=True)
-                            )
+                            torch.distributed.all_reduce(val, group=eval_dp_group)
+                            val /= torch.distributed.get_world_size(group=eval_dp_group)
                             total_loss_dict[key][0] += val
                             total_loss_dict[key][1] += 1
                         else :
                             val = torch.vstack(val).sum(dim=0)
-                            torch.distributed.all_reduce(
-                                val,
-                                group=mpu.get_data_parallel_group(with_context_parallel=True)
-                            )
+                            torch.distributed.all_reduce(val, group=eval_dp_group)
                             total_loss_dict[key] += val
                     elif val[0].numel() == 1:
                         val = torch.cat(val).sum()

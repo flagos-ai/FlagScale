@@ -12,12 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Qwen3.5 non-colocated grid MIMO (world 8): vision TP2/DP1 on ranks [0,2),
+# language TP1/PP1/DP6 on ranks [2,8), via `mimo_module_specs`.
+
 system:
-  vision_ration: 0.1
+  use_mimo: true
+  mimo_layout: grid
+  mimo_module_specs: "images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2"
+
   num_workers: 1
   calculate_per_token_loss: true
-  tensor_model_parallel_size: 4
-  pipeline_model_parallel_size: 2
+  pipeline_model_parallel_size: 1
   context_parallel_size: 1
   use_flash_attn: True
   use_distributed_optimizer: True
@@ -35,7 +40,7 @@ system:
     log_interval: 1
   checkpoint:
     save_interval: 10000
-    ckpt_format: torch
+    ckpt_format: torch_dist
 
 model:
   # Qwen3.5-4B architecture parameters
@@ -64,15 +69,15 @@ model:
   train_iters: 5000
   eval_iters: 0
   eval_interval: 1000
-  micro_batch_size: 1
-  global_batch_size: 4
+  micro_batch_size: 6
+  global_batch_size: 48
   allow_missing_vision_projection_checkpoint: False
   apply_layernorm_1p: False
   group_query_attention: True
   no_masked_softmax_fusion: True
   untie_embeddings_and_output_weights: False
 
-  # Position embedding: Qwen3.5 uses mRoPE with partial rotary
+  # Position embedding
   position_embedding_type: mrope
   rotary_percent: 0.25
   rotary_base: 10000000
@@ -87,8 +92,8 @@ model:
   freeze_ViT: False
   disable_vision_class_token: True
 
-  # mtp
-  mtp_num_layers: 1
+  # mtp (unsupported by the grid path)
+  mtp_num_layers: 0
 
   # Recompute
   vision_recompute_activations: True
@@ -129,12 +134,12 @@ model:
 data:
   no_use_system_prompt: True
   vocab_size: 248320
-  data_path: ${oc.env:QWEN35_DATA_PATH,./data/qwen35/wds-1}
-  vision_root: ${oc.env:QWEN35_VISION_ROOT,./data/qwen35/images}
+  data_path: /workspace/data/qwen/qwen_wds/wds-1
+  vision_root: /
   dataloader_type: external
   split: 100,0,0
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
-    tokenizer_path: ${oc.env:QWEN35_HF_PATH,./models/Qwen3.5-4B}
+    tokenizer_path: /workspace/data/qwen/qwen2vl_tokenizer
     extra_vocab_size: 0
     make_vocab_size_divisible_by: 64

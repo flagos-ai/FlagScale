@@ -13,11 +13,17 @@
 # limitations under the License.
 
 system:
+  # Colocated MIMO: vision and language colocate on every rank with their own
+  # TP/PP sizes (default layout; `mimo_layout` omitted).
+  use_mimo: true
+  vision_tensor_model_parallel_size: 1
+  vision_micro_batch_size: 8
+
   vision_ration: 0.1
   num_workers: 1
   calculate_per_token_loss: true
-  tensor_model_parallel_size: 4
-  pipeline_model_parallel_size: 2
+  tensor_model_parallel_size: 2
+  pipeline_model_parallel_size: 1
   context_parallel_size: 1
   use_flash_attn: True
   use_distributed_optimizer: True
@@ -65,14 +71,14 @@ model:
   eval_iters: 0
   eval_interval: 1000
   micro_batch_size: 1
-  global_batch_size: 4
+  global_batch_size: 64
   allow_missing_vision_projection_checkpoint: False
   apply_layernorm_1p: False
   group_query_attention: True
   no_masked_softmax_fusion: True
   untie_embeddings_and_output_weights: False
 
-  # Position embedding: Qwen3.5 uses mRoPE with partial rotary
+  # Position embedding
   position_embedding_type: mrope
   rotary_percent: 0.25
   rotary_base: 10000000
@@ -129,12 +135,12 @@ model:
 data:
   no_use_system_prompt: True
   vocab_size: 248320
-  data_path: ${oc.env:QWEN35_DATA_PATH,./data/qwen35/wds-1}
-  vision_root: ${oc.env:QWEN35_VISION_ROOT,./data/qwen35/images}
+  data_path: /workspace/data/qwen/qwen_wds/wds-1
+  vision_root: /
   dataloader_type: external
   split: 100,0,0
   tokenizer:
     tokenizer_type: Qwen2VLTokenizer
-    tokenizer_path: ${oc.env:QWEN35_HF_PATH,./models/Qwen3.5-4B}
+    tokenizer_path: /workspace/data/qwen/qwen2vl_tokenizer
     extra_vocab_size: 0
     make_vocab_size_divisible_by: 64
