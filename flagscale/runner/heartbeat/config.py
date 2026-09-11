@@ -23,6 +23,11 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
+from flagscale.runner.diagnostics import (
+    stop_process_shell_lines,
+    wait_for_file_removal_shell_lines,
+)
+
 
 def _positive_float(value: Any, name: str) -> float:
     try:
@@ -100,8 +105,15 @@ class HeartbeatLaunchConfig:
 
     def training_command_body(self, node_rank: int) -> str:
         """Run training and notify the node-zero heartbeat monitor on exit."""
-        if not self.enabled:
+        exit_actions = self.command_exit_actions(node_rank)
+        if not exit_actions:
             return "$cmd; sync"
+        return "$cmd; rc=\\$?; " + "; ".join(exit_actions) + "; sync; exit \\$rc"
+
+    def command_exit_actions(self, node_rank: int) -> list[str]:
+        """Return cleanup actions for a shared diagnostic command wrapper."""
+        if not self.enabled:
+            return []
         exit_actions: list[str] = []
         if node_rank == 0:
             completion_file = shlex.quote(self.completion_file)
@@ -112,9 +124,7 @@ class HeartbeatLaunchConfig:
                 f"if [ -f {health_pid_file} ]; then "
                 f'kill \\"\\$(cat {health_pid_file})\\" 2>/dev/null || true; fi'
             )
-        if not exit_actions:
-            return "$cmd; sync"
-        return "$cmd; rc=\\$?; " + "; ".join(exit_actions) + "; sync; exit \\$rc"
+        return exit_actions
 
     def shell_setup_lines(self, node_rank: int) -> list[str]:
         if not self.enabled:
@@ -214,23 +224,22 @@ class HeartbeatLaunchConfig:
         if not self.enabled:
             return []
         lines: list[str] = []
-        if self.hardware_health_enabled:
-            health_pid_file = shlex.quote(self.hardware_health_pid_file(node_rank))
-            lines.extend(
-                [
-                    f"if [ -f {health_pid_file} ]; then",
-                    f'    kill "$(cat {health_pid_file})" 2>/dev/null || true',
-                    "fi",
-                ]
-            )
         if node_rank == 0:
-            pid_file = shlex.quote(self.monitor_pid_file)
             lines.extend(
-                [
-                    f"if [ -f {pid_file} ]; then",
-                    f'    kill "$(cat {pid_file})" 2>/dev/null || true',
-                    "fi",
-                ]
+                stop_process_shell_lines(
+                    self.monitor_pid_file,
+                    f"flagscale.runner.heartbeat.monitor --heartbeat-dir {self.heartbeat_dir}",
+                )
+            )
+        else:
+            lines.extend(wait_for_file_removal_shell_lines(self.monitor_pid_file))
+        if self.hardware_health_enabled:
+            lines.extend(
+                stop_process_shell_lines(
+                    self.hardware_health_pid_file(node_rank),
+                    "flagscale.runner.heartbeat.gpu_health "
+                    f"--output-file {self.hardware_health_file(node_rank)}",
+                )
             )
         return lines
 
