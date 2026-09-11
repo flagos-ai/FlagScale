@@ -138,9 +138,20 @@ def _rotary_qk_bhsd_kernel(
         target = batch_id * oq_stride_b + head * oq_stride_h + sequence_id * oq_stride_s
         value = tl.load(q_ptr + source + dims * q_stride_d, mask=mask, other=0.0)
         rotated = tl.load(q_ptr + source + rotated_dims * q_stride_d, mask=mask, other=0.0)
+        left = value.to(tl.float32) * cos
+        right = rotated.to(tl.float32) * sin
+        # PyTorch materializes both BF16/FP16 products before the final add.
+        # Preserve that rounding order so fusion does not perturb verifier
+        # hidden states near an acceptance boundary.
+        if tl.constexpr(q_ptr.dtype.element_ty == tl.bfloat16):
+            left = left.to(tl.bfloat16)
+            right = right.to(tl.bfloat16)
+        elif tl.constexpr(q_ptr.dtype.element_ty == tl.float16):
+            left = left.to(tl.float16)
+            right = right.to(tl.float16)
         tl.store(
             output_q_ptr + target + dims * oq_stride_d,
-            value * cos + rotated * sin,
+            left + right,
             mask=mask,
         )
 
@@ -149,9 +160,17 @@ def _rotary_qk_bhsd_kernel(
         target = batch_id * ok_stride_b + head * ok_stride_h + sequence_id * ok_stride_s
         value = tl.load(k_ptr + source + dims * k_stride_d, mask=mask, other=0.0)
         rotated = tl.load(k_ptr + source + rotated_dims * k_stride_d, mask=mask, other=0.0)
+        left = value.to(tl.float32) * cos
+        right = rotated.to(tl.float32) * sin
+        if tl.constexpr(k_ptr.dtype.element_ty == tl.bfloat16):
+            left = left.to(tl.bfloat16)
+            right = right.to(tl.bfloat16)
+        elif tl.constexpr(k_ptr.dtype.element_ty == tl.float16):
+            left = left.to(tl.float16)
+            right = right.to(tl.float16)
         tl.store(
             output_k_ptr + target + dims * ok_stride_d,
-            value * cos + rotated * sin,
+            left + right,
             mask=mask,
         )
 
@@ -222,9 +241,17 @@ def _rotary_qk_bhsd_head_kernel(
         mask=q_mask,
         other=0.0,
     )
+    q_left = q_value.to(tl.float32) * cos
+    q_right = q_rotated.to(tl.float32) * sin
+    if tl.constexpr(q_ptr.dtype.element_ty == tl.bfloat16):
+        q_left = q_left.to(tl.bfloat16)
+        q_right = q_right.to(tl.bfloat16)
+    elif tl.constexpr(q_ptr.dtype.element_ty == tl.float16):
+        q_left = q_left.to(tl.float16)
+        q_right = q_right.to(tl.float16)
     tl.store(
         output_q_ptr + q_target + dims * oq_stride_d,
-        q_value * cos + q_rotated * sin,
+        q_left + q_right,
         mask=q_mask,
     )
 
@@ -237,9 +264,17 @@ def _rotary_qk_bhsd_head_kernel(
         mask=k_mask,
         other=0.0,
     )
+    k_left = k_value.to(tl.float32) * cos
+    k_right = k_rotated.to(tl.float32) * sin
+    if tl.constexpr(k_ptr.dtype.element_ty == tl.bfloat16):
+        k_left = k_left.to(tl.bfloat16)
+        k_right = k_right.to(tl.bfloat16)
+    elif tl.constexpr(k_ptr.dtype.element_ty == tl.float16):
+        k_left = k_left.to(tl.float16)
+        k_right = k_right.to(tl.float16)
     tl.store(
         output_k_ptr + k_target + dims * ok_stride_d,
-        k_value * cos + k_rotated * sin,
+        k_left + k_right,
         mask=k_mask,
     )
 

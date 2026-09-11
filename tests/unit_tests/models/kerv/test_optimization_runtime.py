@@ -76,6 +76,13 @@ def test_adaptive_rotary_matches_reference():
 
 def test_fused_logsoftmax_topk_matches_pytorch():
     logits = torch.randn(2, 32064, device="cuda", dtype=torch.bfloat16)
+    # BF16 random logits contain many ties, and CUDA topk does not guarantee
+    # the order of equal elements across separate launches. Keep the tested
+    # top-k unique so this comparison checks the operator rather than tie
+    # scheduling in two independent native topk calls.
+    top_indices = torch.tensor([3, 17, 101, 509, 1021, 4093, 8191, 16381], device="cuda")
+    top_values = torch.tensor([32, 30, 28, 26, 24, 22, 20, 18], device="cuda", dtype=logits.dtype)
+    logits[:, top_indices] = top_values
 
     values, indices = fused_logsoftmax_topk(logits, 8)
     expected_values, expected_indices = torch.topk(
