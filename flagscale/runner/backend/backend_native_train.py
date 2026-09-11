@@ -18,7 +18,10 @@ from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
+from flagscale.runner.diagnostics import diagnostic_command_body
+from flagscale.runner.heartbeat.config import prepare_heartbeat_launch_config
 from flagscale.runner.runner_train import _get_args_native, _update_config_train
+from flagscale.runner.tracing.config import prepare_trace_launch_config
 from flagscale.runner.utils import get_pkg_dir, logger, parse_hostfile, resolve_path
 
 
@@ -33,6 +36,10 @@ class NativeTrainBackend(BackendBase):
         _update_config_train(self.config)
         self.user_args = _get_args_native(self.config)
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+        self.heartbeat_config = prepare_heartbeat_launch_config(self.config, self.rdzv_id)
+        self.trace_config = prepare_trace_launch_config(
+            self.config, self.rdzv_id, self.heartbeat_config
+        )
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint
         self.resources = parse_hostfile(self.config.experiment.runner.get("hostfile", None))
@@ -94,6 +101,14 @@ class NativeTrainBackend(BackendBase):
             f.write("\n")
             f.write(f"export PYTHONPATH={pkg_dir}:{megatron_dir}:${{PYTHONPATH}}\n")
             f.write("\n")
+            for line in self.heartbeat_config.shell_setup_lines(node_rank):
+                f.write(f"{line}\n")
+            if self.heartbeat_config.enabled:
+                f.write("\n")
+            for line in self.trace_config.shell_setup_lines(node_rank):
+                f.write(f"{line}\n")
+            if self.trace_config.enabled:
+                f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
             if enable_monitoring:
@@ -118,13 +133,16 @@ class NativeTrainBackend(BackendBase):
                 )
             f.write("\n")
 
+            command_body = diagnostic_command_body(
+                node_rank, self.heartbeat_config, self.trace_config
+            )
             if background:
                 f.write(
-                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                    f'nohup bash -c "{command_body}" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
                 f.write("set -o pipefail\n")
-                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
+                f.write(f'bash -c "{command_body}" 2>&1 | tee -a {host_output_file}\n')
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
@@ -160,6 +178,10 @@ class NativeTrainBackend(BackendBase):
             # TODO: This is a temporary fix. We need to find a better way to stop the job.
             f.write("    pkill -f 'torchrun'\n")
             f.write("fi\n")
+            for line in self.heartbeat_config.stop_shell_lines(node_rank):
+                f.write(f"{line}\n")
+            for line in self.trace_config.stop_shell_lines(node_rank):
+                f.write(f"{line}\n")
             f.write(f"{after_stop}\n")
             f.flush()
             os.fsync(f.fileno())
