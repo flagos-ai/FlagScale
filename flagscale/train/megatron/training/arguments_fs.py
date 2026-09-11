@@ -1073,6 +1073,94 @@ def _add_flagos_args(parser):
     return parser
 
 
+def _add_memrift_args(parser):
+    """Add MemRift (memory-efficient training) arguments (FlagScale specific)."""
+    group = parser.add_argument_group(title='flagscale memrift')
+
+    group.add_argument(
+        '--memrift-enable',
+        action='store_true',
+        default=False,
+        help='Enable MemRift memory-efficient training (master switch).',
+    )
+    group.add_argument(
+        '--memrift-weight-enable',
+        action='store_true',
+        default=False,
+        help='Enable MemRift weight compression (frozen base weights on-demand load/release).',
+    )
+    group.add_argument(
+        '--memrift-activation-enable',
+        action='store_true',
+        default=False,
+        help='Enable MemRift activation compression (saved_tensors_hooks).',
+    )
+    group.add_argument(
+        '--memrift-compressed-weight-dir',
+        type=str,
+        default=None,
+        help='Path to MemRift compressed weight directory (contains index.json).',
+    )
+    group.add_argument(
+        '--memrift-zstd-level',
+        type=int,
+        default=6,
+        help='Zstd compression level for MemRift (1-22, default 6).',
+    )
+    group.add_argument(
+        '--memrift-act-zstd-level',
+        type=int,
+        default=3,
+        help='Zstd level for online ACTIVATION compression only (1-22, default 3). '
+             'Independent of --memrift-zstd-level (which is the offline weight-prep '
+             'level and has no runtime effect on activations). High levels (e.g. 18) '
+             'make online activation compression extremely slow.',
+    )
+    group.add_argument(
+        '--memrift-prefetch-layers',
+        type=int,
+        default=4,
+        help='Number of layers to prefetch in MemRift (default 4).',
+    )
+    group.add_argument(
+        '--memrift-weight-async',
+        action='store_true',
+        default=False,
+        help='Enable async weight decompression in MemRift.',
+    )
+    group.add_argument(
+        '--memrift-act-async',
+        action='store_true',
+        default=False,
+        help='Enable async activation compression/decompression in MemRift.',
+    )
+    group.add_argument(
+        '--memrift-decode-pool-workers',
+        type=int,
+        default=16,
+        help='Number of decode thread pool workers for MemRift async operations.',
+    )
+    group.add_argument(
+        '--memrift-compress-pool-workers',
+        type=int,
+        default=8,
+        help='Number of compress thread pool workers for MemRift async operations.',
+    )
+    group.add_argument(
+        '--memrift-print-debug',
+        action='store_true',
+        default=False,
+        help='Print MemRift debug messages.',
+    )
+    group.add_argument(
+        '--memrift-profile-memory',
+        action='store_true',
+        default=False,
+        help='Enable per-layer memory profiling for MemRift (reports activation breakdown).',
+    )
+    return parser
+
+
 def _add_flagscale_specific_args(parser):
     """Add FlagScale-specific arguments that don't fit in other categories."""
     group = parser.add_argument_group(title='flagscale specific')
@@ -1114,4 +1202,5 @@ def add_flagscale_arguments(parser):
     parser = _add_flagos_args(parser)
     parser = _add_flagscale_specific_args(parser)
     parser = _add_perf_monitor_args(parser)
+    parser = _add_memrift_args(parser)
     return parser
