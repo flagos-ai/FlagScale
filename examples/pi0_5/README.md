@@ -30,7 +30,7 @@ pip install ".[cuda]" --verbose
 pip install git+https://github.com/huggingface/transformers.git@fix/lerobot_openpi
 ```
 
-Install additional dependencies for downloading models/datasets:
+Install additional dependencies for automatic model and dataset downloads:
 
 ```sh
 # For HuggingFace Hub
@@ -40,49 +40,13 @@ pip install huggingface_hub
 pip install modelscope
 ```
 
-## Download Models and Tokenizers
-
-Download models and tokenizers using the provided script. Choose either HuggingFace Hub or ModelScope based on your preference:
-
-**Using HuggingFace Hub:**
-
-```sh
-cd FlagScale/
-python examples/pi0/download.py \
-    --repo_id lerobot/pi05_base \
-    --output_dir /workspace/models \
-    --source huggingface
-
-python examples/pi0/download.py \
-    --repo_id google/paligemma-3b-pt-224 \
-    --output_dir /workspace/models \
-    --source huggingface
-```
-
-**Using ModelScope:**
-
-```sh
-cd FlagScale/
-python examples/pi0/download.py \
-    --repo_id lerobot/pi05_base \
-    --output_dir /workspace/models \
-    --source modelscope
-
-python examples/pi0/download.py \
-    --repo_id google/paligemma-3b-pt-224 \
-    --output_dir /workspace/models \
-    --source modelscope
-```
-
-The models will be downloaded to (example with `/workspace/models`):
-- `/workspace/models/lerobot/pi05_base`
-- `/workspace/models/google/paligemma-3b-pt-224`
-
 ## Training
 
-### Prepare Dataset
+### Dataset
 
 FlagScale uses the **LeRobotDataset v3.0** format. For detailed information about the format structure, see the [LeRobotDataset v3.0 documentation](https://huggingface.co/docs/lerobot/en/lerobot-dataset-v3).
+
+By default, `data.data_path` can be either a HuggingFace/ModelScope dataset repo ID or a local dataset root. If a repo ID is provided, FlagScale will automatically download the dataset during training. Set `FLAGSCALE_USE_MODELSCOPE=true` to download from ModelScope instead of HuggingFace Hub.
 
 For example, to download the `aloha_mobile_cabinet` dataset:
 
@@ -176,7 +140,7 @@ Configure the following fields:
 - `model.optimizer.scheduler.decay_lr` - Final learning rate after decay (for example: `2.5e-6`)
 
 **Data settings**:
-- `data.data_path` - Path to LeRobot dataset root (e.g., `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
+- `data.data_path` - LeRobot dataset repo ID or local dataset root path (e.g., `lerobot/aloha_mobile_cabinet` or `/workspace/datasets/lerobot/aloha_mobile_cabinet`)
 - `data.use_imagenet_stats` - Whether to use ImageNet normalization stats (default: `true`)
 - `data.rename_map` - Dictionary mapping dataset keys to policy keys (optional). Check the `features` key in your dataset's `meta/info.json` file to determine the correct mapping:
   ```yaml

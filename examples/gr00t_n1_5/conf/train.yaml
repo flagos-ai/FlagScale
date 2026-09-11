@@ -40,6 +40,7 @@ experiment:
     CUDA_DEVICE_MAX_CONNECTIONS: 1
     WANDB_MODE: offline
     OTEL_SDK_DISABLED: true
+    HF_ENDPOINT: "https://hf-mirror.com"
 
 action: run
 
