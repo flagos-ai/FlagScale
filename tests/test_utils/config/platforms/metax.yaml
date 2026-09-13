@@ -41,6 +41,7 @@ c550:
       benchmark:
         qwen3: ["0_6b_metax"]
     unit:
+      nproc_per_node: 2
       # Include patterns: "*" for all, or list specific paths
       include: "*"
       # Exclude paths use pytest --ignore; nodeids use pytest --deselect.

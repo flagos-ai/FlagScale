@@ -24,7 +24,7 @@ s60:
       train:
         qwen3: ["0_6b_enflame"]
     unit:
-      nproc_per_node: 1
+      nproc_per_node: 2
       include: "*"
       exclude:
         - tests/unit_tests/test_parallel_context.py

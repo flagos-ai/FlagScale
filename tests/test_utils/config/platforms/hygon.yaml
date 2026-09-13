@@ -28,7 +28,7 @@ bw1000:
       serve:
         qwen3: ["4b_tp2_hygon"]
     unit:
-      nproc_per_node: 1
+      nproc_per_node: 2
       include: "*"
       exclude:
         # This test defines an eight-rank heterogeneous mesh; it is not a single-rank unit test.

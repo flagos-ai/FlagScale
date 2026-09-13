@@ -112,7 +112,7 @@ setup_script: .github/scripts/set_env_metax.sh
 # Test matrix configuration for unit tests
 test_matrix:
   unit:
-    nproc_per_node: 8
+    nproc_per_node: 2
 
 # =============================================================================
 # Dependencies Configuration (Megatron-LM-FL & TE-FL)

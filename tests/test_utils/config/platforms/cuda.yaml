@@ -47,6 +47,7 @@ a100:
       serve:
         qwen2_5: ["0.5b"]
     unit:
+      nproc_per_node: 2
       # Include patterns: "*" for all, or list specific paths
       include: "*"
       # Exclude patterns: empty list or list paths to exclude

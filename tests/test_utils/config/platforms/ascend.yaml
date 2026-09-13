@@ -41,6 +41,7 @@ ascend910:
       serve:
         qwen3: ["4b_tp2_ascend"]
     unit:
+      nproc_per_node: 2
       # Include patterns: "*" for all, or list specific paths
       include: "*"
       # Exclude paths use pytest --ignore.
