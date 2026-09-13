@@ -105,3 +105,40 @@ env_names:
   inference: ""
   serve: ""
   rl: ""
+
+# Setup script for environment preparation
+setup_script: .github/scripts/set_env_metax.sh
+
+# Test matrix configuration for unit tests
+test_matrix:
+  unit:
+    nproc_per_node: 2
+
+# =============================================================================
+# Dependencies Configuration (Megatron-LM-FL & TE-FL)
+# =============================================================================
+dependencies:
+  megatron_lm_fl:
+    enabled: true
+    repository: flagos-ai/Megatron-LM-FL
+    ref: main
+    runtime:
+      install_mode: pythonpath
+      environment: {}
+
+  te_fl:
+    enabled: true
+    repository: flagos-ai/TransformerEngine-FL
+    ref: main
+    build_mode: python
+    build_environment:
+      TE_FL_SKIP_CUDA: "1"
+    runtime:
+      environment:
+        TE_FL_SKIP_CUDA: "1"
+        TE_FL_PREFER: flagos
+      install_pip_args: []
+      pip_packages:
+        - flag-gems
+        - sqlalchemy
+        - "megatron-energon[av_decode]~=7.0"

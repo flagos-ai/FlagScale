@@ -637,14 +637,31 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  tests:
-    name: Test ${{ inputs.platform }} images
+  prepare_test_dependencies:
+    name: Prepare ${{ inputs.platform }} test dependencies
     needs: [configure, build]
     if: >-
       always() &&
       inputs.run_tests &&
       needs.configure.result == 'success' &&
       (needs.build.result == 'success' || needs.build.result == 'skipped')
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: ${{ needs.configure.outputs.platform }}
+      image_override: ${{ needs.configure.outputs.train_image }}
+      train_pkg_mgr: ${{ needs.configure.outputs.train_pkg_mgr }}
+      train_env_name: ${{ needs.configure.outputs.train_env_name }}
+      train_env_path: ${{ needs.configure.outputs.train_env_path }}
+
+  tests:
+    name: Test ${{ inputs.platform }} images
+    needs: [configure, build, prepare_test_dependencies]
+    if: >-
+      always() &&
+      inputs.run_tests &&
+      needs.configure.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      needs.prepare_test_dependencies.result == 'success'
     uses: ./.github/workflows/all_tests_common.yml
     secrets: inherit
     with:
@@ -653,3 +670,5 @@ jobs:
       train_pkg_mgr: ${{ needs.configure.outputs.train_pkg_mgr }}
       train_env_name: ${{ needs.configure.outputs.train_env_name }}
       train_env_path: ${{ needs.configure.outputs.train_env_path }}
+      megatron_cache_key: ${{ needs.prepare_test_dependencies.outputs.megatron_cache_key }}
+      te_fl_cache_key: ${{ needs.prepare_test_dependencies.outputs.te_fl_cache_key }}

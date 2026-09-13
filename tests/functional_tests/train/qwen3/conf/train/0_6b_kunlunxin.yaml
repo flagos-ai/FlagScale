@@ -46,6 +46,7 @@ model:
   te_fl_prefer: vendor
   enable_flag_gems: false
   attention_backend: unfused
+  no_bias_swiglu_fusion: true
   no_check_for_nan_in_loss_and_grad: true
   no_gradient_accumulation_fusion: true
   num_layers: 28

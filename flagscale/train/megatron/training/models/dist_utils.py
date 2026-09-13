@@ -28,6 +28,7 @@ from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.transformer import MegatronModule, TransformerConfig
 from megatron.core.transformer.module import Float16Module
 from megatron.core.utils import get_model_config
+from megatron.plugin.platform import get_platform
 
 
 try:
@@ -35,6 +36,8 @@ try:
 except ImportError:
     correct_amax_history_if_needed = None
 
+
+cur_platform = get_platform()
 
 
 def unimodal_build_distributed_models(
@@ -119,14 +122,14 @@ def unimodal_build_distributed_models(
     use_cpu_initialization = transformer_config.use_cpu_initialization
     if not use_torch_fsdp2 and not use_cpu_initialization and not init_model_with_meta_device:
         for model_module in model_list:
-            model_module.cuda(torch.cuda.current_device())
+            model_module.to(cur_platform.device())
 
     model_list = _wrap_with_mp_wrapper(model_list, transformer_config, mixed_precision_wrapper)
 
     # Materialize tensors on meta device (GPU allocation) if not using FSDP2 and not using Megatron FSDP.
     if init_model_with_meta_device and not use_torch_fsdp2 and not use_megatron_fsdp:
         model_list = [
-            to_empty_if_meta_device(model_module, device=torch.device("cuda")) for model_module in model_list
+            to_empty_if_meta_device(model_module, device=cur_platform.device()) for model_module in model_list
         ]
 
     if correct_amax_history_if_needed is not None:

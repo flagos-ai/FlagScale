@@ -554,7 +554,7 @@ def update_seqlen_stats_from_cu_seqlens(cu_seqlens):
     # (e.g. unit tests). Production always supplies a CUDA tensor.
     if _seqlen_stats_in_iteration is None:
         device = (
-            torch.device(f'cuda:{torch.cuda.current_device()}')
+            cur_platform.device()
             if torch.cuda.is_available()
             else cu_seqlens.device
         )
@@ -2545,7 +2545,7 @@ def dummy_train_step(data_iterator):
             if tp_rank == 0:
                 batch = next(data_iterator)
                 for key in BATCH_KEYS:
-                    batch[key] = batch[key].cuda(non_blocking=True) if key in batch and batch[key] is not None else None
+                    batch[key] = batch[key].to(cur_platform.device(), non_blocking=True) if key in batch and batch[key] is not None else None
             batch = get_batch_on_this_tp_rank(
                 batch,
                 broadcast_src_rank=mpu.get_tensor_model_parallel_src_rank(),
@@ -4950,7 +4950,9 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
                     args.eval_iters = [None] * len(valid_dataloaders)
                 else:
                     local_eval_iters = [len(dl) for dl in valid_dataloaders]
-                    eval_iters_tensor = torch.tensor(local_eval_iters, dtype=torch.long, device='cuda')
+                    eval_iters_tensor = torch.tensor(
+                        local_eval_iters, dtype=torch.long, device=cur_platform.device()
+                    )
                     torch.distributed.all_reduce(
                         eval_iters_tensor,
                         op=torch.distributed.ReduceOp.MAX,
@@ -4959,7 +4961,9 @@ def build_train_valid_test_data_iterators(build_train_valid_test_datasets_provid
                     args.eval_iters = eval_iters_tensor.tolist()
             else:
                 local_eval_iters = len(valid_dataloaders[0])
-                eval_iters_tensor = torch.tensor([local_eval_iters], dtype=torch.long, device='cuda')
+                eval_iters_tensor = torch.tensor(
+                    [local_eval_iters], dtype=torch.long, device=cur_platform.device()
+                )
                 torch.distributed.all_reduce(
                     eval_iters_tensor,
                     op=torch.distributed.ReduceOp.MAX,

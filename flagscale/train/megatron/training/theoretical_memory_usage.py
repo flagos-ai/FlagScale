@@ -186,7 +186,11 @@ def compute_weight_and_optimizer_memory(args, verbose=False):
         print(f"Total number of parameters in billions: {num_total_parameters / 10**9:.2f}")
         print(f"Total number of active parameters in billions: {num_active_parameters / 10**9:.2f}")
 
-    expert_tensor_parallel_size = args.expert_tensor_parallel_size
+    expert_tensor_parallel_size = (
+        args.expert_tensor_parallel_size
+        if args.expert_tensor_parallel_size is not None
+        else args.tensor_model_parallel_size
+    )
     expert_model_parallel_size = args.expert_model_parallel_size
     expert_tensor_model_pipeline_parallel_size = (
         expert_tensor_parallel_size

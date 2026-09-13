@@ -52,6 +52,54 @@ on:
         type: string
         description: Environment path (venv path for uv, conda installation path for conda)
         default: "/opt/venv"
+      megatron_cache_key:
+        required: false
+        type: string
+        default: ''
+      megatron_artifact_available:
+        required: false
+        type: string
+        default: 'false'
+        description: Megatron-LM-FL cache key from prepare_dependencies
+      te_fl_cache_key:
+        required: false
+        type: string
+        default: ''
+        description: TE-FL cache key from prepare_dependencies
+      te_fl_artifact_available:
+        required: false
+        type: string
+        default: 'false'
+      megatron_lm_fl_enabled:
+        required: false
+        type: string
+        default: 'false'
+        description: Whether Megatron-LM-FL dependency is enabled
+      te_fl_enabled:
+        required: false
+        type: string
+        default: 'false'
+        description: Whether TE-FL dependency is enabled
+      megatron_runtime_environment:
+        required: false
+        type: string
+        default: '{}'
+        description: Megatron-LM-FL runtime environment variables (JSON)
+      te_fl_runtime_environment:
+        required: false
+        type: string
+        default: '{}'
+        description: TE-FL runtime environment variables (JSON)
+      te_fl_install_pip_args:
+        required: false
+        type: string
+        default: '[]'
+        description: TE-FL pip install arguments (JSON array)
+      te_fl_runtime_pip_packages:
+        required: false
+        type: string
+        default: '[]'
+        description: TE-FL runtime pip packages (JSON array)
 
 jobs:
   unit_test:
@@ -135,6 +183,83 @@ jobs:
       - name: Check environment info
         run: cd $PROJECT_ROOT && bash ./tests/test_utils/runners/check_env.sh
 
+      - name: Reset prepared runtime directories
+        if: inputs.megatron_lm_fl_enabled == 'true' || inputs.te_fl_enabled == 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          rm -rf megatron-lm-fl-install te-fl-wheel
+
+      - name: Restore Megatron-LM-FL cache
+        if: inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != ''
+        id: megatron_cache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: megatron-lm-fl-install
+          key: ${{ inputs.megatron_cache_key }}
+          fail-on-cache-miss: false
+
+      - name: Restore TE-FL cache
+        if: inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != ''
+        id: te_fl_cache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: te-fl-wheel
+          key: ${{ inputs.te_fl_cache_key }}
+          fail-on-cache-miss: false
+
+      - name: Restore prepared Megatron artifact
+        if: inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != '' && steps.megatron_cache_restore.outputs.cache-hit != 'true' && inputs.megatron_artifact_available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
+          path: megatron-lm-fl-install
+
+      - name: Restore prepared TE-FL artifact
+        if: inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != '' && steps.te_fl_cache_restore.outputs.cache-hit != 'true' && inputs.te_fl_artifact_available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
+          path: te-fl-wheel
+
+      - name: Validate prepared training runtime
+        if: inputs.megatron_lm_fl_enabled == 'true' || inputs.te_fl_enabled == 'true'
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.megatron_lm_fl_enabled }}" = "true" ] && [ ! -f megatron-lm-fl-install/megatron/core/__init__.py ]; then
+            echo "::error::Prepared Megatron-LM-FL runtime is missing megatron/core/__init__.py" >&2
+            exit 1
+          fi
+          if [ "${{ inputs.te_fl_enabled }}" = "true" ]; then
+            mapfile -t te_fl_wheels < <(
+              find te-fl-wheel -maxdepth 1 -type f -name 'transformer_engine*.whl' -print 2>/dev/null | sort
+            )
+            if [ "${#te_fl_wheels[@]}" -ne 1 ]; then
+              echo "::error::Expected exactly one TE-FL wheel, found ${#te_fl_wheels[@]}" >&2
+              printf '  %s\n' "${te_fl_wheels[@]}" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Install prepared training runtime
+        if: inputs.megatron_lm_fl_enabled == 'true' || inputs.te_fl_enabled == 'true'
+        run: |
+          set -euo pipefail
+          cd $PROJECT_ROOT
+
+          export MEGATRON_LM_FL_ENABLED='${{ inputs.megatron_lm_fl_enabled }}'
+          export MEGATRON_CACHE_KEY='${{ inputs.megatron_cache_key }}'
+          export MEGATRON_RUNTIME_ENVIRONMENT='${{ inputs.megatron_runtime_environment }}'
+          export TE_FL_ENABLED='${{ inputs.te_fl_enabled }}'
+          export TE_FL_CACHE_KEY='${{ inputs.te_fl_cache_key }}'
+          export TE_FL_RUNTIME_ENVIRONMENT='${{ inputs.te_fl_runtime_environment }}'
+          export TE_FL_INSTALL_PIP_ARGS='${{ inputs.te_fl_install_pip_args }}'
+          export TE_FL_RUNTIME_PIP_PACKAGES='${{ inputs.te_fl_runtime_pip_packages }}'
+          export CI_RUNTIME_PKG_MGR='${{ inputs.pkg_mgr }}'
+          export CI_RUNTIME_ENV_NAME='${{ inputs.env_name }}'
+          export CI_RUNTIME_ENV_PATH='${{ inputs.env_path }}'
+          bash .github/scripts/install_training_runtime.sh
+
       - name: Setup unit test environment
         run: |
           set -euo pipefail
@@ -180,11 +305,12 @@ jobs:
               ;;
           esac
 
-          echo "Python location: $(command -v python)"
-          echo "Python version: $(python --version)"
+          echo "Python location: ${CI_PYTHON_BIN:-python3}"
+          echo "Python version: $(${CI_PYTHON_BIN:-python3} --version)"
 
           set +e
-          export PYTHONPATH="${PYTHONPATH:-}:$PROJECT_ROOT/flagscale/train"
+          # PYTHONPATH is set by run_unit_tests.sh with correct priority
+          # Do NOT override it here to prevent path order conflicts
           bash ./tests/test_utils/runners/run_unit_tests.sh \
             --platform '${{ inputs.platform }}' \
             --device '${{ inputs.device }}' \
@@ -200,7 +326,7 @@ jobs:
 
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
-        timeout-minutes: 15
+        timeout-minutes: 30
 
       - name: Upload coverage report
         if: steps.unit_test.outcome == 'success'

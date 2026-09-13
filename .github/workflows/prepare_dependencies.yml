@@ -1,0 +1,540 @@
+name: Prepare Dependencies
+
+on:
+  workflow_call:
+    inputs:
+      platform: {required: true, type: string}
+      image_override: {required: false, type: string, default: ''}
+      train_pkg_mgr: {required: false, type: string, default: ''}
+      train_env_name: {required: false, type: string, default: ''}
+      train_env_path: {required: false, type: string, default: ''}
+    outputs:
+      megatron_cache_key:
+        value: ${{ jobs.prepare.outputs.megatron_cache_key }}
+      te_fl_cache_key:
+        value: ${{ jobs.prepare.outputs.te_fl_cache_key }}
+      megatron_artifact_available:
+        value: ${{ jobs.prepare.outputs.megatron_artifact_available }}
+      te_fl_artifact_available:
+        value: ${{ jobs.prepare.outputs.te_fl_artifact_available }}
+
+jobs:
+  resolve:
+    name: resolve-${{ inputs.platform }}-deps-config
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.config.outputs.image }}
+      runs_on: ${{ steps.config.outputs.runs_on }}
+      container_volumes: ${{ steps.config.outputs.container_volumes }}
+      container_options: ${{ steps.config.outputs.container_options }}
+      setup_script: ${{ steps.config.outputs.setup_script }}
+      nproc_per_node: ${{ steps.config.outputs.nproc_per_node }}
+      megatron_enabled: ${{ steps.config.outputs.megatron_enabled }}
+      megatron_repo: ${{ steps.config.outputs.megatron_repo }}
+      megatron_ref: ${{ steps.config.outputs.megatron_ref }}
+      te_fl_enabled: ${{ steps.config.outputs.te_fl_enabled }}
+      te_fl_repo: ${{ steps.config.outputs.te_fl_repo }}
+      te_fl_ref: ${{ steps.config.outputs.te_fl_ref }}
+      te_fl_build_mode: ${{ steps.config.outputs.te_fl_build_mode }}
+      te_fl_build_environment: ${{ steps.config.outputs.te_fl_build_environment }}
+      megatron_runtime_environment: ${{ steps.config.outputs.megatron_runtime_environment }}
+      te_fl_runtime_environment: ${{ steps.config.outputs.te_fl_runtime_environment }}
+      te_fl_install_pip_args: ${{ steps.config.outputs.te_fl_install_pip_args }}
+      te_fl_runtime_pip_packages: ${{ steps.config.outputs.te_fl_runtime_pip_packages }}
+      pkg_mgr: ${{ steps.config.outputs.pkg_mgr }}
+      env_name: ${{ steps.config.outputs.env_name }}
+      env_path: ${{ steps.config.outputs.env_path }}
+      runtime_contract_key: ${{ steps.config.outputs.runtime_contract_key }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          if ! command -v yq >/dev/null 2>&1; then
+            sudo wget -qO /usr/local/bin/yq \
+              https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64
+            sudo chmod 0755 /usr/local/bin/yq
+          fi
+          yq --version
+
+      - name: Read and validate platform dependencies configuration
+        id: config
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          IMAGE_OVERRIDE: ${{ inputs.image_override }}
+          PKG_MGR_OVERRIDE: ${{ inputs.train_pkg_mgr }}
+          ENV_NAME_OVERRIDE: ${{ inputs.train_env_name }}
+          ENV_PATH_OVERRIDE: ${{ inputs.train_env_path }}
+        run: |
+          set -euo pipefail
+
+          config_file=".github/configs/${PLATFORM}.yml"
+          if [ ! -f "$config_file" ]; then
+            echo "::error::Platform configuration not found: $config_file" >&2
+            exit 1
+          fi
+
+          image=$(yq -r '.ci_train_image // .ci_image // ""' "$config_file")
+          if [ -n "$IMAGE_OVERRIDE" ]; then
+            image="$IMAGE_OVERRIDE"
+          fi
+          runs_on=$(yq -o=json -I=0 '.runner_labels // []' "$config_file")
+          volumes=$(yq -o=json -I=0 '.container_volumes // []' "$config_file")
+          options=$(yq -r '.container_options // ""' "$config_file")
+          setup_script=$(yq -r '.setup_script // ""' "$config_file")
+          nproc_per_node=$(yq -r '.test_matrix.unit.nproc_per_node // .test_config.nproc_per_node // ""' "$config_file")
+          pkg_mgr=$(yq -r '.pkg_mgr // "pip"' "$config_file")
+          env_name=$(yq -r '.env_names.train // ""' "$config_file")
+          env_path=$(yq -r '.env_path // ""' "$config_file")
+          [ -z "$PKG_MGR_OVERRIDE" ] || pkg_mgr="$PKG_MGR_OVERRIDE"
+          [ -z "$ENV_NAME_OVERRIDE" ] || env_name="$ENV_NAME_OVERRIDE"
+          [ -z "$ENV_PATH_OVERRIDE" ] || env_path="$ENV_PATH_OVERRIDE"
+
+          megatron_enabled=$(yq -r '.dependencies.megatron_lm_fl.enabled // false' "$config_file")
+          megatron_repo=$(yq -r '.dependencies.megatron_lm_fl.repository // "flagos-ai/Megatron-LM-FL"' "$config_file")
+          megatron_ref=$(yq -r '.dependencies.megatron_lm_fl.ref // "main"' "$config_file")
+
+          te_fl_enabled=$(yq -r '.dependencies.te_fl.enabled // false' "$config_file")
+          te_fl_repo=$(yq -r '.dependencies.te_fl.repository // "flagos-ai/TransformerEngine-FL"' "$config_file")
+          te_fl_ref=$(yq -r '.dependencies.te_fl.ref // "main"' "$config_file")
+          te_fl_build_mode=$(yq -r '.dependencies.te_fl.build_mode // ""' "$config_file")
+          te_fl_build_environment=$(yq -o=json -I=0 '.dependencies.te_fl.build_environment // {}' "$config_file")
+
+          megatron_runtime_environment=$(yq -o=json -I=0 '.dependencies.megatron_lm_fl.runtime.environment // {}' "$config_file")
+          te_fl_runtime_environment=$(yq -o=json -I=0 '.dependencies.te_fl.runtime.environment // {}' "$config_file")
+          te_fl_install_pip_args=$(yq -o=json -I=0 '.dependencies.te_fl.runtime.install_pip_args // []' "$config_file")
+          te_fl_runtime_pip_packages=$(yq -o=json -I=0 '.dependencies.te_fl.runtime.pip_packages // []' "$config_file")
+
+          if [ -z "$image" ]; then
+            echo "::error::ci_train_image or ci_image is required in $config_file" >&2
+            exit 1
+          fi
+          if [ "$runs_on" = '[]' ]; then
+            echo "::error::runner_labels is required in $config_file" >&2
+            exit 1
+          fi
+          case "$pkg_mgr" in
+            conda|pip|uv) ;;
+            *)
+              echo "::error::Unsupported training package manager: $pkg_mgr" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$pkg_mgr" = conda ] && { [ -z "$env_name" ] || [ -z "$env_path" ]; }; then
+            echo "::error::Conda training environment requires env_names.train and env_path" >&2
+            exit 1
+          fi
+          if [ "$pkg_mgr" = uv ] && [ -z "$env_path" ]; then
+            echo "::error::uv training environment requires env_path" >&2
+            exit 1
+          fi
+          if [ "$megatron_enabled" = true ] || [ "$te_fl_enabled" = true ]; then
+            if [ -z "$setup_script" ]; then
+              echo "::error::setup_script is required when dependencies are enabled" >&2
+              exit 1
+            fi
+            if ! [[ "$nproc_per_node" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::nproc_per_node must be a positive integer" >&2
+              exit 1
+            fi
+          fi
+
+          if [ "$te_fl_enabled" = true ]; then
+            case "$te_fl_build_mode" in
+              cuda|python) ;;
+              *)
+                echo "::error::dependencies.te_fl.build_mode must be 'cuda' or 'python' in $config_file" >&2
+                exit 1
+                ;;
+            esac
+            if [ "$te_fl_build_mode" = python ] && \
+               [ "$(yq -r '.dependencies.te_fl.build_environment.TE_FL_SKIP_CUDA // ""' "$config_file")" != 1 ]; then
+              echo "::error::Python-only TE-FL build requires TE_FL_SKIP_CUDA=1" >&2
+              exit 1
+            fi
+          fi
+
+          runtime_contract_key=$(printf '%s\n' \
+            'training-runtime-v2' \
+            "$pkg_mgr" "$env_name" "$env_path" \
+            "$megatron_runtime_environment" \
+            "$te_fl_build_mode" "$te_fl_build_environment" \
+            "$te_fl_runtime_environment" "$te_fl_install_pip_args" \
+            "$te_fl_runtime_pip_packages" | sha256sum | awk '{print substr($1,1,16)}')
+
+          {
+            echo "image=$image"
+            echo "runs_on=$runs_on"
+            echo "container_volumes=$volumes"
+            echo "container_options=$options"
+            echo "setup_script=$setup_script"
+            echo "nproc_per_node=$nproc_per_node"
+            echo "megatron_enabled=$megatron_enabled"
+            echo "megatron_repo=$megatron_repo"
+            echo "megatron_ref=$megatron_ref"
+            echo "te_fl_enabled=$te_fl_enabled"
+            echo "te_fl_repo=$te_fl_repo"
+            echo "te_fl_ref=$te_fl_ref"
+            echo "te_fl_build_mode=$te_fl_build_mode"
+            echo "te_fl_build_environment=$te_fl_build_environment"
+            echo "megatron_runtime_environment=$megatron_runtime_environment"
+            echo "te_fl_runtime_environment=$te_fl_runtime_environment"
+            echo "te_fl_install_pip_args=$te_fl_install_pip_args"
+            echo "te_fl_runtime_pip_packages=$te_fl_runtime_pip_packages"
+            echo "pkg_mgr=$pkg_mgr"
+            echo "env_name=$env_name"
+            echo "env_path=$env_path"
+            echo "runtime_contract_key=$runtime_contract_key"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Platform: $PLATFORM"
+          echo "Image: $image"
+          echo "Megatron-LM-FL enabled: $megatron_enabled"
+          echo "TE-FL enabled: $te_fl_enabled"
+          echo "Training environment: $pkg_mgr ${env_name:-<system>} ${env_path:-<default>}"
+
+  prepare:
+    name: deps-${{ inputs.platform }}
+    needs: resolve
+    if: needs.resolve.outputs.megatron_enabled == 'true' || needs.resolve.outputs.te_fl_enabled == 'true'
+    defaults:
+      run:
+        shell: bash
+    runs-on: ${{ fromJson(needs.resolve.outputs.runs_on) }}
+    container:
+      image: ${{ needs.resolve.outputs.image }}
+      volumes: ${{ fromJson(needs.resolve.outputs.container_volumes) }}
+      options: ${{ needs.resolve.outputs.container_options }}
+    outputs:
+      megatron_cache_key: ${{ steps.megatron_cache_key.outputs.key }}
+      te_fl_cache_key: ${{ steps.te_fl_cache_key.outputs.key }}
+      megatron_artifact_available: ${{ steps.runtime_artifacts_available.outputs.megatron_available }}
+      te_fl_artifact_available: ${{ steps.runtime_artifacts_available.outputs.te_fl_available }}
+    steps:
+      - name: Checkout source (attempt 1)
+        id: checkout_1
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout source (attempt 2)
+        id: checkout_2
+        if: steps.checkout_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout source (attempt 3)
+        id: checkout_3
+        if: steps.checkout_2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout Megatron-LM-FL (attempt 1)
+        if: needs.resolve.outputs.megatron_enabled == 'true'
+        id: checkout_megatron_1
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.megatron_repo }}
+          ref: ${{ needs.resolve.outputs.megatron_ref }}
+          path: megatron-lm-fl
+          fetch-depth: 1
+
+      - name: Checkout Megatron-LM-FL (attempt 2)
+        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.checkout_megatron_1.outcome == 'failure'
+        id: checkout_megatron_2
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.megatron_repo }}
+          ref: ${{ needs.resolve.outputs.megatron_ref }}
+          path: megatron-lm-fl
+          fetch-depth: 1
+
+      - name: Checkout Megatron-LM-FL (attempt 3)
+        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.checkout_megatron_2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.megatron_repo }}
+          ref: ${{ needs.resolve.outputs.megatron_ref }}
+          path: megatron-lm-fl
+          fetch-depth: 1
+
+      - name: Checkout TransformerEngine-FL (attempt 1)
+        if: needs.resolve.outputs.te_fl_enabled == 'true'
+        id: checkout_te_fl_1
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.te_fl_repo }}
+          ref: ${{ needs.resolve.outputs.te_fl_ref }}
+          path: te-fl
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Checkout TransformerEngine-FL (attempt 2)
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.checkout_te_fl_1.outcome == 'failure'
+        id: checkout_te_fl_2
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.te_fl_repo }}
+          ref: ${{ needs.resolve.outputs.te_fl_ref }}
+          path: te-fl
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Checkout TransformerEngine-FL (attempt 3)
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.checkout_te_fl_2.outcome == 'failure'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.resolve.outputs.te_fl_repo }}
+          ref: ${{ needs.resolve.outputs.te_fl_ref }}
+          path: te-fl
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Resolve Megatron-LM-FL cache key
+        if: needs.resolve.outputs.megatron_enabled == 'true'
+        id: megatron_cache_key
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          IMAGE: ${{ needs.resolve.outputs.image }}
+          RUNTIME_CONTRACT_KEY: ${{ needs.resolve.outputs.runtime_contract_key }}
+        run: |
+          set -euo pipefail
+          commit=$(git -C "$GITHUB_WORKSPACE/megatron-lm-fl" rev-parse HEAD)
+          if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Unable to resolve a full Megatron-LM-FL commit" >&2
+            exit 1
+          fi
+          echo "Megatron-LM-FL commit: $commit"
+          image_key=$(printf '%s' "$IMAGE" | sha256sum | awk '{print substr($1,1,16)}')
+          key="megatron-lm-fl-v3-${PLATFORM}-${commit}-${image_key}-${RUNTIME_CONTRACT_KEY}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "Megatron-LM-FL cache key: $key"
+
+      - name: Resolve TE-FL cache key
+        if: needs.resolve.outputs.te_fl_enabled == 'true'
+        id: te_fl_cache_key
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          IMAGE: ${{ needs.resolve.outputs.image }}
+          RUNTIME_CONTRACT_KEY: ${{ needs.resolve.outputs.runtime_contract_key }}
+        run: |
+          set -euo pipefail
+          commit=$(git -C "$GITHUB_WORKSPACE/te-fl" rev-parse HEAD)
+          if ! [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Unable to resolve a full TE-FL commit" >&2
+            exit 1
+          fi
+          echo "TE-FL commit: $commit"
+          image_key=$(printf '%s' "$IMAGE" | sha256sum | awk '{print substr($1,1,16)}')
+          key="te-fl-v2-${PLATFORM}-${commit}-${image_key}-${RUNTIME_CONTRACT_KEY}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "TE-FL wheel cache key: $key"
+
+      - name: Reset prepared runtime directories
+        if: needs.resolve.outputs.megatron_enabled == 'true' || needs.resolve.outputs.te_fl_enabled == 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          rm -rf megatron-lm-fl-install te-fl-wheel
+
+      - name: Restore Megatron-LM-FL cache
+        if: needs.resolve.outputs.megatron_enabled == 'true'
+        id: megatron_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: megatron-lm-fl-install
+          key: ${{ steps.megatron_cache_key.outputs.key }}
+
+      - name: Restore TE-FL wheel cache
+        if: needs.resolve.outputs.te_fl_enabled == 'true'
+        id: te_fl_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: te-fl-wheel
+          key: ${{ steps.te_fl_cache_key.outputs.key }}
+
+      - name: Validate cached TE-FL wheel
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit == 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mapfile -t te_fl_wheels < <(
+            find te-fl-wheel -maxdepth 1 -type f -name 'transformer_engine*.whl' -print 2>/dev/null | sort
+          )
+          if [ "${#te_fl_wheels[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one cached TE-FL wheel, found ${#te_fl_wheels[@]}" >&2
+            printf '  %s\n' "${te_fl_wheels[@]}" >&2
+            exit 1
+          fi
+
+      - name: Setup build environment
+        if: |
+          (needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true') ||
+          (needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true')
+        working-directory: ${{ github.workspace }}
+        env:
+          CI_TEST_SUITE: build
+          CI_NPROC_PER_NODE: ${{ needs.resolve.outputs.nproc_per_node }}
+          FLAGSCALE_CI_IMAGE: ${{ needs.resolve.outputs.image }}
+          TE_FL_BUILD_ENV_JSON: ${{ needs.resolve.outputs.te_fl_build_environment }}
+          SETUP_SCRIPT: ${{ needs.resolve.outputs.setup_script }}
+          CI_RUNTIME_PKG_MGR: ${{ needs.resolve.outputs.pkg_mgr }}
+          CI_RUNTIME_ENV_NAME: ${{ needs.resolve.outputs.env_name }}
+          CI_RUNTIME_ENV_PATH: ${{ needs.resolve.outputs.env_path }}
+        run: |
+          set -euo pipefail
+          if [[ "$SETUP_SCRIPT" = /* || "$SETUP_SCRIPT" == *".."* || ! -f "$GITHUB_WORKSPACE/$SETUP_SCRIPT" ]]; then
+            echo "::error::Invalid platform setup script: $SETUP_SCRIPT" >&2
+            exit 1
+          fi
+
+          if [ -f "$GITHUB_WORKSPACE/.github/scripts/set_env_common.sh" ]; then
+            source "$GITHUB_WORKSPACE/.github/scripts/set_env_common.sh"
+            if [ "$TE_FL_BUILD_ENV_JSON" != "{}" ]; then
+              ci_apply_env_json "$TE_FL_BUILD_ENV_JSON"
+            fi
+          fi
+          bash "$GITHUB_WORKSPACE/$SETUP_SCRIPT"
+
+      - name: Build Megatron-LM-FL on cache miss
+        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
+        env:
+          MEGATRON_REPO: ${{ github.workspace }}/megatron-lm-fl
+          OUTPUT_DIR: ${{ github.workspace }}/megatron-lm-fl-install
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT_DIR"
+          python_bin="${CI_PYTHON_BIN:-$(command -v python3)}"
+          if [ ! -x "$python_bin" ]; then
+            echo "::error::Python executable not found: $python_bin" >&2
+            exit 1
+          fi
+
+          # Check Python version and workaround if needed
+          python_version=$("$python_bin" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          echo "Python version: $python_version"
+
+          cd "$MEGATRON_REPO"
+
+          # Workaround for Python < 3.12: temporarily patch pyproject.toml
+          if [[ "$python_version" < "3.12" ]]; then
+            echo "Applying Python version workaround for $python_version"
+            sed -i.bak 's/requires-python = ">=3.12"/requires-python = ">=3.10"/' pyproject.toml
+          fi
+
+          # Megatron-LM-FL imports pybind11 from setup metadata. Build
+          # isolation is disabled so install the build dependency explicitly
+          # in the selected CI environment before generating metadata.
+          "$python_bin" -m pip install \
+            --no-cache-dir \
+            --root-user-action=ignore \
+            "pybind11==3.0.1"
+
+          echo "Building Megatron-LM-FL from $MEGATRON_REPO"
+          "$python_bin" -m pip install --no-deps --no-build-isolation --target "$OUTPUT_DIR" .
+
+          # Restore original pyproject.toml if modified
+          if [ -f pyproject.toml.bak ]; then
+            mv pyproject.toml.bak pyproject.toml
+          fi
+
+          # Verify installation: check for megatron.core package
+          if [ ! -f "$OUTPUT_DIR/megatron/core/__init__.py" ]; then
+            echo "::error::Megatron-LM-FL installation failed: megatron.core package not found" >&2
+            exit 1
+          fi
+          echo "Megatron-LM-FL installed to: $OUTPUT_DIR"
+
+      - name: Build TE-FL wheel on cache miss
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true'
+        env:
+          TE_FL_REPO: ${{ github.workspace }}/te-fl
+          OUTPUT_DIR: ${{ github.workspace }}/te-fl-wheel
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT_DIR"
+          find "$OUTPUT_DIR" -maxdepth 1 -type f -name 'transformer_engine*.whl' -delete
+          python_bin="${CI_PYTHON_BIN:-$(command -v python3)}"
+          if [ ! -x "$python_bin" ]; then
+            echo "::error::Python executable not found: $python_bin" >&2
+            exit 1
+          fi
+          if [ ! -f "$TE_FL_REPO/pyproject.toml" ]; then
+            echo "::error::TE-FL source is missing pyproject.toml: $TE_FL_REPO" >&2
+            exit 1
+          fi
+          echo "Building TransformerEngine-FL wheel from $TE_FL_REPO"
+          "$python_bin" -m pip wheel \
+            --no-deps \
+            --no-build-isolation \
+            --no-cache-dir \
+            --wheel-dir "$OUTPUT_DIR" \
+            "$TE_FL_REPO"
+          mapfile -t wheels < <(
+            find "$OUTPUT_DIR" -maxdepth 1 -type f -name 'transformer_engine*.whl' -print | sort
+          )
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one TransformerEngine-FL wheel, found ${#wheels[@]}" >&2
+            printf '  %s\n' "${wheels[@]}" >&2
+            exit 1
+          fi
+          echo "TE-FL wheel ready: ${wheels[0]}"
+
+      - name: Save Megatron-LM-FL cache
+        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: megatron-lm-fl-install
+          key: ${{ steps.megatron_cache_key.outputs.key }}
+
+      - name: Publish prepared artifact availability
+        id: runtime_artifacts_available
+        if: always() && (needs.resolve.outputs.megatron_enabled == 'true' || needs.resolve.outputs.te_fl_enabled == 'true')
+        run: |
+          if [ "${{ steps.megatron_cache.outputs.cache-hit }}" = "true" ]; then
+            echo "megatron_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "megatron_available=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ steps.te_fl_cache.outputs.cache-hit }}" = "true" ]; then
+            echo "te_fl_available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "te_fl_available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save TE-FL wheel cache
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: te-fl-wheel
+          key: ${{ steps.te_fl_cache_key.outputs.key }}
+
+      # Upload artifacts only on cache misses for same-run handoff when a fork
+      # PR cannot read the prepare job's cache.
+      - name: Upload prepared Megatron artifact
+        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
+          path: megatron-lm-fl-install
+          if-no-files-found: error
+
+      - name: Upload prepared TE-FL artifact
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
+          path: te-fl-wheel
+          if-no-files-found: error

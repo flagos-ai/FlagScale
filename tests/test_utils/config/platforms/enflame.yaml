@@ -24,8 +24,12 @@ s60:
       train:
         qwen3: ["0_6b_enflame"]
     unit:
-      nproc_per_node: 1
+      nproc_per_node: 2
       include: "*"
       exclude:
         - tests/unit_tests/test_parallel_context.py
         - tests/unit_tests/test_spiky_loss_detector.py
+        # The Enflame training image does not provide the optional VLA stack.
+        - tests/unit_tests/models/vla
+        - tests/unit_tests/models/kerv/test_ops.py
+        - tests/unit_tests/models/kerv/test_optimization_runtime.py

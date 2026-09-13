@@ -41,6 +41,7 @@ ascend910:
       serve:
         qwen3: ["4b_tp2_ascend"]
     unit:
+      nproc_per_node: 2
       # Include patterns: "*" for all, or list specific paths
       include: "*"
       # Exclude paths use pytest --ignore.
@@ -50,3 +51,5 @@ ascend910:
         - tests/unit_tests/test_parallel_context.py
         - tests/unit_tests/test_utilities.py
         - tests/unit_tests/serve/processor/test_image_resize_processor.py
+        - tests/unit_tests/models/kerv/test_ops.py
+        - tests/unit_tests/models/kerv/test_optimization_runtime.py

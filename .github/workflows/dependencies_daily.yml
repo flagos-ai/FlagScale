@@ -1,0 +1,47 @@
+name: Daily Dependencies Sync
+
+on:
+  schedule:
+    - cron: '57 17 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: dependencies-daily-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-metax:
+    name: prepare-metax
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: metax
+
+  prepare-ascend:
+    name: prepare-ascend
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: ascend
+
+  prepare-musa:
+    name: prepare-musa
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: musa
+
+  prepare-hygon:
+    name: prepare-hygon
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: hygon
+
+  prepare-enflame:
+    name: prepare-enflame
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: enflame
+
+  prepare-kunlunxin:
+    name: prepare-kunlunxin
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: kunlunxin

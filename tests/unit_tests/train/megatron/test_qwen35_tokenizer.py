@@ -55,7 +55,8 @@ def test_chatml_path_decoder_does_not_initialize_av():
     assert sample["json"] == {"conversations": []}
 
 
-def test_qwen35_mtp_mrope_arguments(monkeypatch):
+@pytest.mark.parametrize("device_arch", [None, 9, 10])
+def test_qwen35_mtp_mrope_arguments(monkeypatch, device_arch):
     import sys
     from pathlib import Path
 
@@ -65,6 +66,7 @@ def test_qwen35_mtp_mrope_arguments(monkeypatch):
 
     root = Path(__file__).resolve().parents[4]
     monkeypatch.syspath_prepend(str(root / "flagscale/train/megatron"))
+    import megatron.training.arguments as training_arguments
     from megatron.training.arguments import parse_args, validate_args
 
     from flagscale.train.megatron.train_qwen35 import add_qwen35_extra_args
@@ -76,8 +78,46 @@ def test_qwen35_mtp_mrope_arguments(monkeypatch):
     monkeypatch.setenv("CUDA_DEVICE_MAX_CONNECTIONS", "1")
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("RANK", "0")
+    monkeypatch.setattr(training_arguments, "get_device_arch_version", lambda: device_arch)
     monkeypatch.setattr(sys, "argv", ["train_qwen35.py", *_get_args_megatron(cfg)])
     args = parse_args(extra_args_provider=add_qwen35_extra_args)
     validate_args(args)
     assert args.mtp_num_layers == 1
     assert args.position_embedding_type == "mrope"
+
+
+@pytest.mark.parametrize("enable_hetero", [False, True])
+def test_hetero_mesh_validation_precedes_common_validation(monkeypatch, enable_hetero):
+    import megatron.backend_config as backend_config
+    import megatron.training.arguments as training_arguments
+    from megatron.training.arguments_fs import FSTrainArguments
+
+    args = SimpleNamespace(enable_hetero=enable_hetero, use_checkpoint_args=False, yaml_cfg=None)
+    events = []
+
+    def pre_validate(instance):
+        assert instance.args is args
+        assert not hasattr(args, "data_parallel_size")
+        args.data_parallel_size = 2
+        events.append("pre")
+
+    def validate(actual, defaults):
+        assert actual is args
+        if enable_hetero:
+            assert args.data_parallel_size == 2
+        events.append("validate")
+
+    monkeypatch.setattr(training_arguments, "parse_args", lambda *a: args)
+    monkeypatch.setattr(training_arguments, "validate_args", validate)
+    monkeypatch.setattr(
+        training_arguments, "set_global_variables", lambda a: events.append("globals")
+    )
+    monkeypatch.setattr(
+        backend_config, "configure_backend_environment", lambda a: events.append("backend")
+    )
+    monkeypatch.setattr(FSTrainArguments, "pre_validate_args", pre_validate)
+    monkeypatch.setattr(FSTrainArguments, "post_validate_args", lambda a: events.append("post"))
+
+    assert training_arguments.parse_and_validate_args() is args
+    expected = ["backend", "pre", "validate", "post", "globals"]
+    assert events == (expected if enable_hetero else ["validate", "globals"])

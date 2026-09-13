@@ -20,12 +20,24 @@ set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/utils.sh"
+source "$PROJECT_ROOT/.github/scripts/set_env_common.sh"
+ci_resolve_python_bin
 
 # Ensure the repo root is on PYTHONPATH so training subprocesses can import
 # top-level packages that are not shipped by `pip install .` (e.g. `tools`,
 # used by train_qwen*_vl.py). The runner appends the pre-set PYTHONPATH when
 # generating the launch script, so this propagates to the torchrun workers.
-export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+#
+# The FlagScale training tree is a namespace overlay: it supplies
+# megatron.training while the prepared runtime supplies megatron.core.
+prepared_megatron_dir="${GITHUB_WORKSPACE:-$PROJECT_ROOT/..}/megatron-lm-fl-install"
+if [ -d "$prepared_megatron_dir" ]; then
+    export MEGATRON_INSTALL_DIR="$prepared_megatron_dir"
+    ci_configure_training_pythonpath
+else
+    export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
+fi
+export PYTHONNOUSERSITE=1
 
 # Preserve dependency paths selected by the image or environment setup.
 # Source-only Megatron installations may not exist in site-packages.
@@ -168,8 +180,10 @@ run_test() {
     # Build command as an array to avoid eval and ensure safe quoting.
     local check_results="$PROJECT_ROOT/tests/test_utils/runners/check_results.py"
     if [ -f "$check_results" ]; then
+        local python_bin
+        python_bin=$(runner_python_bin) || return 1
         local validator_cmd=(
-            python -m pytest "${check_results}::${compare_function}"
+            "$python_bin" -m pytest "${check_results}::${compare_function}"
             --path=tests/functional_tests
             "--task=$task" "--model=$model"
             "--case=$config" "--platform=$PLATFORM"

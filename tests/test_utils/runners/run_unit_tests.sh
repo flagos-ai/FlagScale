@@ -20,6 +20,8 @@ set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/utils.sh"
+source "$PROJECT_ROOT/.github/scripts/set_env_common.sh"
+ci_resolve_python_bin
 
 # Defaults
 PLATFORM="default"
@@ -69,8 +71,17 @@ run_unit_tests_for_device() {
 
     log_info "Running unit tests for device: $device"
 
-    # Set up PYTHONPATH
-    export PYTHONPATH="$PROJECT_ROOT:$PROJECT_ROOT/flagscale/train:${PYTHONPATH:-}"
+    # Match the functional runner: the FlagScale training overlay supplies
+    # megatron.training while the prepared runtime supplies megatron.core.
+    prepared_megatron_dir="${GITHUB_WORKSPACE:-$PROJECT_ROOT/..}/megatron-lm-fl-install"
+    if [ -d "$prepared_megatron_dir" ]; then
+        export MEGATRON_INSTALL_DIR="$prepared_megatron_dir"
+        ci_configure_training_pythonpath
+    else
+        log_error "Prepared Megatron-LM-FL runtime is required but was not found: $prepared_megatron_dir"
+        return 1
+    fi
+    export PYTHONNOUSERSITE=1
     export FLAGSCALE_TEST_PLATFORM="$PLATFORM"
     export FLAGSCALE_TEST_DEVICE_TYPE="$device"
     export FLAGSCALE_TEST_DIST_BACKEND="${FLAGSCALE_TEST_DIST_BACKEND:-$(default_dist_backend "$PLATFORM")}"
@@ -136,8 +147,12 @@ EOF
         # torch_gcu is imported by a site .pth file before coverage starts.
         # Start the worker without site initialization, then add the regular
         # package and project paths explicitly so coverage initializes first.
-        COVERAGE_BOOTSTRAP='import os, runpy, sys, sysconfig; sys.path[:0] = [path for path in os.environ.get("PYTHONPATH", "").split(os.pathsep) if path] + [sysconfig.get_path("purelib"), sysconfig.get_path("platlib")]; sys.argv = sys.argv[1:]; runpy.run_module("coverage", run_name="__main__")'
-        RUNNER_CMD=(--no-python python -S -E -c "$COVERAGE_BOOTSTRAP" coverage run "--rcfile=$COVERAGERC" -m pytest)
+        COVERAGE_BOOTSTRAP=$'import os, runpy, sys, sysconfig\n'
+        COVERAGE_BOOTSTRAP+=$'training_paths = [os.environ.get("MEGATRON_INSTALL_DIR", ""), os.environ.get("CI_TRAINING_OVERLAY_DIR", ""), os.environ.get("PROJECT_ROOT", "")]\n'
+        COVERAGE_BOOTSTRAP+=$'training_paths += [path for path in os.environ.get("PYTHONPATH", "").split(os.pathsep) if path]\n'
+        COVERAGE_BOOTSTRAP+=$'sys.path[:0] = [path for path in training_paths if path] + [sysconfig.get_path("purelib"), sysconfig.get_path("platlib")]\n'
+        COVERAGE_BOOTSTRAP+=$'sys.argv = sys.argv[1:]\nrunpy.run_module("coverage", run_name="__main__")'
+        RUNNER_CMD=(--no-python "$CI_PYTHON_BIN" -S -E -c "$COVERAGE_BOOTSTRAP" coverage run "--rcfile=$COVERAGERC" -m pytest)
     elif [ "$USE_COVERAGE" = true ]; then
         RUNNER_CMD=(-m coverage run "--rcfile=$COVERAGERC" -m pytest)
     else
@@ -170,8 +185,8 @@ EOF
     # All ranks have exited — safe to combine fragment files and generate report
     if [ "$USE_COVERAGE" = true ]; then
         log_info "Combining distributed coverage data..."
-        python -m coverage combine --rcfile="$COVERAGERC" "$COVERAGE_DIR"
-        python -m coverage json --rcfile="$COVERAGERC" -o "$COVERAGE_DIR/coverage.json"
+        "$CI_PYTHON_BIN" -m coverage combine --rcfile="$COVERAGERC" "$COVERAGE_DIR"
+        "$CI_PYTHON_BIN" -m coverage json --rcfile="$COVERAGERC" -o "$COVERAGE_DIR/coverage.json"
     fi
 
     return $test_exit

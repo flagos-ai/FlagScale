@@ -142,3 +142,40 @@ env_names:
   inference: "flagscale-inference"
   serve: "flagscale-inference"
   rl: "flagscale-rl"
+
+# Setup script for environment preparation
+setup_script: .github/scripts/set_env_cuda.sh
+
+# Test matrix configuration for unit tests
+test_matrix:
+  unit:
+    nproc_per_node: 2
+
+# =============================================================================
+# Dependencies Configuration (Megatron-LM-FL & TE-FL)
+# =============================================================================
+dependencies:
+  megatron_lm_fl:
+    enabled: true
+    repository: flagos-ai/Megatron-LM-FL
+    ref: main
+    runtime:
+      install_mode: pythonpath
+      environment: {}
+
+  te_fl:
+    enabled: true
+    repository: flagos-ai/TransformerEngine-FL
+    ref: main
+    build_mode: cuda
+    build_environment:
+      # NCCL-EP requires the internal nccl_device.h header, which is not
+      # shipped by the system NCCL installation in the CUDA CI image.
+      NVTE_WITH_NCCL_EP: "0"
+    runtime:
+      environment:
+        NVTE_WITH_NCCL_EP: "0"
+        TE_FL_PREFER: flagos
+      install_pip_args: []
+      pip_packages:
+        - "megatron-energon[av_decode]~=7.0"

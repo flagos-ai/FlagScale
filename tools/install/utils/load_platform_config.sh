@@ -44,6 +44,15 @@ load_platform_config() {
     ENV_NAME_TRAIN=$(/usr/local/bin/yq -r '.env_names.train // "flagscale-train"' "$CONFIG_FILE")
     ENV_NAME_RL=$(/usr/local/bin/yq -r '.env_names.rl // "flagscale-rl"' "$CONFIG_FILE")
 
+    # Extract dependencies configuration
+    MEGATRON_LM_FL_ENABLED=$(/usr/local/bin/yq -r '.dependencies.megatron_lm_fl.enabled // false' "$CONFIG_FILE")
+    TE_FL_ENABLED=$(/usr/local/bin/yq -r '.dependencies.te_fl.enabled // false' "$CONFIG_FILE")
+    MEGATRON_RUNTIME_ENVIRONMENT=$(/usr/local/bin/yq -o=json -I=0 '.dependencies.megatron_lm_fl.runtime.environment // {}' "$CONFIG_FILE")
+    TE_FL_RUNTIME_ENVIRONMENT=$(/usr/local/bin/yq -o=json -I=0 '.dependencies.te_fl.runtime.environment // {}' "$CONFIG_FILE")
+    TE_FL_INSTALL_PIP_ARGS=$(/usr/local/bin/yq -o=json -I=0 '.dependencies.te_fl.runtime.install_pip_args // []' "$CONFIG_FILE")
+    TE_FL_RUNTIME_PIP_PACKAGES=$(/usr/local/bin/yq -o=json -I=0 '.dependencies.te_fl.runtime.pip_packages // []' "$CONFIG_FILE")
+    SETUP_SCRIPT=$(/usr/local/bin/yq -r '.setup_script // ""' "$CONFIG_FILE")
+
     echo "Package manager: $PKG_MGR"
     echo "Environment path: $ENV_PATH"
     echo "Environment names: train=$ENV_NAME_TRAIN, rl=$ENV_NAME_RL"
@@ -113,4 +122,13 @@ load_platform_config() {
     echo "env_path=$ENV_PATH" >> $GITHUB_OUTPUT
     echo "env_name_train=$ENV_NAME_TRAIN" >> $GITHUB_OUTPUT
     echo "env_name_rl=$ENV_NAME_RL" >> $GITHUB_OUTPUT
+
+    # Output dependencies configuration
+    echo "megatron_lm_fl_enabled=$MEGATRON_LM_FL_ENABLED" >> $GITHUB_OUTPUT
+    echo "te_fl_enabled=$TE_FL_ENABLED" >> $GITHUB_OUTPUT
+    echo "megatron_runtime_environment=$MEGATRON_RUNTIME_ENVIRONMENT" >> $GITHUB_OUTPUT
+    echo "te_fl_runtime_environment=$TE_FL_RUNTIME_ENVIRONMENT" >> $GITHUB_OUTPUT
+    echo "te_fl_install_pip_args=$TE_FL_INSTALL_PIP_ARGS" >> $GITHUB_OUTPUT
+    echo "te_fl_runtime_pip_packages=$TE_FL_RUNTIME_PIP_PACKAGES" >> $GITHUB_OUTPUT
+    echo "setup_script=$SETUP_SCRIPT" >> $GITHUB_OUTPUT
 }

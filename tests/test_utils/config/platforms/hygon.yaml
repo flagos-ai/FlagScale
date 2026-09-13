@@ -28,10 +28,12 @@ bw1000:
       serve:
         qwen3: ["4b_tp2_hygon"]
     unit:
-      nproc_per_node: 1
+      nproc_per_node: 2
       include: "*"
       exclude:
         # This test defines an eight-rank heterogeneous mesh; it is not a single-rank unit test.
         - tests/unit_tests/test_parallel_context.py::test_parallel_config
         # This distributed-only case requires world_size to be divisible by two.
         - tests/unit_tests/test_spiky_loss_detector.py
+        # Hygon training CI does not provide the optional VLA runtime stack.
+        - tests/unit_tests/models/vla

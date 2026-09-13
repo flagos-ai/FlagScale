@@ -71,12 +71,12 @@ def initialize_megatron(
     args = get_args()
 
     ########## FlagScale Begin ##########
-    configure_backend_environment(args)
-    ## FlagScale Begin: Pre Validate Arguments ##
-    fs_argument = FSTrainArguments(args)
-    fs_argument.pre_validate_args()
-    ## FlagScale End: Post Validate Arguments ##
-    fs_argument.post_validate_args()
+    # Heterogeneous meshes were already resolved around validate_args.
+    if not args.enable_hetero:
+        configure_backend_environment(args)
+        fs_argument = FSTrainArguments(args)
+        fs_argument.pre_validate_args()
+        fs_argument.post_validate_args()
     ########## FlagScale End ##########
 
     # set logging level

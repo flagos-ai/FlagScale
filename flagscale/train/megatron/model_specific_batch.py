@@ -10,9 +10,11 @@ from megatron.core.transformer.multi_token_prediction import mtp_on_this_rank as
 from megatron.core.utils import get_batch_on_this_cp_rank
 from megatron.training import get_args
 from megatron.training.arguments import core_transformer_config_from_args
+from megatron.plugin.platform import get_platform
 
 
 BATCH_KEYS = ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "max_seqlen", "position_ids", "tokens"]
+cur_platform = get_platform()
 
 
 def get_batch_for_model_with_all_stage_tokens(data_iterator, vp_stage=None, dualpipev_stage=None):
@@ -31,16 +33,16 @@ def get_batch_for_model_with_all_stage_tokens(data_iterator, vp_stage=None, dual
     if tp_rank == 0:
         batch = next(data_iterator)
         for key in BATCH_KEYS:
-            batch[key] = batch[key].cuda(non_blocking=True) if key in batch and batch[key] is not None else None
+            batch[key] = batch[key].to(cur_platform.device(), non_blocking=True) if key in batch and batch[key] is not None else None
     else:
         shape = (args.micro_batch_size, args.seq_length)
         batch = {key: None for key in BATCH_KEYS}
-        batch["tokens"] = torch.empty(shape, dtype=torch.int64, device=torch.cuda.current_device())
-        batch["labels"] = torch.empty(shape, dtype=torch.int64, device=torch.cuda.current_device())
-        batch["loss_mask"] = torch.empty(shape, dtype=torch.float32, device=torch.cuda.current_device())
-        batch["position_ids"] = torch.empty(shape, dtype=torch.int64, device=torch.cuda.current_device())
+        batch["tokens"] = torch.empty(shape, dtype=torch.int64, device=cur_platform.device())
+        batch["labels"] = torch.empty(shape, dtype=torch.int64, device=cur_platform.device())
+        batch["loss_mask"] = torch.empty(shape, dtype=torch.float32, device=cur_platform.device())
+        batch["position_ids"] = torch.empty(shape, dtype=torch.int64, device=cur_platform.device())
         if args.create_attention_mask_in_dataloader:
-            batch["attention_mask"] = torch.empty((args.micro_batch_size, 1, args.seq_length, args.seq_length), dtype=torch.bool, device=torch.cuda.current_device())
+            batch["attention_mask"] = torch.empty((args.micro_batch_size, 1, args.seq_length, args.seq_length), dtype=torch.bool, device=cur_platform.device())
 
     _broadcast(batch["tokens"])
     if args.pipeline_model_parallel_size == 1 or mtp_on_this_rank:

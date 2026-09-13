@@ -30,6 +30,8 @@ def test_functional_runner_preserves_dependency_paths(tmp_path, source_position)
         HF_HOME=str(tmp_path / "hf"),
         CHECK_PYTHON=sys.executable,
         CHECK_SOURCE=str(source) if source_position is not None else "",
+        # Keep the test independent from the prepared runtime exported by CI.
+        GITHUB_WORKSPACE=str(tmp_path / "github-workspace"),
     )
     if source_position is None:
         env.pop("FLAGSCALE_DEPS", None)

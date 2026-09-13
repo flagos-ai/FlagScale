@@ -29,17 +29,31 @@ log_success() {
     echo -e "\033[0;32m[SUCCESS] $(date +'%Y-%m-%d %H:%M:%S') - $*\033[0m" >&2
 }
 
+runner_python_bin() {
+    local python_bin="${CI_PYTHON_BIN:-}"
+    if [ -z "$python_bin" ]; then
+        python_bin=$(command -v python || command -v python3 || true)
+    fi
+    if [ -z "$python_bin" ] || [ ! -x "$python_bin" ]; then
+        log_error "Python executable not found"
+        return 1
+    fi
+    printf '%s\n' "$python_bin"
+}
+
 # Run configuration-only Python helpers without processing site .pth files on
 # Enflame. The vendor image auto-loads torch_gcu from a .pth hook, which can
 # initialize the accelerator (and abort) even for pure YAML/JSON parsing.
 run_config_python() {
     local platform="$1"
     shift
+    local python_bin
+    python_bin=$(runner_python_bin) || return 1
 
     if [ "$platform" = "enflame" ]; then
         local script="$1"
         shift
-        python -S -E -c '
+        "$python_bin" -S -E -c '
 import runpy
 import sys
 import sysconfig
@@ -50,7 +64,7 @@ sys.argv = sys.argv[1:]
 runpy.run_path(script, run_name="__main__")
 ' "$script" "$@"
     else
-        python "$@"
+        "$python_bin" "$@"
     fi
 }
 
@@ -123,7 +137,9 @@ _gpu_fetch_nvidia() {
 # Query the DTK-backed Torch runtime directly instead.
 _gpu_fetch_hygon() {
     local mem_output
-    mem_output=$(python - <<'PY'
+    local python_bin
+    python_bin=$(runner_python_bin) || return 1
+    mem_output=$("$python_bin" - <<'PY'
 import torch
 
 for index in range(torch.cuda.device_count()):
@@ -199,7 +215,9 @@ _gpu_poll_loop() {
 wait_for_gpu() {
     local gpu_count fetch_fn
     if [ "${PLATFORM:-}" = hygon ]; then
-        gpu_count=$(python -c 'import torch; print(torch.cuda.device_count())') || return 1
+        local python_bin
+        python_bin=$(runner_python_bin) || return 1
+        gpu_count=$("$python_bin" -c 'import torch; print(torch.cuda.device_count())') || return 1
         fetch_fn=_gpu_fetch_hygon
     elif command -v nvidia-smi &>/dev/null; then
         gpu_count=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l)
@@ -245,11 +263,13 @@ default_torch_device_type() {
 
 detect_accelerator_count() {
     local platform="${1:-}"
+    local python_bin
+    python_bin=$(runner_python_bin) || return 1
 
     case "$platform" in
         ascend)
             {
-                python - <<'PY' 2>/dev/null || true
+                "$python_bin" - <<'PY' 2>/dev/null || true
 import torch
 try:
     import torch_npu  # noqa: F401
@@ -262,7 +282,7 @@ PY
             ;;
         metax)
             {
-                python - <<'PY' 2>/dev/null || mx-smi --show-hwinfo 2>/dev/null | awk '/Attached GPUs/{print $NF}' || true
+                "$python_bin" - <<'PY' 2>/dev/null || mx-smi --show-hwinfo 2>/dev/null | awk '/Attached GPUs/{print $NF}' || true
 import torch
 if hasattr(torch, "maca") and hasattr(torch.maca, "device_count"):
     print(torch.maca.device_count())
@@ -275,7 +295,7 @@ PY
             ;;
         musa)
             {
-                python - <<'PY' 2>/dev/null || true
+                "$python_bin" - <<'PY' 2>/dev/null || true
 import torch
 try:
     import torch_musa  # noqa: F401
@@ -288,7 +308,7 @@ PY
             ;;
         *)
             {
-                python - <<'PY' 2>/dev/null || true
+                "$python_bin" - <<'PY' 2>/dev/null || true
 import torch
 print(torch.cuda.device_count() if hasattr(torch, "cuda") else 1)
 PY

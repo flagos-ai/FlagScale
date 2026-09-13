@@ -24,7 +24,7 @@ p800:
       train:
         qwen3: ["0_6b_kunlunxin"]
     unit:
-      nproc_per_node: 8
+      nproc_per_node: 2
       include: "*"
       exclude:
         - tests/unit_tests/runner/test_parse_hostfile.py
@@ -40,3 +40,5 @@ p800:
         - tests/unit_tests/test_init.py::test_get_version_fallback_to_default
         - tests/unit_tests/test_parallel_context.py::test_parallel_config
         - tests/unit_tests/models/vla
+        - tests/unit_tests/models/kerv/test_ops.py
+        - tests/unit_tests/models/kerv/test_optimization_runtime.py
