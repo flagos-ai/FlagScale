@@ -61,7 +61,7 @@ def get_platform_config(platform, device=None):
         "a800": "cuda.yaml",
         "h100": "cuda.yaml",
         "ascend": "ascend.yaml",
-        "ascend910": "ascend.yaml",
+        "unit-910c": "ascend.yaml",
         "metax": "metax.yaml",
         "c550": "metax.yaml",
         "musa": "musa.yaml",

@@ -1,0 +1,21 @@
+{
+    "ascend": {
+        "unit-910c": {
+            "elapsed time per iteration (ms):": {
+                "values": [2647.1, 1544.2, 815.3, 414.0, 401.5, 403.7, 410.4, 384.5, 413.1, 406.7],
+                "threshold": {
+                    "type": "upper_bound",
+                    "tolerance": 0.1
+                }
+            },
+            "throughput per GPU (TFLOP/s/GPU):": {
+                "values": [0.4, 0.6, 1.1, 2.3, 2.3, 2.3, 2.3, 2.4, 2.3, 2.3],
+                "threshold": {
+                    "type": "lower_bound",
+                    "tolerance": 0.1,
+                    "aggregation": "harmonic_mean"
+                }
+            }
+        }
+    }
+}
