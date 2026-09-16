@@ -30,6 +30,8 @@ def test_functional_runner_preserves_dependency_paths(tmp_path, source_position)
         HF_HOME=str(tmp_path / "hf"),
         CHECK_PYTHON=sys.executable,
         CHECK_SOURCE=str(source) if source_position is not None else "",
+        # Keep the test independent from the prepared runtime exported by CI.
+        GITHUB_WORKSPACE=str(tmp_path / "github-workspace"),
     )
     if source_position is None:
         env.pop("FLAGSCALE_DEPS", None)
@@ -66,7 +68,11 @@ source "$1" --help
     )
     output = next(line for line in result.stdout.splitlines() if line.startswith("RUNNER_ENV="))
     actual = json.loads(output.removeprefix("RUNNER_ENV="))
-    assert actual["PYTHONPATH"].split(os.pathsep) == [str(ROOT), *paths]
+    assert actual["PYTHONPATH"].split(os.pathsep) == [
+        str(ROOT / ".github/scripts"),
+        str(ROOT),
+        *paths,
+    ]
     cache = Path(actual["HF_MODULES_CACHE"])
     assert cache.parent == tmp_path / "hf"
     assert cache.name.startswith("modules_")

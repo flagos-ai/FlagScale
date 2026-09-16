@@ -1,0 +1,21 @@
+{
+    "hygon": {
+        "bw1000": {
+            "elapsed time per iteration (ms):": {
+                "values": [221439.5, 114172.0, 122071.0, 14079.6, 16902.7, 10695.0, 18074.3, 11098.3, 10961.4, 11253.0],
+                "threshold": {
+                    "type": "upper_bound",
+                    "tolerance": 0.1
+                }
+            },
+            "throughput per GPU (TFLOP/s/GPU):": {
+                "values": [0.0, 0.1, 0.1, 0.5, 0.4, 0.7, 0.4, 0.7, 0.7, 0.7],
+                "threshold": {
+                    "type": "lower_bound",
+                    "tolerance": 0.1,
+                    "aggregation": "harmonic_mean"
+                }
+            }
+        }
+    }
+}

@@ -48,6 +48,7 @@ done
 
 cd "$PROJECT_ROOT"
 source ./tools/install/utils/pyenv_utils.sh
+source ./.github/scripts/set_env_common.sh
 
 activate_python_env() {
     case "$PKG_MGR" in
@@ -77,12 +78,18 @@ activate_python_env() {
     esac
 }
 
+resolve_training_python() {
+    ci_resolve_python_bin
+    PYTHON_BIN="$CI_PYTHON_BIN"
+    ci_export_env CI_PYTHON_BIN "$PYTHON_BIN"
+}
+
 install_common_python_deps() {
-    python -m pip install coverage pytest pytest-mock diffusers==0.36.0 transformers==4.57.6 --quiet --root-user-action=ignore
+    "$PYTHON_BIN" -m pip install coverage pytest pytest-mock diffusers==0.36.0 transformers==4.57.6 --quiet --root-user-action=ignore
 }
 
 install_flagscale_cli() {
-    python -m pip install . --no-build-isolation --root-user-action=ignore || {
+    "$PYTHON_BIN" -m pip install . --no-build-isolation --root-user-action=ignore || {
         echo "FlagScale CLI install failed"
         exit 1
     }
@@ -94,28 +101,32 @@ install_flagscale_cli() {
 }
 
 setup_cuda_training_env() {
-    local install_dir=""
-    if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
-        install_dir=$(dirname "$ENV_PATH")
+    if [ "${FLAGSCALE_PREPARED_TRAINING_RUNTIME:-0}" != "1" ]; then
+        local install_dir=""
+        if [ "$PKG_MGR" = "conda" ] && [ -n "$ENV_PATH" ]; then
+            install_dir=$(dirname "$ENV_PATH")
+        fi
+
+        local install_args=(
+            --platform cuda
+            --task train
+            --pkg-mgr "$PKG_MGR"
+            --no-system --no-dev --no-base --no-task
+            --src-deps megatron-lm
+            --pip-deps typer
+            --force-build
+            --retry-count 3
+        )
+        [ -n "$ENV_NAME" ] && install_args+=(--env-name "$ENV_NAME")
+        [ -n "$install_dir" ] && install_args+=(--install-dir "$install_dir")
+
+        ./tools/install/install.sh "${install_args[@]}"
+    else
+        echo "Using prepared Megatron-LM-FL and TE-FL runtime"
     fi
 
-    local install_args=(
-        --platform cuda
-        --task train
-        --pkg-mgr "$PKG_MGR"
-        --no-system --no-dev --no-base --no-task
-        --src-deps megatron-lm
-        --pip-deps typer
-        --force-build
-        --retry-count 3
-    )
-    [ -n "$ENV_NAME" ] && install_args+=(--env-name "$ENV_NAME")
-    [ -n "$install_dir" ] && install_args+=(--install-dir "$install_dir")
-
-    ./tools/install/install.sh "${install_args[@]}"
-
     # TODO: remove after CI images contain these dependencies.
-    python -m pip install \
+    "$PYTHON_BIN" -m pip install \
         qwen_vl_utils==0.0.14 \
         diffusers==0.36.0 \
         websocket-client==1.8.0 \
@@ -142,20 +153,20 @@ setup_metax_training_env() {
         fi
     done
 
-    if python -c '
+    if "$PYTHON_BIN" -c '
 import transformer_engine
 from megatron.core.models.gpt import GPTModel
 ' >/dev/null 2>&1; then
-        echo "MetaX training stack is preinstalled; skipping platform dependency installation"
+        echo "MetaX training stack is ready"
         return 0
     fi
 
-    echo "MetaX training stack is missing from the configured CI image" >&2
+    echo "MetaX training stack is not importable in the active environment" >&2
     return 1
 }
 
 setup_ascend_training_env() {
-    if TE_FL_SKIP_CUDA=1 python -c '
+    if TE_FL_SKIP_CUDA=1 "$PYTHON_BIN" -c '
 from megatron.core.extensions.transformer_engine import HAVE_TE
 from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
 from megatron.core.models.gpt import GPTModel
@@ -164,17 +175,21 @@ from transformer_engine.pytorch import DotProductAttention, LayerNormLinear
 assert HAVE_TE
 assert TESpecProvider is not None
 ' >/dev/null 2>&1; then
-        echo "Ascend training stack is preinstalled; skipping platform dependency installation"
+        echo "Ascend training stack is ready"
         return 0
     fi
 
-    echo "Ascend training stack is missing from the configured CI image" >&2
+    echo "Ascend training stack is not importable in the active environment" >&2
     return 1
 }
 
 setup_musa_training_env() {
     if ! FS_PLATFORM=musa MG_FL_PREFER=musa \
-        python -c 'import megatron.core; import torch_musa' >/dev/null 2>&1; then
+        "$PYTHON_BIN" -c 'import megatron.core; import torch_musa' >/dev/null 2>&1; then
+        if [ "${FLAGSCALE_PREPARED_TRAINING_RUNTIME:-0}" = "1" ]; then
+            echo "Prepared MUSA training runtime is not importable" >&2
+            return 1
+        fi
         ./tools/install/install.sh \
             --platform musa \
             --task train \
@@ -198,7 +213,7 @@ setup_musa_training_env() {
         fi
     done
 
-    python -c '
+    "$PYTHON_BIN" -c '
 import torch
 import torch_musa
 assert torch.musa.is_available()
@@ -207,11 +222,11 @@ print(f"MUSA training environment ready on {torch.musa.device_count()} devices")
 }
 
 setup_kunlunxin_training_env() {
-    if ! python -m pytest --version >/dev/null 2>&1; then
+    if ! "$PYTHON_BIN" -m pytest --version >/dev/null 2>&1; then
         install_common_python_deps
     fi
 
-    if python -c '
+    if "$PYTHON_BIN" -c '
 import flagcx
 import megatron.core
 import torch
@@ -225,11 +240,11 @@ assert torch.cuda.device_count() == 8
 assert callable(disable_jit_fuser)
 assert callable(get_gpt_decoder_layer_specs)
 ' >/dev/null 2>&1; then
-        echo "Kunlunxin training stack is preinstalled; skipping platform dependency installation"
+        echo "Kunlunxin training stack is ready"
         return 0
     fi
 
-    echo "Kunlunxin training stack is missing from the configured CI image" >&2
+    echo "Kunlunxin training stack is not importable in the active environment" >&2
     return 1
 }
 
@@ -249,9 +264,10 @@ echo "Install FlagScale CLI: $INSTALL_CLI"
 echo "Install platform deps: $INSTALL_PLATFORM_DEPS"
 
 activate_python_env
+resolve_training_python
 
-echo "Python location: $(command -v python)"
-echo "Python version: $(python --version)"
+echo "Python location: $PYTHON_BIN"
+echo "Python version: $($PYTHON_BIN --version)"
 
 if [ "$INSTALL_COMMON_DEPS" = true ]; then
     install_common_python_deps

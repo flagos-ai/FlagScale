@@ -120,7 +120,8 @@ jobs:
           ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
           ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
 
-          # Source environment utilities
+          # Source shared environment utilities.
+          source .github/scripts/set_env_common.sh
           source ./tools/install/utils/pyenv_utils.sh
 
           # Activate environment based on package manager
@@ -140,8 +141,13 @@ jobs:
               ;;
           esac
 
-          echo "Python location: $(which python)"
-          echo "Python version: $(python --version)"
+          export CI_RUNTIME_PKG_MGR="$PKG_MGR"
+          export CI_RUNTIME_ENV_NAME="$ENV_NAME"
+          export CI_RUNTIME_ENV_PATH="$ENV_PATH"
+          ci_activate_python_environment
+
+          echo "Python location: $CI_PYTHON_BIN"
+          echo "Python version: $($CI_PYTHON_BIN --version)"
 
           MEGATRON_LM_FL_REPO='${{ inputs.megatron_lm_fl_repo }}'
           MEGATRON_LM_FL_BRANCH='${{ inputs.megatron_lm_fl_branch }}'
@@ -151,11 +157,13 @@ jobs:
             "https://github.com/${MEGATRON_LM_FL_REPO}.git" /tmp/Megatron-LM-FL
 
           echo "Installing Megatron-LM-FL via pip..."
-          pip install /tmp/Megatron-LM-FL --no-build-isolation --root-user-action=ignore \
+          "$CI_PYTHON_BIN" -m pip install /tmp/Megatron-LM-FL --no-build-isolation --root-user-action=ignore \
             || { echo "Megatron-LM-FL install failed"; exit 1; }
 
           echo "Megatron-LM-FL installed successfully from branch: ${MEGATRON_LM_FL_BRANCH}"
-          pip show megatron-core 2>/dev/null || pip show megatron 2>/dev/null || echo "Package info not available"
+          "$CI_PYTHON_BIN" -m pip show megatron-core 2>/dev/null || \
+            "$CI_PYTHON_BIN" -m pip show megatron 2>/dev/null || \
+            echo "Package info not available"
         timeout-minutes: 30
 
       - name: Install dependencies for training
@@ -219,9 +227,9 @@ jobs:
               ;;
           esac
 
-          # Display Python environment info
-          echo "Python location: $(which python)"
-          echo "Python version: $(python --version)"
+          # Display the interpreter selected during environment setup.
+          echo "Python location: ${CI_PYTHON_BIN:-python3}"
+          echo "Python version: $(${CI_PYTHON_BIN:-python3} --version)"
 
           # Run functional tests using run_tests.sh
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
@@ -289,7 +297,8 @@ jobs:
           ENV_NAME='${{ needs.checkout_and_config.outputs.env_name_train }}'
           ENV_PATH='${{ needs.checkout_and_config.outputs.env_path }}'
 
-          # Source environment utilities
+          # Source shared environment utilities.
+          source .github/scripts/set_env_common.sh
           source ./tools/install/utils/pyenv_utils.sh
 
           # Activate environment based on package manager
@@ -309,8 +318,8 @@ jobs:
               ;;
           esac
 
-          echo "Python location: $(which python)"
-          echo "Python version: $(python --version)"
+          echo "Python location: ${CI_PYTHON_BIN:-python3}"
+          echo "Python version: $(${CI_PYTHON_BIN:-python3} --version)"
 
           MEGATRON_LM_FL_REPO='${{ inputs.megatron_lm_fl_repo }}'
           MEGATRON_LM_FL_BRANCH='${{ inputs.megatron_lm_fl_branch }}'
@@ -320,11 +329,13 @@ jobs:
             "https://github.com/${MEGATRON_LM_FL_REPO}.git" /tmp/Megatron-LM-FL
 
           echo "Installing Megatron-LM-FL via pip..."
-          pip install /tmp/Megatron-LM-FL --no-build-isolation --root-user-action=ignore \
+          "${CI_PYTHON_BIN:-python3}" -m pip install /tmp/Megatron-LM-FL --no-build-isolation --root-user-action=ignore \
             || { echo "Megatron-LM-FL install failed"; exit 1; }
 
           echo "Megatron-LM-FL installed successfully from branch: ${MEGATRON_LM_FL_BRANCH}"
-          pip show megatron-core 2>/dev/null || pip show megatron 2>/dev/null || echo "Package info not available"
+          "${CI_PYTHON_BIN:-python3}" -m pip show megatron-core 2>/dev/null || \
+            "${CI_PYTHON_BIN:-python3}" -m pip show megatron 2>/dev/null || \
+            echo "Package info not available"
         timeout-minutes: 30
 
       - name: Install dependencies for heterogeneous training
@@ -388,9 +399,9 @@ jobs:
               ;;
           esac
 
-          # Display Python environment info
-          echo "Python location: $(which python)"
-          echo "Python version: $(python --version)"
+          # Display the interpreter selected during environment setup.
+          echo "Python location: ${CI_PYTHON_BIN:-python3}"
+          echo "Python version: $(${CI_PYTHON_BIN:-python3} --version)"
 
           # Run functional tests using run_tests.sh
           bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
