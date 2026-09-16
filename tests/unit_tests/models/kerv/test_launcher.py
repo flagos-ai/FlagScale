@@ -61,7 +61,9 @@ def test_python_command_and_argument_rendering(tmp_path):
     assert command[1] == str(script)
     assert command[-4:] == ["--enabled", "True", "--buckets", "224,240"]
     assert work_dir == tmp_path
-    assert environment["PYTHONPATH"].split(":")[0] == str(tmp_path)
+    python_paths = environment["PYTHONPATH"].split(":")
+    assert python_paths[0].endswith("flagscale/models/kerv/ops")
+    assert python_paths[1] == str(tmp_path)
 
 
 def test_workdir_and_python_paths_are_absolute(tmp_path, monkeypatch):
@@ -82,7 +84,7 @@ def test_workdir_and_python_paths_are_absolute(tmp_path, monkeypatch):
     )
     _, work_dir, environment = build_kerv_command(config)
     assert work_dir == tmp_path
-    assert environment["PYTHONPATH"].split(":")[:2] == [
+    assert environment["PYTHONPATH"].split(":")[1:3] == [
         str(source_root),
         str(runtime_root),
     ]

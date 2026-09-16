@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from .entrypoint import (
     KERVEntrypointError,
+    _python_paths,
     build_inprocess_argv,
     load_kerv_task_config,
     run_kerv_entrypoint,
@@ -78,9 +79,7 @@ def build_kerv_command(kerv: Mapping[str, Any]) -> tuple[list[str], Path, dict[s
     command = [sys.executable, str(script), *build_inprocess_argv(kerv)]
     work_dir = Path(str(kerv.get("work_dir") or root)).expanduser().resolve()
     environment = os.environ.copy()
-    python_paths = [str(root)] + [
-        str(Path(str(value)).expanduser().resolve()) for value in kerv.get("python_paths", [])
-    ]
+    python_paths = _python_paths(kerv, root)
     environment["PYTHONPATH"] = os.pathsep.join(
         value for value in (*python_paths, environment.get("PYTHONPATH", "")) if value
     )
