@@ -99,11 +99,6 @@ class FSTrainArguments:
         if getattr(self.args, "use_mimo", False) and getattr(
             self.args, "mimo_layout", "colocated"
         ) == "grid":
-            # Grid parse-time contract: must run before Megatron validation,
-            # which would otherwise silently clamp conflicting parallel sizes
-            # (validate_yaml PP clamp) and drop sequence_parallel under the
-            # forced global TP=1.  Function-level import: keeps the module
-            # import surface unchanged for non-MIMO training paths.
             from flagscale.models.mimo import apply_parse_time_contract
 
             apply_parse_time_contract(self.args)
@@ -1098,9 +1093,6 @@ def _add_flagscale_specific_args(parser):
         'Default to 0 to disable inference wandb logging.',
     )
 
-    # MIMO training master switch.  When enabled, training.py uses per-module
-    # DDP and optimizer paths instead of the single outer DDP/optimizer; the
-    # execution layout is selected by ``--mimo-layout`` below.
     group.add_argument(
         '--use-mimo',
         action='store_true',
@@ -1108,11 +1100,6 @@ def _add_flagscale_specific_args(parser):
         help='Enable FlagScale MIMO training with per-module DDP/optimizer.',
     )
 
-    # MIMO execution layout, a subordinate selector of ``--use-mimo`` (only
-    # consulted when MIMO is on).  ``colocated`` (default) runs the in-house
-    # colocated macro/micro-batch scheduler exactly; ``grid`` selects the
-    # MCore grid path (this stage: non-colocated Qwen3.5 2+6 dense TP/PP/DP
-    # layouts, see flagscale/models/mimo/grid/providers/qwen35.py).
     group.add_argument(
         '--mimo-layout',
         type=str,
@@ -1125,11 +1112,9 @@ def _add_flagscale_specific_args(parser):
         '--mimo-module-specs',
         type=str,
         default=None,
-        help='Repeatable per-module parallelism specs for the grid path, e.g. '
-        "'images=tp=2,dp=1; language=tp=1,pp=1,dp=6,rank_offset=2'. "
+        help='Repeatable per-module parallelism specs for the grid path. '
         'Module names must be "images" and "language"; rank offsets tile '
-        '[0, world_size). Supported: the 8 dense 2+6 families (world 8, '
-        'images ranks [0,2), language ranks [2,8)).',
+        '[0, world_size).',
     )
 
     return parser

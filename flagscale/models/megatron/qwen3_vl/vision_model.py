@@ -69,16 +69,6 @@ class Qwen3VisionModel(VisionModule):
 
         self.pg_collection = pg_collection
         if pg_collection is not None:
-            # ``MegatronModule.sharded_state_dict`` derives the TP sharding /
-            # replication metadata from ``self.tp_group`` (falling back to the
-            # global parallel state when the attribute is absent).  In grid
-            # mode the global parallel state is TP=1, so without this the
-            # replicated vision params (``patch_embed.proj.*``,
-            # ``pos_embed.weight``, ...) would all be tagged
-            # ``replica_id=(0, 0, dp_rank)`` across the vision TP group, and
-            # torch_dist save-time validation would report an access count of
-            # 2 for the unsharded global tensors.  Mirror the module-local
-            # wiring of ``TransformerLayer``/``MultimodalProjector``.
             self.tp_group = pg_collection.tp
 
         self.spatial_merge_size = transformer_config.spatial_merge_size
