@@ -13,9 +13,41 @@
 # limitations under the License.
 
 import time
+from pathlib import Path
 
 import torch
 import torch_npu
+import torch_npu.profiler as npu_profiler
+
+
+def create_pytorch_profiler(args, rank):
+    from megatron.training.utils import print_rank_0
+
+    def trace_handler(p):
+        profile_dir = Path(f"{args.tensorboard_dir}/../torch_profile")
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        p.export_chrome_trace(f"{profile_dir}/rank-{rank}.json.gz")
+
+    print_rank_0("Using torch_npu.profiler for NPU profiling")
+    prof = npu_profiler.profile(
+        schedule=npu_profiler.schedule(
+            wait=max(args.profile_step_start - 1, 0),
+            warmup=1 if args.profile_step_start > 0 else 0,
+            active=args.profile_step_end - args.profile_step_start,
+            repeat=1,
+        ),
+        on_trace_ready=trace_handler,
+        record_shapes=args.pytorch_profiler_collect_shapes,
+        profile_memory=args.pytorch_profiler_collect_memory,
+        with_stack=args.pytorch_profiler_collect_callstack,
+    )
+    return prof
+
+
+def stop_pytorch_profiler(profiler):
+    """Stop NPU profiling and finish native trace analysis."""
+    profiler.stop()
+
 
 def get_device_arch_version():
     return 8
