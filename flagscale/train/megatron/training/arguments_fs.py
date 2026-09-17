@@ -96,6 +96,13 @@ class FSTrainArguments:
 
     def pre_validate_args(self):
         """Pre-validate the arguments before Megatron function `validate_args`."""
+        if getattr(self.args, "use_mimo", False) and getattr(
+            self.args, "mimo_layout", "colocated"
+        ) == "grid":
+            from flagscale.models.mimo import apply_parse_time_contract
+
+            apply_parse_time_contract(self.args)
+
         if self._rank_mapper is None:
             self._build_rank_mapper()
 
@@ -1084,6 +1091,30 @@ def _add_flagscale_specific_args(parser):
         default=0,
         help='Step interval for logging inference metrics to wandb. '
         'Default to 0 to disable inference wandb logging.',
+    )
+
+    group.add_argument(
+        '--use-mimo',
+        action='store_true',
+        default=False,
+        help='Enable FlagScale MIMO training with per-module DDP/optimizer.',
+    )
+
+    group.add_argument(
+        '--mimo-layout',
+        type=str,
+        default='colocated',
+        choices=['colocated', 'grid'],
+        help='MIMO execution layout: colocated (in-house macro/micro-batch '
+        'scheduler, default) or grid (MCore MimoModel non-colocated path).',
+    )
+    group.add_argument(
+        '--mimo-module-specs',
+        type=str,
+        default=None,
+        help='Repeatable per-module parallelism specs for the grid path. '
+        'Module names must be "images" and "language"; rank offsets tile '
+        '[0, world_size).',
     )
 
     return parser

@@ -128,10 +128,20 @@ class Qwen35LanguageModule(GPTModel):
                 vocab_size=self.vocab_size,
                 max_sequence_length=self.max_sequence_length,
                 position_embedding_type=position_embedding_type,
+                # Grid mode: the global parallel state does not describe the
+                # language module, so the vocab embedding must TP-shard by the
+                # language module's own TP group (None -> global fallback for
+                # the base paths).
+                tp_group=self.pg_collection.tp if self.pg_collection is not None else None,
             )
 
         if self.position_embedding_type == "mrope" and not self.config.multi_latent_attention:
-            cp_group = parallel_state.get_context_parallel_group(check_initialized=False)
+            # Grid mode: prefer the language module's own CP group (falls back
+            # to the global context-parallel group for base paths).
+            if self.pg_collection is not None and getattr(self.pg_collection, "cp", None) is not None:
+                cp_group = self.pg_collection.cp
+            else:
+                cp_group = parallel_state.get_context_parallel_group(check_initialized=False)
             self.rotary_pos_emb = Qwen35LanguageRotaryEmbedding(
                 kv_channels=self.config.kv_channels,
                 rotary_percent=rotary_percent,
