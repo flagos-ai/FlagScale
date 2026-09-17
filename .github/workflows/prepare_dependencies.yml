@@ -502,15 +502,21 @@ jobs:
         id: runtime_artifacts_available
         if: always() && (needs.resolve.outputs.megatron_enabled == 'true' || needs.resolve.outputs.te_fl_enabled == 'true')
         run: |
-          if [ "${{ steps.megatron_cache.outputs.cache-hit }}" = "true" ]; then
-            echo "megatron_available=false" >> "$GITHUB_OUTPUT"
-          else
+          # Artifact is available if: cache miss OR fork PR (cannot access main repo cache)
+          is_fork="${{ github.event.pull_request.head.repo.fork }}"
+          megatron_cache_hit="${{ steps.megatron_cache.outputs.cache-hit }}"
+          te_fl_cache_hit="${{ steps.te_fl_cache.outputs.cache-hit }}"
+
+          if [ "$megatron_cache_hit" != "true" ] || [ "$is_fork" = "true" ]; then
             echo "megatron_available=true" >> "$GITHUB_OUTPUT"
-          fi
-          if [ "${{ steps.te_fl_cache.outputs.cache-hit }}" = "true" ]; then
-            echo "te_fl_available=false" >> "$GITHUB_OUTPUT"
           else
+            echo "megatron_available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$te_fl_cache_hit" != "true" ] || [ "$is_fork" = "true" ]; then
             echo "te_fl_available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "te_fl_available=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Save TE-FL wheel cache
@@ -521,10 +527,9 @@ jobs:
           path: te-fl-wheel
           key: ${{ steps.te_fl_cache_key.outputs.key }}
 
-      # Upload artifacts only on cache misses for same-run handoff when a fork
-      # PR cannot read the prepare job's cache.
+      # Upload artifacts when: cache miss OR fork PR (cannot access main repo cache)
       - name: Upload prepared Megatron artifact
-        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
+        if: needs.resolve.outputs.megatron_enabled == 'true' && (steps.megatron_cache.outputs.cache-hit != 'true' || github.event.pull_request.head.repo.fork == true)
         uses: actions/upload-artifact@v4
         with:
           name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
@@ -532,7 +537,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload prepared TE-FL artifact
-        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true'
+        if: needs.resolve.outputs.te_fl_enabled == 'true' && (steps.te_fl_cache.outputs.cache-hit != 'true' || github.event.pull_request.head.repo.fork == true)
         uses: actions/upload-artifact@v4
         with:
           name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
