@@ -14,32 +14,42 @@
 
 defaults:
   - _self_
-  - train: 0_6b_metax
+  - train: musa0_6b_tp1_pp1-reference
 
 experiment:
-  exp_name: 0_6b_metax
-  exp_dir: tests/functional_tests/benchmark/qwen3/test_results/0_6b_metax
+  exp_name: musa0_6b_tp1_pp1-reference
+  exp_dir: tests/functional_tests/benchmark/qwen3/test_results/musa0_6b_tp1_pp1-reference
   task:
     type: train
     backend: megatron
     entrypoint: flagscale/train/megatron/train_gpt.py
   runner:
-    ssh_port: null
+    backend: torchrun
+    nnodes: 1
+    nproc_per_node: 1
+    rdzv_backend: static
+    no_shared_fs: false
   shell_cmds: null
   envs:
     HYDRA_FULL_ERROR: 1
-    CUDA_VISIBLE_DEVICES: "0,1"
-    CUDA_DEVICE_MAX_CONNECTIONS: 1
-    CUBLAS_WORKSPACE_CONFIG: ":4096:8"
-    NCCL_ALGO: "Ring"
-    NVTE_APPLY_QK_LAYER_SCALING: 0
-    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    FS_PLATFORM: musa
+    MG_FL_PREFER: musa
+    TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: 1
+    # The pinned S5000 TransformerEngine build is validated in eager mode.
+    # Disable torch/TE compilation to avoid unsupported Triton lowering paths.
+    TORCHDYNAMO_DISABLE: 1
+    TORCH_COMPILE_DISABLE: 1
+    NVTE_TORCH_COMPILE: 0
     NVTE_FLASH_ATTN: 0
     NVTE_FUSED_ATTN: 0
-    CUDNN_BENCHMARK: "false"
-    CUDNN_DETERMINISTIC: "true"
+    NVTE_UNFUSED_ATTN: 1
+    ACCELERATOR_BACKEND: musa
+    MUSA_VISIBLE_DEVICES: "0"
+    MTHREADS_VISIBLE_DEVICES: all
+    MTHREADS_DRIVER_CAPABILITIES: all
   cmds:
     before_start: ''
+
 action: run
 
 hydra:

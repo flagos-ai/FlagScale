@@ -24,7 +24,8 @@ s5000:
       train:
         qwen3: ["0_6b_musa"]
       hetero_train: {}
-      benchmark: {}
+      benchmark:
+        qwen3: ["musa0_6b_tp1_pp1-reference"]
       rl: {}
     unit:
       nproc_per_node: 2

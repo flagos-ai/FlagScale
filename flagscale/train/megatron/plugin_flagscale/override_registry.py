@@ -35,7 +35,7 @@ register(
 )
 
 register(
-    target="megatron.training.utils.get_device_arch_version",
+    target="megatron.training.utils.common_utils.get_device_arch_version",
     impl="megatron.plugin_flagscale.npu_plugin.get_device_arch_version",
     vendor="npu",
 )

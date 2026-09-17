@@ -116,12 +116,26 @@ def parse_and_validate_args(extra_args_provider=None, ignore_unknown_args=False,
         load_args_from_checkpoint(args, load_arg='pretrained_checkpoint')
         load_args_from_checkpoint(args)
 
+    fs_argument = None
+    if getattr(args, "enable_hetero", args_defaults.get("enable_hetero", False)):
+        from megatron.backend_config import configure_backend_environment
+        from megatron.training.arguments_fs import FSTrainArguments
+
+        # Resolve rank-local mesh dimensions before the common argument checks.
+        configure_backend_environment(args)
+        fs_argument = FSTrainArguments(args)
+        fs_argument.pre_validate_args()
+
     if args.yaml_cfg is not None:
         from megatron.training.yaml_arguments import validate_yaml
 
         args = validate_yaml(args, args_defaults)
     else:
         validate_args(args, args_defaults)
+
+    if fs_argument is not None:
+        fs_argument.args = args
+        fs_argument.post_validate_args()
 
     # set global args, build tokenizer, and set adlr-autoresume,
     # tensorboard-writer, and timers.
@@ -457,7 +471,7 @@ def validate_args(args, defaults={}):
     update_use_dist_ckpt(args)
 
     ######### FlagScale Begin #########
-    enable_hetero = defaults.get("enable_hetero", False)
+    enable_hetero = getattr(args, "enable_hetero", defaults.get("enable_hetero", False))
     standalone_embedding_stage = defaults.get("standalone_embedding_stage", False)
     multiple_of = defaults.get("multiple_of", None)
     hidden_dim_multiplier = defaults.get("hidden_dim_multiplier", None)
@@ -1462,8 +1476,11 @@ def validate_args(args, defaults={}):
 
     # disable async_tensor_model_parallel_allreduce when
     # model parallel memory optimization is enabled
-    if (args.tensor_model_parallel_size > 1 or args.context_parallel_size > 1) \
-        and get_device_arch_version() < 10:
+    device_arch = get_device_arch_version()
+    # Apply CUDA architecture-specific checks only when an architecture is available.
+    if cur_platform.device_name() == "cuda" \
+        and (args.tensor_model_parallel_size > 1 or args.context_parallel_size > 1) \
+        and device_arch is not None and device_arch < 10:
         # CUDA_DEVICE_MAX_CONNECTIONS requirement no longer exists since the Blackwell architecture
         if args.use_torch_fsdp2 or args.use_megatron_fsdp:
             fsdp_impl = "Torch-FSDP2" if args.use_torch_fsdp2 else "Megatron-FSDP"
@@ -1493,7 +1510,9 @@ def validate_args(args, defaults={}):
     # Setting FSDP communication groups for high priority streams for Blackwell and later architectures
     # Assigning high priority to communication streams ensures that communication kernels are scheduled
     # with higher priority, minimizing the exposed communication when it is overlapped with other computation kernels.
-    if args.use_torch_fsdp2 or args.use_megatron_fsdp and get_device_arch_version() >= 10:
+    if cur_platform.device_name() == "cuda" \
+        and (args.use_torch_fsdp2 or args.use_megatron_fsdp) \
+        and device_arch is not None and device_arch >= 10:
         if 'dp_cp' not in args.high_priority_stream_groups:
             args.high_priority_stream_groups.append('dp_cp')
         if args.expert_model_parallel_size  > 1 and 'ep_dp' not in args.high_priority_stream_groups:
