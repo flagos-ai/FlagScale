@@ -6,10 +6,10 @@ generation, kinematic feedback, and batched tree verification.
 
 FlagScale provides a native, model-independent KERV control path for batched
 candidate generation, verification-tree construction, relaxed acceptance,
-dynamic threshold adjustment, and Kalman completion. Model definitions,
-weights, datasets, and the optimized KERV operators remain in their public
-upstream projects and are selected through reproducible FlagScale
-configurations.
+dynamic threshold adjustment, and Kalman completion. The KERV-specific
+optimized runtime is bundled under `flagscale/models/kerv/ops`; model
+definitions, weights, and datasets remain in their upstream projects and are
+selected through reproducible FlagScale configurations.
 
 ## Components
 
@@ -20,6 +20,7 @@ configurations.
 | Draft data generation | KERV `training/generate_drafter_data.py` | Frozen-verifier supervision |
 | Drafter training | KERV `training/train_drafter.py` | One-layer speculative drafter |
 | Inference | KERV `run_kerv_libero.py` | LIBERO rollout with KERV runtime optimization |
+| Optimized runtime | FlagScale `flagscale/models/kerv/ops` | KERV operators and model hooks |
 
 ## Installation
 
@@ -119,10 +120,20 @@ flagscale inference kerv -c examples/kerv/conf/inference.yaml
 ```
 
 The default BF16 profile keeps KERV's acceptance rule, Kalman logic, model
-precision, and action definition unchanged. It enables the 14 integrated KERV
-operators from the checked-out `runtime_opt` package, including static-tree
-packing and attention, Verify-Accept control, KV commit, QKV fusion,
-Gate-Up-SwiGLU fusion, and RoPE/KV write.
+precision, and action definition unchanged. The FlagScale entrypoint prepends
+its bundled `KERVRuntimeOptimization` package to `PYTHONPATH`, so the external
+KERV checkout consumes the exact runtime shipped with this integration rather
+than another local copy. The package exposes 18 operator interfaces, selects
+14 for the KERV profile, keeps three experimental interfaces disabled, and
+retains one compatibility interface. Fixed-layout Triton paths are used only
+for shapes that pass the A100 timing gate; the same interfaces remain
+importable without Triton.
+
+The bundled runtime also contains the model hooks used by the default profile:
+packed QKV and Gate-Up projections, in-place SwiGLU, adaptive RoPE, resident KV
+write, per-forward rotary caching, fused LogSoftmax/Top-K, and tree-mask
+construction. See [`flagscale/models/kerv/ops/README.md`](../../flagscale/models/kerv/ops/README.md)
+for the complete operator inventory and benchmark command.
 
 ## Native runtime tests
 

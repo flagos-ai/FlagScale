@@ -1,0 +1,21 @@
+{
+    "kunlunxin": {
+        "p800": {
+            "elapsed time per iteration (ms):": {
+                "values": [20302.2, 10296.9, 267.5, 268.9, 264.4, 4757.0, 284.2, 265.3, 410.4, 267.4],
+                "threshold": {
+                    "type": "upper_bound",
+                    "tolerance": 0.1
+                }
+            },
+            "throughput per GPU (TFLOP/s/GPU):": {
+                "values": [0.0, 0.1, 3.5, 3.5, 3.5, 0.2, 3.3, 3.5, 2.3, 3.5],
+                "threshold": {
+                    "type": "lower_bound",
+                    "tolerance": 0.1,
+                    "aggregation": "harmonic_mean"
+                }
+            }
+        }
+    }
+}
