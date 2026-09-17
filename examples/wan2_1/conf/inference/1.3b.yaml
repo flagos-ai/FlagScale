@@ -13,7 +13,7 @@
 # limitations under the License.
 
 engine:
-  model: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+  model: /workspace/models/Wan2.1-T2V-1.3B-Diffusers
   loader: diffusers
   pipeline:
     class: diffusers.WanPipeline
