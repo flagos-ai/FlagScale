@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Low-frequency, node-local NVIDIA GPU hardware health collector."""
+"""Low-frequency, node-local accelerator hardware health collector."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ import csv
 import json
 import logging
 import os
+import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -52,6 +54,14 @@ QUERY_FIELDS = (
 )
 
 _MISSING_VALUES = {"", "n/a", "[n/a]", "not supported", "not found", "unknown"}
+
+_HYGON_INVENTORY_FIELDS = (
+    "--showuniqueid",
+    "--showbus",
+    "--showtemp",
+    "--showmemuse",
+    "--showmemeccinfo",
+)
 
 
 def _missing(value: str) -> bool:
@@ -182,6 +192,98 @@ def parse_nvidia_smi_csv(
     return gpus
 
 
+def parse_hygon_smi(
+    inventory_output: str,
+    ras_output: str,
+    health_output: str,
+    corrected_ecc_baseline: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    """Parse Hygon ``hy-smi`` JSON plus its text health-check response."""
+
+    inventory = json.loads(inventory_output)
+    ras = json.loads(ras_output)
+    if not isinstance(inventory, dict) or not isinstance(ras, dict):
+        raise ValueError("hy-smi returned a non-object JSON response")
+
+    health_by_index: dict[int, str] = {}
+    health_pattern = re.compile(r"HCU\[(\d+)\].*?:\s*([^:\r\n]+)\s*$")
+    for line in health_output.splitlines():
+        match = health_pattern.search(line.strip())
+        if match:
+            health_by_index[int(match.group(1))] = match.group(2).strip()
+
+    baseline = corrected_ecc_baseline if corrected_ecc_baseline is not None else {}
+    gpus: list[dict[str, Any]] = []
+    for card_name, fields in sorted(
+        inventory.items(), key=lambda item: int(str(item[0]).removeprefix("card"))
+    ):
+        if not isinstance(fields, dict):
+            raise ValueError(f"hy-smi returned invalid fields for {card_name}")
+        index = int(str(card_name).removeprefix("card"))
+        uuid = str(fields.get("Unique ID") or card_name)
+        pci_bus_id = str(fields.get("PCI Bus") or "").split(" -->", maxsplit=1)[0]
+
+        corrected_ecc = 0
+        uncorrected_ecc = 0
+        card_ras = ras.get(card_name, {})
+        if isinstance(card_ras, dict):
+            for value in card_ras.values():
+                match = re.search(r"ue:\s*(\d+)\s*,\s*ce:\s*(\d+)", str(value))
+                if match:
+                    uncorrected_ecc += int(match.group(1))
+                    corrected_ecc += int(match.group(2))
+
+        previous_corrected = baseline.setdefault(uuid, corrected_ecc)
+        corrected_delta = max(0, corrected_ecc - previous_corrected)
+        health_status = health_by_index.get(index)
+        issues: list[dict[str, str]] = []
+        if uncorrected_ecc > 0:
+            issues.append({"severity": "unhealthy", "reason": "ras_uncorrected_ecc_present"})
+        if corrected_delta > 0:
+            issues.append({"severity": "warning", "reason": "new_ras_corrected_ecc"})
+        if health_status is None:
+            issues.append({"severity": "warning", "reason": "hygon_healthcheck_not_reported"})
+        elif health_status.lower() != "healthy":
+            issues.append({"severity": "unhealthy", "reason": "hygon_healthcheck_failed"})
+
+        status = "healthy"
+        if any(issue["severity"] == "unhealthy" for issue in issues):
+            status = "unhealthy"
+        elif issues:
+            status = "warning"
+
+        gpus.append(
+            {
+                "index": index,
+                "uuid": uuid,
+                "pci_bus_id": pci_bus_id,
+                "driver_version": None,
+                "status": status,
+                "issues": issues,
+                "temperature_c": _number(str(fields.get("Temperature (Sensor edge) (C)", ""))),
+                "temperature_junction_c": _number(
+                    str(fields.get("Temperature (Sensor junction) (C)", ""))
+                ),
+                "temperature_memory_c": _number(
+                    str(fields.get("Temperature (Sensor mem) (C)", ""))
+                ),
+                "utilization_percent": None,
+                "memory_utilization_percent": _number(str(fields.get("HCU memory use (%)", ""))),
+                "memory_used_mib": None,
+                "memory_total_mib": None,
+                "power_draw_w": None,
+                "power_limit_w": None,
+                "volatile_corrected_ecc": corrected_ecc,
+                "volatile_corrected_ecc_delta": corrected_delta,
+                "volatile_uncorrected_ecc": uncorrected_ecc,
+                "memory_ecc_status": fields.get("Vram memory ECC status"),
+                "vendor_health_status": health_status,
+                "unavailable_metrics": ["utilization_percent", "power_draw_w", "power_limit_w"],
+            }
+        )
+    return gpus
+
+
 def _aggregate_status(gpus: list[dict[str, Any]]) -> str:
     statuses = {str(gpu.get("status")) for gpu in gpus}
     if "unhealthy" in statuses:
@@ -241,6 +343,69 @@ class NvidiaSmiHealthSampler:
             }
 
 
+class HygonSmiHealthSampler:
+    def __init__(self, command_timeout_s: float) -> None:
+        self.command_timeout_s = command_timeout_s
+        self.corrected_ecc_baseline: dict[str, int] = {}
+
+    def _run(self, command: list[str]) -> str:
+        return subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=self.command_timeout_s,
+        ).stdout
+
+    def sample(self, run_id: str, node_rank: int) -> dict[str, Any]:
+        collected_at_unix_ns = time.time_ns()
+        try:
+            inventory_output = self._run(["hy-smi", *_HYGON_INVENTORY_FIELDS, "--json"])
+            ras_output = self._run(["hy-smi", "--showrasinfo", "all", "--json"])
+            health_output = self._run(["hy-smi", "--healthcheck"])
+            gpus = parse_hygon_smi(
+                inventory_output,
+                ras_output,
+                health_output,
+                self.corrected_ecc_baseline,
+            )
+            return {
+                "schema_version": 1,
+                "component": "gpu_hardware_health",
+                "run_id": run_id,
+                "node_rank": node_rank,
+                "hostname": socket.gethostname(),
+                "collector_pid": os.getpid(),
+                "collected_at_unix_ns": collected_at_unix_ns,
+                "source": "hy-smi_dtk",
+                "status": _aggregate_status(gpus),
+                "gpus": gpus,
+            }
+        except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("Hygon hardware health collection failed: %s", exc)
+            return {
+                "schema_version": 1,
+                "component": "gpu_hardware_health",
+                "run_id": run_id,
+                "node_rank": node_rank,
+                "hostname": socket.gethostname(),
+                "collector_pid": os.getpid(),
+                "collected_at_unix_ns": collected_at_unix_ns,
+                "source": "hy-smi_dtk",
+                "status": "unavailable",
+                "error": f"{type(exc).__name__}: {exc}",
+                "gpus": [],
+            }
+
+
+def _make_sampler(command_timeout_s: float) -> NvidiaSmiHealthSampler | HygonSmiHealthSampler:
+    if shutil.which("nvidia-smi"):
+        return NvidiaSmiHealthSampler(command_timeout_s)
+    if shutil.which("hy-smi"):
+        return HygonSmiHealthSampler(command_timeout_s)
+    return NvidiaSmiHealthSampler(command_timeout_s)
+
+
 def _write_snapshot(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -264,7 +429,7 @@ def run_collector(args: argparse.Namespace) -> int:
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, request_stop)
 
-    sampler = NvidiaSmiHealthSampler(args.command_timeout)
+    sampler = _make_sampler(args.command_timeout)
     while not stopping.is_set():
         _write_snapshot(output_file, sampler.sample(args.run_id, args.node_rank))
         stopping.wait(args.interval)
