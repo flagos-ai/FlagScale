@@ -30,6 +30,7 @@ def test_get_runner_cmd_train_strips_perf_monitor_runner_keys():
                     "perf_log_interval": 5,
                     "perf_log_dir": "/tmp/perf_monitor",
                     "perf_console_output": True,
+                    "tracing": {"enabled": True},
                     "heartbeat": {"enabled": True},
                 }
             },
@@ -50,6 +51,7 @@ def test_get_runner_cmd_train_strips_perf_monitor_runner_keys():
     assert "--perf_log_interval" not in cmd
     assert "--perf_log_dir" not in cmd
     assert "--perf_console_output" not in cmd
+    assert "--tracing" not in cmd
     assert "--heartbeat" not in cmd
     assert "--log_dir" in cmd
     assert "--rdzv_endpoint" in cmd
