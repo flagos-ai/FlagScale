@@ -18,7 +18,17 @@ from datetime import datetime
 from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
-from flagscale.runner.heartbeat.config import prepare_heartbeat_launch_config
+from flagscale.runner.diagnostics import (
+    active_run_id_cleanup_lines,
+    active_run_id_file,
+    active_run_id_setup_lines,
+    diagnostic_command_body,
+    read_active_run_id,
+)
+from flagscale.runner.heartbeat.config import (
+    HeartbeatLaunchConfig,
+    prepare_heartbeat_launch_config,
+)
 from flagscale.runner.runner_train import (
     _get_args_megatron,
     _update_config_train,
@@ -50,7 +60,29 @@ class MegatronBackend(BackendBase):
         self._prepare_perf_monitor_config()
         self.user_args = _get_args_megatron(self.config)
         self.rdzv_id = datetime.now().strftime("%Y%m%d_%H%M%S.%f")
+        self.diagnostics_run_id = self.rdzv_id
+        logging_config = self.config.train.system.logging
+        self.active_run_id_file = active_run_id_file(logging_config.pids_dir)
         self.heartbeat_config = prepare_heartbeat_launch_config(self.config, self.rdzv_id)
+        action = str(self.config.get("action", "run")).lower()
+        if action == "stop" and self.heartbeat_config.enabled:
+            active_run_id = read_active_run_id(self.active_run_id_file)
+            if active_run_id is not None:
+                self.diagnostics_run_id = active_run_id
+                self.heartbeat_config = prepare_heartbeat_launch_config(
+                    self.config, self.diagnostics_run_id
+                )
+            else:
+                logger.warning(
+                    "Heartbeat stop cannot locate a valid active diagnostics run id at %s; "
+                    "training workers will still be stopped",
+                    self.active_run_id_file,
+                )
+                self.heartbeat_config = HeartbeatLaunchConfig(enabled=False)
+        self.publish_active_run_id = self.heartbeat_config.enabled and action in {
+            "run",
+            "test",
+        }
         self.user_envs = self.config.experiment.get("envs", {})
         self.user_script = self.config.experiment.task.entrypoint
         self.resources = parse_hostfile(self.config.experiment.runner.get("hostfile", None))
@@ -128,6 +160,13 @@ class MegatronBackend(BackendBase):
                 f.write(f"mkdir -p {system_config.straggler_log_dir}\n")
             if system_config.get("perf_log_dir", None):
                 f.write(f"mkdir -p {system_config.perf_log_dir}\n")
+            if self.publish_active_run_id:
+                for line in active_run_id_setup_lines(
+                    self.active_run_id_file,
+                    self.diagnostics_run_id,
+                    node_rank,
+                ):
+                    f.write(f"{line}\n")
             f.write("\n")
             f.write(f"cd {pkg_dir}\n")
             f.write("\n")
@@ -161,7 +200,12 @@ class MegatronBackend(BackendBase):
                 )
             f.write("\n")
 
-            command_body = self.heartbeat_config.training_command_body(node_rank)
+            command_body = diagnostic_command_body(
+                node_rank,
+                self.heartbeat_config,
+                active_run_id_path=(self.active_run_id_file if self.publish_active_run_id else ""),
+                active_run_id=(self.diagnostics_run_id if self.publish_active_run_id else ""),
+            )
             if background:
                 f.write(
                     f'nohup bash -c "{command_body}" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
@@ -197,6 +241,8 @@ class MegatronBackend(BackendBase):
             after_stop = ""
         with open(host_stop_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
+            for line in self.heartbeat_config.stop_shell_lines(node_rank):
+                f.write(f"{line}\n")
             f.write("if [ -f " + host_pid_file + " ]; then\n")
             f.write("    pid=$(cat " + host_pid_file + ")\n")
             f.write("    pkill -P $pid\n")
@@ -204,8 +250,12 @@ class MegatronBackend(BackendBase):
             # TODO: This is a temporary fix. We need to find a better way to stop the job.
             f.write("    pkill -f 'torchrun'\n")
             f.write("fi\n")
-            for line in self.heartbeat_config.stop_shell_lines(node_rank):
-                f.write(f"{line}\n")
+            if node_rank == 0 and self.diagnostics_run_id != self.rdzv_id:
+                for line in active_run_id_cleanup_lines(
+                    self.active_run_id_file,
+                    self.diagnostics_run_id,
+                ):
+                    f.write(f"{line}\n")
             f.write(f"{after_stop}\n")
             f.flush()
             os.fsync(f.fileno())
