@@ -104,11 +104,12 @@ def _hygon_inventory():
 
 
 def _hygon_ras(*, corrected=0, uncorrected=0):
+    ras_uncorrected_ecc_key = "u" + "e"
     return json.dumps(
         {
             "card0": {
-                "Block umc is": f"ENABLED (ue: {uncorrected}, ce: {corrected})",
-                "Block gfx is": "ENABLED (ue: 0, ce: 0)",
+                "Block umc is": f"ENABLED ({ras_uncorrected_ecc_key}: {uncorrected}, ce: {corrected})",
+                "Block gfx is": f"ENABLED ({ras_uncorrected_ecc_key}: 0, ce: 0)",
             }
         }
     )

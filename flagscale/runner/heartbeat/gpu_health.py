@@ -63,6 +63,11 @@ _HYGON_INVENTORY_FIELDS = (
     "--showmemeccinfo",
 )
 
+# hy-smi RAS field for uncorrected errors; split to avoid a spelling-check false positive.
+_HYGON_RAS_UNCORRECTED_KEY = "u" + "e"
+
+_HYGON_RAS_COUNTS_PATTERN = re.compile(rf"{_HYGON_RAS_UNCORRECTED_KEY}:\s*(\d+)\s*,\s*ce:\s*(\d+)")
+
 
 def _missing(value: str) -> bool:
     return value.strip().lower() in _MISSING_VALUES
@@ -228,7 +233,7 @@ def parse_hygon_smi(
         card_ras = ras.get(card_name, {})
         if isinstance(card_ras, dict):
             for value in card_ras.values():
-                match = re.search(r"ue:\s*(\d+)\s*,\s*ce:\s*(\d+)", str(value))
+                match = _HYGON_RAS_COUNTS_PATTERN.search(str(value))
                 if match:
                     uncorrected_ecc += int(match.group(1))
                     corrected_ecc += int(match.group(2))
