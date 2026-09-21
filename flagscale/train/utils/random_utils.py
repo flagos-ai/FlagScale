@@ -29,7 +29,6 @@ from flagscale.train.datasets.utils import flatten_dict, unflatten_dict
 
 cur_platform = get_platform()
 
-
 def serialize_python_rng_state() -> dict[str, torch.Tensor]:
     """
     Returns the rng state for `random` in the form of a flat dict[str, torch.Tensor] to be saved using
