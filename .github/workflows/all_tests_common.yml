@@ -21,6 +21,26 @@ on:
         required: true
         type: string
         description: Platform name (e.g., cuda, default)
+      megatron_cache_key:
+        required: false
+        type: string
+        default: ''
+        description: Megatron-LM-FL cache key from prepare_dependencies
+      megatron_artifact_available:
+        required: false
+        type: string
+        default: 'false'
+        description: Whether prepare_dependencies uploaded a same-run Megatron artifact
+      te_fl_cache_key:
+        required: false
+        type: string
+        default: ''
+        description: TE-FL cache key from prepare_dependencies
+      te_fl_artifact_available:
+        required: false
+        type: string
+        default: 'false'
+        description: Whether prepare_dependencies uploaded a same-run TE-FL artifact
       ci_train_image:
         required: false
         type: string
@@ -92,6 +112,13 @@ jobs:
       container_volumes: ${{ steps.config.outputs.container_volumes }}
       container_options: ${{ steps.config.outputs.container_options }}
       device_types: ${{ steps.config.outputs.device_types }}
+      megatron_lm_fl_enabled: ${{ steps.config.outputs.megatron_lm_fl_enabled }}
+      te_fl_enabled: ${{ steps.config.outputs.te_fl_enabled }}
+      megatron_runtime_environment: ${{ steps.config.outputs.megatron_runtime_environment }}
+      te_fl_runtime_environment: ${{ steps.config.outputs.te_fl_runtime_environment }}
+      te_fl_install_pip_args: ${{ steps.config.outputs.te_fl_install_pip_args }}
+      te_fl_runtime_pip_packages: ${{ steps.config.outputs.te_fl_runtime_pip_packages }}
+      setup_script: ${{ steps.config.outputs.setup_script }}
       train_test_matrix: ${{ steps.config.outputs.train_test_matrix }}
       hetero_train_test_matrix: ${{ steps.config.outputs.hetero_train_test_matrix }}
       inference_test_matrix: ${{ steps.config.outputs.inference_test_matrix }}
@@ -273,6 +300,16 @@ jobs:
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
+      megatron_cache_key: ${{ inputs.megatron_cache_key }}
+      megatron_artifact_available: ${{ inputs.megatron_artifact_available }}
+      te_fl_cache_key: ${{ inputs.te_fl_cache_key }}
+      te_fl_artifact_available: ${{ inputs.te_fl_artifact_available }}
+      megatron_lm_fl_enabled: ${{ needs.checkout_and_config.outputs.megatron_lm_fl_enabled }}
+      te_fl_enabled: ${{ needs.checkout_and_config.outputs.te_fl_enabled }}
+      megatron_runtime_environment: ${{ needs.checkout_and_config.outputs.megatron_runtime_environment }}
+      te_fl_runtime_environment: ${{ needs.checkout_and_config.outputs.te_fl_runtime_environment }}
+      te_fl_install_pip_args: ${{ needs.checkout_and_config.outputs.te_fl_install_pip_args }}
+      te_fl_runtime_pip_packages: ${{ needs.checkout_and_config.outputs.te_fl_runtime_pip_packages }}
 
   functional_tests_train:
     needs:
@@ -291,6 +328,16 @@ jobs:
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
+      megatron_cache_key: ${{ inputs.megatron_cache_key }}
+      megatron_artifact_available: ${{ inputs.megatron_artifact_available }}
+      te_fl_cache_key: ${{ inputs.te_fl_cache_key }}
+      te_fl_artifact_available: ${{ inputs.te_fl_artifact_available }}
+      megatron_lm_fl_enabled: ${{ needs.checkout_and_config.outputs.megatron_lm_fl_enabled }}
+      te_fl_enabled: ${{ needs.checkout_and_config.outputs.te_fl_enabled }}
+      megatron_runtime_environment: ${{ needs.checkout_and_config.outputs.megatron_runtime_environment }}
+      te_fl_runtime_environment: ${{ needs.checkout_and_config.outputs.te_fl_runtime_environment }}
+      te_fl_install_pip_args: ${{ needs.checkout_and_config.outputs.te_fl_install_pip_args }}
+      te_fl_runtime_pip_packages: ${{ needs.checkout_and_config.outputs.te_fl_runtime_pip_packages }}
 
   functional_tests_hetero_train:
     needs:
@@ -309,6 +356,16 @@ jobs:
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
+      megatron_cache_key: ${{ inputs.megatron_cache_key }}
+      megatron_artifact_available: ${{ inputs.megatron_artifact_available }}
+      te_fl_cache_key: ${{ inputs.te_fl_cache_key }}
+      te_fl_artifact_available: ${{ inputs.te_fl_artifact_available }}
+      megatron_lm_fl_enabled: ${{ needs.checkout_and_config.outputs.megatron_lm_fl_enabled }}
+      te_fl_enabled: ${{ needs.checkout_and_config.outputs.te_fl_enabled }}
+      megatron_runtime_environment: ${{ needs.checkout_and_config.outputs.megatron_runtime_environment }}
+      te_fl_runtime_environment: ${{ needs.checkout_and_config.outputs.te_fl_runtime_environment }}
+      te_fl_install_pip_args: ${{ needs.checkout_and_config.outputs.te_fl_install_pip_args }}
+      te_fl_runtime_pip_packages: ${{ needs.checkout_and_config.outputs.te_fl_runtime_pip_packages }}
 
   functional_tests_inference:
     needs:
@@ -385,6 +442,16 @@ jobs:
       pkg_mgr: ${{ needs.checkout_and_config.outputs.pkg_mgr_train }}
       env_name: ${{ needs.checkout_and_config.outputs.env_name_train }}
       env_path: ${{ needs.checkout_and_config.outputs.env_path_train }}
+      megatron_cache_key: ${{ inputs.megatron_cache_key }}
+      megatron_artifact_available: ${{ inputs.megatron_artifact_available }}
+      te_fl_cache_key: ${{ inputs.te_fl_cache_key }}
+      te_fl_artifact_available: ${{ inputs.te_fl_artifact_available }}
+      megatron_lm_fl_enabled: ${{ needs.checkout_and_config.outputs.megatron_lm_fl_enabled }}
+      te_fl_enabled: ${{ needs.checkout_and_config.outputs.te_fl_enabled }}
+      megatron_runtime_environment: ${{ needs.checkout_and_config.outputs.megatron_runtime_environment }}
+      te_fl_runtime_environment: ${{ needs.checkout_and_config.outputs.te_fl_runtime_environment }}
+      te_fl_install_pip_args: ${{ needs.checkout_and_config.outputs.te_fl_install_pip_args }}
+      te_fl_runtime_pip_packages: ${{ needs.checkout_and_config.outputs.te_fl_runtime_pip_packages }}
 
   all_tests_complete:
     defaults:

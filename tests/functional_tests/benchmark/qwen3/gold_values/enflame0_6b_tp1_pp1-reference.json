@@ -1,0 +1,21 @@
+{
+    "enflame": {
+        "s60": {
+            "elapsed time per iteration (ms):": {
+                "values": [1511.9, 1181.0, 840.1, 841.1, 836.2, 835.3, 837.9, 839.0, 836.1, 839.4],
+                "threshold": {
+                    "type": "upper_bound",
+                    "tolerance": 0.1
+                }
+            },
+            "throughput per GPU (TFLOP/s/GPU):": {
+                "values": [0.6, 0.8, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1],
+                "threshold": {
+                    "type": "lower_bound",
+                    "tolerance": 0.1,
+                    "aggregation": "harmonic_mean"
+                }
+            }
+        }
+    }
+}

@@ -101,7 +101,7 @@ def main():
     device = sys.argv[5] if len(sys.argv) > 5 else None
 
     # Read log file
-    with open(log_file, "r") as f:
+    with open(log_file, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
     # Determine metric keys from gold values file

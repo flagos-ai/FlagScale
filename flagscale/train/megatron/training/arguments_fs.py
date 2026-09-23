@@ -96,7 +96,16 @@ class FSTrainArguments:
 
     def pre_validate_args(self):
         """Pre-validate the arguments before Megatron function `validate_args`."""
-        if self._rank_mapper is None:
+        # NOTE(metax): RankMapper's build_rank_mapping() performs a world-size
+        # all_gather_object very early (before model parallel groups exist).
+        # On backends where world-spanning collectives are unreliable (e.g.
+        # MetaX MCCL), this hangs even for non-hetero runs that never consume
+        # the mapper (no external readers of `.rank_mapper`). Skip building it
+        # unless hetero is actually requested.
+        hetero_requested = getattr(self.args, "hetero_process_meshes", None) is not None or getattr(
+            self.args, "enable_hetero", False
+        )
+        if self._rank_mapper is None and hetero_requested:
             self._build_rank_mapper()
 
         if self.args.hetero_process_meshes is not None:
