@@ -45,3 +45,19 @@ register(
     impl="megatron.plugin_flagscale.npu_plugin._compile_dependencies",
     vendor="npu",
 )
+
+
+# =============================================================================
+# Training - profiler lifecycle
+# =============================================================================
+register(
+    target="megatron.training.training.create_pytorch_profiler",
+    impl="megatron.plugin_flagscale.npu_plugin.create_pytorch_profiler",
+    vendor="npu",
+)
+
+register(
+    target="megatron.training.training.stop_pytorch_profiler",
+    impl="megatron.plugin_flagscale.npu_plugin.stop_pytorch_profiler",
+    vendor="npu",
+)
