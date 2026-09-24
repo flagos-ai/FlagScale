@@ -33,6 +33,24 @@ from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
 
 
+def _get_flagcx_backend_config():
+    # Importing flagcx registers the backend and its supported device types.
+    import flagcx  # noqa: F401
+
+    devices = torch.distributed.Backend.backend_capability.get("flagcx", ())
+    accelerator_devices = [device for device in devices if device != "cpu"]
+
+    if not accelerator_devices:
+        raise RuntimeError(
+            "FlagCX was imported but did not register an accelerator device. "
+            "Please install a FlagCX wheel matching the local accelerator."
+        )
+
+    return ",".join(
+        ["cpu:gloo"] + [f"{device}:flagcx" for device in accelerator_devices]
+    )
+
+
 class FSTrainArguments:
     """Extend the Megatron arguments with FlagScale specific arguments."""
 
@@ -80,7 +98,7 @@ class FSTrainArguments:
                 "timeout": timedelta(minutes=args.distributed_timeout_minutes),
             }
             if args.distributed_backend == "flagcx":
-                init_process_group_kwargs["backend"] = "cpu:gloo,cuda:flagcx,txda:flagcx"
+                init_process_group_kwargs["backend"] = _get_flagcx_backend_config()
             # for communication based cpu
             if args.enable_hetero and args.hetero_use_cpu_communication:
                 # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
