@@ -60,11 +60,13 @@ def test_common_image_build_workflow_is_platform_agnostic():
     root = Path(__file__).parents[2]
     workflow = (root / ".github/workflows/build_image_common.yml").read_text().lower()
 
-    for platform in ("cuda", "musa", "ascend", "hygon", "metax", "kunlunxin"):
+    for platform in ("cuda", "musa", "ascend", "hygon", "metax", "kunlunxin", "ppu"):
         assert platform not in workflow
 
 
-@pytest.mark.parametrize("platform", ["cuda", "musa", "ascend", "hygon", "metax", "kunlunxin"])
+@pytest.mark.parametrize(
+    "platform", ["cuda", "musa", "ascend", "hygon", "metax", "kunlunxin", "ppu"]
+)
 def test_platform_source_refs_use_catalog(platform):
     root = Path(__file__).parents[2]
     catalog = yaml.safe_load((root / ".github/configs/image_sources.yml").read_text())["sources"]

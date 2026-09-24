@@ -1,0 +1,37 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-dev/flagcx:manual-20260827-ppu-dev
+FROM ${BASE_IMAGE} AS dev
+ARG BASE_IMAGE
+ARG FLAGSCALE_MEGATRON_REF
+ARG FLAGSCALE_TE_REF
+ARG FLAGSCALE_REVISION=unknown
+ARG FLAGSCALE_HOME=/opt/flagscale
+LABEL org.opencontainers.image.base.name=${BASE_IMAGE} \
+      org.opencontainers.image.revision=${FLAGSCALE_REVISION} \
+      io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF} \
+      io.flagscale.transformer-engine-fl.revision=${FLAGSCALE_TE_REF} \
+      io.flagscale.ppu.te-backend=reference
+USER root
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF} \
+    FLAGSCALE_TE_REF=${FLAGSCALE_TE_REF} \
+    PATH="/usr/local/PPU_SDK/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/PPU_SDK/CUDA_SDK/lib64:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
+    TE_FL_SKIP_CUDA=1 TE_FL_PREFER=reference NVTE_FRAMEWORK=pytorch \
+    NVTE_FLASH_ATTN=0 NVTE_FUSED_ATTN=0 NVTE_UNFUSED_ATTN=1 \
+    NVTE_WITH_NCCL_EP=0 FLAGSCALE_TEST_DIST_BACKEND=nccl \
+    FLAGSCALE_TEST_TORCH_DEVICE_TYPE=cuda
+COPY tools/install/ppu/env.sh /etc/profile.d/flagscale-env.sh
+WORKDIR /workspace
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+RUN chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/ppu/*.sh && \
+    source /etc/profile.d/flagscale-env.sh && \
+    /workspace/tools/install/install.sh --platform ppu --task train \
+        --pkg-mgr pip --no-system --no-dev --force-build && \
+    rm -rf /workspace/tools /workspace/requirements
+CMD ["/bin/bash"]

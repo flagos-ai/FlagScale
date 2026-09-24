@@ -1,0 +1,20 @@
+# Vendor torch, PCCL, PPU SDK and driver compatibility belong to BASE_IMAGE.
+# Never add torch/torch_cpu/NVIDIA Apex/CUDA FlashAttention here.
+-r base.txt
+setuptools==80.9.0
+wheel==0.45.1
+pybind11>=3.0.1
+packaging>=24.2
+pyyaml>=6.0.2
+sentencepiece>=0.1.99
+tiktoken>=0.12.0
+einops>=0.8.1
+tensorboard>=2.19.0
+psutil>=5.9.8
+nvdlfw-inspect==0.2.2
+coverage==7.6.10
+pytest==8.3.5
+pytest-mock==3.14.0
+megatron-energon[av_decode]~=7.0
+# Preserve compatibility with the vendor image's aliyun-python-sdk-core.
+jmespath>=0.10.0,<1.0.0

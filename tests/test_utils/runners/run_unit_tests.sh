@@ -130,6 +130,10 @@ omit = */_remote_module_non_scriptable
 [report]
 ignore_errors = true
 EOF
+        elif [ "$PLATFORM" = "ppu" ]; then
+            cat >> "$COVERAGERC" <<EOF
+omit = */_remote_module_non_scriptable
+EOF
         fi
     fi
 
