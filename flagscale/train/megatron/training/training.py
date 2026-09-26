@@ -310,8 +310,10 @@ from flagscale.train.perf_monitor.hooks import (
 from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
 
-# Load FlagScale training overrides before decorated functions are called.
-import megatron.plugin_flagscale  # noqa: F401
+# Register FlagScale training overrides before decorated functions are called.
+from megatron.plugin_flagscale import register_overrides
+
+register_overrides()
 
 _fs_straggler_detector = None
 

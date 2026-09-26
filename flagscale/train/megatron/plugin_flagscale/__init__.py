@@ -12,6 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Load the centralized override registry so that all lazy mappings are
-# available before any @overridable function is called.
-import megatron.plugin_flagscale.override_registry  # noqa: F401
+from megatron.plugin_flagscale.override_registry import register_all_overrides
+
+
+_overrides_registered = False
+
+
+def register_overrides():
+    """Register FlagScale overrides once for the current Python process."""
+    global _overrides_registered
+
+    if _overrides_registered:
+        return
+
+    register_all_overrides()
+    _overrides_registered = True
