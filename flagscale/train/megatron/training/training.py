@@ -1431,7 +1431,7 @@ def pretrain(
 
     global _LEGACY_TRAIN_START_TIME
     ########## FlagScale Begin ##########
-    if "cpu:gloo" == torch.distributed.get_backend():
+    if torch.distributed.get_backend() == "cpu:gloo":
         start_time_tensor = torch.tensor([_LEGACY_TRAIN_START_TIME], dtype=torch.double, device='cpu')
     else:
         start_time_tensor = torch.tensor([_LEGACY_TRAIN_START_TIME], dtype=torch.double, device=cur_platform.device_name())
@@ -1814,7 +1814,7 @@ def pretrain(
                     write_to_tensorboard=not cfg_container.validation.skip_train,
                     non_loss_data_func=non_loss_data_func
                 )
-        ########## FlagScale End ##########
+    ########## FlagScale End ##########
 
     wandb_writer = get_wandb_writer()
     if wandb_writer:
@@ -2377,7 +2377,7 @@ def setup_model_and_optimizer(
             config, config_overrides = para_ctx.get_optimizer_config()
         ########## FlagScale End ##########
 
-        if config is None:  # FlagScale Modify
+        if para_ctx is None:  # FlagScale Modify
             config, config_overrides = get_megatron_optimizer_config(args)
         config.timers = timers
         if getattr(args, "use_mup", False):
@@ -2749,7 +2749,7 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
         log_max_attention_logit = 0
         if args.qk_clip or args.log_max_attention_logit:
             log_max_attention_logit = clip_qk(model, log_max_only=not args.qk_clip)
-    
+
         timers('optimizer').stop()
 
     # Checkpoint params with parameter names.
@@ -3329,11 +3329,11 @@ def save_checkpoint_and_time(
         train_data_iterator=train_data_iterator,
         preprocess_common_state_dict_fn=preprocess_common_state_dict,
     )
-
+    
     # Stop timer and compute time elapsed to save checkpoint. Stop timer before timers.log() call as it resets the timer.
     timers(timer_key).stop(barrier=True)
     save_checkpoint_duration = timers(timer_key).elapsed(reset=False)
-
+    
     if should_report_memory:
         # Track memory after checkpoint save.
         report_memory(f"(after save_checkpoint for iteration {iteration})")
@@ -3763,11 +3763,11 @@ def train(
         _run_gpu_sniff_test('before training')
 
     report_memory_flag = True
-    perf_callback = initialize_perf_monitor(args)  # FlagScale Modify
     pre_hook_enabled = False
     should_exit = False
     exit_code = 0
     is_first_iteration = True
+    perf_callback = initialize_perf_monitor(args)  # FlagScale Modify
 
     if args.manual_gc:
         # Disable the default garbage collector and perform the collection manually.
@@ -3936,7 +3936,7 @@ def train(
     # Run training iterations till done.
     buffered_rollouts = None
     while iteration < args.train_iters:
-        if (args.profile
+        if (args.profile 
             and (len(args.profile_ranks) == 0 or
                  torch.distributed.get_rank() in args.profile_ranks)):
             # Enable NVTX range when profiling starts and nvtx_ranges is set.
