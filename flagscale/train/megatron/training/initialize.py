@@ -39,6 +39,7 @@ from megatron.training.utils import is_rank0, print_rank_0, warn_rank_0
 from megatron.training.global_vars import set_global_writers
 from megatron.backend_config import configure_backend_environment
 from megatron.training.arguments_fs import FSTrainArguments
+from megatron.training.distributed_backends import resolve_distributed_backend
 from megatron.training.global_vars import set_spiky_loss_detector
 from megatron.plugin.hetero.parallel_context import set_parallel_context
 from megatron.plugin.decorators import overridable
@@ -346,7 +347,7 @@ def _initialize_distributed(get_embedding_ranks, get_position_embedding_ranks, s
 
         # Call the init process
         init_process_group_kwargs = {
-            'backend': args.distributed_backend,
+            'backend': resolve_distributed_backend(args.distributed_backend),
             'store': store,
             'world_size': args.world_size,
             'rank': args.rank,

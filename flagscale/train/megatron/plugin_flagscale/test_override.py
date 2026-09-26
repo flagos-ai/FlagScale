@@ -34,6 +34,7 @@ MEGATRON_LM_FL_ROOT = os.path.abspath(
 if MEGATRON_LM_FL_ROOT not in sys.path:
     sys.path.insert(0, MEGATRON_LM_FL_ROOT)
 
+import megatron.plugin_flagscale as flagscale_plugin
 from megatron.plugin.decorators import (
     register,
     register_override_method,
@@ -52,6 +53,30 @@ def _clear_registry():
     _plugin_impl_cache.clear()
     _original_impl_cache.clear()
     _lazy_registry.clear()
+
+
+class TestFlagScaleOverrideRegistration(unittest.TestCase):
+    """Test the explicit FlagScale override registration entry point."""
+
+    def setUp(self):
+        _clear_registry()
+        flagscale_plugin._overrides_registered = False
+
+    def tearDown(self):
+        _clear_registry()
+        flagscale_plugin._overrides_registered = False
+
+    def test_register_overrides_installs_builtin_mapping(self):
+        flagscale_plugin.register_overrides()
+
+        self.assertIn("dist_signal_handler.get_device", _lazy_registry)
+
+    def test_register_overrides_is_idempotent(self):
+        with patch.object(flagscale_plugin, "register_all_overrides") as register_all:
+            flagscale_plugin.register_overrides()
+            flagscale_plugin.register_overrides()
+
+        register_all.assert_called_once_with()
 
 
 class TestGetDeviceOverride(unittest.TestCase):
