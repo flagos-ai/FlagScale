@@ -1,0 +1,104 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+hardware_name: ppu
+display_name: "T-Head PPU training"
+runner_labels: [flagcicd-810e]
+# Validated PPU image: manual-20260922-ppu-810e-dev.
+# Build candidates through the shared build_image.yml workflow.
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20260922-ppu-810e-dev
+pkg_mgr: pip
+env_path: ""
+env_names:
+  train: ""
+
+setup_script: .github/scripts/set_env_ppu.sh
+test_matrix:
+  unit:
+    nproc_per_node: 2
+
+dependencies:
+  megatron_lm_fl:
+    enabled: true
+    repository: flagos-ai/Megatron-LM-FL
+    ref: main
+    runtime:
+      install_mode: pythonpath
+      environment: {}
+  te_fl:
+    enabled: true
+    repository: flagos-ai/TransformerEngine-FL
+    ref: main
+    build_mode: python
+    build_environment:
+      TE_FL_SKIP_CUDA: "1"
+      NVTE_WITH_NCCL_EP: "0"
+    runtime:
+      environment:
+        TE_FL_SKIP_CUDA: "1"
+        # PPU currently validates the reference implementation only.
+        TE_FL_PREFER: reference
+        NVTE_FLASH_ATTN: "0"
+        NVTE_FUSED_ATTN: "0"
+        NVTE_UNFUSED_ATTN: "1"
+      install_pip_args: []
+      pip_packages: ["megatron-energon[av_decode]~=7.0", "jmespath>=0.10.0,<1.0.0"]
+
+image_build:
+  enabled: true
+  registry: harbor.baai.ac.cn
+  target: dev
+  network: default
+  max_parallel: 1
+  runtime_device_count: '16'
+  runtime_smoke_nproc: '2'
+  registry_login: false
+  runner_labels: [flagcicd-810e]
+  validation_script: tools/install/ppu/validate_image_build.sh
+  tasks:
+    train:
+      dockerfile: docker/ppu/Dockerfile.train
+      image: flagos-dev/flagscale-train
+      base_image: harbor.baai.ac.cn/flagos-dev/flagcx:manual-20260827-ppu-dev
+      test_roles: [train]
+      source_refs:
+        FLAGSCALE_MEGATRON_REF: megatron_lm_fl
+        FLAGSCALE_TE_REF: transformer_engine_fl
+
+# Provision these host directories before running acceptance.
+# Their contents are not inferred from the FlagCX base image.
+container_volumes:
+  - /home/gitlab-runner/baai_datasets:/home/gitlab-runner/data:ro
+  - /home/gitlab-runner/baai_tokenizers:/home/gitlab-runner/tokenizers:ro
+# Device layout from flagos-ai/FlagCX de5e09d62008c659c6e43d25225fc7ff207f89cd.
+# No --network=host here: GitHub container jobs supply their own network.
+container_options: >-
+  --shm-size=100g
+  --ulimit=memlock=-1
+  --ulimit=stack=67108864
+  --device=/dev/alixpu
+  --device=/dev/alixpu_ctl
+  --device=/dev/alixpu_ppu0
+  --device=/dev/alixpu_ppu1
+  --device=/dev/alixpu_ppu2
+  --device=/dev/alixpu_ppu3
+  --device=/dev/alixpu_ppu4
+  --device=/dev/alixpu_ppu5
+  --device=/dev/alixpu_ppu6
+  --device=/dev/alixpu_ppu7
+  --device=/dev/alixpu_ppu8
+  --device=/dev/alixpu_ppu9
+  --device=/dev/alixpu_ppu10
+  --device=/dev/alixpu_ppu11
+  --device=/dev/alixpu_ppu12
+  --device=/dev/alixpu_ppu13
+  --device=/dev/alixpu_ppu14
+  --device=/dev/alixpu_ppu15
+  --device=/dev/infiniband/rdma_cm
+  --device=/dev/infiniband/uverbs0
+  --device=/dev/infiniband/uverbs1
+  --device=/dev/infiniband/uverbs2
+  --device=/dev/infiniband/uverbs3
+  --device=/dev/infiniband/fic2_soe_ucmd0
+  --device=/dev/infiniband/fic2_soe_ucmd1
+  --device=/dev/infiniband/fic2_soe_ucmd2
+  --device=/dev/infiniband/fic2_soe_ucmd3

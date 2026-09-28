@@ -1,0 +1,35 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+defaults:
+  - _self_
+  - train: 0_6b_ppu
+experiment:
+  exp_name: 0_6b_ppu
+  exp_dir: tests/functional_tests/train/qwen3/test_results/0_6b_ppu
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_gpt.py
+  runner:
+    backend: torchrun
+    nnodes: 1
+    nproc_per_node: 2
+    rdzv_backend: static
+    no_shared_fs: false
+    ssh_port: null
+  shell_cmds: null
+  envs:
+    HYDRA_FULL_ERROR: 1
+    CUDA_VISIBLE_DEVICES: "0,1"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    NCCL_ALGO: Ring
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: 0
+    NVTE_FLASH_ATTN: 0
+    NVTE_FUSED_ATTN: 0
+    NVTE_UNFUSED_ATTN: 1
+  cmds:
+    before_start: ''
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

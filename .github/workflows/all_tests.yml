@@ -49,12 +49,33 @@ on:
           - metax
           - musa
           - kunlunxin
+          - ppu
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
   cancel-in-progress: true
 
 jobs:
+  # PPU Platform
+  ppu_prepare:
+    name: PPU / prepare-deps
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ppu'
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: ppu
+
+  ppu_tests:
+    name: PPU / tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ppu'
+    needs: ppu_prepare
+    uses: ./.github/workflows/all_tests_common.yml
+    with:
+      platform: ppu
+      megatron_cache_key: ${{ needs.ppu_prepare.outputs.megatron_cache_key }}
+      megatron_artifact_available: ${{ needs.ppu_prepare.outputs.megatron_artifact_available }}
+      te_fl_cache_key: ${{ needs.ppu_prepare.outputs.te_fl_cache_key }}
+      te_fl_artifact_available: ${{ needs.ppu_prepare.outputs.te_fl_artifact_available }}
+
   # CUDA Platform
   cuda_prepare:
     name: CUDA / prepare-deps
@@ -205,6 +226,7 @@ jobs:
       - metax_prepare
       - musa_prepare
       - kunlunxin_prepare
+      - ppu_prepare
       - cuda_tests
       - ascend_tests
       - enflame_tests
@@ -212,6 +234,7 @@ jobs:
       - metax_tests
       - musa_tests
       - kunlunxin_tests
+      - ppu_tests
     runs-on: ubuntu-latest
     if: always()
     steps:

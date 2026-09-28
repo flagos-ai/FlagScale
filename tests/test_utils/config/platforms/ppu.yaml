@@ -1,0 +1,20 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+device_types: [ppu]
+ppu:
+  name: ppu
+  tests:
+    functional:
+      train:
+        qwen3: [0_6b_ppu]
+      benchmark:
+        qwen3: [ppu0_6b_tp1_pp1-reference]
+    unit:
+      nproc_per_node: 2
+      include: "*"
+      exclude:
+        # VLA tests require a separate multimodal dependency stack that is not
+        # part of the PPU Qwen3 training image.
+        - tests/unit_tests/models/vla
+        # This test builds a logical mesh larger than the two-rank PPU CI job.
+        - tests/unit_tests/test_parallel_context.py::test_parallel_config

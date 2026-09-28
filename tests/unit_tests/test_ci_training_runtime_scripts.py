@@ -400,7 +400,7 @@ def test_training_setup_exports_and_runners_use_ci_python_bin():
 
 
 def test_platform_setup_scripts_only_activate_and_validate_runtime():
-    for platform in ("ascend", "cuda", "enflame", "hygon", "kunlunxin", "metax", "musa"):
+    for platform in ("ascend", "cuda", "enflame", "hygon", "kunlunxin", "metax", "musa", "ppu"):
         script = (ROOT / f".github/scripts/set_env_{platform}.sh").read_text()
 
         assert "ci_activate_python_environment" in script
