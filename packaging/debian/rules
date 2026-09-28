@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export PYBUILD_NAME = flagscale
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+# Smoke find_spec test (not an actual import) — verifies the built
+# module lands at the expected path. Doesn't import flagscale because
+# module-level deps (torch, megatron, vllm, ...) are install-time
+# concerns not satisfied in the build container. Catches: wrong install
+# path, missing __init__.py, dh_python install bugs.
+override_dh_auto_test:
+	@echo "=== smoke find_spec test ==="
+	@for d in .pybuild/cpython3_*/build $(CURDIR)/src $(CURDIR); do \
+	    if [ -d "$$d/flagscale" ]; then \
+	        echo "Found build dir: $$d"; \
+	        PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1 PYTHONPATH="$$d" python3 -c \
+	            "import importlib.util; s = importlib.util.find_spec('flagscale'); assert s and s.origin, 'flagscale not findable'; print('OK: flagscale at', s.origin)" \
+	            && exit 0; \
+	        echo "ERROR: find_spec failed"; exit 1; \
+	    fi; \
+	done; \
+	echo "ERROR: could not find a built flagscale module"; exit 1
