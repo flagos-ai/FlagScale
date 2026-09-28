@@ -29,6 +29,7 @@ except:
     )
 from megatron.plugin.hetero.parallel_context import RankMapper
 from megatron.plugin.platform import get_platform
+from megatron.training.distributed_backends import resolve_distributed_backend
 
 cur_platform = get_platform()
 
@@ -74,13 +75,11 @@ class FSTrainArguments:
 
             # Call the init process
             init_process_group_kwargs = {
-                "backend": args.distributed_backend,
+                "backend": resolve_distributed_backend(args.distributed_backend),
                 "world_size": args.world_size,
                 "rank": args.rank,
                 "timeout": timedelta(minutes=args.distributed_timeout_minutes),
             }
-            if args.distributed_backend == "flagcx":
-                init_process_group_kwargs["backend"] = "cpu:gloo,cuda:flagcx,txda:flagcx"
             # for communication based cpu
             if args.enable_hetero and args.hetero_use_cpu_communication:
                 # if not all(device_type == args.hetero_device_types[0] for device_type in args.hetero_device_types):
