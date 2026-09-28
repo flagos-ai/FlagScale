@@ -148,9 +148,11 @@ def _get_runner_cmd_train(
         del runner_args["perf_max_log_files"]
     if "perf_model_type" in runner_args:
         del runner_args["perf_model_type"]
-    # Heartbeat is consumed by FlagScale and is not a torchrun option.
+    # Diagnostics are consumed by FlagScale and are not torchrun options.
     if "heartbeat" in runner_args:
         del runner_args["heartbeat"]
+    if "tracing" in runner_args:
+        del runner_args["tracing"]
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port
