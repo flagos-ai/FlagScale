@@ -15,7 +15,7 @@
 defaults:
   - _self_
   - inference: 1.3b
-
+  
 experiment:
   exp_name: wan2_1
   exp_dir: outputs/${experiment.exp_name}
@@ -27,7 +27,7 @@ experiment:
   runner:
     hostfile: null
   cmds:
-    before_start: source /root/miniconda3/bin/activate flagscale-inference
+    before_start: ""
   envs:
     CUDA_VISIBLE_DEVICES: 0
     CUDA_DEVICE_MAX_CONNECTIONS: 1
