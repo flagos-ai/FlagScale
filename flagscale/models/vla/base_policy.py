@@ -100,6 +100,7 @@ class TrainablePolicy(nn.Module, ABC):
                 f"No policy registered for config type '{type_name}'. "
                 f"Known policies: {list(cls._registry.keys())}"
             )
+        config.resolve_pretrained_paths()
         return policy_cls(config=config)
 
     def save_pretrained(self, save_directory, *, state_dict=None) -> None:
