@@ -19,6 +19,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import queue
 import socket
 import threading
 import time
@@ -63,6 +64,8 @@ class ProgressSnapshot:
     progress_seq: int
     iteration: int | None
     phase: str
+    checkpoint_active: bool
+    checkpoint_id: str | None
     last_progress_unix_ns: int | None
     last_progress_mono_ns: int | None
 
@@ -96,8 +99,15 @@ class GpuProgressHeartbeat:
         self._progress_seq = 0
         self._iteration: int | None = None
         self._phase = "setup"
+        self._phase_before_checkpoint = "setup"
+        self._checkpoint_active = False
+        self._checkpoint_id: str | None = None
+        self._checkpoint_seq = 0
         self._last_progress_unix_ns: int | None = None
         self._last_progress_mono_ns: int | None = None
+        self._record_queue: queue.Queue[tuple[dict[str, Any], threading.Event] | None] = (
+            queue.Queue()
+        )
         self._thread = threading.Thread(
             target=self._publisher_loop,
             name=f"flagscale-gpu-heartbeat-rank-{rank}",
@@ -124,18 +134,56 @@ class GpuProgressHeartbeat:
             self._last_progress_unix_ns = now_unix_ns
             self._last_progress_mono_ns = now_mono_ns
 
+    def checkpoint_start(self, iteration: int | None = None) -> str:
+        """Publish a durable checkpoint transition before checkpoint work starts."""
+        with self._lock:
+            if not self._checkpoint_active:
+                self._checkpoint_seq += 1
+                self._phase_before_checkpoint = self._phase
+                if iteration is not None:
+                    self._iteration = int(iteration)
+                iteration_label = str(self._iteration) if self._iteration is not None else "unknown"
+                self._checkpoint_id = f"iteration-{iteration_label}-{self._checkpoint_seq}"
+                self._checkpoint_active = True
+                self._phase = "checkpointing"
+            checkpoint_id = self._checkpoint_id
+
+        assert checkpoint_id is not None
+        self._publish_transition("checkpoint_start")
+        return checkpoint_id
+
+    def checkpoint_end(self) -> str | None:
+        """Publish checkpoint completion and restore the preceding training phase."""
+        now_unix_ns = time.time_ns()
+        now_mono_ns = time.monotonic_ns()
+        with self._lock:
+            if not self._checkpoint_active:
+                return None
+            checkpoint_id = self._checkpoint_id
+            self._checkpoint_active = False
+            self._phase = self._phase_before_checkpoint
+            self._progress_seq += 1
+            self._last_progress_unix_ns = now_unix_ns
+            self._last_progress_mono_ns = now_mono_ns
+
+        self._publish_transition("checkpoint_end")
+        return checkpoint_id
+
     def snapshot(self) -> ProgressSnapshot:
         with self._lock:
             return ProgressSnapshot(
                 progress_seq=self._progress_seq,
                 iteration=self._iteration,
                 phase=self._phase,
+                checkpoint_active=self._checkpoint_active,
+                checkpoint_id=self._checkpoint_id,
                 last_progress_unix_ns=self._last_progress_unix_ns,
                 last_progress_mono_ns=self._last_progress_mono_ns,
             )
 
     def stop(self) -> None:
         self._stop.set()
+        self._record_queue.put(None)
         if self._thread is not threading.current_thread():
             self._thread.join(timeout=min(self.publish_interval_s + 0.5, 2.0))
 
@@ -158,26 +206,62 @@ class GpuProgressHeartbeat:
             "progress_seq": snapshot.progress_seq,
             "iteration": snapshot.iteration,
             "phase": snapshot.phase,
+            "checkpoint_active": snapshot.checkpoint_active,
+            "checkpoint_id": snapshot.checkpoint_id,
             "last_progress_unix_ns": snapshot.last_progress_unix_ns,
             "last_progress_mono_ns": snapshot.last_progress_mono_ns,
         }
 
-    def _write_record(self, file_obj, event: str) -> None:
-        record = self._base_record(event)
+    @staticmethod
+    def _write_payload(file_obj, record: dict[str, Any]) -> None:
         file_obj.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
         file_obj.flush()
+
+    def _write_record(self, file_obj, event: str) -> None:
+        self._write_payload(file_obj, self._base_record(event))
+
+    def _publish_transition(self, event: str) -> bool:
+        """Wait briefly until the publisher has flushed a lifecycle event."""
+        if not self._thread.is_alive():
+            return False
+        written = threading.Event()
+        self._record_queue.put((self._base_record(event), written))
+        return written.wait(timeout=1.0)
 
     def _publisher_loop(self) -> None:
         try:
             with self.path.open("a", encoding="utf-8") as output:
                 self._write_record(output, "process_start")
-                while not self._stop.is_set():
-                    self._write_record(output, "heartbeat")
-                    self._stop.wait(self.publish_interval_s)
+                self._write_record(output, "heartbeat")
+                while True:
+                    try:
+                        pending = self._record_queue.get(timeout=self.publish_interval_s)
+                    except queue.Empty:
+                        if self._stop.is_set():
+                            break
+                        self._write_record(output, "heartbeat")
+                        continue
+                    if pending is None:
+                        if self._stop.is_set():
+                            break
+                        continue
+                    record, written = pending
+                    try:
+                        self._write_payload(output, record)
+                    finally:
+                        written.set()
                 self._write_record(output, "process_end")
         except Exception:
             # Diagnostics must never make the training worker fail.
             return
+        finally:
+            while True:
+                try:
+                    pending = self._record_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if pending is not None:
+                    pending[1].set()
 
 
 _runtime_lock = threading.Lock()
@@ -228,6 +312,24 @@ def mark_training_progress(current_iteration: Any) -> None:
     except (TypeError, ValueError):
         completed_iteration = None
     mark_progress("train", completed_iteration)
+
+
+def checkpoint_start(current_iteration: Any = None) -> str | None:
+    runtime = _runtime or initialize_from_env()
+    if runtime is None:
+        return None
+    try:
+        iteration = int(current_iteration) if current_iteration is not None else None
+    except (TypeError, ValueError):
+        iteration = None
+    return runtime.checkpoint_start(iteration)
+
+
+def checkpoint_end() -> str | None:
+    runtime = _runtime or initialize_from_env()
+    if runtime is None:
+        return None
+    return runtime.checkpoint_end()
 
 
 def shutdown() -> None:
