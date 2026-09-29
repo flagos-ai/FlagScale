@@ -33,6 +33,9 @@ def test_disabled_heartbeat_is_a_noop(tmp_path):
     resolved = prepare_heartbeat_launch_config(_config(tmp_path, {"enabled": False}), "run")
     assert resolved.enabled is False
     assert resolved.shell_setup_lines(0) == []
+    assert resolved.training_command_body(0) == "$cmd; sync"
+    assert resolved.command_exit_actions(0) == []
+    assert resolved.stop_shell_lines(0) == []
 
 
 def test_cloud_runner_rejects_enabled_heartbeat(tmp_path):
@@ -105,6 +108,31 @@ def test_optional_hardware_health_starts_one_node_local_cpu_collector(tmp_path):
     assert "gpu_health_node_0.pid" in resolved.training_command_body(0)
     assert "gpu_health_node_1.pid" in resolved.training_command_body(1)
     assert '\\"\\$(cat ' in resolved.training_command_body(0)
+
+
+def test_stop_orders_global_monitor_before_node_local_health(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "hardware_health": {"enabled": True},
+        },
+    )
+    resolved = prepare_heartbeat_launch_config(config, "run-123")
+
+    node_zero = "\n".join(resolved.stop_shell_lines(0))
+    node_one = "\n".join(resolved.stop_shell_lines(1))
+
+    assert node_zero.index(resolved.monitor_pid_file) < node_zero.index(
+        resolved.hardware_health_pid_file(0)
+    )
+    assert "flagscale.runner.heartbeat.monitor --heartbeat-dir" in node_zero
+    assert "kill -KILL" in node_zero
+    assert "kill -0" in node_zero
+    assert "[ ! -f" in node_one
+    assert node_one.index(resolved.monitor_pid_file) < node_one.index(
+        resolved.hardware_health_pid_file(1)
+    )
 
 
 def test_hardware_health_command_timeout_must_be_less_than_interval(tmp_path):
