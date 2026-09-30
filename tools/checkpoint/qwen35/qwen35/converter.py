@@ -270,6 +270,7 @@ class BaseConverter:
         """Split a full Megatron state dict into TP shards."""
         cfg = self.cfg
         tp = cfg.tp
+        vis_tp = cfg.vision_tp
         shards = [{} for _ in range(tp)]
 
         if cfg.enable_vision:
@@ -310,26 +311,26 @@ class BaseConverter:
                         shards[r][k] = v
                 elif "linear_qkv.weight" in k:
                     viewed = v.view(vis_qg, 3, vis_head_dim, vis_h)
-                    chunks = viewed.chunk(tp, dim=0)
+                    chunks = viewed.chunk(vis_tp, dim=0)
                     for r in range(tp):
-                        shards[r][k] = chunks[r].reshape(-1, vis_h)
+                        shards[r][k] = chunks[r % vis_tp].reshape(-1, vis_h)
                 elif "linear_qkv.bias" in k:
                     viewed = v.view(vis_qg, 3, vis_head_dim)
-                    chunks = viewed.chunk(tp, dim=0)
+                    chunks = viewed.chunk(vis_tp, dim=0)
                     for r in range(tp):
-                        shards[r][k] = chunks[r].reshape(-1)
+                        shards[r][k] = chunks[r % vis_tp].reshape(-1)
                 elif "linear_proj.weight" in k or "linear_fc2.weight" in k:
-                    chunks = v.chunk(tp, dim=1)
+                    chunks = v.chunk(vis_tp, dim=1)
                     for r in range(tp):
-                        shards[r][k] = chunks[r]
+                        shards[r][k] = chunks[r % vis_tp]
                 elif "linear_fc1.weight" in k and "projection" not in k:
-                    chunks = v.chunk(tp, dim=0)
+                    chunks = v.chunk(vis_tp, dim=0)
                     for r in range(tp):
-                        shards[r][k] = chunks[r]
+                        shards[r][k] = chunks[r % vis_tp]
                 elif "linear_fc1.bias" in k and "projection" not in k:
-                    chunks = v.chunk(tp, dim=0)
+                    chunks = v.chunk(vis_tp, dim=0)
                     for r in range(tp):
-                        shards[r][k] = chunks[r]
+                        shards[r][k] = chunks[r % vis_tp]
                 elif "linear_proj.bias" in k or "linear_fc2.bias" in k:
                     for r in range(tp):
                         shards[r][k] = v
@@ -338,13 +339,13 @@ class BaseConverter:
                         shards[r][k] = v
                 elif "projection.encoder" in k:
                     if "linear_fc1" in k:
-                        chunks = v.chunk(tp, dim=0)
+                        chunks = v.chunk(vis_tp, dim=0)
                         for r in range(tp):
-                            shards[r][k] = chunks[r]
+                            shards[r][k] = chunks[r % vis_tp]
                     elif "linear_fc2.weight" in k:
-                        chunks = v.chunk(tp, dim=1)
+                        chunks = v.chunk(vis_tp, dim=1)
                         for r in range(tp):
-                            shards[r][k] = chunks[r]
+                            shards[r][k] = chunks[r % vis_tp]
                     else:
                         for r in range(tp):
                             shards[r][k] = v
@@ -434,7 +435,6 @@ class BaseConverter:
     def _merge_tp(self, shards):
         """Merge TP shards into a single state dict for one PP/EP rank."""
         cfg = self.cfg
-        tp = cfg.tp
         merged = {}
         all_keys = set()
         for s in shards:
@@ -445,7 +445,8 @@ class BaseConverter:
             vis_heads = cfg.vision_num_attention_heads
             vis_head_dim = vis_h // vis_heads
             vis_qg = vis_heads
-            vis_gps = vis_qg // tp
+            vis_tp = cfg.vision_tp
+            vis_gps = vis_qg // vis_tp
         else:
             vis_h = vis_heads = vis_head_dim = vis_qg = vis_gps = 0
 
@@ -467,26 +468,26 @@ class BaseConverter:
                 if "patch_embed" in k or "pos_embed" in k:
                     merged[k] = vals[0]
                 elif "linear_qkv.weight" in k:
-                    viewed = [x.view(vis_gps, -1, vis_head_dim, vis_h) for x in vals]
+                    viewed = [x.view(vis_gps, -1, vis_head_dim, vis_h) for x in vals[:vis_tp]]
                     merged[k] = torch.cat(viewed, dim=0).view(-1, vis_h)
                 elif "linear_qkv.bias" in k:
-                    viewed = [x.view(vis_gps, -1, vis_head_dim) for x in vals]
+                    viewed = [x.view(vis_gps, -1, vis_head_dim) for x in vals[:vis_tp]]
                     merged[k] = torch.cat(viewed, dim=0).view(-1)
                 elif "linear_proj.weight" in k or "linear_fc2.weight" in k:
-                    merged[k] = torch.cat(vals, dim=1)
+                    merged[k] = torch.cat(vals[:vis_tp], dim=1)
                 elif "linear_fc1.weight" in k and "projection" not in k:
-                    merged[k] = torch.cat(vals, dim=0)
+                    merged[k] = torch.cat(vals[:vis_tp], dim=0)
                 elif "linear_fc1.bias" in k and "projection" not in k:
-                    merged[k] = torch.cat(vals, dim=0)
+                    merged[k] = torch.cat(vals[:vis_tp], dim=0)
                 elif "linear_proj.bias" in k or "linear_fc2.bias" in k:
                     merged[k] = vals[0]
                 elif "layer_norm" in k or "final_layernorm" in k:
                     merged[k] = vals[0]
                 elif "projection.encoder" in k:
                     if "linear_fc1" in k:
-                        merged[k] = torch.cat(vals, dim=0)
+                        merged[k] = torch.cat(vals[:vis_tp], dim=0)
                     elif "linear_fc2.weight" in k:
-                        merged[k] = torch.cat(vals, dim=1)
+                        merged[k] = torch.cat(vals[:vis_tp], dim=1)
                     else:
                         merged[k] = vals[0]
                 else:

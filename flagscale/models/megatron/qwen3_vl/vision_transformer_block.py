@@ -87,7 +87,8 @@ class VisionTransformerBlock(TransformerBlock):
                     projection_config,
                     projection_layer_spec,
                     projection_type,
-                    projection_config.ffn_hidden_size
+                    projection_config.ffn_hidden_size,
+                    pg_collection=self.pg_collection,
                 )
                 for _ in range(len(self.config.deepstack_visual_indexes))
             ]

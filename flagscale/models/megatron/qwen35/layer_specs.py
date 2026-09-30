@@ -13,6 +13,8 @@
 # limitations under the License.
 
 
+from typing import Optional
+
 from megatron.core.extensions.transformer_engine import (
     TEColumnParallelGroupedLinear,
     TEColumnParallelLinear,
@@ -63,7 +65,9 @@ def _patch_standard_attention_specs(
             attn_spec.module = attention_cls
 
 
-def get_qwen35_language_model_spec(config, patch=True, vp_stage=None) -> TransformerBlockSubmodules:
+def get_qwen35_language_model_spec(
+    config, patch=True, vp_stage=None, pp_rank: Optional[int] = None
+) -> TransformerBlockSubmodules:
     """Build hybrid GDN + Attention block spec for Qwen3.5 language model.
 
     Args:
@@ -71,6 +75,16 @@ def get_qwen35_language_model_spec(config, patch=True, vp_stage=None) -> Transfo
             - experimental_attention_variant: "gated_delta_net"
             - linear_attention_freq: 4 (1 attention per 4 layers)
             - num_layers: 64 (for 27B dense)
+        patch: Selectively patch the standard attention layers with
+            Qwen35SelfAttention (False only for the MTP block spec).
+        pp_rank: Explicit pipeline-model-parallel rank of the *language*
+            module used to slice the returned layer specs down to this stage's
+            layers.  ``None`` falls back to the global parallel state (non-grid
+            behavior).  Grid MIMO mode must pass the language module's own PP
+            rank: the global parallel state there is TP=1/PP=1, so without it
+            every stage would slice *all* ``config.num_layers`` layer specs -
+            duplicated weights and overlapping checkpoint keys (e.g. layers
+            12..23 saved by both PP2 stages).
 
     Returns:
         TransformerBlockSubmodules with per-layer specs where:
@@ -79,10 +93,15 @@ def get_qwen35_language_model_spec(config, patch=True, vp_stage=None) -> Transfo
     """
     # Build hybrid block spec: produces TransformerBlockSubmodules with
     # per-layer specs (GDN layers get GatedDeltaNet, attention layers get
-    # standard SelfAttention + standard MLP)
+    # standard SelfAttention + standard MLP).  The spec is sliced to the
+    # current pipeline stage's layers: with ``pp_rank`` the offset/count come
+    # from the language module's own PP config, otherwise from the global
+    # parallel state (``get_transformer_layer_offset`` /
+    # ``get_num_layers_to_build`` fall back to it when pp_rank is None).
     block_spec = get_transformer_block_with_experimental_attention_variant_spec(
         config,
         vp_stage=vp_stage,
+        pp_rank=pp_rank,
     )
 
     # This flag only for mtp layer (patch = false).
