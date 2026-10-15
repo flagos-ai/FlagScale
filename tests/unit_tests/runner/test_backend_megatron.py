@@ -88,6 +88,14 @@ def _backend(config) -> MegatronBackend:
         return MegatronBackend(config)
 
 
+def _enable_trace_only(config, tmp_path: Path) -> None:
+    config.experiment.runner.heartbeat.enabled = False
+    config.experiment.runner.tracing = {
+        "enabled": True,
+        "probe_library": str(tmp_path / "libflagscale_nccl_probe.so"),
+    }
+
+
 def test_run_script_atomically_publishes_active_diagnostics_run_id(tmp_path):
     config = _config(tmp_path, "run")
     backend = _backend(config)
@@ -125,6 +133,44 @@ def test_stop_reuses_active_run_id_and_stops_monitor_before_worker(tmp_path):
     assert backend.heartbeat_config.heartbeat_dir.endswith(f"heartbeat/{active_run_id}")
     assert script.index("flagscale.runner.heartbeat.monitor") < script.index("pkill -P $pid")
     assert script.index("pkill -P $pid") < script.rindex("diagnostics.active_run_id")
+
+
+def test_trace_only_stop_reuses_active_run_id_and_stops_analyzer_before_worker(tmp_path):
+    run_config = _config(tmp_path, "run")
+    _enable_trace_only(run_config, tmp_path)
+    run_backend = _backend(run_config)
+
+    run_script_path = run_backend.generate_run_script(
+        run_config,
+        "localhost",
+        0,
+        "python train.py",
+        background=True,
+        pkg_dir=str(tmp_path),
+    )
+    run_script = Path(run_script_path).read_text(encoding="utf-8")
+    assert "diagnostics.active_run_id" in run_script
+    assert run_script.index("diagnostics.active_run_id") < run_script.index(
+        "flagscale.runner.tracing.monitor"
+    )
+
+    active_run_id = run_backend.diagnostics_run_id
+    active_file = tmp_path / "logs" / "pids" / "diagnostics.active_run_id"
+    active_file.parent.mkdir(parents=True, exist_ok=True)
+    active_file.write_text(active_run_id, encoding="utf-8")
+
+    stop_config = _config(tmp_path, "stop")
+    _enable_trace_only(stop_config, tmp_path)
+    backend = _backend(stop_config)
+    stop_script_path = backend.generate_stop_script("localhost", 0)
+    stop_script = Path(stop_script_path).read_text(encoding="utf-8")
+
+    assert backend.diagnostics_run_id == active_run_id
+    assert backend.heartbeat_config.enabled is False
+    assert backend.trace_config.run_id == active_run_id
+    assert backend.trace_config.trace_dir.endswith(f"tracing/{active_run_id}")
+    assert stop_script.index("analyzer.pid") < stop_script.index("pkill -P $pid")
+    assert stop_script.index("pkill -P $pid") < stop_script.rindex("diagnostics.active_run_id")
 
 
 def test_nonzero_node_waits_for_monitor_and_does_not_clear_active_run_id(tmp_path):
