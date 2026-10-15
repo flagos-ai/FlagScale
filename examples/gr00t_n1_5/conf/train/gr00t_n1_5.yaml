@@ -31,7 +31,7 @@ system:
 model:
   model_name: gr00t_n1_5
   # Path or HuggingFace model ID for the pretrained GR00T N1.5 model
-  checkpoint_dir: /workspace/models/nvidia/GR00T-N1.5-3B
+  checkpoint_dir: nvidia/GR00T-N1.5-3B
 
   # Fine-tuning control
   tune_llm: true
@@ -91,7 +91,7 @@ model:
 
 data:
   dataset_type: lerobot
-  data_path: /workspace/datasets/IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot/
+  data_path: IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot
   tolerance_s: 0.0001
   preprocessor:
     name: policy_preprocessor
