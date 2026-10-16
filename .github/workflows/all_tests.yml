@@ -51,6 +51,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ppu'
     needs: ppu_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: ppu
       megatron_cache_key: ${{ needs.ppu_prepare.outputs.megatron_cache_key }}
@@ -71,6 +73,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'cuda'
     needs: cuda_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: cuda
       megatron_cache_key: ${{ needs.cuda_prepare.outputs.megatron_cache_key }}
@@ -91,6 +95,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'ascend'
     needs: ascend_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: ascend
       megatron_cache_key: ${{ needs.ascend_prepare.outputs.megatron_cache_key }}
@@ -111,6 +117,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'enflame'
     needs: enflame_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: enflame
       megatron_cache_key: ${{ needs.enflame_prepare.outputs.megatron_cache_key }}
@@ -131,6 +139,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'hygon'
     needs: hygon_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: hygon
       megatron_cache_key: ${{ needs.hygon_prepare.outputs.megatron_cache_key }}
@@ -151,6 +161,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'metax'
     needs: metax_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: metax
       megatron_cache_key: ${{ needs.metax_prepare.outputs.megatron_cache_key }}
@@ -171,6 +183,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'musa'
     needs: musa_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: musa
       megatron_cache_key: ${{ needs.musa_prepare.outputs.megatron_cache_key }}
@@ -191,6 +205,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'kunlunxin'
     needs: kunlunxin_prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: kunlunxin
       megatron_cache_key: ${{ needs.kunlunxin_prepare.outputs.megatron_cache_key }}

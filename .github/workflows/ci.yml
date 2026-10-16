@@ -12,43 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Unified CI entry point for FlagScale.
-#
-# Pipeline:  lint → generate-matrix → platform-pipeline (matrix)
-#
-# Platform discovery is config-driven: generate_matrix.py scans
-# .github/configs/*.yml for platform names, then on pull_request events
-# intersects the changed-file list against per-platform paths_watch so
-# only affected platforms run.  All other events run the full matrix.
-
+# One required check, with config-driven per-platform pipelines.
 name: CI
 
 on:
   schedule:
-    - cron: '0 18 * * *'   # 02:00 CST daily
+    - cron: '0 18 * * *'   # 02:00 Asia/Shanghai daily
   push:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'examples/**'
   pull_request:
     branches: [main, devops]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'examples/**'
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Unrelated labels must not cancel an active platform run.
+  group: >-
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !startsWith(github.event.label.name, 'platform:') && format('-ignored-label-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
-  # Reuse the repository's own .pre-commit-config.yaml, scoped to files changed
-  # against the base branch.  Pre-existing style debt elsewhere in the tree is
-  # not this gate's concern; on push/schedule the diff is empty and it passes.
   lint:
+    if: (!contains(fromJSON('["labeled","unlabeled"]'), github.event.action) || startsWith(github.event.label.name, 'platform:'))
     name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -56,18 +44,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pre-commit
-        run: pip install --quiet pre-commit==4.2.0
+      - name: Install CI validation dependencies
+        run: pip install --quiet pre-commit==4.2.0 PyYAML==6.0.2 pytest==8.3.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test CI comment authorization
+        run: node --test tests/ci/slash_command.test.cjs
+      - name: Test CI control logic (no accelerators required)
+        run: python -m pytest --confcutdir=tests/ci tests/ci -q
       - name: pre-commit (changed files)
         env:
-          BASE_REF: ${{ github.base_ref || 'main' }}
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
         run: |
-          git fetch --no-tags origin "$BASE_REF"
           pre-commit run --show-diff-on-failure \
-            --from-ref "$(git merge-base "origin/$BASE_REF" HEAD)" --to-ref HEAD
+            --from-ref "$(git merge-base "$BASE_REF" HEAD)" --to-ref HEAD
 
   generate-matrix:
     name: Generate platform matrix
@@ -80,14 +75,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet PyYAML==6.0.2
       - name: Compute platform matrix
         id: matrix
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python .github/scripts/ci/generate_matrix.py \
-            --event-name "${{ github.event_name }}" \
-            --base-ref  "${{ github.base_ref || 'main' }}" \
-            --configs-dir .github/configs \
-            >> "$GITHUB_OUTPUT"
+            --event-name "$GITHUB_EVENT_NAME" \
+            --base-ref "$BASE_REF" --head-ref "$HEAD_REF" \
+            --event-path "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+      - name: Explain selection
+        env:
+          PLATFORMS: ${{ steps.matrix.outputs.platforms }}
+          REASON: ${{ steps.matrix.outputs.reason }}
+        run: |
+          printf 'Platforms: `%s`\n\nReason: %s\n' "$PLATFORMS" "$REASON" >> "$GITHUB_STEP_SUMMARY"
 
   platform-pipeline:
     name: Platform pipeline (${{ matrix.platform }})
@@ -98,5 +106,24 @@ jobs:
       matrix:
         platform: ${{ fromJson(needs.generate-matrix.outputs.platforms) }}
     uses: ./.github/workflows/_platform_pipeline.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
       platform: ${{ matrix.platform }}
+
+  ci-complete:
+    # Do not publish a skipped required-gate name for an ignored label event.
+    name: ${{ contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && !startsWith(github.event.label.name, 'platform:') && 'Ignored label event' || 'CI Complete' }}
+    needs: [lint, generate-matrix, platform-pipeline]
+    if: always() && (!contains(fromJSON('["labeled","unlabeled"]'), github.event.action) || startsWith(github.event.label.name, 'platform:'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify required checks
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          PLATFORMS: ${{ needs.generate-matrix.outputs.platforms || '[]' }}
+        run: python3 .github/scripts/ci/check_results.py

@@ -1,0 +1,104 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+name: Requested CI
+run-name: 'Requested CI: PR #${{ inputs.pr_number }} / ${{ inputs.platform }} / ${{ inputs.head_sha }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number in this repository
+        type: string
+        required: true
+      head_sha:
+        description: Exact current PR head SHA (40 hex characters)
+        type: string
+        required: true
+      platform:
+        description: Configured platform name or all
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# A platform supplement cannot cancel the ordinary required CI run.
+concurrency:
+  group: requested-ci-${{ inputs.pr_number }}-${{ inputs.platform }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Validate requested PR commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_repository: ${{ steps.pr.outputs.repository }}
+      source_sha: ${{ steps.pr.outputs.sha }}
+      platforms: ${{ steps.matrix.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@v7
+        id: pr
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        with:
+          script: |
+            const resolve = require('./.github/scripts/ci/request_source.js');
+            await resolve({ github, context, core,
+              prNumber: process.env.PR_NUMBER, headSha: process.env.HEAD_SHA });
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet PyYAML==6.0.2
+      - name: Validate platform against trusted configs
+        id: matrix
+        env:
+          REQUESTED_PLATFORM: ${{ inputs.platform }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import pathlib
+          import sys
+          sys.path.insert(0, '.github/scripts/ci')
+          from generate_matrix import load_platforms
+          platforms = sorted(load_platforms(pathlib.Path('.github/configs')))
+          target = os.environ['REQUESTED_PLATFORM']
+          if target != 'all' and target not in platforms:
+              raise SystemExit('Unknown platform')
+          print('platforms=' + json.dumps(platforms if target == 'all' else [target]))
+          PY
+
+  platform-pipeline:
+    name: Requested platform (${{ matrix.platform }})
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.resolve.outputs.platforms) }}
+    # Do not pass report secrets to explicitly requested PR source code.
+    uses: ./.github/workflows/_platform_pipeline.yml
+    with:
+      platform: ${{ matrix.platform }}
+      source_repository: ${{ needs.resolve.outputs.source_repository }}
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+
+  requested-complete:
+    name: Requested CI Complete
+    needs: [resolve, platform-pipeline]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify supplemental results
+        env:
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
+          PIPELINE_RESULT: ${{ needs.platform-pipeline.result }}
+        run: |
+          test "$RESOLVE_RESULT" = success
+          test "$PIPELINE_RESULT" = success

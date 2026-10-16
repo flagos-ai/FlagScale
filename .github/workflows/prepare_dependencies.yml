@@ -3,6 +3,16 @@ name: Prepare Dependencies
 on:
   workflow_call:
     inputs:
+      source_repository:
+        type: string
+        required: false
+        default: ''
+        description: Explicit source repository for PR comment requests
+      source_sha:
+        type: string
+        required: false
+        default: ''
+        description: Immutable source commit for PR comment requests
       platform: {required: true, type: string}
       image_override: {required: false, type: string, default: ''}
       train_pkg_mgr: {required: false, type: string, default: ''}
@@ -48,6 +58,10 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install yq
         run: |
@@ -221,6 +235,9 @@ jobs:
         continue-on-error: true
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Checkout source (attempt 2)
@@ -229,6 +246,9 @@ jobs:
         continue-on-error: true
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Checkout source (attempt 3)
@@ -236,6 +256,9 @@ jobs:
         if: steps.checkout_2.outcome == 'failure'
         uses: actions/checkout@v4
         with:
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Checkout Megatron-LM-FL (attempt 1)
@@ -494,7 +517,8 @@ jobs:
           echo "TE-FL wheel ready: ${wheels[0]}"
 
       - name: Save Megatron-LM-FL cache
-        if: needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
+        # Explicit PR source executes under the dispatch ref: never publish it to that ref's cache.
+        if: inputs.source_sha == '' && inputs.source_repository == '' && needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -523,7 +547,8 @@ jobs:
           fi
 
       - name: Save TE-FL wheel cache
-        if: needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true'
+        # Explicit PR source executes under the dispatch ref: never publish it to that ref's cache.
+        if: inputs.source_sha == '' && inputs.source_repository == '' && needs.resolve.outputs.te_fl_enabled == 'true' && steps.te_fl_cache.outputs.cache-hit != 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:

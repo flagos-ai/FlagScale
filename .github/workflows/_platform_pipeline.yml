@@ -20,7 +20,21 @@ name: Platform Pipeline
 
 on:
   workflow_call:
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
+        description: Optional FlagCICD report upload token; unavailable in fork PRs
     inputs:
+      source_repository:
+        type: string
+        required: false
+        default: ''
+        description: Explicit source repository for PR comment requests
+      source_sha:
+        type: string
+        required: false
+        default: ''
+        description: Immutable source commit for PR comment requests
       platform:
         required: true
         type: string
@@ -31,13 +45,19 @@ jobs:
     name: prepare / ${{ inputs.platform }}
     uses: ./.github/workflows/prepare_dependencies.yml
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       platform: ${{ inputs.platform }}
 
   test:
     name: test / ${{ inputs.platform }}
     needs: prepare
     uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       platform: ${{ inputs.platform }}
       megatron_cache_key: ${{ needs.prepare.outputs.megatron_cache_key }}
       megatron_artifact_available: ${{ needs.prepare.outputs.megatron_artifact_available }}

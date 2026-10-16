@@ -144,3 +144,12 @@ dependencies:
       install_pip_args: []
       pip_packages:
         - "megatron-energon[av_decode]~=7.0"
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/hygon/
+  - tools/install/hygon/
+  - requirements/hygon/
+  - .github/scripts/set_env_hygon.sh
+  - tests/test_utils/config/platforms/hygon.yaml
+  - .github/configs/hygon.yml

@@ -16,7 +16,21 @@ name: Common Unit Tests
 
 on:
   workflow_call:
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
+        description: Optional FlagCICD report upload token; unavailable in fork PRs
     inputs:
+      source_repository:
+        type: string
+        required: false
+        default: ''
+        description: Explicit source repository for PR comment requests
+      source_sha:
+        type: string
+        required: false
+        default: ''
+        description: Immutable source commit for PR comment requests
       runtime_recovery_timeout_minutes:
         required: false
         type: number
@@ -118,6 +132,7 @@ jobs:
         shell: bash
     env:
       PROJECT_ROOT: ${{ github.workspace }}/FlagScale
+      FLAGCICD_TOKEN_SET: ${{ secrets.FLAGCICD_API_TOKEN != '' }}
       COVERAGE_REPORT_DIR: /tmp/coverage-report
     runs-on: ${{ fromJson(inputs.runs_on) }}
     name: ${{ startsWith(inputs.device, 'unit-') && inputs.device || format('unit-{0}', inputs.device) }}
@@ -133,8 +148,8 @@ jobs:
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -153,8 +168,8 @@ jobs:
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -172,8 +187,8 @@ jobs:
         id: checkout_attempt_3
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -356,8 +371,24 @@ jobs:
           exit $exit_code
         timeout-minutes: ${{ inputs.unit_timeout_minutes }}
 
+      - name: Check generated coverage report
+        id: coverage_report
+        if: ${{ !cancelled() && steps.unit_test.outcome != 'skipped' }}
+        env:
+          REPORT_PATH: ${{ env.COVERAGE_REPORT_DIR }}/coverage.json
+        run: |
+          if [ -s "$REPORT_PATH" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'Coverage report unavailable; see unit-test logs.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$FLAGCICD_TOKEN_SET" != 'true' ]; then
+            echo 'FlagCICD coverage-${{ inputs.platform }}-${{ inputs.device }}-unittest: Skipped: FLAGCICD_API_TOKEN unavailable' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload coverage report
-        if: steps.unit_test.outcome == 'success'
+        if: ${{ !cancelled() && steps.coverage_report.outputs.available == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ inputs.platform }}-${{ inputs.device }}
@@ -365,14 +396,18 @@ jobs:
           retention-days: 7
 
       - name: Upload coverage report to FlagCICD
-        if: steps.unit_test.outcome == 'success'
+        if: ${{ !cancelled() && env.FLAGCICD_TOKEN_SET == 'true' && steps.unit_test.outcome == 'success' && steps.coverage_report.outputs.available == 'true' }}
         continue-on-error: true
-        uses: flagos-ai/FlagOps/actions/post-pytest-report@v2.0.4
+        timeout-minutes: 3
+        # v2 resolved on 2026-10-15; pin the token-based API rather than a moving tag.
+        uses: flagos-ai/FlagOps/actions/post-pytest-report@466de7d164bf6ca3989c0abaeba1c3a62c68a047
         env:
           NO_PROXY: "flagcicd.flagos.net"
         with:
-          user_id: '000000000000000000'
-          backend_url: 'http://flagcicd-inner.flagos.net:8000/metrics/'
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
+          backend_url: 'https://flagcicd.flagos.net/flagcicd/api/v1/cicd/metrics/'
           report_path: '${{ env.COVERAGE_REPORT_DIR }}/coverage.json'
+          file_type: coverage
+          job_name: coverage-${{ inputs.platform }}-${{ inputs.device }}-unittest
           fail_on_error: 'false'
           runner_set_name: ${{ fromJson(inputs.runs_on)[0] }}

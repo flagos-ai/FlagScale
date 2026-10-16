@@ -76,3 +76,12 @@ container_options: >-
   --hostname flagscale_cicd
   --user root
   --ulimit nofile=65535:65535
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/template/
+  - tools/install/template/
+  - requirements/template/
+  - .github/scripts/set_env_template.sh
+  - tests/test_utils/config/platforms/template.yaml
+  - .github/configs/template.yml

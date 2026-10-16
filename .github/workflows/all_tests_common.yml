@@ -16,7 +16,21 @@ name: Common All Tests
 
 on:
   workflow_call:
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
+        description: Optional FlagCICD report upload token; unavailable in fork PRs
     inputs:
+      source_repository:
+        type: string
+        required: false
+        default: ''
+        description: Explicit source repository for PR comment requests
+      source_sha:
+        type: string
+        required: false
+        default: ''
+        description: Immutable source commit for PR comment requests
       platform:
         required: true
         type: string
@@ -145,8 +159,8 @@ jobs:
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -164,8 +178,8 @@ jobs:
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -182,8 +196,8 @@ jobs:
         id: checkout_attempt_3
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           ssh-strict: true
           ssh-user: git
           persist-credentials: false
@@ -272,6 +286,8 @@ jobs:
     needs: checkout_and_config
     uses: ./.github/workflows/functional_tests_cli.yml
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       platform: ${{ inputs.platform }}
       image: ${{ needs.checkout_and_config.outputs.ci_train_image }}
       runs_on: ${{ needs.checkout_and_config.outputs.runs_on }}
@@ -291,8 +307,12 @@ jobs:
       matrix:
         device: ${{ fromJson(needs.checkout_and_config.outputs.device_types) }}
     uses: ./.github/workflows/unit_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     name: unit_tests
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       runtime_recovery_timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.runtime_recovery_timeout_minutes) }}
       unit_timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.unit_timeout_minutes) }}
       platform: ${{ inputs.platform }}
@@ -323,6 +343,8 @@ jobs:
     if: fromJson(needs.checkout_and_config.outputs.train_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_train.yml
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       runtime_recovery_timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.runtime_recovery_timeout_minutes) }}
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.train_test_matrix }}
@@ -352,6 +374,8 @@ jobs:
     if: fromJson(needs.checkout_and_config.outputs.hetero_train_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_hetero_train.yml
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       runtime_recovery_timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.runtime_recovery_timeout_minutes) }}
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.hetero_train_test_matrix }}
@@ -382,6 +406,8 @@ jobs:
     if: false  # Temporarily disabled - was: fromJson(needs.checkout_and_config.outputs.inference_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_inference.yml
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.inference_test_matrix }}
       image: ${{ needs.checkout_and_config.outputs.ci_inference_image }}
@@ -402,6 +428,8 @@ jobs:
     if: false  # Temporarily disabled - was: fromJson(needs.checkout_and_config.outputs.serve_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_serve.yml
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.serve_test_matrix }}
       image: ${{ needs.checkout_and_config.outputs.ci_inference_image }}
@@ -438,7 +466,11 @@ jobs:
       - unit_tests
     if: fromJson(needs.checkout_and_config.outputs.benchmark_test_matrix)[0] != null
     uses: ./.github/workflows/functional_tests_benchmark.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
     with:
+      source_repository: ${{ inputs.source_repository }}
+      source_sha: ${{ inputs.source_sha }}
       runtime_recovery_timeout_minutes: ${{ fromJson(needs.checkout_and_config.outputs.runtime_recovery_timeout_minutes) }}
       platform: ${{ inputs.platform }}
       test_matrix: ${{ needs.checkout_and_config.outputs.benchmark_test_matrix }}
@@ -482,6 +514,10 @@ jobs:
         run: |
           # Check all test jobs (skip if not run)
           failed=false
+          if [ "${{ needs.checkout_and_config.result }}" != "success" ]; then
+            echo "Platform configuration did not succeed"
+            failed=true
+          fi
 
           if [ "${{ needs.unit_tests.result }}" != "success" ] && \
              [ "${{ needs.unit_tests.result }}" != "skipped" ]; then

@@ -102,3 +102,12 @@ container_options: >-
   --device=/dev/infiniband/fic2_soe_ucmd1
   --device=/dev/infiniband/fic2_soe_ucmd2
   --device=/dev/infiniband/fic2_soe_ucmd3
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/ppu/
+  - tools/install/ppu/
+  - requirements/ppu/
+  - .github/scripts/set_env_ppu.sh
+  - tests/test_utils/config/platforms/ppu.yaml
+  - .github/configs/ppu.yml

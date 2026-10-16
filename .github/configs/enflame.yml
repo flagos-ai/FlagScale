@@ -94,3 +94,12 @@ dependencies:
       pip_packages:
         - onnxscript
         - megatron-energon[av_decode]~=7.0
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/enflame/
+  - tools/install/enflame/
+  - requirements/enflame/
+  - .github/scripts/set_env_enflame.sh
+  - tests/test_utils/config/platforms/enflame.yaml
+  - .github/configs/enflame.yml

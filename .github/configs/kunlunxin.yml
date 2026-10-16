@@ -98,3 +98,12 @@ dependencies:
         TE_FL_PREFER: flagos
       install_pip_args: []
       pip_packages: ["megatron-energon[av_decode]~=7.0"]
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/kunlunxin/
+  - tools/install/kunlunxin/
+  - requirements/kunlunxin/
+  - .github/scripts/set_env_kunlunxin.sh
+  - tests/test_utils/config/platforms/kunlunxin.yaml
+  - .github/configs/kunlunxin.yml

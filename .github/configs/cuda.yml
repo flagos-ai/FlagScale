@@ -193,3 +193,12 @@ dependencies:
         - "s3fs==2025.10.0"
         # TE-FL is installed with --no-deps; include its inspection dependency.
         - "nvdlfw-inspect==0.2.2"
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/cuda/
+  - tools/install/cuda/
+  - requirements/cuda/
+  - .github/scripts/set_env_cuda.sh
+  - tests/test_utils/config/platforms/cuda.yaml
+  - .github/configs/cuda.yml
