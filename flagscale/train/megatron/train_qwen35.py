@@ -29,6 +29,7 @@ from argparse import Namespace
 from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 
@@ -100,6 +101,7 @@ def model_provider(
 ) -> Union[Qwen35Model]:
     """Provide a Qwen3.5 model instance."""
     args = get_args()
+    validate_packing_args(args)
     print_rank_0("start building qwen3.5 model ...")
 
     if args.record_memory_history:
@@ -218,6 +220,7 @@ def get_ltor_masks_and_position_ids(
     second_per_grid_ts,
     ignore_index=None,
     model: Qwen35Model = None,
+    cu_seqlens=None,
 ):
     """Build masks and position ids for left-to-right model."""
     args = get_args()
@@ -228,12 +231,14 @@ def get_ltor_masks_and_position_ids(
         pos = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
         position_ids = pos.unsqueeze(0).expand(3, -1, -1)
     else:
-        # Multimodal: compute mRoPE position indices from vision grids
+        # Training consumes explicit positions only. The returned packed-row delta
+        # is not a per-sample generation/cache offset and is intentionally unused.
         position_ids, _ = model.get_rope_index(
             input_ids=input_ids,
             image_grid_thw=image_thw_grids,
             video_grid_thw=video_thw_grids,
             attention_mask=input_ids != pad_token,
+            cu_seqlens=cu_seqlens,
         )
 
     # Loss mask
@@ -278,6 +283,16 @@ def get_batch(
     data_text = broadcast_data(["text"], data, torch.int64)["text"]
     target = broadcast_data(["target"], data, torch.int64)["target"]
 
+    cu_seqlens = None
+    if getattr(args, "packing_buffer_size", 0) > 0:
+        # Validation stays unpacked. Broadcast batch metadata rather than assuming that
+        # every batch is packed just because training packing is enabled.
+        metadata = None if data is None else {
+            "is_packed": torch.tensor([data.get("cu_seqlens") is not None], dtype=torch.int64)
+        }
+        if broadcast_data(["is_packed"], metadata, torch.int64)["is_packed"].item():
+            cu_seqlens = broadcast_data(["cu_seqlens"], data, torch.int32)["cu_seqlens"]
+
     if enable_vision:
         imgs = broadcast_data(["imgs"], data, torch.float32)["imgs"]
         videos = broadcast_data(["videos"], data, torch.float32)["videos"]
@@ -318,6 +333,7 @@ def get_batch(
         second_per_grid_ts=second_per_grid_ts,
         ignore_index=IGNORE_IDX,
         model=model,
+        cu_seqlens=cu_seqlens,
     )
     cur_platform.range_pop()
 
@@ -333,6 +349,7 @@ def get_batch(
         video_thw_grids,
         image_input_mask,
         video_input_mask,
+        cu_seqlens,
     )
 
 
@@ -410,8 +427,24 @@ def forward_step(data_iterator, model: Qwen35Model):
             video_thw_grids,
             image_input_mask,
             video_input_mask,
+            cu_seqlens,
         ) = get_batch(data_iterator, model=unwrap_model(model))
     timers('batch-generator').stop()
+
+    packed_seq_params = None
+    if cu_seqlens is not None:
+        max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
+        # These boundaries already cover the complete physical THD buffer, with
+        # tail padding included in the final segment. At CP=1 no separate padded
+        # offsets are needed: attention/GDN fall back to cu_seqlens_q/kv, and MTP
+        # rolls within the same segments. CP>1 remains rejected by validation.
+        packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_kv=cu_seqlens,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_kv=max_seqlen,
+        )
 
     enable_vision = getattr(args, 'enable_vision', True)
 
@@ -428,6 +461,7 @@ def forward_step(data_iterator, model: Qwen35Model):
                 video_start_index=image_input_mask.sum().cpu().item(),
                 image_input_mask=image_input_mask,
                 video_input_mask=video_input_mask,
+                packed_seq_params=packed_seq_params,
                 attention_mask=attention_mask,
                 labels=labels,
                 loss_mask=loss_mask,
@@ -522,9 +556,26 @@ def forward_step_text(data_iterator, model: Qwen35Model, return_schedule_plan: b
 # Multimodal (energon) data loading — used when enable_vision=True
 ###############################################################################
 
+def validate_packing_args(args):
+    """Reject unsupported packing layouts before starting dataset workers."""
+    buffer_size = getattr(args, "packing_buffer_size", 0)
+    if buffer_size < 0:
+        raise ValueError("packing_buffer_size must be nonnegative (0 disables packing)")
+    if buffer_size > 0:
+        if not getattr(args, "enable_vision", True):
+            raise ValueError("packing_buffer_size applies to the multimodal Energon loader")
+        if args.micro_batch_size != 1 or args.context_parallel_size != 1:
+            raise ValueError("Qwen3.5 packing requires micro_batch_size=1 and context_parallel_size=1")
+        if args.pipeline_model_parallel_size != 1:
+            raise ValueError("Qwen3.5 packing currently requires pipeline_model_parallel_size=1")
+        if args.max_padding_length != args.seq_length:
+            raise ValueError("Qwen3.5 packing requires max_padding_length equal to seq_length")
+
+
 def datasets_provider(worker_config=None):
     """Create multimodal train, validation and test datasets."""
     args = get_args()
+    validate_packing_args(args)
     dname = args.data_path[0] if type(args.data_path) is list else args.data_path
     train_dataset = get_train_dataset(
         dname,
@@ -534,6 +585,7 @@ def datasets_provider(worker_config=None):
         virtual_epoch_length=0,
         max_samples_per_sequence=args.max_samples_per_sequence,
         shuffle_buffer_size=args.shuffle_buffer_size,
+        packing_buffer_size=getattr(args, "packing_buffer_size", 0) or None,
         handler=print_error_handler,
         repeat=True,
         image_decode="pil",
@@ -645,6 +697,10 @@ def cyclic_iter(iter):
 def add_qwen35_extra_args(parser):
     """Extra arguments for Qwen3.5 training."""
     group = parser.add_argument_group(title="qwen35 arguments")
+    group.add_argument(
+        "--packing-buffer-size", type=int, default=0,
+        help="Samples buffered per Energon worker for sequential multimodal packing; 0 disables it.",
+    )
     group.add_argument("--disable-vision-class-token", action="store_true", default=False)
     group.add_argument("--enable-vision", action="store_true", default=True,
                        help="Enable vision encoder for multimodal training (default).")
