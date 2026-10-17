@@ -1,0 +1,50 @@
+# Dockerfile to build FlagScale Debian packages
+# No vendor SDK needed - pure Python package
+
+# Unified to ubuntu:24.04 like the other Flag* packaging PRs after the
+# pyproject's setuptools requirement was relaxed from >=77 to >=64 (noble
+# ships setuptools 68 which now satisfies it). BASE_IMAGE / BASE_IMAGE_VERSION
+# stay overridable for ad-hoc rebuilds against a different base.
+ARG BASE_IMAGE=ubuntu
+ARG BASE_IMAGE_VERSION=24.04
+
+FROM ${BASE_IMAGE}:${BASE_IMAGE_VERSION}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    debhelper \
+    devscripts \
+    dpkg-dev \
+    fakeroot \
+    dh-python \
+    pybuild-plugin-pyproject \
+    python3-all \
+    python3-setuptools \
+    python3-wheel \
+    python3-pip \
+    lintian \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY . /workspace/FlagScale
+WORKDIR /workspace/FlagScale
+
+# Copy packaging debian dir to source root
+RUN cp -r packaging/debian debian
+
+# Build the package
+RUN dpkg-buildpackage -us -uc -b || \
+    { echo "=== Build failed, showing logs ===" >&2; \
+      find /workspace -name "*.log" -exec echo "=== {} ===" \; -exec cat {} \; 2>/dev/null || true; \
+      exit 1; }
+
+# Collect built .deb files
+# Run lintian against the produced .deb — surface packaging warnings
+# (unused-license-paragraph, no-manual-page, missing-build-dependency, etc.)
+# in the build log without failing the build.
+RUN lintian --info --display-info /workspace/python3-flagscale_*.deb || true
+
+RUN mkdir -p /output && \
+    find /workspace -maxdepth 1 -name "*.deb" -exec cp {} /output/ \; && \
+    ls -lh /output/
