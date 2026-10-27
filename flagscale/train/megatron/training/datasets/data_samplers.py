@@ -95,7 +95,15 @@ def build_pretraining_data_loader(dataset, consumed_samples):
         worker_init_fn if args.num_workers > 0 else None
     )
     # Torch dataloader.
-    if args.hybrid_context_parallel:
+    if hasattr(dataset, "template") and getattr(dataset, "template", None) is not None \
+            and getattr(args, "sft_data_backend", "megatron") == "swift":
+        # ms-swift online SFT: convert packed/encoded rows into FlagScale batch keys.
+        from data import build_swift_sft_collator
+        from data.swift_collator import swift_padding_to_from_args
+
+        padding_to = swift_padding_to_from_args(args)
+        extra_kwargs = {"collate_fn": build_swift_sft_collator(dataset.template, padding_to)}
+    elif args.hybrid_context_parallel:
         extra_kwargs = {"collate_fn": lambda x: x,}
     else:
         extra_kwargs = {}

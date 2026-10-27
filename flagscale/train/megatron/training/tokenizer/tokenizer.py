@@ -155,7 +155,12 @@ class _HFTokenizerFS(_FlagScaleTokenizerBase):
 
     @property
     def vocab_size(self):
-        return self.tokenizer.vocab_size
+        # Use len(tokenizer) rather than tokenizer.vocab_size: the latter reports
+        # only the base vocabulary and excludes added/special tokens, so a model
+        # sized from it would under-allocate its embedding table and hit a CUDA
+        # device-side assert on any token id in the added range. len() covers
+        # base + added tokens, matching the HF model's config.json vocab_size.
+        return len(self.tokenizer)
 
     @property
     def vocab(self):

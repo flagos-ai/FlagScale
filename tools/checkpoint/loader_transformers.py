@@ -42,8 +42,8 @@ def _load_checkpoint(queue, args):
 
     try:
         import transformers
-        major, minor, _ = map(int, transformers.__version__.split('.'))
-        assert major >= 4 and minor >= 36
+        major, minor, _ = map(int, transformers.__version__.split('.')[:2] + ['0'])
+        assert (major > 4) or (major == 4 and minor >= 36)
     except:
         raise ImportError("transformers version >= 4.36.0 ")
 

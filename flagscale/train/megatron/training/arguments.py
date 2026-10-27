@@ -3526,6 +3526,53 @@ def _add_sft_args(parser):
     group.add_argument('--sft', action="store_true", help='Megatron SFT training')
     group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned",
                        help='SFT prompt format.')
+
+    # ---- ms-swift online SFT data backend (Phase 1) ----
+    group.add_argument('--sft-data-backend', type=str, default='megatron',
+                       choices=['megatron', 'swift'],
+                       help='SFT data pipeline backend. "megatron" uses the built-in '
+                            'BlendedMegatronDatasetBuilder + SFTDataset (offline). "swift" uses '
+                            'the ms-swift online pipeline (jsonl load, template tokenize with '
+                            'loss_scale, and packing).')
+    group.add_argument('--sft-model-dir', type=str, default=None,
+                       help='[swift backend] Path to the HF model dir providing the tokenizer/'
+                            'processor and template config.')
+    group.add_argument('--sft-model-type', type=str, default='deepseek_v4',
+                       help='[swift backend] ms-swift model_type used to resolve the processor.')
+    group.add_argument('--sft-template', type=str, default='deepseek_v4_flash',
+                       help='[swift backend] ms-swift template type.')
+    group.add_argument('--sft-dataset', type=str, nargs='+', default=None,
+                       help='[swift backend] One or more training dataset paths/ids. Each entry '
+                            'may carry ms-swift "#N" sampling syntax, e.g. "data.jsonl#512".')
+    group.add_argument('--sft-val-dataset', type=str, nargs='+', default=None,
+                       help='[swift backend] Optional validation dataset paths/ids.')
+    group.add_argument('--sft-split-dataset-ratio', type=float, default=0.0,
+                       help='[swift backend] Ratio to split a validation set out of the training '
+                            'set when --sft-val-dataset is not provided.')
+    group.add_argument('--sft-max-length', type=int, default=None,
+                       help='[swift backend] Max token length per sample. Defaults to '
+                            '--seq-length when unset.')
+    group.add_argument('--sft-truncation-strategy', type=str, default='delete',
+                       choices=['raise', 'left', 'right', 'delete', 'split'],
+                       help='[swift backend] How to handle samples exceeding --sft-max-length.')
+    group.add_argument('--sft-loss-scale', type=str, default='default+ignore_empty_think',
+                       help='[swift backend] ms-swift loss_scale spec (may be non-binary).')
+    group.add_argument('--sft-no-add-non-thinking-prefix', action='store_false',
+                       dest='sft_add_non_thinking_prefix',
+                       help='[swift backend] Disable the template non-thinking prefix.')
+    group.add_argument('--sft-packing', action='store_true', default=True,
+                       help='[swift backend] Enable best-fit-decreasing packing (default: on).')
+    group.add_argument('--sft-no-packing', action='store_false', dest='sft_packing',
+                       help='[swift backend] Disable packing (one sample per sequence).')
+    group.add_argument('--sft-packing-length', type=int, default=None,
+                       help='[swift backend] Target packed length. Defaults to --sft-max-length.')
+    group.add_argument('--sft-packing-strategy', type=str, default='binpack',
+                       choices=['binpack', 'sequential'],
+                       help='[swift backend] Packing strategy.')
+    group.add_argument('--sft-packing-num-proc', type=int, default=1,
+                       help='[swift backend] Number of packing worker processes.')
+    group.add_argument('--sft-dataset-num-proc', type=int, default=1,
+                       help='[swift backend] Number of dataset preprocessing processes.')
     return parser
 
 
