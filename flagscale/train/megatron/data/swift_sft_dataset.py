@@ -69,18 +69,13 @@ class SwiftSFTConfig:
 
 
 def _build_template(config: SwiftSFTConfig):
-    """Build a stand-alone ms-swift template (tokenizer only, no model weights)."""
-    from swift.model import get_processor
-    from swift.template import get_template
+    """Build a stand-alone template (tokenizer only, no model weights)."""
+    from .swift_processor_shim import build_processor
+    from .template import get_template
 
-    # ``get_processor`` wraps ``get_model_processor(load_model=False)``, giving us
-    # the processor/tokenizer without materializing the (huge) model on this rank
-    # -- tokenization only needs the tokenizer.
-    processor = get_processor(
-        config.model_dir,
-        model_type=config.model_type,
-        download_model=False,
-    )
+    # Only the tokenizer plus a handful of config-derived fields are needed to
+    # encode; see swift_processor_shim for why swift.model is not used here.
+    processor = build_processor(config.model_dir, config.model_type, config.template)
     # ms-swift arg-level ``delete`` means "drop over-long samples". The template
     # itself only accepts raise/left/right/split, so (matching ms-swift
     # ``template_args.py``) we map ``delete`` -> ``raise`` here; over-long rows
@@ -121,7 +116,7 @@ class SwiftSFTDataset:
     """
 
     def __init__(self, config: SwiftSFTConfig, dataset_paths: List[str], *, is_train: bool):
-        from swift.dataset import AddLengthPreprocessor, LazyLLMDataset, PackingDataset, load_dataset
+        from .dataset import AddLengthPreprocessor, LazyLLMDataset, PackingDataset, load_dataset
 
         self.config = config
         self.is_train = is_train
