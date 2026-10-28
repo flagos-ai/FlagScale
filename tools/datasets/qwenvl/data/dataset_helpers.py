@@ -79,6 +79,7 @@ class VQATaskBatch(Batch):
     text: torch.Tensor
     # (n, seq_len)
     target: torch.Tensor
+    cu_seqlens: torch.Tensor | None = None
 
 
 class InternalWarning(Warning): ...
@@ -616,6 +617,80 @@ class TaskEncoder(
             target=target,
         )
 
+    def select_samples_to_pack(self, samples: list[ImageTaskSample]) -> list[list[ImageTaskSample]]:
+        """Next Fit: preserve input order and close a pack when the next sample does not fit."""
+        packs, current = [], []
+        current_length = 0
+        for sample in samples:
+            length = len(sample.text)
+            if length == 0 or length > self.seq_len:
+                # Never truncate a visual span or silently lose its image/grid alignment.
+                dataset_logger.warning(
+                    "Skipping packing sample %s: length %s is outside [1, %s]",
+                    sample.__key__,
+                    length,
+                    self.seq_len,
+                )
+                continue
+            if current and current_length + length > self.seq_len:
+                packs.append(current)
+                current, current_length = [], 0
+            current.append(sample)
+            current_length += length
+        if current:
+            packs.append(current)
+        return packs
+
+    def pack_selected_samples(self, samples: list[ImageTaskSample]) -> ImageTaskSample:
+        """Concatenate complete samples and retain boundaries for attention, GDN and mRoPE."""
+        lengths = [len(sample.text) for sample in samples]
+        if not lengths or min(lengths) <= 0 or sum(lengths) > self.seq_len:
+            raise ValueError("A pack must contain nonempty samples within max_padding_length")
+
+        def concatenate(name):
+            arrays = [np.asarray(getattr(sample, name)) for sample in samples]
+            arrays = [array for array in arrays if array.size]
+            if arrays:
+                return np.concatenate(arrays, axis=0)
+            if name.endswith("thw_grids"):
+                return np.empty((0, 3), dtype=np.int64)
+            return np.empty(0, dtype=np.float32)
+
+        def concatenate_mask(name):
+            masks = []
+            for sample, length in zip(samples, lengths):
+                mask = getattr(sample, name)
+                mask = (
+                    np.zeros(length, dtype=bool) if mask is None else np.asarray(mask, dtype=bool)
+                )
+                if mask.shape != (length,):
+                    raise ValueError(f"{name} must align with the sample tokens")
+                masks.append(mask)
+            return np.concatenate(masks)
+
+        targets = []
+        for sample, length in zip(samples, lengths):
+            target = np.asarray(sample.target).copy()
+            if target.shape != (length,):
+                raise ValueError("Packing requires one already-shifted target per token")
+            # Encoders already shift labels. Only the last token cannot predict a next token;
+            # the first target of the following sample must retain its original supervision.
+            target[-1] = IGNORE_IDX
+            targets.append(target)
+        return ImageTaskSample(
+            __key__=",".join(sample.__key__ for sample in samples),
+            __subflavors__={"packed_seq_lengths": lengths},
+            imgs=concatenate("imgs"),
+            videos=concatenate("videos"),
+            image_thw_grids=concatenate("image_thw_grids"),
+            video_thw_grids=concatenate("video_thw_grids"),
+            image_input_mask=concatenate_mask("image_input_mask"),
+            video_input_mask=concatenate_mask("video_input_mask"),
+            second_per_grid_ts=concatenate("second_per_grid_ts"),
+            text=np.concatenate([np.asarray(sample.text) for sample in samples]),
+            target=np.concatenate(targets),
+        )
+
     def batch(self, samples: list[ImageTaskSample]) -> VQATaskBatch:
         # Stack images to [num_tiles, c, h, w]. If there are no images (text-only), then use a dummy image.
         # imgs = [img for s in samples for img in s.imgs]
@@ -713,6 +788,21 @@ class TaskEncoder(
                 video_input_masks[i, :text_len] = np.array(s.video_input_mask)[:text_len]
             target_mat[i, :target_len] = np.array(s.target)[:target_len]
 
+        cu_seqlens = None
+        if any("packed_seq_lengths" in (sample.__subflavors__ or {}) for sample in samples):
+            if len(samples) != 1:
+                raise ValueError("Qwen3.5 packing requires micro_batch_size=1")
+            lengths = samples[0].__subflavors__["packed_seq_lengths"]
+            if not lengths or min(lengths) <= 0 or sum(lengths) != len(samples[0].text):
+                raise ValueError("Packed sequence lengths must describe every input token")
+            if sum(lengths) > max_seq_len:
+                raise ValueError("Packed samples must not be truncated")
+            # Keep alignment/capacity padding in the final segment. Its labels are ignored;
+            # causal attention ensures the padding cannot affect any preceding real token.
+            boundaries = np.cumsum([0, *lengths], dtype=np.int64)
+            boundaries[-1] = max_seq_len
+            cu_seqlens = torch.tensor(boundaries, dtype=torch.int32)
+
         batch = VQATaskBatch(
             __keys__=[s.__key__ for s in samples],
             __subflavors__=[s.__subflavors__ for s in samples],
@@ -725,6 +815,7 @@ class TaskEncoder(
             video_input_mask=torch.from_numpy(video_input_masks),
             text=torch.from_numpy(text_mat),
             target=torch.from_numpy(target_mat),
+            cu_seqlens=cu_seqlens,
         )
 
         return batch
@@ -732,6 +823,8 @@ class TaskEncoder(
     def encode_batch(self, batch: VQATaskBatch) -> dict:
         raw = dataclasses.asdict(batch)
         del raw["__subflavors__"]
+        if raw["cu_seqlens"] is None:
+            del raw["cu_seqlens"]
         return raw
 
 
