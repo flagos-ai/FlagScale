@@ -1,0 +1,118 @@
+# DSv4 composes reusable structures; its adapter handles configuration conventions.
+schema_version: 2
+profile: deepseek_v4
+adapter: tools.checkpoint.deepseek_v4.adapter
+parameters:
+- embedding
+- output_te
+- final_norm_te
+- separate_norms
+- mla_query
+- absorbed_kv
+- grouped_attention_output
+- moe
+- shared_experts
+- attention_sink
+- compressed_attention
+- sparse_indexer
+- hash_router
+- hyper_connections
+- hyper_connection_head
+- mtp_streams
+args:
+- rope
+- yarn
+# DSv4's TE norms require empty extra-state entries during ordinary DCP loading.
+rules:
+- id: attn_norm
+  scope: layer
+  hf: ['{attention_norm}.weight']
+  mcore: [input_layernorm.weight]
+  extra_state: [input_layernorm._extra_state/shard_0_1]
+- id: ffn_norm
+  scope: layer
+  hf: ['{mlp_norm}.weight']
+  mcore: [pre_mlp_layernorm.weight]
+  extra_state: [pre_mlp_layernorm._extra_state/shard_0_1]
+- id: q_norm
+  scope: layer
+  optional: true
+  hf: ['{attention}.q_norm.weight']
+  mcore: [self_attention.q_layernorm.weight]
+  extra_state: [self_attention.q_layernorm._extra_state/shard_0_1]
+- id: kv_norm
+  scope: layer
+  optional: true
+  hf: ['{attention}.kv_norm.weight']
+  mcore: [self_attention.kv_layernorm.weight]
+  extra_state: [self_attention.kv_layernorm._extra_state/shard_0_1]
+- id: compress_norm
+  scope: layer
+  optional: true
+  hf: ['{attention}.compressor.norm.weight']
+  mcore: [self_attention.core_attention.compressor.norm.weight]
+  extra_state: [self_attention.core_attention.compressor.norm._extra_state/shard_0_1]
+- id: index_compress_norm
+  scope: layer
+  optional: true
+  hf: ['{attention}.indexer.compressor.norm.weight']
+  mcore: [self_attention.core_attention.indexer.compressor.norm.weight]
+  extra_state: [self_attention.core_attention.indexer.compressor.norm._extra_state/shard_0_1]
+quantization:
+  mxfp4:
+  - layers.*.ffn.experts.*.w*.weight
+  - mtp.*.ffn.experts.*.w*.weight
+scopes:
+  layer:
+  - hf: layers.{layer}.
+    mcore: decoder.layers.{layer}.
+  - hf: mtp.{layer}.
+    mcore: mtp.layers.{layer}.transformer_layer.
+    optional: true
+  mtp:
+  - hf: mtp.{layer}.
+    mcore: mtp.layers.{layer}.
+    optional: true
+config_map:
+  intermediate_size:
+    mcore: ffn_hidden_size
+    hf_default: null
+  num_nextn_predict_layers:
+    mcore: mtp_num_layers
+    hf_default: 0
+    normalize: int_or_zero
+  num_hash_layers:
+    mcore: moe_n_hash_layers
+    hf_default: 0
+    normalize: int_or_zero
+  routed_scaling_factor:
+    mcore: moe_router_topk_scaling_factor
+    hf_default: 1.0
+    reverse_default: 1
+  n_group:
+    mcore: moe_router_num_groups
+    hf_default: null
+    reverse_default: 1
+  topk_group:
+    mcore: moe_router_group_topk
+    hf_default: null
+    reverse_default: 1
+  swiglu_limit:
+    mcore: activation_func_clamp_value
+    hf_default: null
+mcore_args:
+  untie_embeddings_and_output_weights:
+    op: not
+    args:
+    - $hf.tie_word_embeddings
+  moe_layer_freq: 1
+  experimental_attention_variant: dsv4_hybrid
+  rotary_percent: 1.0
+  rotary_interleaved: false
+hf_config:
+  model_type: deepseek_v4
+  hidden_act: silu
+  attention_bias: false
+  num_key_value_heads: 1
+  first_k_dense_replace: 0
+  norm_topk_prob: true

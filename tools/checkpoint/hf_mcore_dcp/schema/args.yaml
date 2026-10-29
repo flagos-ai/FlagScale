@@ -1,0 +1,192 @@
+# Configuration groups selected by weight structures or model profiles.
+schema_version: 2
+groups:
+  model:
+    config_map:
+      num_hidden_layers: num_layers
+      hidden_size: hidden_size
+      num_attention_heads: num_attention_heads
+      max_position_embeddings: max_position_embeddings
+      attention_dropout: attention_dropout
+  vocabulary:
+    config_map:
+      vocab_size: vocab_size
+      make_vocab_size_divisible_by: make_vocab_size_divisible_by
+  rmsnorm:
+    config_map:
+      rms_norm_eps: [norm_epsilon, layernorm_epsilon]
+    mcore_args:
+      normalization: RMSNorm
+  rope:
+    config_map:
+      rope_theta: rotary_base
+    mcore_args:
+      position_embedding_type: rope
+  yarn:
+    # MLA reads these unprefixed TransformerConfig fields.
+    config_map:
+      rope_scaling.factor: rotary_scaling_factor
+      rope_scaling.original_max_position_embeddings: original_max_position_embeddings
+      rope_scaling.beta_fast: beta_fast
+      rope_scaling.beta_slow: beta_slow
+      rope_scaling.mscale: mscale
+      rope_scaling.mscale_all_dim: mscale_all_dim
+      rope_scaling.rope_type: rope_type
+  yarn_gqa:
+    # GPT/GQA selects YarnRotaryEmbedding through position_embedding_type.
+    config_map:
+      rope_scaling.factor: yarn_rotary_scaling_factor
+      rope_scaling.original_max_position_embeddings: yarn_original_max_position_embeddings
+      rope_scaling.beta_fast:
+        mcore: yarn_beta_fast
+        hf_default: 32.0
+        reverse_default: 32.0
+      rope_scaling.beta_slow:
+        mcore: yarn_beta_slow
+        hf_default: 1.0
+        reverse_default: 1.0
+      rope_scaling.mscale:
+        mcore: yarn_mscale
+        hf_default: 1.0
+      rope_scaling.mscale_all_dim:
+        mcore: yarn_mscale_all_dim
+        hf_default: 0.0
+      rope_scaling.truncate:
+        mcore: yarn_correction_range_round_to_int
+        hf_default: true
+        reverse_default: true
+    mcore_args:
+      position_embedding_type: $hf._position_embedding_type
+    hf_config:
+      rope_scaling.rope_type: $mcore.position_embedding_type
+  gqa:
+    config_map:
+      num_key_value_heads: num_query_groups
+      head_dim: kv_channels
+    mcore_args:
+      group_query_attention: true
+  qk_norm:
+    mcore_args:
+      qk_layernorm: true
+  gated_attention:
+    mcore_args:
+      attention_output_gate: true
+  zero_centered_norm:
+    mcore_args:
+      layernorm_zero_centered_gamma: true
+  bias_free:
+    mcore_args:
+      add_bias_linear: false
+      disable_bias_linear: true
+      add_qkv_bias: false
+  untied_embeddings:
+    mcore_args:
+      untie_embeddings_and_output_weights: true
+    hf_config:
+      tie_word_embeddings: false
+  dense_mlp:
+    config_map:
+      intermediate_size: ffn_hidden_size
+  swiglu:
+    mcore_args:
+      swiglu: true
+      gated_linear_unit: true
+    hf_config:
+      hidden_act: silu
+  mla:
+    config_map:
+      q_lora_rank: q_lora_rank
+      qk_rope_head_dim: qk_pos_emb_head_dim
+      num_key_value_heads: num_query_groups
+    mcore_args:
+      multi_latent_attention: true
+  absorbed_mla:
+    mcore_args:
+      qk_head_dim:
+        op: sub
+        args: [$hf.head_dim, $hf.qk_rope_head_dim]
+      kv_lora_rank:
+        op: sub
+        args: [$hf.head_dim, $hf.qk_rope_head_dim]
+      kv_channels: $hf.head_dim
+    config_map:
+      head_dim: v_head_dim
+  grouped_output:
+    config_map:
+      o_groups: o_groups
+      o_lora_rank: o_lora_rank
+  moe:
+    config_map:
+      n_routed_experts: [num_experts, num_moe_experts]
+      moe_intermediate_size: moe_ffn_hidden_size
+      num_experts_per_tok: moe_router_topk
+      scoring_func: moe_router_score_function
+      routed_scaling_factor: moe_router_topk_scaling_factor
+      n_group: moe_router_num_groups
+      topk_group: moe_router_group_topk
+      swiglu_limit: activation_func_clamp_value
+      moe_router_enable_expert_bias: moe_router_enable_expert_bias
+  shared_experts:
+    mcore_args:
+      moe_shared_expert_intermediate_size:
+        op: mul
+        args: [$hf.n_shared_experts, $hf.moe_intermediate_size]
+    hf_config:
+      n_shared_experts:
+        op: exactdiv
+        args: [$mcore.moe_shared_expert_intermediate_size, $mcore.moe_ffn_hidden_size]
+  compression:
+    config_map:
+      compress_rope_theta: csa_compress_rotary_base
+      compress_ratios: csa_compress_ratios
+      sliding_window: csa_window_size
+  indexer:
+    config_map:
+      index_n_heads: dsa_indexer_n_heads
+      index_head_dim: dsa_indexer_head_dim
+      index_topk: dsa_indexer_topk
+  hyper_connections:
+    config_map:
+      hc_mult: num_residual_streams
+      hc_sinkhorn_iters: mhc_sinkhorn_iterations
+    mcore_args:
+      enable_hyper_connections: true
+  hash_router:
+    config_map:
+      num_hash_layers: moe_n_hash_layers
+  mtp:
+    config_map:
+      num_nextn_predict_layers: mtp_num_layers
+  gdn:
+    mcore_args:
+      experimental_attention_variant: gated_delta_net
+      linear_attention_freq: $hf._linear_pattern
+    config_map:
+      linear_conv_kernel_dim: linear_conv_kernel_dim
+      linear_key_head_dim: linear_key_head_dim
+      linear_value_head_dim: linear_value_head_dim
+      linear_num_key_heads: linear_num_key_heads
+      linear_num_value_heads: linear_num_value_heads
+  partial_rope:
+    config_map:
+      partial_rotary_factor: rotary_percent
+  initialization:
+    config_map:
+      initializer_range: init_method_std
+  vision:
+    config_map:
+      vision_config.depth: vision_num_layers
+      vision_config.hidden_size: vision_hidden_size
+      vision_config.num_heads: vision_num_attention_heads
+      vision_config.intermediate_size: vision_ffn_hidden_size
+      vision_config.patch_size: patch_size
+      vision_config.temporal_patch_size: temporal_patch_size
+      vision_config.in_channels: in_channels
+      vision_config.spatial_merge_size: spatial_merge_size
+      vision_config.num_position_embeddings: num_position_embeddings
+      vision_config.hidden_act: vision_hidden_act
+  gated_shared_expert:
+    config_map:
+      shared_expert_intermediate_size: moe_shared_expert_intermediate_size
+    mcore_args:
+      moe_shared_expert_gate: true
