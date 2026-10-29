@@ -64,7 +64,6 @@ from .log_handler import CustomHandler
 ######### FlagScale Begin #########
 import json
 import socket
-from .profiler_reports import export_kernel_reports
 ######### FlagScale Begin #########
 
 # Make default logging level INFO, but filter out all log messages not from MCore.
@@ -3879,16 +3878,6 @@ def train(
             profile_dir = Path(f"{args.tensorboard_dir}/../torch_profile")
             profile_dir.mkdir(parents=True, exist_ok=True)
             p.export_chrome_trace(f"{profile_dir}/rank-{torch.distributed.get_rank()}.json.gz")
-
-            ########## FlagScale Begin ##########
-            kernel_details_path, kernel_summary_path, operator_list_path = export_kernel_reports(
-                p.events(), profile_dir, rank, f"{profile_dir}/rank-{torch.distributed.get_rank()}.json.gz"
-            )
-            print(f"[CUDA] kernel details report is saved to: {kernel_details_path}")
-            print(f"[CUDA] kernel summary report is saved to: {kernel_summary_path}")
-            print(f"[CUDA] operator list is saved to: {operator_list_path}")
-            ########## FlagScale Begin ##########
-
         prof = torch.profiler.profile(
             schedule=torch.profiler.schedule(
                 wait=max(args.profile_step_start - 1, 0),
