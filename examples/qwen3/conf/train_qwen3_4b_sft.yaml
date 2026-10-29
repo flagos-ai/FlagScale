@@ -1,0 +1,66 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 the "License";
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Qwen3-4B (dense) SFT hot-start: full-size model, real pretrained weights.
+# Same ms-swift online SFT data backend as the smoke test (which validated the
+# data path with a random-init 4-layer model); this run swaps in the real
+# Qwen3-4B architecture and loads the mcore-converted checkpoint via
+# experiment.load. Launch with:
+#   python run.py --config-path examples/qwen3/conf \
+#                 --config-name train_qwen3_4b_sft
+
+defaults:
+  - _self_
+  - train: qwen3_4b_sft
+
+experiment:
+  exp_name: qwen3-4b-sft
+  seed: 42
+  # Provides the tokenizer/processor + template config for the swift backend.
+  sft_model_dir: /public-nvme/lizhiyu/Qwen/Qwen3-4B
+  sft_dataset:
+    - /public/lizhiyu/data/code/self_evolving/unify_browsecomp/results/collect/ws_processed/0501/validation/valid.jsonl
+  save_steps: 100000
+  # mcore-format checkpoint converted from the HF weights
+  # (tools/checkpoint convert.py, TP=1/PP=1, bf16).
+  load: /public-nvme/lizhiyu/ckpt/qwen3_4b_mcore_tp2pp1
+  exp_dir: /public/lizhiyu/FlagScale/outputs/qwen3_4b_sft
+  ckpt_format: torch
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_gpt.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    hostfile: null
+    nproc_per_node: 8
+  cmds:
+    # Use the dsv4-train-back conda env: it has the full FlagScale/Megatron/TE
+    # stack PLUS the swift library the SFT data backend imports.
+    before_start: >-
+      ulimit -n 1048576 &&
+      export PATH=/public/lizhiyu/envs/dsv4-train-back/bin:$PATH &&
+      export LD_LIBRARY_PATH=/public/lizhiyu/nccl/build/lib:$LD_LIBRARY_PATH
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+    PYTORCH_ALLOC_CONF: "expandable_segments:True"
+    NVTE_DEBUG: 1
+    NVTE_DEBUG_LEVEL: 2
+    HF_HOME: /public/lizhiyu/FlagScale/outputs/qwen3_4b_sft/cache/huggingface
+    HF_DATASETS_CACHE: /public/lizhiyu/FlagScale/outputs/qwen3_4b_sft/cache/datasets
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

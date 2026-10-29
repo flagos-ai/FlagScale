@@ -239,6 +239,43 @@ def test_non_binary_loss_scale_stays_out_of_the_denominator():
     assert torch.allclose(n_tokens, mask.sum())
 
 
+def test_collator_metadata_matches_the_tp_broadcast_buffers():
+    """Pin the tensor shapes/dtypes the TP broadcast allocates on receiving ranks.
+
+    ``megatron.core.utils.get_batch_on_this_tp_rank`` pre-allocates receive
+    buffers before broadcasting, so a mismatch between what rank 0 sends and
+    what the others expect does not raise -- every rank blocks in the same
+    collective and the run hangs on the first training step. A multi-GPU smoke
+    test caught exactly that for ``max_seqlen`` (sent 0-dim int64 against a
+    ``torch.empty(1, dtype=torch.int32)`` buffer), which single-process tests
+    cannot see.
+
+    The receiver side, for reference:
+        max_seqlen = torch.empty(1, dtype=torch.int32, ...)
+        cu_seqlens = torch.empty((1, n), dtype=torch.int32, ...)
+    """
+    from data.swift_collator import swift_sft_collate
+
+    template = _build_vendored_template()
+    batch = _encode(template)
+    out = swift_sft_collate(list(batch), template=template, padding_to=None)
+
+    assert out["max_seqlen"].shape == (1, ), out["max_seqlen"].shape
+    assert out["max_seqlen"].dtype == torch.int32, out["max_seqlen"].dtype
+    # forward_step does int(max_seqlen.item()), which requires exactly one element.
+    assert int(out["max_seqlen"].item()) > 0
+
+    for key in ("cu_seqlens", "cu_seqlens_padded"):
+        value = out[key]
+        assert value.dim() == 2 and value.shape[0] == 1, (key, value.shape)
+        assert value.dtype == torch.int32, (key, value.dtype)
+
+    # attention_mask must be None: packed sequences use varlen attention. Runs
+    # must therefore set --no-create-attention-mask-in-dataloader, or the
+    # receiving ranks wait for a mask that rank 0 never sends.
+    assert out["attention_mask"] is None
+
+
 def test_loss_func_applies_loss_scale_to_the_numerator_only():
     """``train_gpt.loss_func`` must weight the numerator and count tokens."""
     pytest.importorskip("megatron.core")

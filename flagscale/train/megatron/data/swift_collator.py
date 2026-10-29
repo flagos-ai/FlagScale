@@ -134,7 +134,13 @@ def swift_sft_collate(
         "position_ids": position_ids.to(torch.int64),
         "cu_seqlens": cu_seqlens,
         "cu_seqlens_padded": cu_seqlens,
-        "max_seqlen": torch.tensor(max_seqlen, dtype=torch.int64),
+        # Shape (1,) int32, matching the receive buffer non-zero TP ranks
+        # allocate in megatron.core.utils.get_batch_on_this_tp_rank:
+        #     max_seqlen = torch.empty(1, dtype=torch.int32, ...)
+        # A 0-dim or int64 tensor here makes that broadcast disagree on both
+        # shape and dtype, and NCCL hangs on the first training step rather than
+        # raising -- every rank sits in the same collective waiting forever.
+        "max_seqlen": torch.tensor([max_seqlen], dtype=torch.int32),
         "attention_mask": None,
     }
     return out

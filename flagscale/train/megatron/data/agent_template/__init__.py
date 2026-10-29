@@ -18,6 +18,7 @@ code; the markup is then just text.
 from .base import BaseAgentTemplate
 from .deepseek_v3_1 import DeepSeekV31AgentTemplate
 from .deepseek_v4 import DeepSeekV4AgentTemplate
+from .hermes import HermesAgentTemplate, HunyuanHermesAgentTemplate
 
 # Add an agent template here, select it with --agent_template xxx
 agent_template_map = {
@@ -25,11 +26,16 @@ agent_template_map = {
     'deepseek_v3_1': DeepSeekV31AgentTemplate,
     # ref: https://modelscope.cn/models/deepseek-ai/DeepSeek-V4-Flash
     'deepseek_v4': DeepSeekV4AgentTemplate,
+    # Qwen's tool-calling format; the default for the qwen3 templates.
+    'hermes': HermesAgentTemplate,
+    'hunyuan_hermes': HunyuanHermesAgentTemplate,
 }
 
 __all__ = [
     "BaseAgentTemplate",
     "DeepSeekV31AgentTemplate",
     "DeepSeekV4AgentTemplate",
+    "HermesAgentTemplate",
+    "HunyuanHermesAgentTemplate",
     "agent_template_map",
 ]

@@ -17,6 +17,7 @@ through both this package and ``swift.template`` and requires identical
 """
 
 from . import deepseek  # noqa: F401  -- registers the DeepSeek template chain
+from . import qwen  # noqa: F401  -- registers the Qwen3 chain (verification only)
 from .base import MaxLengthError, Template
 from .constant import LLMTemplateType, MLLMTemplateType, TemplateType
 from .register import TEMPLATE_MAPPING, get_template, get_template_meta, register_template
