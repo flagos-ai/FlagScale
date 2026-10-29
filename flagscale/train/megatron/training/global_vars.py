@@ -32,6 +32,9 @@ _GLOBAL_ADLR_AUTORESUME = None
 _GLOBAL_TIMERS = None
 _GLOBAL_ENERGY_MONITOR = None
 _GLOBAL_SIGNAL_HANDLER = None
+# BEGIN MEGALENS OBSERVABILITY
+_GLOBAL_MEGALENS_RUNTIME = None
+# END MEGALENS OBSERVABILITY
 
 ########## FlagScale Begin ##########
 _GLOBAL_SPIKY_LOSS_DETECTOR = None
@@ -89,6 +92,21 @@ def get_signal_handler():
     return _GLOBAL_SIGNAL_HANDLER
 
 
+# BEGIN MEGALENS OBSERVABILITY
+def get_megalens_runtime():
+    """Return the lazily-created per-rank MegaLens runtime."""
+    _ensure_var_is_initialized(_GLOBAL_MEGALENS_RUNTIME, 'MegaLens runtime')
+    return _GLOBAL_MEGALENS_RUNTIME
+
+
+def get_tracer():
+    """Return the active MegaLens tracer, or ``None`` when tracing is disabled."""
+    runtime = _GLOBAL_MEGALENS_RUNTIME
+    return runtime.tracer if runtime is not None else None
+
+# END MEGALENS OBSERVABILITY
+
+
 def _set_signal_handler(exit_signal):
 
     global _GLOBAL_SIGNAL_HANDLER
@@ -108,6 +126,10 @@ def _graceful_shutdown(signum, frame):
     """
     from megatron.training.utils import print_rank_0
     print_rank_0("\nTermination requested. Performing orderly shutdown.")
+
+    # BEGIN MEGALENS OBSERVABILITY
+    shutdown_megalens_runtime(graceful=False)
+    # END MEGALENS OBSERVABILITY
 
     try:
         if torch.distributed.is_available() and torch.distributed.is_initialized():
@@ -167,6 +189,10 @@ def set_global_variables(args, build_tokenizer=True):
     if args.disable_jit_fuser:
         disable_jit_fuser()
 
+    # BEGIN MEGALENS OBSERVABILITY
+    _set_megalens_runtime(args)
+    # END MEGALENS OBSERVABILITY
+
 
 ########## FlagScale Begin ##########
 def set_global_writers(args):
@@ -205,6 +231,9 @@ def set_global_writers(args):
 
 
 def unset_global_variables():
+    # BEGIN MEGALENS OBSERVABILITY
+    shutdown_megalens_runtime(graceful=False)
+    # END MEGALENS OBSERVABILITY
     """Unset global vars.
 
     Useful for multiple runs. See `tests/unit_tests/ckpt_converter/test_ckpt_converter.py` for an example.
@@ -238,6 +267,33 @@ def unset_global_variables():
 def set_args(args):
     global _GLOBAL_ARGS
     _GLOBAL_ARGS = args
+
+
+# BEGIN MEGALENS OBSERVABILITY
+def _set_megalens_runtime(args):
+    """Create MegaLens only when tracing was explicitly requested."""
+    global _GLOBAL_MEGALENS_RUNTIME
+    _ensure_var_is_not_initialized(_GLOBAL_MEGALENS_RUNTIME, 'MegaLens runtime')
+    if not getattr(args, 'trace', False):
+        return
+
+    from megatron.megalens.runtime import MegaLensRuntime
+
+    _GLOBAL_MEGALENS_RUNTIME = MegaLensRuntime(args)
+
+
+def shutdown_megalens_runtime(*, graceful: bool) -> None:
+    """Idempotently close MegaLens before distributed/global teardown."""
+    global _GLOBAL_MEGALENS_RUNTIME
+    runtime = _GLOBAL_MEGALENS_RUNTIME
+    if runtime is None:
+        return
+    try:
+        runtime.shutdown(graceful=graceful)
+    finally:
+        _GLOBAL_MEGALENS_RUNTIME = None
+
+# END MEGALENS OBSERVABILITY
 
 
 def _build_tokenizer(args):
@@ -385,6 +441,9 @@ def _ensure_var_is_not_initialized(var, name):
     assert var is None, '{} is already initialized.'.format(name)
 
 def destroy_global_vars():
+    # BEGIN MEGALENS OBSERVABILITY
+    shutdown_megalens_runtime(graceful=False)
+    # END MEGALENS OBSERVABILITY
     global _GLOBAL_ARGS
     _GLOBAL_ARGS = None
 

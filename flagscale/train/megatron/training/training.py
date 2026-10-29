@@ -46,12 +46,19 @@ import os
 import sys
 from collections import defaultdict
 from contextlib import nullcontext
+# BEGIN MEGALENS OBSERVABILITY
+from contextlib import ExitStack
+# END MEGALENS OBSERVABILITY
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import torch.distributed
 
+# BEGIN MEGALENS OBSERVABILITY
+from megatron.core.observability import trace_scope
+from megatron.training.global_vars import get_megalens_runtime, shutdown_megalens_runtime
+# END MEGALENS OBSERVABILITY
 from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
 from megatron.core.optimizer.layer_wise_optimizer import (
     LayerWiseDistributedOptimizer,
@@ -1295,6 +1302,30 @@ def preprocess_common_state_dict(common_state_dict):
     return preprocessed_common_state_dict
 
 
+# BEGIN MEGALENS OBSERVABILITY
+def _owns_megalens_runtime(pretrain_func):
+    """Ensure failures across the pretrain lifecycle close MegaLens."""
+
+    @functools.wraps(pretrain_func)
+    def wrapped(*args, **kwargs):
+        try:
+            result = pretrain_func(*args, **kwargs)
+        except BaseException:
+            try:
+                shutdown_megalens_runtime(graceful=False)
+            except BaseException:
+                logging.getLogger(__name__).exception(
+                    "MegaLens non-graceful shutdown failed while handling a pretrain failure"
+                )
+            raise
+        shutdown_megalens_runtime(graceful=True)
+        return result
+
+    return wrapped
+
+
+@_owns_megalens_runtime
+# END MEGALENS OBSERVABILITY
 def pretrain(
     cfg_container: PretrainConfigContainer,
     train_valid_test_dataset_provider,
@@ -2741,7 +2772,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     ):
     ########## FlagScale End ##########
         timers('optimizer', log_level=1).start(barrier=args.barrier_with_L1_time)
-        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+        # BEGIN MEGALENS OBSERVABILITY
+        with trace_scope("optimizer"):
+            update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+        # END MEGALENS OBSERVABILITY
 
         # get max attention logit for logging and run clip_qk()
         # Part of MuonClip Optimizer step
@@ -2755,69 +2789,72 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     if save_params_in_this_iteration:
         _save_state_dict(attr_name="data", label="params")
 
-    # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
-    # so we must gather across mp ranks
-    update_successful = logical_and_across_model_parallel_group(update_successful)
-    # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
-    # so we must gather across mp ranks
-    grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
-    if args.log_num_zeros_in_grad:
-        num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(num_zeros_in_grad)
+    # BEGIN MEGALENS OBSERVABILITY
+    with trace_scope("optimizer-postprocess"):
+        # when freezing sub-models we may have a mixture of successful and unsucessful ranks,
+        # so we must gather across mp ranks
+        update_successful = logical_and_across_model_parallel_group(update_successful)
+        # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
+        # so we must gather across mp ranks
+        grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
+        if args.log_num_zeros_in_grad:
+            num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(num_zeros_in_grad)
 
-    # Vision momentum.
-    if args.vision_pretraining and args.vision_pretraining_type == "dino":
-        unwrapped_model = unwrap_model(model[0])
-        unwrapped_model.update_momentum(args.curr_iteration)
+        # Vision momentum.
+        if args.vision_pretraining and args.vision_pretraining_type == "dino":
+            unwrapped_model = unwrap_model(model[0])
+            unwrapped_model.update_momentum(args.curr_iteration)
 
-    # Update learning rate.
-    if update_successful:
-        increment = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
-        opt_param_scheduler.step(increment=increment)
-        skipped_iter = 0
-    else:
-        skipped_iter = 1
+        # Update learning rate.
+        if update_successful:
+            increment = get_num_microbatches() * args.micro_batch_size * args.data_parallel_size
+            opt_param_scheduler.step(increment=increment)
+            skipped_iter = 0
+        else:
+            skipped_iter = 1
 
-    # Empty unused memory.
-    if args.empty_unused_memory_level >= 2:
-        cur_platform.empty_cache()  # FlagScale Modify
+        # Empty unused memory.
+        if args.empty_unused_memory_level >= 2:
+            cur_platform.empty_cache()  # FlagScale Modify
 
-    ########## FlagScale Begin ##########
-    is_last_stage = mpu.is_pipeline_last_stage(ignore_virtual=True)
-    if args.use_dualpipev:
-        is_last_stage = mpu.is_pipeline_first_stage(ignore_virtual=True)
-    ########## FlagScale End ##########
-    if is_last_stage:  # FlagScale Modify
-        # Average loss across microbatches.
-        loss_reduced = {}
+        ########## FlagScale Begin ##########
+        is_last_stage = mpu.is_pipeline_last_stage(ignore_virtual=True)
+        if args.use_dualpipev:
+            is_last_stage = mpu.is_pipeline_first_stage(ignore_virtual=True)
+        ########## FlagScale End ##########
+        if is_last_stage:  # FlagScale Modify
+            # Average loss across microbatches.
+            loss_reduced = {}
 
-        for key in losses_reduced[0].keys():
-            val = [x[key].view(-1) for x in losses_reduced]
-            if val[0].numel() == 2:
-                # there is one dict per microbatch. in new reporting, we average
-                # over the total number of tokens across the global batch.
-                val = torch.vstack(val).sum(dim=0)
-                torch.distributed.all_reduce(
-                    val,
-                    group=mpu.get_data_parallel_group(with_context_parallel=True)
-                )
-                loss_reduced[key] = val[0] / val[1]
-            elif val[0].numel() == 1:
-                # legacy behavior, we average over the number of microbatches
-                val = torch.cat(val).mean()
-                loss_reduced[key] = val
-            else:
-                raise ValueError(f"Invalid value shape: {val[0].shape} for key {key}")
-        return (
-            loss_reduced,
-            skipped_iter,
-            should_checkpoint,
-            should_exit,
-            exit_code,
-            grad_norm,
-            num_zeros_in_grad,
-            log_max_attention_logit,
-        )
-    return {}, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad, log_max_attention_logit
+            for key in losses_reduced[0].keys():
+                val = [x[key].view(-1) for x in losses_reduced]
+                if val[0].numel() == 2:
+                    # there is one dict per microbatch. in new reporting, we average
+                    # over the total number of tokens across the global batch.
+                    val = torch.vstack(val).sum(dim=0)
+                    torch.distributed.all_reduce(
+                        val,
+                        group=mpu.get_data_parallel_group(with_context_parallel=True)
+                    )
+                    loss_reduced[key] = val[0] / val[1]
+                elif val[0].numel() == 1:
+                    # legacy behavior, we average over the number of microbatches
+                    val = torch.cat(val).mean()
+                    loss_reduced[key] = val
+                else:
+                    raise ValueError(f"Invalid value shape: {val[0].shape} for key {key}")
+            return (
+                loss_reduced,
+                skipped_iter,
+                should_checkpoint,
+                should_exit,
+                exit_code,
+                grad_norm,
+                num_zeros_in_grad,
+                log_max_attention_logit,
+            )
+        return {}, skipped_iter, should_checkpoint, should_exit, exit_code, grad_norm, num_zeros_in_grad, log_max_attention_logit
+    # END MEGALENS OBSERVABILITY
 
 
 def training_log(
@@ -3924,230 +3961,276 @@ def train(
 
     # Run training iterations till done.
     buffered_rollouts = None
+    # BEGIN MEGALENS OBSERVABILITY
+    if args.trace and args.skip_samples_range and args.step_batch_size_schedule is not None:
+        raise ValueError(
+            "MegaLens tracing does not support --skip-samples-range with "
+            "--step-batch-size-schedule; use --skip-iters-range or a fixed global batch size"
+        )
+    # END MEGALENS OBSERVABILITY
     while iteration < args.train_iters:
-        if (args.profile 
-            and (len(args.profile_ranks) == 0 or
-                 torch.distributed.get_rank() in args.profile_ranks)):
-            # Enable NVTX range when profiling starts and nvtx_ranges is set.
-            if iteration == args.profile_step_start and args.nvtx_ranges:
-                configure_nvtx_profiling(True)
-            if args.use_pytorch_profiler:
-                prof.step()
-            elif iteration == args.profile_step_start:
-                torch.cuda.check_error(torch.cuda.cudart().cudaProfilerStart())
-                nsys_nvtx_context = torch.autograd.profiler.emit_nvtx(record_shapes=args.record_shapes)
-                nsys_nvtx_context.__enter__()
-
-        ft_integration.on_checkpointing_start(is_async_finalization=True, blocking=False)
-        maybe_finalize_async_save(blocking=False)
-        ft_integration.on_checkpointing_end(is_async_finalization=True, blocking=False)
-        # Update the timeout for all process groups after initialization
-        # We update the timeout after the first successful iteration,
-        # which takes longer than others usually
-        if args.distributed_timeout_seconds_after_init is not None and iteration == start_iteration+1:
-            # TODO: some dynamic timeout setting is required
-            # based on the iteration time considering interval-based steps (e.g. eval, checkpoint)
-            # e.g. timeout for normal iterations vs timeout for iterations with checkpoint
-            # this timeout is triggered when there's no collective communication
-            # for the duration of timeout
-            update_pg_timeout(timedelta(seconds=args.distributed_timeout_seconds_after_init))
-        # Update number of microbatches first without consistency check to decide if a
-        # checkpoint should be saved. If the number of microbatches is different
-        # from the previous iteration, save a checkpoint. Then run consistency check
-        # to make sure training configuration is still valid.
-        # Standard microbatch update (sequence packing overrides this in rl_utils.py)
-        update_num_microbatches(args.consumed_train_samples, consistency_check=False, verbose=True)
-        # Skip automatic checkpoint on microbatch changes when sequence packing is active
-        # as it intentionally reconfigures microbatches
-        if get_num_microbatches() != num_microbatches and iteration != 0 \
-            and args.save_when_num_microbatches_change:  # FlagScale Modify
-            if args.rl_use_sequence_packing:
-                print_rank_0(
-                    f"[Sequence Packing] Skipping automatic checkpoint at iteration {iteration} "
-                    f"(microbatch change: {num_microbatches} -> {get_num_microbatches()})"
-                )
-            else:
-                assert get_num_microbatches() > num_microbatches, (
-                    f"Number of microbatches should not decrease; "
-                    f"going from {num_microbatches} to {get_num_microbatches()}"
-                )
-                if args.save is not None:
-                    save_checkpoint_and_time(
-                        iteration,
-                        model,
-                        optimizer,
-                        opt_param_scheduler,
-                        num_floating_point_operations_so_far,
-                        checkpointing_context,
-                        train_data_iterator=train_data_iterator,
-                    )
-        num_microbatches = get_num_microbatches()
-        update_num_microbatches(args.consumed_train_samples, consistency_check=True, verbose=True)
-
-        # Capture CUDA Graphs.
-        if (
-            args.cuda_graph_impl == "transformer_engine"
-            and not cuda_graph_helper.capture_finished()
-            and iteration - start_iteration == args.cuda_graph_warmup_steps
-        ):
-            if args.cuda_graph_warmup_steps > 0 and should_disable_forward_pre_hook(args):
-                disable_forward_pre_hook(model, param_sync=False)
-            cuda_graph_helper.create_cudagraphs()
-            if args.cuda_graph_warmup_steps > 0 and should_disable_forward_pre_hook(args):
-                enable_forward_pre_hook(model)
-                cuda_graph_helper.cuda_graph_set_manual_hooks()
-
-        # Completely skip iteration if needed.
-        if (iteration + 1) in args.iterations_to_skip:
-            # Dummy train_step to fast forward train_data_iterator.
-            dummy_train_step(train_data_iterator)
-            if iteration == start_iteration:
-                start_iteration = iteration + 1
-            iteration += 1
-            batch_size = (
-                mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
-            )
-            args.consumed_train_samples += batch_size
-            args.skipped_train_samples += batch_size
-            continue
-
-        args.curr_iteration = iteration
-
-        ########## FlagScale Begin ##########
-        if args.skip_samples_range or args.skip_iters_range:
-            current_global_batch_size = get_current_global_batch_size()
-            start_skip_iteration = 0
-            end_skip_iteration = 0
+        # BEGIN MEGALENS OBSERVABILITY
+        skip_iteration = (iteration + 1) in args.iterations_to_skip
+        trace_iteration = args.trace and not skip_iteration
+        range_skip_active = False
+        if trace_iteration:
             if args.skip_samples_range:
-                if args.consumed_train_samples + current_global_batch_size > args.skip_samples_range[0] and args.consumed_train_samples < args.skip_samples_range[1]:
-                    num_skipped_iters = (args.skip_samples_range[1] - args.consumed_train_samples + current_global_batch_size - 1) // current_global_batch_size
-                    args.skip_samples_range[1] = args.consumed_train_samples + num_skipped_iters * current_global_batch_size
-                    start_skip_iteration = iteration
-                    end_skip_iteration = iteration + num_skipped_iters
-            else:
-                if iteration >= args.skip_iters_range[0] and iteration < args.skip_iters_range[1]:
-                    start_skip_iteration = iteration
-                    end_skip_iteration = args.skip_iters_range[1]
-            while iteration >= start_skip_iteration and iteration < end_skip_iteration:
-                if mpu.is_pipeline_first_stage() or mpu.is_pipeline_last_stage():
-                    for _ in range(get_num_microbatches()):
-                        _ = next(train_data_iterator)
-                args.consumed_train_samples += mpu.get_data_parallel_world_size() * \
-                                           args.micro_batch_size * \
-                                           get_num_microbatches()
-                update_num_microbatches(args.consumed_train_samples, consistency_check=True, verbose=True)
+                current_global_batch_size = get_current_global_batch_size()
+                range_skip_active = (
+                    args.consumed_train_samples + current_global_batch_size > args.skip_samples_range[0]
+                    and args.consumed_train_samples < args.skip_samples_range[1]
+                )
+            elif args.skip_iters_range:
+                range_skip_active = args.skip_iters_range[0] <= iteration < args.skip_iters_range[1]
+        megalens_runtime = get_megalens_runtime() if args.trace else None
+        if megalens_runtime is not None and (skip_iteration or range_skip_active):
+            megalens_runtime.tracer.close_trace_window()
+        with ExitStack() as iteration_stack:
+            if trace_iteration and not range_skip_active:
+                if not megalens_runtime.tracer.is_mode0():
+                    torch.distributed.barrier()
+                iteration_stack.enter_context(
+                    megalens_runtime.iteration(
+                        iteration + 1,
+                        enable_hw_monitor=getattr(args, 'hardware_monitor', False),
+                    )
+                )
+            if (args.profile
+                and (len(args.profile_ranks) == 0 or
+                     torch.distributed.get_rank() in args.profile_ranks)):
+                # Enable NVTX range when profiling starts and nvtx_ranges is set.
+                if iteration == args.profile_step_start and args.nvtx_ranges:
+                    configure_nvtx_profiling(True)
+                if args.use_pytorch_profiler:
+                    prof.step()
+                elif iteration == args.profile_step_start:
+                    torch.cuda.check_error(torch.cuda.cudart().cudaProfilerStart())
+                    nsys_nvtx_context = torch.autograd.profiler.emit_nvtx(record_shapes=args.record_shapes)
+                    nsys_nvtx_context.__enter__()
+
+            ft_integration.on_checkpointing_start(is_async_finalization=True, blocking=False)
+            maybe_finalize_async_save(blocking=False)
+            ft_integration.on_checkpointing_end(is_async_finalization=True, blocking=False)
+            # Update the timeout for all process groups after initialization
+            # We update the timeout after the first successful iteration,
+            # which takes longer than others usually
+            if args.distributed_timeout_seconds_after_init is not None and iteration == start_iteration+1:
+                # TODO: some dynamic timeout setting is required
+                # based on the iteration time considering interval-based steps (e.g. eval, checkpoint)
+                # e.g. timeout for normal iterations vs timeout for iterations with checkpoint
+                # this timeout is triggered when there's no collective communication
+                # for the duration of timeout
+                update_pg_timeout(timedelta(seconds=args.distributed_timeout_seconds_after_init))
+            # Update number of microbatches first without consistency check to decide if a
+            # checkpoint should be saved. If the number of microbatches is different
+            # from the previous iteration, save a checkpoint. Then run consistency check
+            # to make sure training configuration is still valid.
+            # Standard microbatch update (sequence packing overrides this in rl_utils.py)
+            update_num_microbatches(args.consumed_train_samples, consistency_check=False, verbose=True)
+            # Skip automatic checkpoint on microbatch changes when sequence packing is active
+            # as it intentionally reconfigures microbatches
+            if get_num_microbatches() != num_microbatches and iteration != 0 \
+                and args.save_when_num_microbatches_change:  # FlagScale Modify
+                if args.rl_use_sequence_packing:
+                    print_rank_0(
+                        f"[Sequence Packing] Skipping automatic checkpoint at iteration {iteration} "
+                        f"(microbatch change: {num_microbatches} -> {get_num_microbatches()})"
+                    )
+                else:
+                    assert get_num_microbatches() > num_microbatches, (
+                        f"Number of microbatches should not decrease; "
+                        f"going from {num_microbatches} to {get_num_microbatches()}"
+                    )
+                    if args.save is not None:
+                        save_checkpoint_and_time(
+                            iteration,
+                            model,
+                            optimizer,
+                            opt_param_scheduler,
+                            num_floating_point_operations_so_far,
+                            checkpointing_context,
+                            train_data_iterator=train_data_iterator,
+                        )
+            num_microbatches = get_num_microbatches()
+            update_num_microbatches(args.consumed_train_samples, consistency_check=True, verbose=True)
+
+            # Capture CUDA Graphs.
+            if (
+                args.cuda_graph_impl == "transformer_engine"
+                and not cuda_graph_helper.capture_finished()
+                and iteration - start_iteration == args.cuda_graph_warmup_steps
+            ):
+                if args.cuda_graph_warmup_steps > 0 and should_disable_forward_pre_hook(args):
+                    disable_forward_pre_hook(model, param_sync=False)
+                cuda_graph_helper.create_cudagraphs()
+                if args.cuda_graph_warmup_steps > 0 and should_disable_forward_pre_hook(args):
+                    enable_forward_pre_hook(model)
+                    cuda_graph_helper.cuda_graph_set_manual_hooks()
+
+            # Completely skip iteration if needed.
+            if (iteration + 1) in args.iterations_to_skip:
+                # Dummy train_step to fast forward train_data_iterator.
+                dummy_train_step(train_data_iterator)
+                if iteration == start_iteration:
+                    start_iteration = iteration + 1
                 iteration += 1
+                batch_size = (
+                    mpu.get_data_parallel_world_size() * args.micro_batch_size * get_num_microbatches()
+                )
+                args.consumed_train_samples += batch_size
+                args.skipped_train_samples += batch_size
+                continue
 
             args.curr_iteration = iteration
-            if rerun_state_machine.current_iteration != iteration:
-                print_rank_0(f"Setting rerun_state_machine.current_iteration to {iteration}...")
-                rerun_state_machine.current_iteration = iteration
-        ########## FlagScale end ##########
 
-        # For GRPO, we keep the data for a few epochs. DeepSeekMath paper calls this number $\mu$.
-        # It is similar to a PPO epoch.
+            ########## FlagScale Begin ##########
+            if args.skip_samples_range or args.skip_iters_range:
+                current_global_batch_size = get_current_global_batch_size()
+                start_skip_iteration = 0
+                end_skip_iteration = 0
+                if args.skip_samples_range:
+                    if args.consumed_train_samples + current_global_batch_size > args.skip_samples_range[0] and args.consumed_train_samples < args.skip_samples_range[1]:
+                        num_skipped_iters = (args.skip_samples_range[1] - args.consumed_train_samples + current_global_batch_size - 1) // current_global_batch_size
+                        args.skip_samples_range[1] = args.consumed_train_samples + num_skipped_iters * current_global_batch_size
+                        start_skip_iteration = iteration
+                        end_skip_iteration = iteration + num_skipped_iters
+                else:
+                    if iteration >= args.skip_iters_range[0] and iteration < args.skip_iters_range[1]:
+                        start_skip_iteration = iteration
+                        end_skip_iteration = args.skip_iters_range[1]
+                while iteration >= start_skip_iteration and iteration < end_skip_iteration:
+                    if mpu.is_pipeline_first_stage() or mpu.is_pipeline_last_stage():
+                        for _ in range(get_num_microbatches()):
+                            _ = next(train_data_iterator)
+                    args.consumed_train_samples += mpu.get_data_parallel_world_size() * \
+                                               args.micro_batch_size * \
+                                               get_num_microbatches()
+                    update_num_microbatches(args.consumed_train_samples, consistency_check=True, verbose=True)
+                    iteration += 1
 
-        if args.perform_rl_step:
-            if optimizer is None:
-                # Release stale CUDA cached memory before inference.
-                cur_platform.empty_cache()  # FlagScale Modify
-            with torch.no_grad():
-                train_data_iterator = rl_utils.get_grpo_data_iterator(
-                    model, inference_model, optimizer, iteration, ref_state_dict,
-                    grpo_iterations=args.grpo_iterations,
-                    grpo_prompts_per_step=args.grpo_prompts_per_step,
-                    grpo_group_size=args.grpo_group_size,
-                    global_batch_size=args.global_batch_size,
-                    sequence_packing=args.rl_use_sequence_packing,
-                    buffered_rollouts=buffered_rollouts,
-                    is_correction=args.rl_inference_logprobs_is_correction,
-                    optimizer_is_on_cpu=args.rl_offload_optimizer_during_inference,
+                args.curr_iteration = iteration
+                if rerun_state_machine.current_iteration != iteration:
+                    print_rank_0(f"Setting rerun_state_machine.current_iteration to {iteration}...")
+                    rerun_state_machine.current_iteration = iteration
+            ########## FlagScale end ##########
+            # BEGIN MEGALENS OBSERVABILITY
+            if trace_iteration and range_skip_active:
+                if not megalens_runtime.tracer.is_mode0():
+                    torch.distributed.barrier()
+                iteration_stack.enter_context(
+                    megalens_runtime.iteration(
+                        iteration + 1,
+                        enable_hw_monitor=getattr(args, 'hardware_monitor', False),
+                    )
                 )
-                # Buffered rollouts are used as a state container for setups when
-                # we use previously-generated data for an update.
-                buffered_rollouts = train_data_iterator
+            # END MEGALENS OBSERVABILITY
 
-        if args.skip_train:
-            # RL inference-only mode: skip gradient updates, just collect rollouts.
-            loss_dict = {}
-            skipped_iter = 0
-            should_checkpoint = False
-            should_exit = False
-            exit_code = 0
-            grad_norm = 0.0
-            num_zeros_in_grad = 0
-            max_attention_logit = None
-        else:
-            ########## FlagScale Begin ##########
-            if perf_callback is not None:
-                perf_monitor_start_iteration(iteration)
-            ########## FlagScale End ##########
-            ft_integration.on_training_step_start()
-            (
-                loss_dict,
-                skipped_iter,
-                should_checkpoint,
-                should_exit,
-                exit_code,
-                grad_norm,
-                num_zeros_in_grad,
-                max_attention_logit,
-            ) = train_step(
-                forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func, iteration=iteration
-            )
-            ft_integration.on_training_step_end()
-            ########## FlagScale Begin ##########
-            if perf_callback is not None:
-                perf_monitor_end_iteration(iteration, writer, wandb_writer)
-            ########## FlagScale End ##########
-            if _maybe_raise_workload_exception is not None and iteration != start_iteration:
-                _maybe_raise_workload_exception()
-            # Fault delay timing can start at the end of iteration N. Self-firing faults
-            # (signals, GIL, GPU) may then manifest in iteration N or N+1 depending on the
-            # configured delay; workload-exception faults manifest on a later poll.
-            if _maybe_raise_workload_exception is not None and should_setup_fault_injection_at_iteration(
-                fault_injector_config, iteration
-            ):
-                setup_fault_injection(fault_injector_config)
-        if should_checkpoint:
-            save_checkpoint_and_time(
-                iteration,
-                model,
-                optimizer,
-                opt_param_scheduler,
-                num_floating_point_operations_so_far,
-                checkpointing_context,
-                train_data_iterator=train_data_iterator,
-            )
-        if should_exit:
-            break
+            # For GRPO, we keep the data for a few epochs. DeepSeekMath paper calls this number $\mu$.
+            # It is similar to a PPO epoch.
 
-        # Enable forward pre-hooks after first set of forward and backward passes.
-        # When running in fp16, skip all NaN iterations until steady-state loss scaling value
-        # is reached.
-        if iteration == start_iteration:
-            if skipped_iter:
-                # Only enable forward pre-hook after a training step has successfully run. Relevant
-                # for fp16 codepath where first XX iterations are skipped until steady-state loss
-                # scale value is reached.
-                start_iteration = iteration + 1
+            if args.perform_rl_step:
+                if optimizer is None:
+                    # Release stale CUDA cached memory before inference.
+                    cur_platform.empty_cache()  # FlagScale Modify
+                with torch.no_grad():
+                    train_data_iterator = rl_utils.get_grpo_data_iterator(
+                        model, inference_model, optimizer, iteration, ref_state_dict,
+                        grpo_iterations=args.grpo_iterations,
+                        grpo_prompts_per_step=args.grpo_prompts_per_step,
+                        grpo_group_size=args.grpo_group_size,
+                        global_batch_size=args.global_batch_size,
+                        sequence_packing=args.rl_use_sequence_packing,
+                        buffered_rollouts=buffered_rollouts,
+                        is_correction=args.rl_inference_logprobs_is_correction,
+                        optimizer_is_on_cpu=args.rl_offload_optimizer_during_inference,
+                    )
+                    # Buffered rollouts are used as a state container for setups when
+                    # we use previously-generated data for an update.
+                    buffered_rollouts = train_data_iterator
+
+            if args.skip_train:
+                # RL inference-only mode: skip gradient updates, just collect rollouts.
+                loss_dict = {}
+                skipped_iter = 0
+                should_checkpoint = False
+                should_exit = False
+                exit_code = 0
+                grad_norm = 0.0
+                num_zeros_in_grad = 0
+                max_attention_logit = None
             else:
-                # Enable forward pre-hook after training step has successfully run. All subsequent
-                # forward passes will use the forward pre-hook / `param_sync_func` in
-                # `forward_backward_func`.
-                if should_disable_forward_pre_hook(args):
-                    enable_forward_pre_hook(model)
-                    config.param_sync_func = param_sync_func
-                    pre_hook_enabled = True
-                    # Set the manual hooks here since it's not set right after the capturing.
-                    if (
-                        args.cuda_graph_impl == "transformer_engine"
-                        and args.cuda_graph_warmup_steps == 0
-                    ):
-                        assert (
-                            cuda_graph_helper.capture_finished()
-                        ), "CUDA Graph capture should have been finished."
-                        cuda_graph_helper.cuda_graph_set_manual_hooks()
+                ########## FlagScale Begin ##########
+                if perf_callback is not None:
+                    perf_monitor_start_iteration(iteration)
+                ########## FlagScale End ##########
+                ft_integration.on_training_step_start()
+                (
+                    loss_dict,
+                    skipped_iter,
+                    should_checkpoint,
+                    should_exit,
+                    exit_code,
+                    grad_norm,
+                    num_zeros_in_grad,
+                    max_attention_logit,
+                ) = train_step(
+                    forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func, iteration=iteration
+                )
+                ft_integration.on_training_step_end()
+                ########## FlagScale Begin ##########
+                if perf_callback is not None:
+                    perf_monitor_end_iteration(iteration, writer, wandb_writer)
+                ########## FlagScale End ##########
+                if _maybe_raise_workload_exception is not None and iteration != start_iteration:
+                    _maybe_raise_workload_exception()
+                # Fault delay timing can start at the end of iteration N. Self-firing faults
+                # (signals, GIL, GPU) may then manifest in iteration N or N+1 depending on the
+                # configured delay; workload-exception faults manifest on a later poll.
+                if _maybe_raise_workload_exception is not None and should_setup_fault_injection_at_iteration(
+                    fault_injector_config, iteration
+                ):
+                    setup_fault_injection(fault_injector_config)
+            if should_checkpoint:
+                save_checkpoint_and_time(
+                    iteration,
+                    model,
+                    optimizer,
+                    opt_param_scheduler,
+                    num_floating_point_operations_so_far,
+                    checkpointing_context,
+                    train_data_iterator=train_data_iterator,
+                )
+            if should_exit:
+                break
+
+            # Enable forward pre-hooks after first set of forward and backward passes.
+            # When running in fp16, skip all NaN iterations until steady-state loss scaling value
+            # is reached.
+            if iteration == start_iteration:
+                if skipped_iter:
+                    # Only enable forward pre-hook after a training step has successfully run. Relevant
+                    # for fp16 codepath where first XX iterations are skipped until steady-state loss
+                    # scale value is reached.
+                    start_iteration = iteration + 1
+                else:
+                    # Enable forward pre-hook after training step has successfully run. All subsequent
+                    # forward passes will use the forward pre-hook / `param_sync_func` in
+                    # `forward_backward_func`.
+                    if should_disable_forward_pre_hook(args):
+                        enable_forward_pre_hook(model)
+                        config.param_sync_func = param_sync_func
+                        pre_hook_enabled = True
+                        # Set the manual hooks here since it's not set right after the capturing.
+                        if (
+                            args.cuda_graph_impl == "transformer_engine"
+                            and args.cuda_graph_warmup_steps == 0
+                        ):
+                            assert (
+                                cuda_graph_helper.capture_finished()
+                            ), "CUDA Graph capture should have been finished."
+                            cuda_graph_helper.cuda_graph_set_manual_hooks()
+
+        # END MEGALENS OBSERVABILITY
 
         iteration += 1
 
@@ -4460,6 +4543,9 @@ def train(
         one_logger_utils.finish()
         if args.perform_rl_step:
             rl_utils.rl_inference_interface_shutdown()
+        # BEGIN MEGALENS OBSERVABILITY
+        shutdown_megalens_runtime(graceful=True)
+        # END MEGALENS OBSERVABILITY
         sys.exit(exit_code)
 
     return iteration, num_floating_point_operations_so_far
