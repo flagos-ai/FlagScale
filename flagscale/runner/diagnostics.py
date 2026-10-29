@@ -96,6 +96,7 @@ def diagnostic_command_body(
     *configs: DiagnosticLaunchConfig,
     active_run_id_path: str = "",
     active_run_id: str = "",
+    stop_requested_path: str = "",
 ) -> str:
     """Write monitor completion markers and clear active state on normal exit."""
 
@@ -106,7 +107,10 @@ def diagnostic_command_body(
         for action in config.command_exit_actions(node_rank)
     ]
     if node_rank == 0 and active_run_id_path and active_run_id:
-        actions.append(active_run_id_cleanup_action(active_run_id_path, active_run_id))
+        cleanup = active_run_id_cleanup_action(active_run_id_path, active_run_id)
+        if stop_requested_path:
+            cleanup = f"if [ ! -f {shlex.quote(stop_requested_path)} ]; then {cleanup}; fi"
+        actions.append(cleanup)
     if not actions:
         return "$cmd; sync"
     return f"$cmd; rc=\\$?; {'; '.join(dict.fromkeys(actions))}; sync; exit \\$rc"
