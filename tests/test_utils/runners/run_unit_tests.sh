@@ -27,12 +27,14 @@ ci_resolve_python_bin
 PLATFORM="default"
 DEVICE=""
 COVERAGE_DIR_INPUT=""
+SELECTION_FILE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --platform) PLATFORM="$2"; shift 2 ;;
         --device) DEVICE="$2"; shift 2 ;;
+        --selection-file) SELECTION_FILE="$2"; shift 2 ;;
         --coverage-dir) COVERAGE_DIR_INPUT="$2"; shift 2 ;;
         -h|--help) cat <<EOF && exit 0
 Usage: $(basename "$0") [OPTIONS]
@@ -43,6 +45,7 @@ OPTIONS:
     --platform PLATFORM  Platform type (default: default)
     --device DEVICE      Device type (e.g., a100, a800, h100, generic)
                          If not specified, runs tests for all devices in the platform
+    --selection-file FILE Validated planned targets (optional)
     --coverage-dir DIR   Optional coverage output directory
     -h, --help           Show this help message
 
@@ -168,6 +171,22 @@ EOF
         TEST_TARGETS="$INCLUDE"
     fi
     read -r -a TEST_TARGET_ARGS <<< "$TEST_TARGETS"
+    if [ -n "$SELECTION_FILE" ]; then
+        # Selection is configuration data. Reuse the platform-aware helper so
+        # vendor .pth startup output cannot become pytest file arguments.
+        selected_targets=$(run_config_python "$PLATFORM" "$PROJECT_ROOT/.github/scripts/ci/flagcicd_unit.py" \
+            --selection-file "$SELECTION_FILE" --device "$device") || return 1
+        if [ -n "$selected_targets" ]; then
+            read -r -a TEST_TARGET_ARGS <<< "$selected_targets"
+        fi
+        export FLAGSCALE_CI_JUNIT_DIR="$PROJECT_ROOT/test-results/unit/$device"
+        mkdir -p "$FLAGSCALE_CI_JUNIT_DIR"
+        # Remove only this job's previous report files before collecting evidence.
+        rm -f "$FLAGSCALE_CI_JUNIT_DIR"/junit-rank-*.xml "$FLAGSCALE_CI_JUNIT_DIR"/collection-rank-*.json
+        cp "$SELECTION_FILE" "$FLAGSCALE_CI_JUNIT_DIR/selection.json"
+        export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PROJECT_ROOT/.github/scripts/ci"
+        RUNNER_CMD+=(-p flagcicd_pytest)
+    fi
 
     PYTEST_CMD=(torchrun "--nproc_per_node=$NPROC" "${RUNNER_CMD[@]}" "${TEST_TARGET_ARGS[@]}" -v --tb=short --durations=20 --durations-min=1)
     wait_for_gpu || return 1
@@ -185,6 +204,12 @@ EOF
     "${PYTEST_CMD[@]}"
     local test_exit=$?
     set -e
+
+    if [ -n "$SELECTION_FILE" ]; then
+        run_config_python "$PLATFORM" "$PROJECT_ROOT/.github/scripts/ci/flagcicd_evidence.py" unit \
+            --selection-file "$SELECTION_FILE" --device "$device" \
+            --report-dir "$FLAGSCALE_CI_JUNIT_DIR" --exit-code "$test_exit" || test_exit=1
+    fi
 
     # All ranks have exited — safe to combine fragment files and generate report
     if [ "$USE_COVERAGE" = true ]; then
