@@ -82,8 +82,17 @@ Dockerfile 和平台配置固定以上 digest。厂商依赖版本参考
 - 首次构建已完成系统依赖及 Python 3.12 环境；COREX 对应的厂商 torch、audio、vision、
   Triton 包均已下载。普通 PyPI 元数据解析较慢，因此只为天数构建增加镜像源参数后重试；
   尚未完成训练镜像构建或双卡 smoke。
-- `/home/gitlab-runner/data` 与 `/home/gitlab-runner/tokenizers` 均不存在，
-  未找到 `pile_wikipedia_demo` 和 `qwentokenizer`。需要提供真实数据来源后再进行 Qwen3 验收。
+- 初始预设的 `/home/gitlab-runner/data` 与 `/home/gitlab-runner/tokenizers` 不存在。
+  已从 FlagScale 官方示例资源下载 Wikipedia `.bin`、`.idx` 以及四个 Qwen tokenizer 文件，
+  放在 `/data/flagscale-ci/assets/data` 与 `/data/flagscale-ci/assets/tokenizers`。
+  下载全部成功，SHA-256 记录在 `/data/flagscale-ci/assets/SHA256SUMS`。
+  平台配置只调整宿主机挂载来源，容器内仍保留公共 `/home/gitlab-runner/...` 路径。
+  下载成功仍不等于训练数据格式和 tokenizer 兼容性已经验证。
+
+资源来源与仓库 `docs/getting-started.md` 使用相同的官方对象存储：
+`https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/datasets/pile_wikipedia_demo/`
+以及 `https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/tokenizers/qwentokenizer/`。
+保留原始文件名及校验记录，不将大数据文件、账号或密码提交到 Git。
 
 ## n32 后续验证步骤
 
@@ -92,8 +101,8 @@ Dockerfile 和平台配置固定以上 digest。厂商依赖版本参考
    核实 `/dev/itrctl` 和 `/dev/iluvatar0` 到 `/dev/iluvatar7` 存在；这是官方 plain Docker
    映射，若 n32 的实际布局不同，只修改天数平台配置。先使用单机通信，不假设 RDMA 设备。
 2. 核实 `/home/gitlab-runner/data/pile_wikipedia_demo/pile_wikipedia_demo.{bin,idx}`
-   和 `/home/gitlab-runner/tokenizers/qwentokenizer`，数据与 tokenizer 路径目前是待确认值。
-   按服务器实际位置调整天数配置的挂载来源，保持容器内公共路径一致。
+   和 `/home/gitlab-runner/tokenizers/qwentokenizer`；以上是容器内路径。
+   n32 上已下载的宿主机资源位于 `/data/flagscale-ci/assets/`，按平台配置只读挂载。
 3. 在服务器放置审阅后的仓库代码。用交互式 `docker login harbor.baai.ac.cn` 登录；
    不把密码写进脚本、Git、Dockerfile 或构建参数。
 4. 优先复用 `.github/workflows/build_image.yml`，输入 `platform=iluvatar`、`tasks=train`、

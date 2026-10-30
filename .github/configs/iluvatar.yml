@@ -68,10 +68,10 @@ image_build:
         FLAGSCALE_MEGATRON_REF: megatron_lm_fl
         FLAGSCALE_TE_REF: transformer_engine_fl
 
-# Provision and check these paths on tianshu-n32 before functional acceptance.
+# Official example assets provisioned on n32; keep shared container paths.
 container_volumes:
-  - /home/gitlab-runner/data:/home/gitlab-runner/data:ro
-  - /home/gitlab-runner/tokenizers:/home/gitlab-runner/tokenizers:ro
+  - /data/flagscale-ci/assets/data:/home/gitlab-runner/data:ro
+  - /data/flagscale-ci/assets/tokenizers:/home/gitlab-runner/tokenizers:ro
 # Plain Docker device mapping from build-infra's Iluvatar runtime contract.
 # Verify the actual eight device nodes on n32 before building. No host network
 # here: GitHub container jobs manage their own network.
