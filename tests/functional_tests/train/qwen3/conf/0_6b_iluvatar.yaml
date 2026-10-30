@@ -5,7 +5,7 @@ defaults:
   - train: 0_6b_iluvatar
 experiment:
   exp_name: 0_6b_iluvatar
-  exp_dir: outputs/qwen3/0_6b_iluvatar
+  exp_dir: tests/functional_tests/train/qwen3/test_results/0_6b_iluvatar
   task:
     type: train
     backend: megatron

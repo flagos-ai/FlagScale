@@ -12,7 +12,7 @@
 - `requirements/iluvatar/`：训练包与厂商运行时约束，不引用 CUDA 平台依赖。
 - `.github/scripts/set_env_iluvatar.sh`：公共测试 workflow 的环境入口。
 - `tests/test_utils/config/platforms/iluvatar.yaml`：两进程单测配置；训练功能矩阵待实测基线后登记。
-- `examples/qwen3/conf/0_6b_iluvatar.yaml`：参考 PPU 的两卡 Qwen3
+- `tests/functional_tests/train/qwen3/conf/0_6b_iluvatar.yaml`：参考 PPU 的两卡 Qwen3
   0.6B、10 步训练配置，使用 TE-FL reference / unfused attention。
 
 平台标识使用官方拼写 `iluvatar`；分支、Runner 和预定镜像标签保留用户提供的
@@ -152,7 +152,7 @@ python -m pip install --no-deps --no-build-isolation \
   --target "$GITHUB_WORKSPACE/megatron-lm-fl-install" \
   "$FLAGSCALE_HOME/deps/Megatron-LM-FL"
 bash tests/test_utils/runners/run_unit_tests.sh --platform iluvatar --device iluvatar
-flagscale train qwen3 --config examples/qwen3/conf/0_6b_iluvatar.yaml --test
+flagscale train qwen3 --config tests/functional_tests/train/qwen3/conf/0_6b_iluvatar.yaml --test
 ```
 
 保留完整训练日志、loss、设备/驱动信息和两个源码 SHA。检查 loss 有限、训练完整退出，
@@ -236,3 +236,11 @@ datasets 4.5.0，并固定 s3fs 2025.10.0 以匹配 datasets 的 fsspec 约束�
   10 steps and saved iteration-10 checkpoints. Loss comparison is pending.
 - The public CLI can return status 0 while training children failed. Acceptance
   must also inspect rank logs, all ten finite losses and completion markers.
+
+Public unit regression after the warp guard: 685 passed, 1 deselected per
+rank, exit 0. Two fresh Qwen3 runs produced identical ten-value loss logs
+(max difference 0), verified using the public metric extractor. Register
+the measured values at rtol=1e-5, atol=1e-8 and move the accepted configs
+into the standard functional train tree. Seventh image build and both
+smoke ranks passed; final-image unit and registered functional tests follow.
+CI remains disabled until the tested image is pushed and its digest verified.
