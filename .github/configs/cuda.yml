@@ -115,7 +115,7 @@ container_options: >-
 
 # Budget for each prepared dependency recovery step (download plus validation).
 timeouts:
-  runtime_recovery_minutes: 30
+  runtime_recovery_minutes: 60
 
 # =============================================================================
 # Package Manager Configuration
