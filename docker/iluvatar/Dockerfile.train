@@ -13,7 +13,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Use Ubuntu 24.04's Python 3.12 in an isolated venv (PEP 668).
 # Do not replace COREX's CMake/compiler or install NVIDIA CUDA packages.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      python3.12 python3.12-dev python3.12-venv ninja-build pkg-config \
+      python3.12 python3.12-dev python3-dev python3.12-venv ninja-build pkg-config \
       openssh-client openssh-server rsync procps psmisc hostname \
       libnuma1 libibverbs1 ibverbs-providers librdmacm1 libopenmpi3t64 ffmpeg \
     && python3.12 -m venv "${FLAGSCALE_HOME}/venv" \
