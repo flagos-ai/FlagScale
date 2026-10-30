@@ -7,6 +7,8 @@ ARG FLAGSCALE_MEGATRON_REF
 ARG FLAGSCALE_TE_REF
 ARG FLAGSCALE_REVISION=unknown
 ARG FLAGSCALE_HOME=/opt/flagscale
+# Build-only package index; vendor wheels remain pinned in requirements.
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 LABEL org.opencontainers.image.base.name=${BASE_IMAGE} \
       org.opencontainers.image.revision=${FLAGSCALE_REVISION} \
       io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF} \

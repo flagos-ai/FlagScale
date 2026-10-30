@@ -49,7 +49,9 @@ sha256:187f7443fc0a6bf53f9f55cc599e7f95b7d6a9260b0281b927c8acff86a7bfce
 Dockerfile 和平台配置固定以上 digest。厂商依赖版本参考
 [build-infra 的配置](https://github.com/flagos-ai/build-infra/blob/main/configs.yaml)
 和 [COREX 4.5.0 运行环境说明](https://github.com/flagos-ai/build-infra/blob/main/runtime/iluvatar-corex4.5.0.md)，
-包来自 `https://resource.flagos.net/repository/flagos-pypi-iluvatar/simple`：
+厂商包来自 `https://resource.flagos.net/repository/flagos-pypi-iluvatar/simple`；
+普通 Python 包通过天数镜像专属的 `PIP_INDEX_URL` 构建参数使用阿里云镜像，
+不修改其他平台或宿主机的 pip 配置，也不把构建参数写成运行时强制配置：
 
 - Python 3.12 / NumPy 1.26.4。
 - PyTorch、torchaudio 2.10.0+corex.4.5.0.20260804。
@@ -62,7 +64,28 @@ Dockerfile 和平台配置固定以上 digest。厂商依赖版本参考
 运行时约束保存在镜像内，后续公共 CI 安装包也不能静默替换厂商 torch/triton。
 当前版本与 n32 的实际驱动兼容性仍需实测。
 
-## 审阅确认后的 n32 验证步骤
+## 2026-10-30 n32 实际预检查记录
+
+- 已经通过堡垒机连接 `ub32` / `10.31.28.32`。
+- 实际硬件是 **16 张 BI-V150，每张 32 GiB**，宿主机驱动和 IX-ML 均为 5.0.0；
+  当前平台配置映射前 8 张卡，smoke 使用其中的逻辑卡 0、1，不要求使用全部 16 张卡。
+- 预检查时 `ixsmi` 未发现运行中的 GPU 进程，`docker ps` 为空；Docker 为 24.0.7。
+  这些是当时的状态，后续每次测试仍应重新检查占用。
+- 固定 digest 的基础镜像已经拉取，基础容器内 `ixsmi` 和
+  `cmake 3.31.8+corex.4.5.0.20260804` 检查通过；这不等于厂商 PyTorch/通信/训练已经通过。
+- 服务器独立验证目录：`/data/flagscale-ci/iluvatar-b399420/FlagScale`。
+  通过 Git bundle 同步本地三笔提交，没有改动已有 Runner 工作区，没有执行 Git push。
+- 本次公共 source catalog 解析得到：
+  Megatron-LM-FL `bbc208e00f2a201783938ef549f5058d6047e4c0`，
+  TE-FL `6df49429794d18109f0d04d924a14e032cdc220b`。
+  构建日志和解析结果保存在该目录的上一级 `logs/`、`resolved-sources.json`。
+- 首次构建已完成系统依赖及 Python 3.12 环境；COREX 对应的厂商 torch、audio、vision、
+  Triton 包均已下载。普通 PyPI 元数据解析较慢，因此只为天数构建增加镜像源参数后重试；
+  尚未完成训练镜像构建或双卡 smoke。
+- `/home/gitlab-runner/data` 与 `/home/gitlab-runner/tokenizers` 均不存在，
+  未找到 `pile_wikipedia_demo` 和 `qwentokenizer`。需要提供真实数据来源后再进行 Qwen3 验收。
+
+## n32 后续验证步骤
 
 1. 先检查宿主机 `ixsmi`、驱动、Docker 版本、磁盘空间、现有占卡任务；确认待用的两张卡空闲。
    镜像为 linux/amd64，不在本地 Mac 上执行硬件验收。

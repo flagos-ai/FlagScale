@@ -61,6 +61,8 @@ image_build:
       image: flagos-dev/flagscale-train
       # COREX 4.5.0 / base release 2.3.0; pin the artifact checked on 2026-10-30.
       base_image: harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0@sha256:187f7443fc0a6bf53f9f55cc599e7f95b7d6a9260b0281b927c8acff86a7bfce
+      build_args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
       test_roles: [train]
       source_refs:
         FLAGSCALE_MEGATRON_REF: megatron_lm_fl
