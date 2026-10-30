@@ -217,6 +217,8 @@ jobs:
 
       - name: Load platform configuration
         id: config
+        env:
+          CI_TRAIN_IMAGE_OVERRIDE: ${{ inputs.ci_train_image }}
         run: |
           set -euo pipefail
 
@@ -239,7 +241,7 @@ jobs:
           source ./tools/install/utils/load_platform_config.sh
 
           # Load configuration and group tests by task
-          load_platform_config "$PLATFORM"
+          load_platform_config "$PLATFORM" "$CI_TRAIN_IMAGE_OVERRIDE"
 
           # Override images if provided as inputs
           if [ -n "${{ inputs.ci_train_image }}" ]; then
