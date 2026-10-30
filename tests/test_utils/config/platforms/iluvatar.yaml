@@ -1,0 +1,15 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+device_types: [iluvatar]
+iluvatar:
+  name: iluvatar
+  tests:
+    # Register qwen3: [0_6b_iluvatar] after capturing and reviewing its own
+    # gold_values/0_6b_iluvatar.json on n32. Never copy another chip's loss.
+    functional: {}
+    unit:
+      nproc_per_node: 2
+      include: "*"
+      exclude:
+        - tests/unit_tests/models/vla
+        - tests/unit_tests/test_parallel_context.py::test_parallel_config

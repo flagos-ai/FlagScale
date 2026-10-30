@@ -1,0 +1,9 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+# Keep vendor runtimes pinned during image builds AND shared CI pip installs.
+# Source: flagos-ai/build-infra configs.yaml, iluvatar.corex4.5.0.
+torch==2.10.0+corex.4.5.0.20260804
+torchaudio==2.10.0+corex.4.5.0.20260804
+torchvision==0.25.0+corex.4.5.0.20260804
+triton==3.2.0+corex.4.5.0.20260804
+numpy==1.26.4
