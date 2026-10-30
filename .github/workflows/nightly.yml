@@ -1,0 +1,135 @@
+# Copyright 2026 FlagOS Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Full regression uses the same plan and reusable execution as PR CI.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 18 * * *'   # 02:00 Asia/Shanghai daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CI validation dependencies
+        run: pip install --quiet pre-commit==4.2.0 PyYAML==6.0.2 pytest==8.3.5
+      - name: Test CI control logic (no accelerators required)
+        run: python -m pytest --confcutdir=tests/ci tests/ci -q
+      - name: pre-commit (changed files)
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: |
+          pre-commit run --show-diff-on-failure \
+            --from-ref "$(git merge-base "$BASE_REF" HEAD)" --to-ref HEAD
+
+  generate-matrix:
+    name: Generate nightly plan
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      platforms: ${{ steps.matrix.outputs.platforms }}
+      plan: ${{ steps.matrix.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet PyYAML==6.0.2
+      - name: Compute platform matrix
+        id: matrix
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          PROFILE: nightly
+          CONTROL_SHA: ${{ github.workflow_sha }}
+        run: |
+          python .github/scripts/ci/flagcicd_plan.py plan \
+            --profile "$PROFILE" \
+            --base-ref "$BASE_REF" --head-ref "$HEAD_REF" \
+            --control-sha "$CONTROL_SHA" --file "$RUNNER_TEMP/plan.json" \
+            --event-path "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+      - name: Upload test plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/plan.json
+          if-no-files-found: error
+          retention-days: 7
+
+  platform-pipeline:
+    name: Platform pipeline (${{ matrix.platform }})
+    needs: generate-matrix
+    if: needs.generate-matrix.outputs.platforms != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.generate-matrix.outputs.platforms) }}
+    uses: ./.github/workflows/_platform_pipeline.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
+    with:
+      platform: ${{ matrix.platform }}
+      test_plan: ${{ needs.generate-matrix.outputs.plan }}
+
+  ci-complete:
+    name: Nightly Complete
+    needs: [lint, generate-matrix, platform-pipeline]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet PyYAML==6.0.2
+      - name: Download execution evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-evidence-*
+          path: ${{ runner.temp }}/ci-evidence
+          merge-multiple: true
+      - name: Verify required checks
+        env:
+          EVIDENCE_ROOT: ${{ runner.temp }}/ci-evidence
+          PLAN_JSON: ${{ needs.generate-matrix.outputs.plan }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          PLATFORMS: ${{ needs.generate-matrix.outputs.platforms || '[]' }}
+        run: python3 .github/scripts/ci/check_results.py
