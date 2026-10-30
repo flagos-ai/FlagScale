@@ -30,7 +30,7 @@ on:
       runtime_recovery_timeout_minutes:
         required: false
         type: number
-        default: 15
+        default: 60
         description: Budget for each prepared dependency download and validation step
       platform:
         required: true
@@ -110,6 +110,7 @@ on:
 
 jobs:
   functional_test_train:
+    name: functional_test_train (${{ matrix.test_config.device }}, ${{ matrix.test_config.task }}, ${{ matrix.test_config.model }}, ${{ matrix.test_config.case }})
     defaults:
       run:
         shell: bash
@@ -203,6 +204,10 @@ jobs:
       - name: Restore Megatron-LM-FL cache
         if: inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != ''
         id: megatron_cache_restore
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 10
         uses: actions/cache/restore@v4
         with:
           path: megatron-lm-fl-install
@@ -212,42 +217,32 @@ jobs:
       - name: Restore TE-FL cache
         if: inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != ''
         id: te_fl_cache_restore
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 10
         uses: actions/cache/restore@v4
         with:
           path: te-fl-wheel
           key: ${{ inputs.te_fl_cache_key }}
           fail-on-cache-miss: false
 
-      - name: Restore prepared Megatron artifact
-        if: inputs.platform != 'cuda' && inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != '' && steps.megatron_cache_restore.outputs.cache-hit != 'true' && inputs.megatron_artifact_available == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
-          path: megatron-lm-fl-install
-
-      - name: Restore prepared TE-FL artifact
-        if: inputs.platform != 'cuda' && inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != '' && steps.te_fl_cache_restore.outputs.cache-hit != 'true' && inputs.te_fl_artifact_available == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
-          path: te-fl-wheel
-
-      - name: Recover and validate CUDA megatron runtime
-        if: inputs.platform == 'cuda' && inputs.megatron_lm_fl_enabled == 'true'
+      - name: Recover and validate prepared megatron runtime
+        if: inputs.megatron_lm_fl_enabled == 'true'
         timeout-minutes: ${{ inputs.runtime_recovery_timeout_minutes }}
         uses: ./FlagScale/.github/actions/restore-prepared-runtime
         with:
           kind: megatron
-          artifact-name: prepared-megatron-cuda-${{ github.run_id }}
+          artifact-name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
           artifact-available: ${{ inputs.megatron_artifact_available }}
 
-      - name: Recover and validate CUDA te runtime
-        if: inputs.platform == 'cuda' && inputs.te_fl_enabled == 'true'
+      - name: Recover and validate prepared te runtime
+        if: inputs.te_fl_enabled == 'true'
         timeout-minutes: ${{ inputs.runtime_recovery_timeout_minutes }}
         uses: ./FlagScale/.github/actions/restore-prepared-runtime
         with:
           kind: te
-          artifact-name: prepared-te-fl-cuda-${{ github.run_id }}
+          artifact-name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
           artifact-available: ${{ inputs.te_fl_artifact_available }}
 
       - name: Validate prepared training runtime
@@ -302,6 +297,8 @@ jobs:
 
       - name: Run functional tests
         id: functional_test
+        env:
+          EXECUTION_SPEC: ${{ matrix.test_config.execution_spec || '' }}
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -351,14 +348,18 @@ jobs:
           echo "Python version: $(${CI_PYTHON_BIN:-python3} --version)"
 
           # Run functional tests using run_tests.sh
-          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
-            --platform "$PLATFORM" \
-            --device "$DEVICE" \
-            --type functional \
-            --task "$TASK" \
-            --model "$MODEL" \
-            --list "$CASE"
+          command=(bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh"
+            --platform "$PLATFORM" --device "$DEVICE" --type functional
+            --task "$TASK" --model "$MODEL" --list "$CASE")
+          if [ -n "$EXECUTION_SPEC" ]; then
+            printf '%s\n' "$EXECUTION_SPEC" > "$RUNNER_TEMP/execution-spec.json"
+            command=("${CI_PYTHON_BIN:-python3}" -S "$PROJECT_ROOT/.github/scripts/ci/flagcicd_evidence.py"
+              functional --spec-file "$RUNNER_TEMP/execution-spec.json" -- "${command[@]}")
+          fi
+          set +e
+          "${command[@]}"
           exit_code=$?
+          set -e
 
           if [ $exit_code -eq 0 ]; then
             echo "✅ Functional tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
@@ -378,3 +379,12 @@ jobs:
           path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
           retention-days: 7
           if-no-files-found: warn
+
+      - name: Upload functional execution evidence
+        if: ${{ !cancelled() && matrix.test_config.execution_spec != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ inputs.platform }}-functional-${{ matrix.test_config.device }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}-${{ matrix.test_config.case }}-${{ github.run_attempt }}
+          path: ${{ env.PROJECT_ROOT }}/test-results/evidence
+          if-no-files-found: error
+          retention-days: 7
