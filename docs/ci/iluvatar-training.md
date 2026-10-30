@@ -67,7 +67,7 @@ Dockerfile 和平台配置固定以上 digest。厂商依赖版本参考
 ## 2026-10-30 n32 实际预检查记录
 
 - 已经通过堡垒机连接 `ub32` / `10.31.28.32`。
-- 实际硬件是 **16 张 BI-V150，每张 32 GiB**，宿主机驱动和 IX-ML 均为 5.0.0；
+- `ixsmi` 枚举 **16 个 BI-V150 逻辑设备，每个 32 GiB**，宿主机驱动和 IX-ML 均为 5.0.0；
   当前平台配置映射前 8 张卡，smoke 使用其中的逻辑卡 0、1，不要求使用全部 16 张卡。
 - 预检查时 `ixsmi` 未发现运行中的 GPU 进程，`docker ps` 为空；Docker 为 24.0.7。
   这些是当时的状态，后续每次测试仍应重新检查占用。
@@ -158,7 +158,7 @@ flagscale train qwen3 --config examples/qwen3/conf/0_6b_iluvatar.yaml --test
 保留完整训练日志、loss、设备/驱动信息和两个源码 SHA。检查 loss 有限、训练完整退出，
 在相同条件下重复运行，再根据实际稳定性审阅误差容限，生成
 `tests/functional_tests/train/qwen3/gold_values/0_6b_iluvatar.json`。
-将这两份已验收的 example 配置复制到 `tests/functional_tests/train/qwen3/conf/`
+将这两份已验收的 example 配置移动到 `tests/functional_tests/train/qwen3/conf/`
 及其 `train/` 子目录，把入口配置的 `exp_dir` 改为
 `tests/functional_tests/train/qwen3/test_results/0_6b_iluvatar`。
 随后在天数平台配置的 `functional.train` 登记 `qwen3: [0_6b_iluvatar]`，
@@ -166,7 +166,7 @@ flagscale train qwen3 --config examples/qwen3/conf/0_6b_iluvatar.yaml --test
 
 7. 单测、双卡 smoke、Qwen3 功能回归通过后，再执行 `docker push "$TRAIN_IMAGE"`，
    记录返回 digest 并确认 Harbor 可拉取。最后将 `ci_train_image` 填成该镜像的已推送
-   digest 引用，并把 `ci_enabled` 改为 `true`，接入现有自动 CI。构建成功不等于训练验收。
+   digest 引用，并删除临时 `ci_enabled: false`，按默认启用行为接入现有自动 CI。构建成功不等于训练验收。
    公共构建入口会生成自己的 SHA 标签；若走该入口，验收后再给同一 digest 添加预定的
    `manual-20261030-lluvatar-bi-gpu8-dev` 标签，不修改公共标签生成逻辑。
 
@@ -204,3 +204,18 @@ reference 模式已设置 `TE_FL_SKIP_CUDA=1`，不构建 NVIDIA CUDA 扩展；
 天数安装器因此不递归下载对应子模块，并在 TE 安装调用内使用上游支持的
 `NVTE_SKIP_SUBMODULE_CHECKS_DURING_BUILD=1`，避免 setup 隐式拉取这些子模块。
 该变量只作用于天数 TE 安装，源码 SHA、公共安装器和其他芯片保持不变。
+
+## 第五次候选镜像与公共单测补包
+
+以 `d916227` 构建候选镜像成功，pre/post 验证脚本退出码为 0。
+post 验证的 rank 0、1 均输出 `train image validation PASS`，已覆盖厂商
+PyTorch、矩阵反向传播、NCCL-compatible all-reduce、TE reference BF16 和 AdamW 更新。
+这只是双卡 smoke 结果，尚不能据此启用正式 CI 或推送已验收镜像。
+
+首次公共 `run_unit_tests.sh` 在收集时缺少 pandas；继续核查发现公共数据工具还导入
+Hugging Face datasets 和 PyArrow。天数 requirements 补充仓库使用的 pandas 2.2.3、
+datasets 4.5.0，并固定 s3fs 2025.10.0 以匹配 datasets 的 fsspec 约束。
+补包后的 `pip check` 无冲突，但第二次单测实测发现 PyArrow 26 要求 NumPy 2，
+不兼容厂商固定的 NumPy 1.26.4，因此显式固定 PyArrow 21.0.0。
+这些修复先在独立验收容器验证，再由同一 Dockerfile 重建最终候选镜像；
+不能将手工补包的容器状态直接作为正式训练镜像发布。

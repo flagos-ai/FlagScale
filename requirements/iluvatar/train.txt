@@ -14,6 +14,13 @@ tiktoken==0.12.0
 einops>=0.8.1
 tensorboard>=2.19.0
 psutil>=5.9.8
+# Shared runner/autotuner and dataset utilities are imported by public unit tests.
+pandas==2.2.3
+datasets==4.5.0
+# Newer wheels require NumPy 2, incompatible with the pinned vendor runtime.
+pyarrow==21.0.0
+# Match the datasets fsspec upper bound while retaining Energon storage support.
+s3fs==2025.10.0
 nvdlfw-inspect==0.2.2
 coverage==7.6.10
 pytest==8.3.5
