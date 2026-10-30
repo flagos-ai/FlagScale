@@ -15,6 +15,7 @@
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -299,3 +300,25 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
         valid_prefix_tokens=valid_prefix_tensor,
     )
     torch.testing.assert_close(result, expected, rtol=2e-2, atol=2e-2)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+@pytest.mark.parametrize("warp_size,expected", [(32, True), (64, False)])
+def test_dynamic_prefix_kernel_checks_warp_layout(monkeypatch, warp_size, expected):
+    import importlib
+
+    module = importlib.import_module("KERVRuntimeOptimization.embodied_ops.static_tree_attention")
+    if module.triton is None:
+        pytest.skip("Triton is required")
+    query = torch.zeros(1, 2, 16, 128, device="cuda", dtype=torch.bfloat16)
+    key = torch.zeros(1, 2, 48, 128, device="cuda", dtype=torch.bfloat16)
+    ancestors = torch.full((16, 8), -1, device="cuda", dtype=torch.long)
+    prefix = torch.tensor(31, device="cuda", dtype=torch.int32)
+    monkeypatch.setattr(
+        module.triton.runtime.driver.active,
+        "get_current_target",
+        lambda: SimpleNamespace(warp_size=warp_size),
+    )
+    assert module.is_supported(query, key, key, ancestors, 32, prefix) is expected
+    # The existing static-prefix path is unaffected by this capability guard.
+    assert module.is_supported(query, key, key, ancestors, 32)
