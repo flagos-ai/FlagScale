@@ -192,3 +192,9 @@ flagscale train qwen3 --config examples/qwen3/conf/0_6b_iluvatar.yaml --test
 不会接受仅有上游 `torch==2.10.0` 的环境。后续仍须通过设备、通信和反向传播验证。
 Dockerfile 将公共安装器的 pip 阶段和源码阶段分开缓存，并在末尾设置源码 revision 标签，
 避免网络重试时无必要地重复下载已经安装成功的 Python 包。
+
+第三次构建保存了 pip 依赖层，但 CUTLASS 子模块的临时 Git 包连续六分钟未增长。
+天数 Dockerfile 的源码 RUN 阶段因此统一使用 HTTP/1.1，并设置
+`http.lowSpeedLimit=1024`、`http.lowSpeedTime=120`，将停滞交给现有重试函数处理。
+设置通过该 RUN 的局部环境传给 Git 子进程，不写宿主机 Git 配置或镜像运行时 ENV，
+不影响其他芯片；重试复用 pip 层，不引入新的源码来源或工作流。

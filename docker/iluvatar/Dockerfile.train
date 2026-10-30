@@ -44,7 +44,13 @@ RUN chmod +x /workspace/tools/install/*.sh \
     /workspace/tools/install/install.sh --platform iluvatar --task train \
         --pkg-mgr pip --no-system --no-dev --only-pip
 # Cache the Python dependency layer before network-dependent source checkouts.
-RUN source /etc/profile.d/flagscale-env.sh && \
+# Scope Git transport settings to source installation, including submodules.
+# Fail stalled transfers so the existing shared retry helper can recover.
+RUN export GIT_CONFIG_COUNT=3 \
+        GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+        GIT_CONFIG_KEY_1=http.lowSpeedLimit GIT_CONFIG_VALUE_1=1024 \
+        GIT_CONFIG_KEY_2=http.lowSpeedTime GIT_CONFIG_VALUE_2=120 && \
+    source /etc/profile.d/flagscale-env.sh && \
     /workspace/tools/install/install.sh --platform iluvatar --task train \
         --pkg-mgr pip --no-system --no-dev --no-base --no-task \
         --src-deps transformer-engine,megatron-lm --force-build && \
