@@ -25,6 +25,11 @@ on:
         required: false
         description: Optional FlagCICD report upload token; unavailable in fork PRs
     inputs:
+      test_plan:
+        type: string
+        required: false
+        default: ''
+        description: Validated FlagScale test plan; empty preserves legacy full execution
       source_repository:
         type: string
         required: false
@@ -59,6 +64,7 @@ jobs:
       source_repository: ${{ inputs.source_repository }}
       source_sha: ${{ inputs.source_sha }}
       platform: ${{ inputs.platform }}
+      test_plan: ${{ inputs.test_plan }}
       megatron_cache_key: ${{ needs.prepare.outputs.megatron_cache_key }}
       megatron_artifact_available: ${{ needs.prepare.outputs.megatron_artifact_available }}
       te_fl_cache_key: ${{ needs.prepare.outputs.te_fl_cache_key }}

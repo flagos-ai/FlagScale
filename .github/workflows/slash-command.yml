@@ -13,12 +13,12 @@ permissions:
   issues: write
 
 concurrency:
-  group: ci-command-${{ github.event.comment.id }}
+  group: ci-command-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
   dispatch:
-    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/ci run ')
+    if: github.event.issue.pull_request && (startsWith(github.event.comment.body, '/ci run ') || startsWith(github.event.comment.body, '/ci rerun-job '))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,8 +27,11 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github/scripts/ci
           persist-credentials: false
-      - uses: actions/github-script@v7
+      - uses: actions/setup-python@v5
         with:
-          script: |
-            const command = require('./.github/scripts/ci/slash_command.js');
-            await command({ github, context, core });
+          python-version: '3.12'
+      - name: Validate and process CI comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: python .github/scripts/ci/commands.py comment
