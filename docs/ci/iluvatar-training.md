@@ -219,3 +219,20 @@ datasets 4.5.0，并固定 s3fs 2025.10.0 以匹配 datasets 的 fsspec 约束�
 不兼容厂商固定的 NumPy 1.26.4，因此显式固定 PyArrow 21.0.0。
 这些修复先在独立验收容器验证，再由同一 Dockerfile 重建最终候选镜像；
 不能将手工补包的容器状态直接作为正式训练镜像发布。
+
+## Subsequent n32 acceptance evidence
+
+- Sixth candidate build and both smoke ranks passed with the data dependency fixes.
+- Public unit tests: 682 passed, 1 failed, 1 deselected per rank. The remaining
+  failure is dynamic-prefix KERV tree attention on COREX's 64-lane CUDA target.
+  A seeded comparison found max error 13.828125 for the optimized kernel and
+  approximately 3.05e-5 for the existing GPU dense reference against CPU.
+  Keep the original test and tolerance; use the existing exact reference for
+  unsupported dynamic-prefix warp layouts and verify both 32/64-lane dispatch.
+- Qwen3 initially failed because python3.12-dev supplies python3.12-config,
+  while Megatron invokes python3-config. Add Ubuntu python3-dev in a final
+  small OS layer to preserve completed vendor/source cache layers.
+- After installing that package, two fresh two-GPU Qwen3 runs completed all
+  10 steps and saved iteration-10 checkpoints. Loss comparison is pending.
+- The public CLI can return status 0 while training children failed. Acceptance
+  must also inspect rank logs, all ten finite losses and completion markers.
