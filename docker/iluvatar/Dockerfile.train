@@ -5,15 +5,9 @@ FROM ${BASE_IMAGE} AS dev
 ARG BASE_IMAGE
 ARG FLAGSCALE_MEGATRON_REF
 ARG FLAGSCALE_TE_REF
-ARG FLAGSCALE_REVISION=unknown
 ARG FLAGSCALE_HOME=/opt/flagscale
 # Build-only package index; vendor wheels remain pinned in requirements.
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
-LABEL org.opencontainers.image.base.name=${BASE_IMAGE} \
-      org.opencontainers.image.revision=${FLAGSCALE_REVISION} \
-      io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF} \
-      io.flagscale.transformer-engine-fl.revision=${FLAGSCALE_TE_REF} \
-      io.flagscale.iluvatar.te-backend=reference
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Use Ubuntu 24.04's Python 3.12 in an isolated venv (PEP 668).
@@ -48,6 +42,17 @@ RUN chmod +x /workspace/tools/install/*.sh \
     source /etc/profile.d/flagscale-env.sh && \
     python -m pip install --no-cache-dir pip==25.2 && \
     /workspace/tools/install/install.sh --platform iluvatar --task train \
-        --pkg-mgr pip --no-system --no-dev --force-build && \
+        --pkg-mgr pip --no-system --no-dev --only-pip
+# Cache the Python dependency layer before network-dependent source checkouts.
+RUN source /etc/profile.d/flagscale-env.sh && \
+    /workspace/tools/install/install.sh --platform iluvatar --task train \
+        --pkg-mgr pip --no-system --no-dev --no-base --no-task \
+        --src-deps transformer-engine,megatron-lm --force-build && \
     rm -rf /workspace/tools /workspace/requirements
+ARG FLAGSCALE_REVISION=unknown
+LABEL org.opencontainers.image.base.name=${BASE_IMAGE} \
+      org.opencontainers.image.revision=${FLAGSCALE_REVISION} \
+      io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF} \
+      io.flagscale.transformer-engine-fl.revision=${FLAGSCALE_TE_REF} \
+      io.flagscale.iluvatar.te-backend=reference
 CMD ["/bin/bash"]

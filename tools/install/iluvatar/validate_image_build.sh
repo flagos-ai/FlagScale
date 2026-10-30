@@ -48,12 +48,16 @@ python -m torch.distributed.run --standalone --nproc-per-node="$SMOKE_NPROC" "$s
 import os
 from datetime import timedelta
 
+from importlib.metadata import version
+
 import torch
 import torch.distributed as dist
 
 rank = int(os.environ["LOCAL_RANK"])
 world = int(os.environ["WORLD_SIZE"])
-assert torch.__version__ == "2.10.0+corex.4.5.0.20260804", torch.__version__
+# COREX wheel metadata includes its vendor suffix; torch/version.py does not.
+assert version("torch") == "2.10.0+corex.4.5.0.20260804", version("torch")
+assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
 assert torch.cuda.is_available()
 assert torch.cuda.device_count() >= int(os.environ["EXPECTED_DEVICE_COUNT"])
 torch.cuda.set_device(rank)

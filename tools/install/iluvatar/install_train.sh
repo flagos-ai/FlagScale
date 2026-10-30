@@ -54,13 +54,17 @@ fi
 # Native driver/collective compatibility is checked on-node after the build.
 if [ "$installed_te" = true ] && [ "$installed_megatron" = true ]; then
 python -c '
+from importlib.metadata import version
+
 import torch
 import torch.distributed as dist
 import transformer_engine.pytorch
 from megatron.core.models.gpt import GPTModel
 
 assert dist.is_nccl_available()
-assert torch.__version__ == "2.10.0+corex.4.5.0.20260804", torch.__version__
+# COREX wheel metadata includes its vendor suffix; torch/version.py does not.
+assert version("torch") == "2.10.0+corex.4.5.0.20260804", version("torch")
+assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
 print("COREX torch:", torch.__version__)
 '
 fi

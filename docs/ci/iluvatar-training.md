@@ -182,3 +182,13 @@ flagscale train qwen3 --config examples/qwen3/conf/0_6b_iluvatar.yaml --test
 
 用户已同意提交初始实现并连接服务器继续验证。镜像验收和推送完成前，
 `ci_train_image` 保持为空，`ci_enabled` 保持关闭。
+
+## 后续构建发现：厂商 PyTorch 版本字段
+
+第二次构建完成了 Python 依赖、TE-FL 和 Megatron-LM-FL 安装，但在最终版本检查失败。
+从失败容器提取并核对，`torch/version.py` 的 `__version__` 为 `2.10.0`、CUDA 为 `10.2`，
+而安装包 METADATA 的 Version 为 `2.10.0+corex.4.5.0.20260804`。
+安装器和 smoke 因此改为同时严格检查发行包的完整厂商版本，以及运行时基础版本，
+不会接受仅有上游 `torch==2.10.0` 的环境。后续仍须通过设备、通信和反向传播验证。
+Dockerfile 将公共安装器的 pip 阶段和源码阶段分开缓存，并在末尾设置源码 revision 标签，
+避免网络重试时无必要地重复下载已经安装成功的 Python 包。
