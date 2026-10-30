@@ -2,12 +2,9 @@
 # Licensed under the Apache License, Version 2.0.
 hardware_name: iluvatar
 display_name: "Iluvatar BI training (COREX 4.5.0)"
-# Enable automatic CI only after node validation, golden capture and registry push.
-ci_enabled: false
 runner_labels: [flagscale-lluvatar-bi-gpu8]
-# Reserved after acceptance: manual-20261030-lluvatar-bi-gpu8-dev.
-# Do not set ci_image to the SDK-only base: shared tests use it as a fallback.
-ci_train_image: ""
+# Validated on n32: two-GPU smoke, public unit tests and Qwen3 golden regression.
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-dev@sha256:73f105dd02dde974355f29f0cc85382913bba2554a3e8c7d786f5aeb28bc3436
 pkg_mgr: pip
 env_path: ""
 env_names:

@@ -17,6 +17,18 @@ sys.path.insert(0, str(ROOT / ".github/scripts/ci"))
 import flagcicd_plan as planner
 from generate_matrix import changed_files, documentation
 
+EXPECTED_PLATFORMS = {
+    "ascend",
+    "cuda",
+    "enflame",
+    "hygon",
+    "iluvatar",
+    "kunlunxin",
+    "metax",
+    "musa",
+    "ppu",
+}
+
 
 def plan(changed=None, profile="pr", labels=None, root=ROOT, **kwargs):
     return planner.build_plan(root, profile=profile, changed=changed, labels=labels or [], **kwargs)
@@ -25,7 +37,7 @@ def plan(changed=None, profile="pr", labels=None, root=ROOT, **kwargs):
 @pytest.mark.parametrize("profile", ["branch", "nightly"])
 def test_full_plan_matches_every_enabled_configured_case(profile):
     result = plan(profile=profile)
-    assert len(result["platforms"]) == 8
+    assert set(result["platforms"]) == EXPECTED_PLATFORMS
     for platform, s in result["slices"].items():
         config = yaml.safe_load(
             (ROOT / f"tests/test_utils/config/platforms/{platform}.yaml").read_text()
@@ -72,7 +84,10 @@ def test_platform_labels_only_add_platforms_and_request_full_supplement():
     p = plan(["docker/cuda/Dockerfile.train"], labels=["platform:ascend"])
     assert p["platforms"] == ["ascend", "cuda"]
     assert all(s["unit_mode"] == "full" for s in p["slices"].values())
-    assert len(plan(["flagscale/run.py"], labels=["platform:ascend"])["platforms"]) == 8
+    assert (
+        set(plan(["flagscale/run.py"], labels=["platform:ascend"])["platforms"])
+        == EXPECTED_PLATFORMS
+    )
 
 
 @pytest.mark.parametrize(
@@ -88,7 +103,7 @@ def test_platform_labels_only_add_platforms_and_request_full_supplement():
 )
 def test_shared_unknown_and_missing_diff_keep_configured_regression(changed):
     p = plan(changed)
-    assert len(p["platforms"]) == 8
+    assert set(p["platforms"]) == EXPECTED_PLATFORMS
     assert all(s["unit_mode"] == "full" and s["cases"] for s in p["slices"].values())
 
 

@@ -15,12 +15,14 @@ sys.path.insert(0, str(ROOT / ".github/scripts/ci"))
 from generate_matrix import load_platforms
 
 
-def test_iluvatar_builds_without_promoting_unvalidated_image():
+def test_iluvatar_uses_validated_image_through_shared_ci():
     config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
-    assert config["ci_train_image"] == ""
+    assert config["ci_train_image"].endswith(
+        "@sha256:73f105dd02dde974355f29f0cc85382913bba2554a3e8c7d786f5aeb28bc3436"
+    )
     assert "ci_image" not in config  # SDK images cannot be a training fallback.
-    assert config["ci_enabled"] is False
-    assert "iluvatar" not in load_platforms(ROOT / ".github/configs")
+    assert "ci_enabled" not in config
+    assert "iluvatar" in load_platforms(ROOT / ".github/configs")
     assert config["runner_labels"] == ["flagscale-lluvatar-bi-gpu8"]
     build = config["image_build"]
     assert build["enabled"] is True
@@ -63,7 +65,7 @@ def test_train_installer_respects_common_phase_controls(phase, override):
         assert "requirements/iluvatar/train.txt" in result.stderr
 
 
-def test_bootstrap_changes_keep_existing_ci_plan_executable():
+def test_iluvatar_changes_keep_all_shared_platform_plans_executable():
     from flagcicd_plan import build_plan
 
     plan = build_plan(
@@ -72,8 +74,8 @@ def test_bootstrap_changes_keep_existing_ci_plan_executable():
         changed=[
             ".github/configs/iluvatar.yml",
             "docker/iluvatar/Dockerfile.train",
-            "examples/qwen3/conf/0_6b_iluvatar.yaml",
-            "examples/qwen3/conf/train/0_6b_iluvatar.yaml",
+            "tests/functional_tests/train/qwen3/conf/0_6b_iluvatar.yaml",
+            "tests/functional_tests/train/qwen3/conf/train/0_6b_iluvatar.yaml",
             "tests/ci/test_iluvatar_bootstrap.py",
         ],
         labels=[],
@@ -83,9 +85,10 @@ def test_bootstrap_changes_keep_existing_ci_plan_executable():
         "cuda",
         "enflame",
         "hygon",
+        "iluvatar",
         "kunlunxin",
         "metax",
         "musa",
         "ppu",
     }
-    assert "iluvatar" not in plan["slices"]
+    assert "iluvatar" in plan["slices"]

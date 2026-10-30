@@ -428,7 +428,17 @@ def test_training_setup_exports_and_runners_use_ci_python_bin():
 
 
 def test_platform_setup_scripts_only_activate_and_validate_runtime():
-    for platform in ("ascend", "cuda", "enflame", "hygon", "kunlunxin", "metax", "musa", "ppu"):
+    for platform in (
+        "ascend",
+        "cuda",
+        "enflame",
+        "hygon",
+        "iluvatar",
+        "kunlunxin",
+        "metax",
+        "musa",
+        "ppu",
+    ):
         script = (ROOT / f".github/scripts/set_env_{platform}.sh").read_text()
 
         assert "ci_activate_python_environment" in script
@@ -832,6 +842,6 @@ def test_runtime_recovery_budget_is_forwarded_without_changing_test_budgets():
             assert "inputs.platform" not in step["if"]
     cuda = yaml.safe_load((ROOT / ".github/configs/cuda.yml").read_text())
     assert cuda["timeouts"]["runtime_recovery_minutes"] == 60
-    for platform in ("ascend", "enflame", "ppu", "metax", "musa", "hygon", "kunlunxin"):
+    for platform in ("ascend", "enflame", "ppu", "metax", "musa", "hygon", "iluvatar", "kunlunxin"):
         config = yaml.safe_load((ROOT / f".github/configs/{platform}.yml").read_text())
         assert config.get("timeouts", {}).get("runtime_recovery_minutes", 60) == 60
