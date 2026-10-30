@@ -198,3 +198,9 @@ Dockerfile 将公共安装器的 pip 阶段和源码阶段分开缓存，并在�
 `http.lowSpeedLimit=1024`、`http.lowSpeedTime=120`，将停滞交给现有重试函数处理。
 设置通过该 RUN 的局部环境传给 Git 子进程，不写宿主机 Git 配置或镜像运行时 ENV，
 不影响其他芯片；重试复用 pip 层，不引入新的源码来源或工作流。
+
+第四次构建与宿主机完整 fetch 均出现 GitHub 下载停滞，尚无证据支持更换构建网络。
+reference 模式已设置 `TE_FL_SKIP_CUDA=1`，不构建 NVIDIA CUDA 扩展；
+天数安装器因此不递归下载对应子模块，并在 TE 安装调用内使用上游支持的
+`NVTE_SKIP_SUBMODULE_CHECKS_DURING_BUILD=1`，避免 setup 隐式拉取这些子模块。
+该变量只作用于天数 TE 安装，源码 SHA、公共安装器和其他芯片保持不变。

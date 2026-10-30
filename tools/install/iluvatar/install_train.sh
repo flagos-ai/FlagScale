@@ -42,7 +42,10 @@ install_source() {
 installed_te=false
 installed_megatron=false
 if should_install_src task transformer-engine; then
-    install_source TransformerEngine-FL "${FLAGSCALE_TE_REF:-}" --recursive
+    # Pure Python reference mode does not build the NVIDIA CUDA submodules.
+    # Keep TE setup from fetching them implicitly during wheel metadata/build.
+    NVTE_SKIP_SUBMODULE_CHECKS_DURING_BUILD=1 \
+        install_source TransformerEngine-FL "${FLAGSCALE_TE_REF:-}"
     installed_te=true
 fi
 if should_install_src task megatron-lm; then
