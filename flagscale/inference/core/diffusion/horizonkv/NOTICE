@@ -1,0 +1,32 @@
+HorizonKV and Krea autoregressive diffusion inference in FlagScale
+
+This package combines the Wan model components used by HorizonKV and the dense
+Krea efficiency baseline. Common T5, tokenizer, scheduler, embeddings, model
+initialization and VAE code live in wan/. baseline_* modules retain the dense
+attention, KV recomputation and temporal resampling differences; pipeline.py
+is the production HorizonKV entry and baseline.py is the comparison entry.
+
+Sources and licenses:
+- Wan2.1 (Copyright 2024-2025 The Alibaba Wan Team Authors), Self-Forcing and
+  FramePack: upstream Apache-2.0 notices are retained in their adapted files.
+  The Apache-2.0 text is provided by the repository root LICENSE.
+- Krea realtime-video: https://github.com/krea-ai/realtime-video
+  Revision acf4b7b4e1a3049a0e04782e751d12203334038d; original source hashes
+  are recorded in provenance.json. Its CC-BY-NC-SA-4.0 license is retained in
+  licenses/CC-BY-NC-SA-4.0.md. The adapted causal model sources and shared causal
+  primitives retain their file-level CC-BY-NC-SA-4.0 notice.
+- LightForcing-derived compacted RoPE primitives are retained in
+  algorithm/sparse_kernels.py; the separate baseline selector is excluded.
+- The modified Block-Sparse-Attention backend supplies the 64x64 and variable
+  length paths used by HorizonKV:
+  https://github.com/lemonadenn/Block-Sparse-Attention.git
+  (fork of https://github.com/mit-han-lab/Block-Sparse-Attention.git).
+  Its BSD license and upstream notices remain in third_party/Block-Sparse-Attention.
+
+FlagScale modifications include frame retrieval, bounded GPU/host KV storage,
+overlap execution, residency-aware selection, shared Wan components and separate
+inference loops. The dense baseline preserves Krea's five-step schedule,
+context reconstruction, boundary reencoding and streaming FP16 VAE. The server,
+webcam/video input, training, research launchers and evaluation code are excluded.
+Model tensor names remain compatible with the public checkpoints. No weights or
+evaluation datasets are distributed with this package.

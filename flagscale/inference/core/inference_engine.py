@@ -14,6 +14,7 @@
 
 import dataclasses
 import importlib
+import math
 import os
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -53,6 +54,7 @@ class InferenceEngineArgs:
 
     results_path: str = None
     output_format: str = None
+    output_fps: float = 15.0
     state_scopes: list[str] = None
     transformations: Any = None
 
@@ -92,6 +94,7 @@ class InferenceEngineArgs:
         engine_obj = EngineConfig(
             results_path=self.results_path,
             output_format=self.output_format,
+            output_fps=self.output_fps,
             state_scopes=self.state_scopes,
             transformations=self.transformations if self.transformations is not None else {},
         )
@@ -123,6 +126,7 @@ class ModelLoadConfig:
 class EngineConfig:
     results_path: str
     output_format: str
+    output_fps: float = 15.0
     state_scopes: list[str] = None
     transformations: Any = None
 
@@ -131,6 +135,8 @@ class EngineConfig:
             raise ValueError("'results_path' is required")
         if not self.output_format:
             raise ValueError("'output_format' is required")
+        if not math.isfinite(self.output_fps) or self.output_fps <= 0:
+            raise ValueError("'output_fps' must be finite and positive")
         allowed_formats = {"image", "video"}
         if self.output_format not in allowed_formats:
             raise ValueError(
@@ -251,7 +257,9 @@ class InferenceEngine:
                 for i, frame in enumerate(outputs.frames):
                     fname = f"{name_prefix}_output_{i}.mp4" if name_prefix else f"output_{i}.mp4"
                     export_to_video(
-                        frame, os.path.join(self.vconfig.engine.results_path, fname), fps=15
+                        frame,
+                        os.path.join(self.vconfig.engine.results_path, fname),
+                        fps=self.vconfig.engine.output_fps,
                     )
             else:
                 raise NotImplementedError("Not implemented yet")

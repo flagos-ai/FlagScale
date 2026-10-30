@@ -40,6 +40,8 @@ include = ["flagscale*"]
 
 [tool.setuptools.package-data]
 "flagscale" = ["**/*.yaml", "**/*.yml"]
+"flagscale.inference.core.diffusion.horizonkv" = ["configs/*.json", "algorithm/csrc/*.cpp", "algorithm/csrc/*.cu", "algorithm/csrc/*.h", "licenses/CC-BY-NC-SA-4.0.md", "NOTICE", "provenance.json"]
+
 
 [tool.ruff]
 line-length = 100

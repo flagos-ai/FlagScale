@@ -1,0 +1,36 @@
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Original Krea GenerationSession: 5 denoising steps, 6 recomputed context
+# latents, 3 new latents, no fixed first-frame sink; streaming FP16 VAE.
+# Total KV is 9 latent frames. KREA_CONTEXT_FRAMES=3 restores upstream defaults.
+engine:
+  model: ${experiment.model}
+  loader: diffusers
+  pipeline:
+    class: flagscale.inference.core.diffusion.horizonkv.baseline.ARDiffusionPipeline
+    from_pretrained:
+      checkpoint: ${oc.env:KREA_CHECKPOINT,./models/horizonkv/checkpoints/krea/krea-realtime-video-14b.safetensors}
+      torch_dtype: bfloat16
+      context_latent_frames: ${oc.decode:${oc.env:KREA_CONTEXT_FRAMES,6}}
+  device: cuda
+  results_path: ${oc.env:FLAGSCALE_BENCHMARK_OUTPUT,./benchmarks/ar_diffusion_baseline/results}
+  output_format: video
+  output_fps: 24
+
+generate:
+  prompt: A cinematic shot of a red fox walking slowly through a sunlit green meadow, natural motion, realistic fur, stable camera.
+  latent_frames: 24
+  height: 480
+  width: 832
+  benchmark: false
+  warmup: 0
+  runs: 1
+  save: true
+  duration_seconds: null
+  profile: true
+  output_type: np
+  return_latents: false
+  generator:
+    seed: 42
+    device: cuda
