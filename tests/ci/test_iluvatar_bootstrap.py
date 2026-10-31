@@ -17,8 +17,8 @@ from generate_matrix import load_platforms
 
 def test_iluvatar_uses_validated_image_through_shared_ci():
     config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
-    assert config["ci_train_image"].endswith(
-        "@sha256:73f105dd02dde974355f29f0cc85382913bba2554a3e8c7d786f5aeb28bc3436"
+    assert config["ci_train_image"] == (
+        "harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-dev"
     )
     assert "ci_image" not in config  # SDK images cannot be a training fallback.
     assert "ci_enabled" not in config
@@ -32,7 +32,9 @@ def test_iluvatar_uses_validated_image_through_shared_ci():
     task = build["tasks"]["train"]
     for path in (task["dockerfile"], build["validation_script"]):
         assert (ROOT / path).is_file()
-    assert "corex4.5.0:2.3.0@sha256:" in task["base_image"]
+    assert task["base_image"] == (
+        "harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0"
+    )
     assert not list((ROOT / ".github/workflows").glob("*iluvatar*"))
 
 

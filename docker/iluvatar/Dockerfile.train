@@ -1,6 +1,6 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
-ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0@sha256:187f7443fc0a6bf53f9f55cc599e7f95b7d6a9260b0281b927c8acff86a7bfce
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0
 FROM ${BASE_IMAGE} AS dev
 ARG BASE_IMAGE
 ARG FLAGSCALE_MEGATRON_REF

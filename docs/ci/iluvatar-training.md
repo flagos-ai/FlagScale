@@ -28,11 +28,11 @@ harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-de
 sha256:73f105dd02dde974355f29f0cc85382913bba2554a3e8c7d786f5aeb28bc3436
 ```
 
-Harbor 推送及按 digest 拉取已核对。
-正式 `ci_train_image` 固定该 digest；删除临时的 `ci_enabled: false`，
+Harbor 推送及按 digest 拉取已核对，上面的 digest 仅保留为验收记录。
+代码中的 `ci_train_image` 使用标签名，不附加 `@sha256`；删除临时的 `ci_enabled: false`，
 按公共平台发现机制的默认行为启用。没有新增天数专用 workflow。
 
-SDK 基础镜像固定为：
+SDK 基础镜像使用以下标签；下行 digest 仅为验收记录，不附加到代码中的镜像名：
 
 ```text
 harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0
@@ -125,6 +125,6 @@ n32 宿主机挂载来源为 `/data/flagscale-ci/assets/data` 和 `.../tokenizer
    首先构建和验证候选镜像，不直接覆盖已验收的正式镜像引用。
 3. 通过公共单测和 Qwen3 功能回归；若更新源码或配置导致 loss 改变，
    先解释变化并重复实测，再审阅 golden，不能直接放宽阈值。
-4. 推送验收通过的镜像，验证 registry digest，再更新 `ci_train_image`。
+4. 推送验收通过的镜像，用 registry digest 核对内容并保留验收记录，再更新 `ci_train_image` 的标签名。
 5. 将分支提交推送 GitHub 后，在现有公共 CI 中确认 Runner 调度、依赖准备和测试结果。
    本次本地与服务器验证不等同于已经执行 GitHub Actions。

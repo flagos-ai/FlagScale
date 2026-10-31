@@ -4,7 +4,7 @@ hardware_name: iluvatar
 display_name: "Iluvatar BI training (COREX 4.5.0)"
 runner_labels: [flagscale-lluvatar-bi-gpu8]
 # Validated on n32: two-GPU smoke, public unit tests and Qwen3 golden regression.
-ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-dev@sha256:73f105dd02dde974355f29f0cc85382913bba2554a3e8c7d786f5aeb28bc3436
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-dev
 pkg_mgr: pip
 env_path: ""
 env_names:
@@ -56,8 +56,8 @@ image_build:
     train:
       dockerfile: docker/iluvatar/Dockerfile.train
       image: flagos-dev/flagscale-train
-      # COREX 4.5.0 / base release 2.3.0; pin the artifact checked on 2026-10-30.
-      base_image: harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0@sha256:187f7443fc0a6bf53f9f55cc599e7f95b7d6a9260b0281b927c8acff86a7bfce
+      # COREX 4.5.0 / base release 2.3.0; use the tag checked on 2026-10-30.
+      base_image: harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0
       build_args:
         PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
       test_roles: [train]
