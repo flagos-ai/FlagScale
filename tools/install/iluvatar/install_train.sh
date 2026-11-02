@@ -19,7 +19,8 @@ done
 
 # Enforce the same pins when the common installer skips the base phase.
 # The Docker image also persists these constraints for shared CI installs.
-export PIP_CONSTRAINT="$PROJECT_ROOT/requirements/iluvatar/constraints.txt${PIP_CONSTRAINT:+ $PIP_CONSTRAINT}"
+CONSTRAINTS_FILE="$PROJECT_ROOT/requirements/iluvatar/constraints.txt"
+export PIP_CONSTRAINT="$CONSTRAINTS_FILE${PIP_CONSTRAINT:+ $PIP_CONSTRAINT}"
 packages=$(get_pip_deps_for_requirements "$REQ_FILE")
 if is_phase_enabled task; then
     set_step "Installing Iluvatar train requirements"
@@ -56,7 +57,10 @@ fi
 # COREX torch exposes CUDA-compatible device and distributed APIs.
 # Native driver/collective compatibility is checked on-node after the build.
 if [ "$installed_te" = true ] && [ "$installed_megatron" = true ]; then
-python -c '
+expected_torch=$(sed -n 's/^torch==//p' "$CONSTRAINTS_FILE")
+[ -n "$expected_torch" ] || die "torch pin not found in $CONSTRAINTS_FILE"
+EXPECTED_TORCH_VERSION="$expected_torch" python -c '
+import os
 from importlib.metadata import version
 
 import torch
@@ -64,10 +68,11 @@ import torch.distributed as dist
 import transformer_engine.pytorch
 from megatron.core.models.gpt import GPTModel
 
+expected = os.environ["EXPECTED_TORCH_VERSION"]
 assert dist.is_nccl_available()
 # COREX wheel metadata includes its vendor suffix; torch/version.py does not.
-assert version("torch") == "2.10.0+corex.4.5.0.20260804", version("torch")
-assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
+assert version("torch") == expected, (version("torch"), expected)
+assert torch.__version__.split("+")[0] == expected.split("+")[0], torch.__version__
 print("COREX torch:", torch.__version__)
 '
 fi

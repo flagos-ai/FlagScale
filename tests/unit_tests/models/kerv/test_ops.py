@@ -283,6 +283,13 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
         nodes = torch.arange(start, row + 1, device="cuda") + tree_start
         ancestors[row, : nodes.numel()] = nodes
     valid_prefix_tensor = torch.tensor(valid_prefix, device="cuda", dtype=torch.int32)
+    kernel = _static_tree_attention_module()
+    if not kernel.is_supported(query, key, value, ancestors, tree_start, valid_prefix_tensor):
+        target = kernel.triton.runtime.driver.active.get_current_target()
+        pytest.skip(
+            "dynamic-prefix kernel unsupported: "
+            f"warp_size={getattr(target, 'warp_size', 'unknown')}"
+        )
     result = static_tree_attention(
         query,
         key,
@@ -302,23 +309,41 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
     torch.testing.assert_close(result, expected, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
-@pytest.mark.parametrize("warp_size,expected", [(32, True), (64, False)])
-def test_dynamic_prefix_kernel_checks_warp_layout(monkeypatch, warp_size, expected):
+def _static_tree_attention_module():
     import importlib
 
     module = importlib.import_module("KERVRuntimeOptimization.embodied_ops.static_tree_attention")
     if module.triton is None:
         pytest.skip("Triton is required")
+    return module
+
+
+def _raise_target_error():
+    raise RuntimeError("no active driver")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+@pytest.mark.parametrize(
+    "target,expected",
+    [
+        (lambda: SimpleNamespace(warp_size=32), True),
+        (lambda: SimpleNamespace(warp_size=64), False),
+        (lambda: SimpleNamespace(), True),
+        (_raise_target_error, False),
+    ],
+    ids=["warp32", "warp64", "no-warp-size", "target-error"],
+)
+def test_dynamic_prefix_kernel_checks_warp_layout(monkeypatch, target, expected):
+    module = _static_tree_attention_module()
     query = torch.zeros(1, 2, 16, 128, device="cuda", dtype=torch.bfloat16)
     key = torch.zeros(1, 2, 48, 128, device="cuda", dtype=torch.bfloat16)
     ancestors = torch.full((16, 8), -1, device="cuda", dtype=torch.long)
     prefix = torch.tensor(31, device="cuda", dtype=torch.int32)
-    monkeypatch.setattr(
-        module.triton.runtime.driver.active,
-        "get_current_target",
-        lambda: SimpleNamespace(warp_size=warp_size),
-    )
-    assert module.is_supported(query, key, key, ancestors, 32, prefix) is expected
-    # The existing static-prefix path is unaffected by this capability guard.
-    assert module.is_supported(query, key, key, ancestors, 32)
+    module.dynamic_prefix_kernel_supported.cache_clear()
+    monkeypatch.setattr(module.triton.runtime.driver.active, "get_current_target", target)
+    try:
+        assert module.is_supported(query, key, key, ancestors, 32, prefix) is expected
+        # The existing static-prefix path is unaffected by this capability guard.
+        assert module.is_supported(query, key, key, ancestors, 32)
+    finally:
+        module.dynamic_prefix_kernel_supported.cache_clear()

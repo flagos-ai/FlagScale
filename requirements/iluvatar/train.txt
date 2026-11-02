@@ -29,5 +29,5 @@ megatron-energon[av_decode]~=7.0
 # TE-FL source is installed with --no-deps to protect vendor torch.
 pydantic>=2
 importlib-metadata>=1.0
-onnx
-onnxscript
+onnx==1.23.2
+onnxscript==0.7.2

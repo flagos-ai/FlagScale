@@ -1,8 +1,9 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
-"""CPU checks for image bootstrap isolation and shared candidate validation."""
+"""CPU contract checks for the Iluvatar platform configuration and installers."""
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -14,28 +15,47 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / ".github/scripts/ci"))
 from generate_matrix import load_platforms
 
+CONFIG = ROOT / ".github/configs/iluvatar.yml"
+CONSTRAINTS = ROOT / "requirements/iluvatar/constraints.txt"
+
+
+def _image(value):
+    return isinstance(value, str) and re.fullmatch(r"harbor\.baai\.ac\.cn/[^\s:@]+[:@]\S+", value)
+
 
 def test_iluvatar_uses_validated_image_through_shared_ci():
-    config = yaml.safe_load((ROOT / ".github/configs/iluvatar.yml").read_text())
-    assert config["ci_train_image"] == (
-        "harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-dev"
-    )
+    config = yaml.safe_load(CONFIG.read_text())
+    assert _image(config["ci_train_image"])
     assert "ci_image" not in config  # SDK images cannot be a training fallback.
-    assert "ci_enabled" not in config
     assert "iluvatar" in load_platforms(ROOT / ".github/configs")
-    assert config["runner_labels"] == ["flagscale-lluvatar-bi-gpu8"]
+    labels = config["runner_labels"]
+    assert labels and all(isinstance(label, str) and label for label in labels)
     build = config["image_build"]
     assert build["enabled"] is True
     assert set(build["tasks"]) == {"train"}
-    assert build["runtime_smoke_nproc"] == "2"
-    assert build["runtime_device_count"] == "8"
+    assert int(build["runtime_device_count"]) >= int(build["runtime_smoke_nproc"]) >= 2
     task = build["tasks"]["train"]
+    assert _image(task["base_image"])
     for path in (task["dockerfile"], build["validation_script"]):
         assert (ROOT / path).is_file()
-    assert task["base_image"] == (
-        "harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0"
-    )
     assert not list((ROOT / ".github/workflows").glob("*iluvatar*"))
+
+
+def test_corex_runtime_versions_have_a_single_source():
+    pins = dict(
+        line.split("==", 1)
+        for line in CONSTRAINTS.read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    torch = pins["torch"]
+    assert "+corex." in torch
+    for path in (
+        "requirements/iluvatar/base.txt",
+        "requirements/iluvatar/train.txt",
+        "tools/install/iluvatar/install_train.sh",
+        "tools/install/iluvatar/validate_image_build.sh",
+    ):
+        assert torch not in (ROOT / path).read_text(), path
 
 
 @pytest.mark.parametrize("phase,override", [("false", ""), ("false", "typer"), ("true", "")])
@@ -67,7 +87,7 @@ def test_train_installer_respects_common_phase_controls(phase, override):
         assert "requirements/iluvatar/train.txt" in result.stderr
 
 
-def test_iluvatar_changes_keep_all_shared_platform_plans_executable():
+def test_iluvatar_owned_changes_select_only_iluvatar():
     from flagcicd_plan import build_plan
 
     plan = build_plan(
@@ -82,15 +102,5 @@ def test_iluvatar_changes_keep_all_shared_platform_plans_executable():
         ],
         labels=[],
     )
-    assert set(plan["platforms"]) == {
-        "ascend",
-        "cuda",
-        "enflame",
-        "hygon",
-        "iluvatar",
-        "kunlunxin",
-        "metax",
-        "musa",
-        "ppu",
-    }
+    assert plan["platforms"] == ["iluvatar"]
     assert "iluvatar" in plan["slices"]

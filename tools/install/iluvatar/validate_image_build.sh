@@ -21,6 +21,11 @@ case "$phase" in
     post) image=${IMAGE_BUILD_CANDIDATE_IMAGE:?}; mode=train ;;
     *) echo "Unknown validation phase: $phase" >&2; exit 2 ;;
 esac
+expected_torch=$(sed -n 's/^torch==//p' "$root/requirements/iluvatar/constraints.txt")
+if [ -z "$expected_torch" ]; then
+    echo "torch pin not found in requirements/iluvatar/constraints.txt" >&2
+    exit 2
+fi
 options=$(${YQ_BIN:-yq} -r '.container_options' "$root/.github/configs/iluvatar.yml")
 read -r -a docker_args <<< "$options"
 name="flagscale-iluvatar-validate-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$"
@@ -28,6 +33,7 @@ trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 timeout 600 docker run --rm -i --name "$name" "${docker_args[@]}" \
     --volume "$script_dir/env.sh:/tmp/flagscale-iluvatar-env.sh:ro" \
     --env EXPECTED_DEVICE_COUNT="$device_count" \
+    --env EXPECTED_TORCH_VERSION="$expected_torch" \
     --env SMOKE_NPROC="$nproc" --env SMOKE_MODE="$mode" \
     --entrypoint bash "$image" -c '
 set -euo pipefail
@@ -55,9 +61,10 @@ import torch.distributed as dist
 
 rank = int(os.environ["LOCAL_RANK"])
 world = int(os.environ["WORLD_SIZE"])
+expected = os.environ["EXPECTED_TORCH_VERSION"]
 # COREX wheel metadata includes its vendor suffix; torch/version.py does not.
-assert version("torch") == "2.10.0+corex.4.5.0.20260804", version("torch")
-assert torch.__version__.split("+")[0] == "2.10.0", torch.__version__
+assert version("torch") == expected, (version("torch"), expected)
+assert torch.__version__.split("+")[0] == expected.split("+")[0], torch.__version__
 assert torch.cuda.is_available()
 assert torch.cuda.device_count() >= int(os.environ["EXPECTED_DEVICE_COUNT"])
 torch.cuda.set_device(rank)

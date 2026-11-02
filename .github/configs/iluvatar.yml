@@ -92,4 +92,5 @@ paths_watch:
   - requirements/iluvatar/
   - .github/scripts/set_env_iluvatar.sh
   - tests/test_utils/config/platforms/iluvatar.yaml
+  - tests/ci/test_iluvatar_bootstrap.py
   - .github/configs/iluvatar.yml

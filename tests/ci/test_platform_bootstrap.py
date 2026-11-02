@@ -1,6 +1,6 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
-"""CPU checks for image bootstrap isolation and shared candidate validation."""
+"""CPU checks for the shared ci_enabled gate and candidate image override."""
 
 import os
 import subprocess

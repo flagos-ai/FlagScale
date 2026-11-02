@@ -16,7 +16,8 @@
 
 # Platform configuration loading script
 # Extracts platform configuration and groups tests by task
-# Usage: source load_platform_config.sh && load_platform_config <platform_name>
+# Usage: source load_platform_config.sh && load_platform_config <platform_name> [train_image]
+# A non-empty train_image overrides ci_train_image from the platform config.
 
 set -euo pipefail
 

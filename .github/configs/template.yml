@@ -20,8 +20,9 @@
 
 hardware_name: my_hardware  # Change this to your hardware name
 display_name: "My Hardware Tests"  # Display name for GitHub Actions
-# Optional: false keeps an unvalidated platform out of automatic test plans.
-# Image builds remain independently controlled by image_build.enabled.
+# Optional: false keeps a platform out of PR, nightly and requested test plans.
+# Image builds (image_build.enabled), all_tests.yml and the daily dependency
+# preparation in dependencies_daily.yml stay independently controlled.
 ci_enabled: true
 
 # Validated images consumed by the shared test workflow. Use a registry that
