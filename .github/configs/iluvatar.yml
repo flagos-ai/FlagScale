@@ -67,8 +67,8 @@ image_build:
 
 # Official example assets provisioned on n32; keep shared container paths.
 container_volumes:
-  - /data/flagscale-ci/assets/data:/home/gitlab-runner/data:ro
-  - /data/flagscale-ci/assets/tokenizers:/home/gitlab-runner/tokenizers:ro
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data:ro
+  - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers:ro
 # Plain Docker device mapping from build-infra's Iluvatar runtime contract.
 # Verify the actual eight device nodes on n32 before building. No host network
 # here: GitHub container jobs manage their own network.
