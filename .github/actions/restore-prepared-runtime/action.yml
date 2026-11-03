@@ -1,0 +1,161 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+name: Restore prepared runtime
+description: Validate cached packages and retry failed artifact transfers in clean directories.
+inputs:
+  kind:
+    description: Package kind (megatron or te).
+    required: true
+  artifact-name:
+    description: Artifact produced by prepare_dependencies.
+    required: true
+  artifact-available:
+    description: Whether the producer uploaded a fallback artifact.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Select runtime directory
+      id: runtime
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+      run: |
+        set -euo pipefail
+        case "$KIND" in
+          megatron) directory=megatron-lm-fl-install ;;
+          te) directory=te-fl-wheel ;;
+          *) echo "::error::Unknown runtime kind"; exit 1 ;;
+        esac
+        echo "directory=$GITHUB_WORKSPACE/$directory" >> "$GITHUB_OUTPUT"
+
+    - name: Validate cached runtime
+      id: cached
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        source "$GITHUB_ACTION_PATH/../../scripts/set_env_common.sh"
+        ci_resolve_python_bin
+        "$CI_PYTHON_BIN" -S "$GITHUB_ACTION_PATH/../../scripts/validate_prepared_runtime.py" \
+          "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
+
+    - name: Clean incomplete runtime before attempt 1
+      if: steps.cached.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      shell: bash
+      env:
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        rm -rf -- "$RUNTIME_DIR"
+        mkdir -p -- "$RUNTIME_DIR"
+
+    - name: Download runtime attempt 1
+      id: download_1
+      if: steps.cached.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.runtime.outputs.directory }}
+
+    - name: Validate downloaded runtime attempt 1
+      if: steps.cached.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      id: validated_1
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        source "$GITHUB_ACTION_PATH/../../scripts/set_env_common.sh"
+        ci_resolve_python_bin
+        "$CI_PYTHON_BIN" -S "$GITHUB_ACTION_PATH/../../scripts/validate_prepared_runtime.py" \
+          "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
+
+    - name: Clean incomplete runtime before attempt 2
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure'
+      shell: bash
+      env:
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        rm -rf -- "$RUNTIME_DIR"
+        mkdir -p -- "$RUNTIME_DIR"
+
+    - name: Download runtime attempt 2
+      id: download_2
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.runtime.outputs.directory }}
+
+    - name: Validate downloaded runtime attempt 2
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure'
+      id: validated_2
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        source "$GITHUB_ACTION_PATH/../../scripts/set_env_common.sh"
+        ci_resolve_python_bin
+        "$CI_PYTHON_BIN" -S "$GITHUB_ACTION_PATH/../../scripts/validate_prepared_runtime.py" \
+          "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
+
+    - name: Clean incomplete runtime before attempt 3
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure'
+      shell: bash
+      env:
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        rm -rf -- "$RUNTIME_DIR"
+        mkdir -p -- "$RUNTIME_DIR"
+
+    - name: Download runtime attempt 3
+      id: download_3
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.runtime.outputs.directory }}
+
+    - name: Validate downloaded runtime attempt 3
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure'
+      id: validated_3
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        source "$GITHUB_ACTION_PATH/../../scripts/set_env_common.sh"
+        ci_resolve_python_bin
+        "$CI_PYTHON_BIN" -S "$GITHUB_ACTION_PATH/../../scripts/validate_prepared_runtime.py" \
+          "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
+
+    - name: Record exhausted artifact transfers
+      if: steps.cached.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure' && steps.download_3.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "CI_INFRA_RECOVERY_DOWNLOAD_FAILED"
+        echo "::warning::Artifact transfer attempts exhausted; runtime validation will still fail."
+
+    - name: Require complete runtime before installation
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+        RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
+      run: |
+        set -euo pipefail
+        source "$GITHUB_ACTION_PATH/../../scripts/set_env_common.sh"
+        ci_resolve_python_bin
+        "$CI_PYTHON_BIN" -S "$GITHUB_ACTION_PATH/../../scripts/validate_prepared_runtime.py" \
+          "$KIND" "$RUNTIME_DIR"

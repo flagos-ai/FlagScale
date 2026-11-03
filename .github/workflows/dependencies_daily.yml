@@ -2,7 +2,10 @@ name: Daily Dependencies Sync
 
 on:
   schedule:
-    - cron: '57 17 * * *'
+    # Rotate every 18 hours so a TE-FL main advance leaves at most one
+    # 18-hour window where PRs must download the artifact over the network.
+    # 22:17 -> 04:17 is 6h, 04:17 -> 22:17 is 18h.
+    - cron: '17 4,22 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -10,6 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-ppu:
+    name: prepare-ppu
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: ppu
+
   prepare-metax:
     name: prepare-metax
     uses: ./.github/workflows/prepare_dependencies.yml
@@ -45,3 +54,9 @@ jobs:
     uses: ./.github/workflows/prepare_dependencies.yml
     with:
       platform: kunlunxin
+
+  prepare-cuda:
+    name: prepare-cuda
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: cuda

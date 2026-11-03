@@ -20,6 +20,18 @@
 
 set -euo pipefail
 
+validate_timeout_minutes() {
+    local value=$1 config_file=$2 setting=$3
+    if ! [[ "$value" =~ ^[1-9][0-9]{0,2}$ ]] || [ "$value" -gt 360 ]; then
+        echo "Invalid $setting in $config_file: $value (expected integer 1-360)" >&2
+        return 1
+    fi
+}
+
+validate_unit_timeout_minutes() {
+    validate_timeout_minutes "$1" "$2" "unit timeout_minutes"
+}
+
 load_platform_config() {
     local PLATFORM=$1
     local CONFIG_FILE=".github/configs/${PLATFORM}.yml"
@@ -37,6 +49,10 @@ load_platform_config() {
     RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
     VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
     CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
+    UNIT_TIMEOUT_MINUTES=$(/usr/local/bin/yq -r '.test_matrix.unit.timeout_minutes // 20' "$CONFIG_FILE")
+    validate_unit_timeout_minutes "$UNIT_TIMEOUT_MINUTES" "$CONFIG_FILE" || return 1
+    RUNTIME_RECOVERY_TIMEOUT_MINUTES=$(/usr/local/bin/yq -r '.timeouts.runtime_recovery_minutes // 60' "$CONFIG_FILE")
+    validate_timeout_minutes "$RUNTIME_RECOVERY_TIMEOUT_MINUTES" "$CONFIG_FILE" "runtime recovery timeout_minutes" || return 1
 
     # Extract package manager configuration
     PKG_MGR=$(/usr/local/bin/yq -r '.pkg_mgr // "uv"' "$CONFIG_FILE")
@@ -108,6 +124,8 @@ load_platform_config() {
     # Output values to $GITHUB_OUTPUT
     echo "ci_train_image=$CI_TRAIN_IMAGE" >> $GITHUB_OUTPUT
     echo "container_options=$CONTAINER_OPTIONS" >> $GITHUB_OUTPUT
+    echo "unit_timeout_minutes=$UNIT_TIMEOUT_MINUTES" >> $GITHUB_OUTPUT
+    echo "runtime_recovery_timeout_minutes=$RUNTIME_RECOVERY_TIMEOUT_MINUTES" >> $GITHUB_OUTPUT
 
     { echo 'runs_on<<EOFRUNSON'; echo "$RUNNER_LABELS"; echo 'EOFRUNSON'; } >> $GITHUB_OUTPUT
     { echo 'container_volumes<<EOFVOLUMES'; echo "$VOLUMES"; echo 'EOFVOLUMES'; } >> $GITHUB_OUTPUT

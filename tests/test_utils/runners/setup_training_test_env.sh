@@ -126,6 +126,8 @@ setup_cuda_training_env() {
     fi
 
     # TODO: remove after CI images contain these dependencies.
+    # Keep PyArrow compatible with the image's NumPy 1.x, and resolve s3fs
+    # against the fsspec version supported by datasets.
     "$PYTHON_BIN" -m pip install \
         qwen_vl_utils==0.0.14 \
         diffusers==0.36.0 \
@@ -134,6 +136,8 @@ setup_cuda_training_env() {
         websockets==15.0.1 \
         msgpack==1.1.0 \
         datasets==4.5.0 \
+        pyarrow==21.0.0 \
+        s3fs==2025.10.0 \
         https://baai-flagscale.ks3-cn-beijing.ksyuncs.com/whl/fast_hadamard_transform-1.1.0%2Bcu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 }
 

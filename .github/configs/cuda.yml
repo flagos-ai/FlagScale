@@ -113,6 +113,10 @@ container_options: >-
   --cap-add NET_ADMIN
   --security-opt seccomp=unconfined
 
+# Budget for each prepared dependency recovery step (download plus validation).
+timeouts:
+  runtime_recovery_minutes: 60
+
 # =============================================================================
 # Package Manager Configuration
 # =============================================================================
@@ -172,6 +176,9 @@ dependencies:
       # NCCL-EP requires the internal nccl_device.h header, which is not
       # shipped by the system NCCL installation in the CUDA CI image.
       NVTE_WITH_NCCL_EP: "0"
+      # Restrict CUDA arch compilation to the GPUs present on CI runners
+      # (A100 = sm80, H100 = sm90). Avoids building unused archs sm70/89/100/120.
+      NVTE_CUDA_ARCHS: "80;90"
     runtime:
       environment:
         NVTE_WITH_NCCL_EP: "0"
@@ -179,3 +186,19 @@ dependencies:
       install_pip_args: []
       pip_packages:
         - "megatron-energon[av_decode]~=7.0"
+        # Resolve Energon and datasets together. The CI image uses NumPy 1.x;
+        # PyArrow 26 requires NumPy 2, and datasets bounds fsspec to 2025.10.
+        - "datasets==4.5.0"
+        - "pyarrow==21.0.0"
+        - "s3fs==2025.10.0"
+        # TE-FL is installed with --no-deps; include its inspection dependency.
+        - "nvdlfw-inspect==0.2.2"
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/cuda/
+  - tools/install/cuda/
+  - requirements/cuda/
+  - .github/scripts/set_env_cuda.sh
+  - tests/test_utils/config/platforms/cuda.yaml
+  - .github/configs/cuda.yml

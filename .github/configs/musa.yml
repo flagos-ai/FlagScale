@@ -139,3 +139,12 @@ dependencies:
       pip_packages:
         - onnxscript
         - megatron-energon[av_decode]~=7.0
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/musa/
+  - tools/install/musa/
+  - requirements/musa/
+  - .github/scripts/set_env_musa.sh
+  - tests/test_utils/config/platforms/musa.yaml
+  - .github/configs/musa.yml

@@ -1,10 +1,17 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
 
+import base64
+import csv
+import hashlib
+import importlib.util
+import io
 import json
 import os
+import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -12,6 +19,22 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 COMMON_SCRIPT = ROOT / ".github/scripts/set_env_common.sh"
+SCRIPT = ROOT / ".github/scripts/validate_prepared_runtime.py"
+ACTION = ROOT / ".github/actions/restore-prepared-runtime/action.yml"
+spec = importlib.util.spec_from_file_location("runtime_validator", SCRIPT)
+validator = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(validator)
+
+
+def startup_hook_guard(tmp_path):
+    """Detect accidental site initialization in standard-library subprocesses."""
+    directory = tmp_path / "startup-hook"
+    directory.mkdir()
+    marker = tmp_path / "startup-hook-used"
+    (directory / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('loaded')\n"
+    )
+    return directory, marker
 
 
 def run_common_helper(script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -298,7 +321,10 @@ def test_parallel_context_uses_training_overlay_namespace():
         ("success", "skipped", False),
     ],
 )
-def test_all_tests_reports_preparation_and_test_failures(prepare_result, test_result, should_pass):
+def test_all_tests_reports_preparation_and_test_failures(
+    tmp_path, prepare_result, test_result, should_pass
+):
+    startup_directory, startup_marker = startup_hook_guard(tmp_path)
     workflow = yaml.safe_load((ROOT / ".github/workflows/all_tests.yml").read_text())
     jobs = workflow["jobs"]
     summary = jobs["all_tests"]
@@ -316,6 +342,7 @@ def test_all_tests_reports_preparation_and_test_failures(prepare_result, test_re
         results[tests]["result"] = test_result
         env = os.environ.copy()
         env["JOB_RESULTS"] = json.dumps(results)
+        env["PYTHONPATH"] = str(startup_directory)
         result = subprocess.run(
             ["bash", "-e", "-c", step["run"]],
             env=env,
@@ -324,6 +351,7 @@ def test_all_tests_reports_preparation_and_test_failures(prepare_result, test_re
             timeout=30,
         )
         assert (result.returncode == 0) == should_pass, result.stdout + result.stderr
+        assert not startup_marker.exists(), "Status checks must not initialize vendor site hooks"
 
 
 def test_training_workflows_restore_prepared_dependencies_from_cache_or_artifact():
@@ -336,7 +364,7 @@ def test_training_workflows_restore_prepared_dependencies_from_cache_or_artifact
         workflow = (ROOT / relative_path).read_text()
 
         assert "actions/cache/restore@v4" in workflow
-        assert "actions/download-artifact@v4" in workflow
+        assert "uses: ./FlagScale/.github/actions/restore-prepared-runtime" in workflow
         assert "name: Validate prepared training runtime" in workflow
         assert "Tests will run with image-provided dependencies" not in workflow
         assert "Expected exactly one TE-FL wheel" in workflow
@@ -400,7 +428,7 @@ def test_training_setup_exports_and_runners_use_ci_python_bin():
 
 
 def test_platform_setup_scripts_only_activate_and_validate_runtime():
-    for platform in ("ascend", "cuda", "enflame", "hygon", "kunlunxin", "metax", "musa"):
+    for platform in ("ascend", "cuda", "enflame", "hygon", "kunlunxin", "metax", "musa", "ppu"):
         script = (ROOT / f".github/scripts/set_env_{platform}.sh").read_text()
 
         assert "ci_activate_python_environment" in script
@@ -438,3 +466,372 @@ def test_megatron_runtime_environment_uses_supported_contract():
     for config_path in sorted((ROOT / ".github/configs").glob("*.yml")):
         config = config_path.read_text()
         assert "MEGATRON_FL_PREFER" not in config
+
+
+def record_for(files):
+    stream = io.StringIO()
+    writer = csv.writer(stream)
+    for name, data in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        writer.writerow([name, f"sha256={digest}", len(data)])
+    return stream.getvalue().encode()
+
+
+def make_runtime(root, kind):
+    root.mkdir(parents=True, exist_ok=True)
+    if kind == "te":
+        files = {
+            "transformer_engine/__init__.py": b"# package\n",
+            "transformer_engine-1.0.dist-info/METADATA": b"Name: transformer-engine\n",
+            "transformer_engine-1.0.dist-info/WHEEL": b"Wheel-Version: 1.0\n",
+        }
+        files["transformer_engine-1.0.dist-info/RECORD"] = record_for(files)
+        with zipfile.ZipFile(root / "transformer_engine-1.0-py3-none-any.whl", "w") as wheel:
+            for name, data in files.items():
+                wheel.writestr(name, data)
+    else:
+        files = {
+            f"megatron/core/{part}__init__.py": b"# module\n"
+            for part in ("", "tensor_parallel/", "transformer/", "pipeline_parallel/")
+        }
+        files["megatron_core-1.0.dist-info/RECORD"] = record_for(files)
+        for name, data in files.items():
+            target = root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+
+
+@pytest.mark.parametrize("kind", ["te", "megatron"])
+def test_accept_complete_runtime(tmp_path, kind):
+    make_runtime(tmp_path, kind)
+    validator.validate(kind, tmp_path)
+
+
+def test_reject_truncated_wheel(tmp_path):
+    make_runtime(tmp_path, "te")
+    wheel = next(tmp_path.glob("*.whl"))
+    wheel.write_bytes(wheel.read_bytes()[:100])
+    with pytest.raises(zipfile.BadZipFile):
+        validator.validate("te", tmp_path)
+
+
+@pytest.mark.parametrize("change", ["missing", "corrupt"])
+def test_reject_incomplete_megatron_with_core_init_present(tmp_path, change):
+    make_runtime(tmp_path, "megatron")
+    module = tmp_path / "megatron/core/tensor_parallel/__init__.py"
+    if change == "missing":
+        module.unlink()
+    else:
+        module.write_text("# changed\n")
+    with pytest.raises((OSError, ValueError)):
+        validator.validate("megatron", tmp_path)
+
+
+def test_reject_wheel_with_valid_zip_but_wrong_record(tmp_path):
+    make_runtime(tmp_path, "te")
+    wheel = next(tmp_path.glob("*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    files["transformer_engine/__init__.py"] = b"# changed\n"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, data in files.items():
+            archive.writestr(name, data)
+    with pytest.raises(ValueError, match="RECORD mismatch"):
+        validator.validate("te", tmp_path)
+
+
+def test_probe_reports_invalid_and_strict_mode_fails(tmp_path):
+    startup_directory, startup_marker = startup_hook_guard(tmp_path)
+    env = {**os.environ, "PYTHONPATH": str(startup_directory)}
+    output = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            str(SCRIPT),
+            "te",
+            str(tmp_path),
+            "--probe",
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        env=env,
+    )
+    assert result.returncode == 0
+    assert output.read_text() == "valid=false\n"
+    result = subprocess.run(
+        [sys.executable, "-S", str(SCRIPT), "te", str(tmp_path)], capture_output=True, env=env
+    )
+    assert result.returncode == 1
+    assert not startup_marker.exists(), "Package validation must not initialize vendor site hooks"
+
+
+def evaluate_action_condition(condition, context):
+    """Evaluate only the comparison subset used here; reject all other syntax."""
+    comparisons = []
+    for clause in condition.split("&&"):
+        match = re.fullmatch(
+            r"\s*((?:inputs\.[\w-]+|steps\.[\w-]+\.outputs\.[\w-]+|steps\.[\w-]+\.outcome))"
+            r"\s*(==|!=)\s*'([^']*)'\s*",
+            clause,
+        )
+        if match is None:
+            pytest.fail(f"Unsupported action condition: {condition!r}")
+        comparisons.append(match.groups())
+    # Validate every clause before evaluating: short-circuiting must not hide
+    # unsupported syntax in a later clause.
+    return all(
+        (context.get(key, "") == value) if operator == "==" else (context.get(key, "") != value)
+        for key, operator, value in comparisons
+    )
+
+
+@pytest.mark.parametrize(
+    "cached,available,success_at,expected_downloads,passed",
+    [
+        (True, True, None, 0, True),
+        (False, True, 1, 1, True),
+        (False, True, 2, 2, True),
+        (False, True, 3, 3, True),
+        (False, True, None, 3, False),
+        (False, True, "corrupt", 1, False),
+        (False, False, None, 0, False),
+    ],
+)
+@pytest.mark.parametrize("kind", ["te", "megatron"])
+def test_action_recovery(tmp_path, cached, available, success_at, expected_downloads, passed, kind):
+    """Execute composite shell steps; inject partial/successful artifact downloads."""
+    startup_directory, startup_marker = startup_hook_guard(tmp_path)
+    runtime = tmp_path / ("te-fl-wheel" if kind == "te" else "megatron-lm-fl-install")
+    runtime.mkdir()
+    if cached:
+        make_runtime(runtime, kind)
+    else:
+        (runtime / "partial").write_text("left by failed cache restore")
+    context = {
+        "inputs.kind": kind,
+        "inputs.artifact-name": "test",
+        "inputs.artifact-available": str(available).lower(),
+    }
+    downloads = 0
+    final_status = 0
+    action = yaml.safe_load(ACTION.read_text())
+    for index, step in enumerate(action["runs"]["steps"]):
+        if "if" in step:
+            if not evaluate_action_condition(step["if"], context):
+                continue
+        if "uses" in step:
+            downloads += 1
+            assert list(runtime.iterdir()) == [], "Every download needs a clean destination"
+            if downloads == success_at:
+                make_runtime(runtime, kind)
+            else:
+                (runtime / "partial").write_text("incomplete download")
+            context[f"steps.{step['id']}.outcome"] = (
+                "success"
+                if downloads == success_at or (success_at == "corrupt" and downloads == 1)
+                else "failure"
+            )
+            continue
+
+        def resolve(value):
+            return re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda match: context[match.group(1)], value)
+
+        output = tmp_path / f"output-{index}"
+        env = {
+            **os.environ,
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "GITHUB_ACTION_PATH": str(ACTION.parent),
+            "GITHUB_OUTPUT": str(output),
+        }
+        env.update({key: resolve(value) for key, value in step.get("env", {}).items()})
+        # Use the test interpreter for the action's dependency-free validator.
+        env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+        env["PYTHONPATH"] = str(startup_directory)
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            final_status = result.returncode
+            break
+        if "id" in step and output.exists():
+            for line in output.read_text().splitlines():
+                key, value = line.split("=", 1)
+                context[f"steps.{step['id']}.outputs.{key}"] = value
+    assert downloads == expected_downloads
+    assert (final_status == 0) == passed
+    assert not startup_marker.exists(), "Recovery validation must not initialize vendor site hooks"
+
+
+def test_installed_bytecode_without_hash_is_allowed(tmp_path):
+    make_runtime(tmp_path, "megatron")
+    record = next(tmp_path.glob("*.dist-info/RECORD"))
+    with record.open("a") as output:
+        output.write("megatron/core/__pycache__/__init__.cpython-312.pyc,,\n")
+    validator.validate("megatron", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "inputs.kind != 'te' && contains(inputs.kind, 'te')",
+        "inputs.kind == 'te' || inputs.kind == 'megatron'",
+        "!(inputs.kind == 'te')",
+        "inputs.kind >= 'te'",
+        "${{ inputs.kind == 'te' }}",
+        "inputs.kind == 'te' &&",
+    ],
+)
+def test_action_condition_rejects_unsupported_syntax(condition):
+    with pytest.raises(pytest.fail.Exception, match="Unsupported action condition"):
+        evaluate_action_condition(condition, {"inputs.kind": "te"})
+
+
+@pytest.mark.parametrize("missing_interpreter", [False, True])
+def test_action_validation_uses_selected_interpreter(tmp_path, missing_interpreter):
+    startup_directory, startup_marker = startup_hook_guard(tmp_path)
+    runtime = tmp_path / "runtime"
+    make_runtime(runtime, "te")
+    interpreter = tmp_path / "selected python"
+    marker = tmp_path / "interpreter-used"
+    if not missing_interpreter:
+        interpreter.write_text(
+            '#!/bin/bash\nprintf "used\\n" >> "$INTERPRETER_MARKER"\nexec "$TEST_PYTHON" "$@"\n'
+        )
+        interpreter.chmod(0o755)
+    action = yaml.safe_load(ACTION.read_text())
+    validation_steps = [
+        step
+        for step in action["runs"]["steps"]
+        if "validate_prepared_runtime.py" in step.get("run", "")
+    ]
+    assert len(validation_steps) == 5
+    env = {
+        **os.environ,
+        "CI_PYTHON_BIN": str(interpreter),
+        "KIND": "te",
+        "RUNTIME_DIR": str(runtime),
+        "GITHUB_ACTION_PATH": str(ACTION.parent),
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
+        "INTERPRETER_MARKER": str(marker),
+        "TEST_PYTHON": sys.executable,
+        "PYTHONPATH": str(startup_directory),
+    }
+    for step in validation_steps:
+        result = subprocess.run(
+            ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if missing_interpreter:
+            assert result.returncode != 0
+            assert "Python executable not found" in result.stdout + result.stderr
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+    if missing_interpreter:
+        assert not marker.exists()
+    else:
+        assert marker.read_text().splitlines() == ["used"] * 5
+    assert not startup_marker.exists()
+
+
+@pytest.mark.parametrize(
+    "value,valid",
+    [
+        ("1", True),
+        ("20", True),
+        ("30", True),
+        ("360", True),
+        ("0", False),
+        ("361", False),
+        ("-1", False),
+        ("30.5", False),
+        ("true", False),
+        ("", False),
+        ("030", False),
+    ],
+)
+def test_unit_timeout_validation(value, valid):
+    loader = ROOT / "tools/install/utils/load_platform_config.sh"
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; validate_unit_timeout_minutes "$2" fixture.yml',
+            "bash",
+            str(loader),
+            value,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert (result.returncode == 0) == valid, result.stdout + result.stderr
+    if not valid:
+        assert "expected integer 1-360" in result.stderr
+
+
+def test_unit_timeout_is_forwarded_through_common_workflow():
+    common = yaml.safe_load((ROOT / ".github/workflows/all_tests_common.yml").read_text())
+    unit = yaml.safe_load((ROOT / ".github/workflows/unit_tests_common.yml").read_text())
+    trigger = unit.get("on", unit.get(True))
+    setting = trigger["workflow_call"]["inputs"]["unit_timeout_minutes"]
+    assert setting["type"] == "number" and setting["default"] == 20
+    assert (
+        common["jobs"]["checkout_and_config"]["outputs"]["unit_timeout_minutes"]
+        == "${{ steps.config.outputs.unit_timeout_minutes }}"
+    )
+    assert (
+        common["jobs"]["unit_tests"]["with"]["unit_timeout_minutes"]
+        == "${{ fromJson(needs.checkout_and_config.outputs.unit_timeout_minutes) }}"
+    )
+    steps = unit["jobs"]["unit_test"]["steps"]
+    run = next(step for step in steps if step["name"] == "Run unit tests")
+    assert run["timeout-minutes"] == "${{ inputs.unit_timeout_minutes }}"
+    enflame = yaml.safe_load((ROOT / ".github/configs/enflame.yml").read_text())
+    assert enflame["test_matrix"]["unit"]["timeout_minutes"] == 30
+
+
+def test_runtime_recovery_budget_is_forwarded_without_changing_test_budgets():
+    common = yaml.safe_load((ROOT / ".github/workflows/all_tests_common.yml").read_text())
+    key = "runtime_recovery_timeout_minutes"
+    assert (
+        common["jobs"]["checkout_and_config"]["outputs"][key]
+        == "${{ steps.config.outputs.runtime_recovery_timeout_minutes }}"
+    )
+    consumers = {
+        "unit_tests": "unit_tests_common",
+        "functional_tests_train": "functional_tests_train",
+        "functional_tests_hetero_train": "functional_tests_hetero_train",
+        "functional_tests_benchmark": "functional_tests_benchmark",
+    }
+    for job, workflow in consumers.items():
+        assert (
+            common["jobs"][job]["with"][key]
+            == "${{ fromJson(needs.checkout_and_config.outputs.runtime_recovery_timeout_minutes) }}"
+        )
+        data = yaml.safe_load((ROOT / f".github/workflows/{workflow}.yml").read_text())
+        trigger = data.get("on", data.get(True))
+        setting = trigger["workflow_call"]["inputs"][key]
+        assert setting["type"] == "number" and setting["default"] == 60
+        recovery = [
+            step
+            for definition in data["jobs"].values()
+            for step in definition.get("steps", [])
+            if step["name"].startswith("Recover and validate prepared")
+        ]
+        assert len(recovery) == 2
+        for step in recovery:
+            assert step["timeout-minutes"] == "${{ inputs.runtime_recovery_timeout_minutes }}"
+            assert "inputs.platform" not in step["if"]
+    cuda = yaml.safe_load((ROOT / ".github/configs/cuda.yml").read_text())
+    assert cuda["timeouts"]["runtime_recovery_minutes"] == 60
+    for platform in ("ascend", "enflame", "ppu", "metax", "musa", "hygon", "kunlunxin"):
+        config = yaml.safe_load((ROOT / f".github/configs/{platform}.yml").read_text())
+        assert config.get("timeouts", {}).get("runtime_recovery_minutes", 60) == 60

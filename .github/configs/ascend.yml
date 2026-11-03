@@ -25,7 +25,7 @@ ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260812-ascend-de
 ci_inference_image: harbor.baai.ac.cn/flagos-dev/flagscale:manual-20260812-ascend-dev-inference
 
 # Runner labels for this hardware
-runner_labels: ["flagscale-ascend-ascend910-gpu2-32c-128g"]
+runner_labels: ["flagcicd-910c"]
 
 # Container volumes (hardware-specific paths)
 container_volumes:
@@ -141,3 +141,12 @@ dependencies:
       install_pip_args: []
       pip_packages:
         - "megatron-energon[av_decode]~=7.0"
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/ascend/
+  - tools/install/ascend/
+  - requirements/ascend/
+  - .github/scripts/set_env_ascend.sh
+  - tests/test_utils/config/platforms/ascend.yaml
+  - .github/configs/ascend.yml

@@ -184,6 +184,10 @@ run_test() {
             "--task=$task" "--model=$model"
             "--case=$config" "--platform=$PLATFORM"
         )
+        if [ -n "${FLAGSCALE_CI_FUNCTIONAL_JUNIT:-}" ]; then
+            export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$PROJECT_ROOT/.github/scripts/ci"
+            validator_cmd+=("--junitxml=$FLAGSCALE_CI_FUNCTIONAL_JUNIT" -p flagcicd_functional_pytest)
+        fi
         [ -n "$CURRENT_DEVICE" ] && validator_cmd+=("--device=$CURRENT_DEVICE")
 
         # For serve tasks, wait for the service to be fully ready before validation

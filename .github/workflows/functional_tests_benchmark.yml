@@ -16,7 +16,26 @@ name: Common Functional Tests - Benchmark
 
 on:
   workflow_call:
+    secrets:
+      FLAGCICD_API_TOKEN:
+        required: false
+        description: Optional FlagCICD report upload token; unavailable in fork PRs
     inputs:
+      source_repository:
+        type: string
+        required: false
+        default: ''
+        description: Explicit source repository for PR comment requests
+      source_sha:
+        type: string
+        required: false
+        default: ''
+        description: Immutable source commit for PR comment requests
+      runtime_recovery_timeout_minutes:
+        required: false
+        type: number
+        default: 60
+        description: Budget for each prepared dependency download and validation step
       platform:
         required: true
         type: string
@@ -95,11 +114,13 @@ on:
 
 jobs:
   functional_test_benchmark:
+    name: functional_test_benchmark (${{ matrix.test_config.device }}, ${{ matrix.test_config.task }}, ${{ matrix.test_config.model }}, ${{ matrix.test_config.case }})
     defaults:
       run:
         shell: bash
     env:
       PROJECT_ROOT: ${{ github.workspace }}/FlagScale
+      FLAGCICD_TOKEN_SET: ${{ secrets.FLAGCICD_API_TOKEN != '' }}
     runs-on: ${{ fromJson(inputs.runs_on) }}
     strategy:
       fail-fast: false
@@ -118,8 +139,8 @@ jobs:
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -138,8 +159,8 @@ jobs:
         uses: actions/checkout@v4
         continue-on-error: true
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -157,8 +178,8 @@ jobs:
         id: checkout_attempt_3
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ inputs.source_repository || github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: FlagScale
           ssh-strict: true
           ssh-user: git
@@ -188,6 +209,10 @@ jobs:
       - name: Restore Megatron-LM-FL cache
         if: inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != ''
         id: megatron_cache_restore
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 10
         uses: actions/cache/restore@v4
         with:
           path: megatron-lm-fl-install
@@ -197,25 +222,33 @@ jobs:
       - name: Restore TE-FL cache
         if: inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != ''
         id: te_fl_cache_restore
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 10
         uses: actions/cache/restore@v4
         with:
           path: te-fl-wheel
           key: ${{ inputs.te_fl_cache_key }}
           fail-on-cache-miss: false
 
-      - name: Restore prepared Megatron artifact
-        if: inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != '' && steps.megatron_cache_restore.outputs.cache-hit != 'true' && inputs.megatron_artifact_available == 'true'
-        uses: actions/download-artifact@v4
+      - name: Recover and validate prepared megatron runtime
+        if: inputs.megatron_lm_fl_enabled == 'true'
+        timeout-minutes: ${{ inputs.runtime_recovery_timeout_minutes }}
+        uses: ./FlagScale/.github/actions/restore-prepared-runtime
         with:
-          name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
-          path: megatron-lm-fl-install
+          kind: megatron
+          artifact-name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
+          artifact-available: ${{ inputs.megatron_artifact_available }}
 
-      - name: Restore prepared TE-FL artifact
-        if: inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != '' && steps.te_fl_cache_restore.outputs.cache-hit != 'true' && inputs.te_fl_artifact_available == 'true'
-        uses: actions/download-artifact@v4
+      - name: Recover and validate prepared te runtime
+        if: inputs.te_fl_enabled == 'true'
+        timeout-minutes: ${{ inputs.runtime_recovery_timeout_minutes }}
+        uses: ./FlagScale/.github/actions/restore-prepared-runtime
         with:
-          name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
-          path: te-fl-wheel
+          kind: te
+          artifact-name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
+          artifact-available: ${{ inputs.te_fl_artifact_available }}
 
       - name: Validate prepared training runtime
         if: inputs.megatron_lm_fl_enabled == 'true' || inputs.te_fl_enabled == 'true'
@@ -269,6 +302,8 @@ jobs:
 
       - name: Run benchmark tests
         id: benchmark_test
+        env:
+          EXECUTION_SPEC: ${{ matrix.test_config.execution_spec || '' }}
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -325,14 +360,18 @@ jobs:
           echo "=========================================="
 
           # Run benchmark tests using run_tests.sh
-          bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh" \
-            --platform "$PLATFORM" \
-            --device "$DEVICE" \
-            --type functional \
-            --task "$TASK" \
-            --model "$MODEL" \
-            --list "$CASE"
+          command=(bash "$PROJECT_ROOT/tests/test_utils/runners/run_tests.sh"
+            --platform "$PLATFORM" --device "$DEVICE" --type functional
+            --task "$TASK" --model "$MODEL" --list "$CASE")
+          if [ -n "$EXECUTION_SPEC" ]; then
+            printf '%s\n' "$EXECUTION_SPEC" > "$RUNNER_TEMP/execution-spec.json"
+            command=("${CI_PYTHON_BIN:-python3}" -S "$PROJECT_ROOT/.github/scripts/ci/flagcicd_evidence.py"
+              functional --spec-file "$RUNNER_TEMP/execution-spec.json" -- "${command[@]}")
+          fi
+          set +e
+          "${command[@]}"
           exit_code=$?
+          set -e
 
           if [ $exit_code -eq 0 ]; then
             echo "Benchmark tests passed for $PLATFORM/$DEVICE/$TASK/$MODEL/$CASE"
@@ -394,23 +433,33 @@ jobs:
             "$LOG_FILE" "$GOLD_FILE" "$OUTPUT_FILE"
 
       - name: Install jq
-        if: always() && steps.benchmark_test.outcome == 'success'
+        if: ${{ !cancelled() && env.FLAGCICD_TOKEN_SET == 'true' && vars.FLAGCICD_BENCHMARK_BACKEND_URL != '' && steps.benchmark_test.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 3
         run: apt-get update && apt-get install -y jq
 
+      - name: Explain skipped FlagCICD benchmark upload
+        if: ${{ !cancelled() && (env.FLAGCICD_TOKEN_SET != 'true' || vars.FLAGCICD_BENCHMARK_BACKEND_URL == '') }}
+        run: |
+          echo 'FlagCICD benchmark-${{ inputs.platform }}-${{ matrix.test_config.model }}-${{ matrix.test_config.case }}: Skipped: FLAGCICD_API_TOKEN or FLAGCICD_BENCHMARK_BACKEND_URL unavailable' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload benchmark data to backend
-        if: always() && steps.benchmark_test.outcome == 'success'
-        uses: flagos-ai/FlagOps/actions/post-benchmark-report@main
+        if: ${{ !cancelled() && env.FLAGCICD_TOKEN_SET == 'true' && vars.FLAGCICD_BENCHMARK_BACKEND_URL != '' && steps.benchmark_test.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: flagos-ai/FlagOps/actions/post-benchmark-report@466de7d164bf6ca3989c0abaeba1c3a62c68a047
         env:
-          NO_PROXY: "flagcicd-inner.flagos.net"
+          NO_PROXY: "flagcicd.flagos.net"
         with:
-          backend_url: 'http://flagcicd-inner.flagos.net:8000'
-          user_id: '000000000000000000'
+          # Benchmark action appends /list/*; do not pass the coverage metrics endpoint.
+          backend_url: ${{ vars.FLAGCICD_BENCHMARK_BACKEND_URL }}
+          api_token: ${{ secrets.FLAGCICD_API_TOKEN }}
           report_path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results/${{ matrix.test_config.case }}/logs/benchmark_metrics.json
           list_code: 'benchmark_${{ matrix.test_config.task }}_${{ matrix.test_config.model }}_${{ matrix.test_config.case }}'
           list_name: 'Benchmark-${{ matrix.test_config.model }}-${{ matrix.test_config.case }}'
           header_config: '[{"field":"metric","name":"Benchmark Metric","required":true,"sortable":true,"type":"string"},{"field":"values","name":"Per Step Details","required":false,"sortable":false,"type":"array"},{"field":"avg","name":"Avg","required":true,"sortable":true,"type":"number"},{"field":"p50","name":"P50","required":true,"sortable":true,"type":"number"},{"field":"p99","name":"P99","required":true,"sortable":true,"type":"number"}]'
           repository_name: '${{ github.repository }}'
-          commit_id: '${{ github.event.pull_request.head.sha || github.sha }}'
+          commit_id: '${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}'
           workflow_id: '${{ github.run_id }}'
           runner_set_name: ${{ fromJson(inputs.runs_on)[0] }}
           fail_on_error: 'false'
@@ -424,3 +473,12 @@ jobs:
           path: ${{ env.PROJECT_ROOT }}/tests/functional_tests/${{ matrix.test_config.task }}/${{ matrix.test_config.model }}/test_results
           retention-days: 7
           if-no-files-found: warn
+
+      - name: Upload functional execution evidence
+        if: ${{ !cancelled() && matrix.test_config.execution_spec != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ inputs.platform }}-functional-${{ matrix.test_config.device }}-${{ matrix.test_config.task }}-${{ matrix.test_config.model }}-${{ matrix.test_config.case }}-${{ github.run_attempt }}
+          path: ${{ env.PROJECT_ROOT }}/test-results/evidence
+          if-no-files-found: error
+          retention-days: 7

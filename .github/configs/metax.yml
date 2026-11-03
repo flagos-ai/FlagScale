@@ -142,3 +142,12 @@ dependencies:
         - flag-gems
         - sqlalchemy
         - "megatron-energon[av_decode]~=7.0"
+
+# Platform-owned paths. Shared/unrecognized code still runs every platform.
+paths_watch:
+  - docker/metax/
+  - tools/install/metax/
+  - requirements/metax/
+  - .github/scripts/set_env_metax.sh
+  - tests/test_utils/config/platforms/metax.yaml
+  - .github/configs/metax.yml
