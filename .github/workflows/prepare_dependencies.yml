@@ -227,8 +227,8 @@ jobs:
     outputs:
       megatron_cache_key: ${{ steps.megatron_cache_key.outputs.key }}
       te_fl_cache_key: ${{ steps.te_fl_cache_key.outputs.key }}
-      megatron_artifact_available: ${{ steps.runtime_artifacts_available.outputs.megatron_available }}
-      te_fl_artifact_available: ${{ steps.runtime_artifacts_available.outputs.te_fl_available }}
+      megatron_artifact_available: ${{ steps.publish_megatron.outcome == 'success' }}
+      te_fl_artifact_available: ${{ steps.publish_te.outcome == 'success' }}
     steps:
       - name: Checkout source (attempt 1)
         id: checkout_1
@@ -516,6 +516,24 @@ jobs:
           fi
           echo "TE-FL wheel ready: ${wheels[0]}"
 
+      - name: Validate prepared megatron before publication
+        if: needs.resolve.outputs.megatron_enabled == 'true'
+        run: |
+          set -euo pipefail
+          source "$GITHUB_WORKSPACE/.github/scripts/set_env_common.sh"
+          ci_resolve_python_bin
+          "$CI_PYTHON_BIN" -S "$GITHUB_WORKSPACE/.github/scripts/validate_prepared_runtime.py" \
+            megatron "$GITHUB_WORKSPACE/megatron-lm-fl-install"
+
+      - name: Validate prepared te before publication
+        if: needs.resolve.outputs.te_fl_enabled == 'true'
+        run: |
+          set -euo pipefail
+          source "$GITHUB_WORKSPACE/.github/scripts/set_env_common.sh"
+          ci_resolve_python_bin
+          "$CI_PYTHON_BIN" -S "$GITHUB_WORKSPACE/.github/scripts/validate_prepared_runtime.py" \
+            te "$GITHUB_WORKSPACE/te-fl-wheel"
+
       - name: Save Megatron-LM-FL cache
         # Explicit PR source executes under the dispatch ref: never publish it to that ref's cache.
         if: inputs.source_sha == '' && inputs.source_repository == '' && needs.resolve.outputs.megatron_enabled == 'true' && steps.megatron_cache.outputs.cache-hit != 'true'
@@ -524,27 +542,6 @@ jobs:
         with:
           path: megatron-lm-fl-install
           key: ${{ steps.megatron_cache_key.outputs.key }}
-
-      - name: Publish prepared artifact availability
-        id: runtime_artifacts_available
-        if: always() && (needs.resolve.outputs.megatron_enabled == 'true' || needs.resolve.outputs.te_fl_enabled == 'true')
-        run: |
-          # Artifact is available if: cache miss OR fork PR (cannot access main repo cache)
-          is_fork="${{ github.event.pull_request.head.repo.fork }}"
-          megatron_cache_hit="${{ steps.megatron_cache.outputs.cache-hit }}"
-          te_fl_cache_hit="${{ steps.te_fl_cache.outputs.cache-hit }}"
-
-          if [ "$megatron_cache_hit" != "true" ] || [ "$is_fork" = "true" ]; then
-            echo "megatron_available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "megatron_available=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if [ "$te_fl_cache_hit" != "true" ] || [ "$is_fork" = "true" ]; then
-            echo "te_fl_available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "te_fl_available=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Save TE-FL wheel cache
         # Explicit PR source executes under the dispatch ref: never publish it to that ref's cache.
@@ -555,19 +552,25 @@ jobs:
           path: te-fl-wheel
           key: ${{ steps.te_fl_cache_key.outputs.key }}
 
-      # Upload artifacts when: cache miss OR fork PR (cannot access main repo cache)
+      # Every successful producer publishes a same-run fallback, including cache hits.
       - name: Upload prepared Megatron artifact
-        if: needs.resolve.outputs.megatron_enabled == 'true' && (steps.megatron_cache.outputs.cache-hit != 'true' || github.event.pull_request.head.repo.fork == true)
+        id: publish_megatron
+        if: needs.resolve.outputs.megatron_enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
           path: megatron-lm-fl-install
           if-no-files-found: error
+          overwrite: true
+          retention-days: 7
 
       - name: Upload prepared TE-FL artifact
-        if: needs.resolve.outputs.te_fl_enabled == 'true' && (steps.te_fl_cache.outputs.cache-hit != 'true' || github.event.pull_request.head.repo.fork == true)
+        id: publish_te
+        if: needs.resolve.outputs.te_fl_enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
           path: te-fl-wheel
           if-no-files-found: error
+          overwrite: true
+          retention-days: 7

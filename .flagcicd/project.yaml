@@ -1,0 +1,223 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+schema_version: flagcicd.project/v2
+repository: FlagScale
+profiles:
+  pr:
+    selection: affected
+  branch:
+    selection: configured
+  nightly:
+    selection: configured
+  requested:
+    selection: requested
+functional_tasks:
+- train
+- hetero_train
+- benchmark
+shared_paths:
+- .flagcicd/
+- .github/
+- tests/test_utils/
+- tests/conftest.py
+- tests/unit_tests/conftest.py
+- requirements/
+- tools/install/
+- docker/
+- pyproject.toml
+- setup.py
+- setup.cfg
+- uv.lock
+- .pre-commit-config.yaml
+- flagscale/runner/runner_train.py
+- flagscale/runner/utils.py
+- flagscale/runner/launcher/
+- flagscale/runner/backend/__init__.py
+- flagscale/platforms/
+test_exceptions:
+  tests/unit_tests/test_basic.py:
+    kind: placeholder
+    reason: Contains only a pass placeholder; not proof of functionality.
+  tests/unit_tests/test_utilities.py:
+    kind: helper
+    reason: Shared test helper; changes require configured regression.
+test_groups:
+  entrypoint:
+    tests:
+    - tests/unit_tests/test_cli.py
+    - tests/unit_tests/test_run.py
+    - tests/unit_tests/test_init.py
+    sources:
+    - flagscale/cli.py
+    - flagscale/run.py
+    - flagscale/__init__.py
+    affects:
+    - runner
+    - megatron-train
+    - native-train
+    - train-utils
+    - kerv
+    - vla
+    - transformations
+    - serve-processor
+    functional:
+    - task: train
+    - task: hetero_train
+    - task: benchmark
+    gaps: []
+  ci-control:
+    tests:
+    - tests/ci/
+    - tests/unit_tests/test_ci_training_runtime_scripts.py
+    - tests/unit_tests/test_setup.py
+    - tests/unit_tests/test_resolve_source_refs.py
+    sources: []
+    affects: []
+    functional: []
+    gaps: []
+  distributed:
+    tests:
+    - tests/unit_tests/test_parallel_context.py
+    - tests/unit_tests/test_spiky_loss_detector.py
+    sources:
+    - flagscale/train/hetero/
+    affects:
+    - megatron-train
+    functional:
+    - task: train
+    - task: hetero_train
+    - task: benchmark
+    gaps: []
+  checkpoint:
+    tests:
+    - tests/unit_tests/checkpoint/
+    sources:
+    - tools/checkpoint/qwen35/
+    - examples/qwen35/
+    affects: []
+    functional: []
+    gaps: []
+  runner:
+    tests:
+    - tests/unit_tests/runner/
+    sources:
+    - flagscale/runner/
+    affects:
+    - entrypoint
+    - megatron-train
+    - native-train
+    - train-utils
+    - kerv
+    - vla
+    - transformations
+    - serve-processor
+    - distributed
+    functional:
+    - task: train
+    - task: hetero_train
+    - task: benchmark
+    gaps: []
+  megatron-train:
+    tests:
+    - tests/unit_tests/train/megatron/
+    - tests/unit_tests/train/test_train_config.py
+    sources:
+    - flagscale/runner/backend/backend_megatron.py
+    - flagscale/train/megatron/
+    affects:
+    - runner
+    - train-utils
+    functional:
+    - task: train
+      backend: megatron
+    - task: hetero_train
+      backend: megatron
+    - task: benchmark
+      backend: megatron
+    gaps: []
+  native-train:
+    tests: []
+    sources:
+    - flagscale/runner/backend/backend_native_train.py
+    - flagscale/train/train_pi.py
+    - flagscale/train/train_qwen_gr00t.py
+    affects:
+    - runner
+    - train-utils
+    - vla
+    - kerv
+    functional:
+    - task: train
+      backend: native
+    gaps:
+    - No configured native training functional case is currently connected.
+  train-utils:
+    tests:
+    - tests/unit_tests/train/utils/
+    - tests/unit_tests/train/test_perf_monitor.py
+    sources:
+    - flagscale/train/utils/
+    - flagscale/train/train_config.py
+    affects:
+    - runner
+    - megatron-train
+    - native-train
+    functional:
+    - task: train
+    - task: hetero_train
+    - task: benchmark
+    gaps: []
+  kerv:
+    tests:
+    - tests/unit_tests/models/kerv/
+    sources:
+    - flagscale/models/kerv/
+    - examples/kerv/
+    - flagscale/inference/inference_kerv.py
+    - flagscale/train/train_kerv.py
+    affects:
+    - transformations
+    functional:
+    - task: inference
+      backend: native
+    gaps:
+    - KERV inference E2E is not enabled; configured unit/runtime tests remain required.
+  vla:
+    tests:
+    - tests/unit_tests/models/vla/
+    sources:
+    - flagscale/models/vla/
+    - examples/vla/
+    affects: []
+    functional:
+    - task: train
+      backend: native
+    gaps:
+    - VLA native training/serving E2E is not connected to the configured matrix.
+  transformations:
+    tests:
+    - tests/unit_tests/transformations/
+    sources:
+    - flagscale/transformations/
+    - flagscale/inference/
+    affects:
+    - kerv
+    functional:
+    - task: inference
+    gaps:
+    - Inference workflow is disabled; existing transformation/runtime tests still execute.
+  serve-processor:
+    tests:
+    - tests/unit_tests/serve/processor/
+    sources:
+    - flagscale/serve/processor/
+    affects: []
+    functional:
+    - task: serve
+    gaps:
+    - Serving E2E is disabled; processor unit tests do not establish service acceptance.
+gate:
+  require_unit_evidence: true
+  require_functional_evidence: true
+case_unit_groups:
+- entrypoint

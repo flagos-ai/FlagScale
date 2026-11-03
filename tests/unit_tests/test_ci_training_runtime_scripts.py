@@ -364,7 +364,7 @@ def test_training_workflows_restore_prepared_dependencies_from_cache_or_artifact
         workflow = (ROOT / relative_path).read_text()
 
         assert "actions/cache/restore@v4" in workflow
-        assert "actions/download-artifact@v4" in workflow
+        assert "uses: ./FlagScale/.github/actions/restore-prepared-runtime" in workflow
         assert "name: Validate prepared training runtime" in workflow
         assert "Tests will run with image-provided dependencies" not in workflow
         assert "Expected exactly one TE-FL wheel" in workflow
@@ -572,7 +572,7 @@ def evaluate_action_condition(condition, context):
     comparisons = []
     for clause in condition.split("&&"):
         match = re.fullmatch(
-            r"\s*((?:inputs\.[\w-]+|steps\.[\w-]+\.outputs\.[\w-]+))"
+            r"\s*((?:inputs\.[\w-]+|steps\.[\w-]+\.outputs\.[\w-]+|steps\.[\w-]+\.outcome))"
             r"\s*(==|!=)\s*'([^']*)'\s*",
             clause,
         )
@@ -595,6 +595,7 @@ def evaluate_action_condition(condition, context):
         (False, True, 2, 2, True),
         (False, True, 3, 3, True),
         (False, True, None, 3, False),
+        (False, True, "corrupt", 1, False),
         (False, False, None, 0, False),
     ],
 )
@@ -627,6 +628,11 @@ def test_action_recovery(tmp_path, cached, available, success_at, expected_downl
                 make_runtime(runtime, kind)
             else:
                 (runtime / "partial").write_text("incomplete download")
+            context[f"steps.{step['id']}.outcome"] = (
+                "success"
+                if downloads == success_at or (success_at == "corrupt" and downloads == 1)
+                else "failure"
+            )
             continue
 
         def resolve(value):
@@ -813,19 +819,19 @@ def test_runtime_recovery_budget_is_forwarded_without_changing_test_budgets():
         data = yaml.safe_load((ROOT / f".github/workflows/{workflow}.yml").read_text())
         trigger = data.get("on", data.get(True))
         setting = trigger["workflow_call"]["inputs"][key]
-        assert setting["type"] == "number" and setting["default"] == 15
+        assert setting["type"] == "number" and setting["default"] == 60
         recovery = [
             step
             for definition in data["jobs"].values()
             for step in definition.get("steps", [])
-            if step["name"].startswith("Recover and validate CUDA")
+            if step["name"].startswith("Recover and validate prepared")
         ]
         assert len(recovery) == 2
         for step in recovery:
             assert step["timeout-minutes"] == "${{ inputs.runtime_recovery_timeout_minutes }}"
-            assert "inputs.platform == 'cuda'" in step["if"]
+            assert "inputs.platform" not in step["if"]
     cuda = yaml.safe_load((ROOT / ".github/configs/cuda.yml").read_text())
-    assert cuda["timeouts"]["runtime_recovery_minutes"] == 30
+    assert cuda["timeouts"]["runtime_recovery_minutes"] == 60
     for platform in ("ascend", "enflame", "ppu", "metax", "musa", "hygon", "kunlunxin"):
         config = yaml.safe_load((ROOT / f".github/configs/{platform}.yml").read_text())
-        assert config.get("timeouts", {}).get("runtime_recovery_minutes", 15) == 15
+        assert config.get("timeouts", {}).get("runtime_recovery_minutes", 60) == 60

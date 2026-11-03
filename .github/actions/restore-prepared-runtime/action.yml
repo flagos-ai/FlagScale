@@ -1,7 +1,7 @@
 # Copyright 2026 FlagOS Contributors
 # Licensed under the Apache License, Version 2.0.
 name: Restore prepared runtime
-description: Validate cached packages and retry artifact recovery in clean directories.
+description: Validate cached packages and retry failed artifact transfers in clean directories.
 inputs:
   kind:
     description: Package kind (megatron or te).
@@ -53,6 +53,7 @@ runs:
         mkdir -p -- "$RUNTIME_DIR"
 
     - name: Download runtime attempt 1
+      id: download_1
       if: steps.cached.outputs.valid != 'true' && inputs.artifact-available == 'true'
       continue-on-error: true
       uses: actions/download-artifact@v4
@@ -75,7 +76,7 @@ runs:
           "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
 
     - name: Clean incomplete runtime before attempt 2
-      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure'
       shell: bash
       env:
         RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
@@ -85,7 +86,8 @@ runs:
         mkdir -p -- "$RUNTIME_DIR"
 
     - name: Download runtime attempt 2
-      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      id: download_2
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure'
       continue-on-error: true
       uses: actions/download-artifact@v4
       with:
@@ -93,7 +95,7 @@ runs:
         path: ${{ steps.runtime.outputs.directory }}
 
     - name: Validate downloaded runtime attempt 2
-      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure'
       id: validated_2
       shell: bash
       env:
@@ -107,7 +109,7 @@ runs:
           "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
 
     - name: Clean incomplete runtime before attempt 3
-      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure'
       shell: bash
       env:
         RUNTIME_DIR: ${{ steps.runtime.outputs.directory }}
@@ -117,7 +119,8 @@ runs:
         mkdir -p -- "$RUNTIME_DIR"
 
     - name: Download runtime attempt 3
-      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      id: download_3
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure'
       continue-on-error: true
       uses: actions/download-artifact@v4
       with:
@@ -125,7 +128,7 @@ runs:
         path: ${{ steps.runtime.outputs.directory }}
 
     - name: Validate downloaded runtime attempt 3
-      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true'
+      if: steps.cached.outputs.valid != 'true' && steps.validated_1.outputs.valid != 'true' && steps.validated_2.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure'
       id: validated_3
       shell: bash
       env:
@@ -137,6 +140,13 @@ runs:
         ci_resolve_python_bin
         "$CI_PYTHON_BIN" -S "$GITHUB_ACTION_PATH/../../scripts/validate_prepared_runtime.py" \
           "$KIND" "$RUNTIME_DIR" --probe --output "$GITHUB_OUTPUT"
+
+    - name: Record exhausted artifact transfers
+      if: steps.cached.outputs.valid != 'true' && inputs.artifact-available == 'true' && steps.download_1.outcome == 'failure' && steps.download_2.outcome == 'failure' && steps.download_3.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "CI_INFRA_RECOVERY_DOWNLOAD_FAILED"
+        echo "::warning::Artifact transfer attempts exhausted; runtime validation will still fail."
 
     - name: Require complete runtime before installation
       shell: bash

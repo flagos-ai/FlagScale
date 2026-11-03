@@ -21,6 +21,11 @@ on:
         required: false
         description: Optional FlagCICD report upload token; unavailable in fork PRs
     inputs:
+      unit_selection:
+        type: string
+        required: false
+        default: ''
+        description: Planned unit targets; empty retains the legacy launcher and coverage behavior
       source_repository:
         type: string
         required: false
@@ -34,7 +39,7 @@ on:
       runtime_recovery_timeout_minutes:
         required: false
         type: number
-        default: 15
+        default: 60
         description: Budget for each prepared dependency download and validation step
       platform:
         required: true
@@ -218,6 +223,10 @@ jobs:
       - name: Restore Megatron-LM-FL cache
         if: inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != ''
         id: megatron_cache_restore
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 10
         uses: actions/cache/restore@v4
         with:
           path: megatron-lm-fl-install
@@ -227,42 +236,32 @@ jobs:
       - name: Restore TE-FL cache
         if: inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != ''
         id: te_fl_cache_restore
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 10
         uses: actions/cache/restore@v4
         with:
           path: te-fl-wheel
           key: ${{ inputs.te_fl_cache_key }}
           fail-on-cache-miss: false
 
-      - name: Restore prepared Megatron artifact
-        if: inputs.platform != 'cuda' && inputs.megatron_lm_fl_enabled == 'true' && inputs.megatron_cache_key != '' && steps.megatron_cache_restore.outputs.cache-hit != 'true' && inputs.megatron_artifact_available == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
-          path: megatron-lm-fl-install
-
-      - name: Restore prepared TE-FL artifact
-        if: inputs.platform != 'cuda' && inputs.te_fl_enabled == 'true' && inputs.te_fl_cache_key != '' && steps.te_fl_cache_restore.outputs.cache-hit != 'true' && inputs.te_fl_artifact_available == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
-          path: te-fl-wheel
-
-      - name: Recover and validate CUDA megatron runtime
-        if: inputs.platform == 'cuda' && inputs.megatron_lm_fl_enabled == 'true'
+      - name: Recover and validate prepared megatron runtime
+        if: inputs.megatron_lm_fl_enabled == 'true'
         timeout-minutes: ${{ inputs.runtime_recovery_timeout_minutes }}
         uses: ./FlagScale/.github/actions/restore-prepared-runtime
         with:
           kind: megatron
-          artifact-name: prepared-megatron-cuda-${{ github.run_id }}
+          artifact-name: prepared-megatron-${{ inputs.platform }}-${{ github.run_id }}
           artifact-available: ${{ inputs.megatron_artifact_available }}
 
-      - name: Recover and validate CUDA te runtime
-        if: inputs.platform == 'cuda' && inputs.te_fl_enabled == 'true'
+      - name: Recover and validate prepared te runtime
+        if: inputs.te_fl_enabled == 'true'
         timeout-minutes: ${{ inputs.runtime_recovery_timeout_minutes }}
         uses: ./FlagScale/.github/actions/restore-prepared-runtime
         with:
           kind: te
-          artifact-name: prepared-te-fl-cuda-${{ github.run_id }}
+          artifact-name: prepared-te-fl-${{ inputs.platform }}-${{ github.run_id }}
           artifact-available: ${{ inputs.te_fl_artifact_available }}
 
       - name: Validate prepared training runtime
@@ -319,6 +318,8 @@ jobs:
 
       - name: Run unit tests
         id: unit_test
+        env:
+          UNIT_SELECTION: ${{ inputs.unit_selection }}
         run: |
           set -euo pipefail
           cd $PROJECT_ROOT
@@ -351,13 +352,18 @@ jobs:
           echo "Python location: ${CI_PYTHON_BIN:-python3}"
           echo "Python version: $(${CI_PYTHON_BIN:-python3} --version)"
 
+          selection_args=()
+          if [ -n "$UNIT_SELECTION" ]; then
+            printf '%s\n' "$UNIT_SELECTION" > "$RUNNER_TEMP/unit-selection.json"
+            selection_args=(--selection-file "$RUNNER_TEMP/unit-selection.json")
+          fi
           set +e
           # PYTHONPATH is set by run_unit_tests.sh with correct priority
           # Do NOT override it here to prevent path order conflicts
           bash ./tests/test_utils/runners/run_unit_tests.sh \
             --platform '${{ inputs.platform }}' \
             --device '${{ inputs.device }}' \
-            --coverage-dir "$COVERAGE_REPORT_DIR"
+            --coverage-dir "$COVERAGE_REPORT_DIR" "${selection_args[@]}"
           exit_code=$?
           set -e
 
@@ -370,6 +376,15 @@ jobs:
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           exit $exit_code
         timeout-minutes: ${{ inputs.unit_timeout_minutes }}
+
+      - name: Upload planned unit execution evidence
+        if: ${{ !cancelled() && inputs.unit_selection != '' && steps.unit_test.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ inputs.platform }}-${{ inputs.device }}-${{ github.run_attempt }}
+          path: ${{ env.PROJECT_ROOT }}/test-results/evidence
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Check generated coverage report
         id: coverage_report
