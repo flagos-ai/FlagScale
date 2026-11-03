@@ -2,6 +2,8 @@
 # Licensed under the Apache License, Version 2.0.
 """CPU contract checks for the Iluvatar platform configuration and installers."""
 
+import json
+import math
 import os
 import re
 import subprocess
@@ -99,8 +101,44 @@ def test_iluvatar_owned_changes_select_only_iluvatar():
             "tests/functional_tests/train/qwen3/conf/0_6b_iluvatar.yaml",
             "tests/functional_tests/train/qwen3/conf/train/0_6b_iluvatar.yaml",
             "tests/ci/test_iluvatar_bootstrap.py",
+            "tests/functional_tests/benchmark/qwen3/conf/iluvatar0_6b_tp1_pp1-reference.yaml",
+            "tests/functional_tests/benchmark/qwen3/conf/train/iluvatar0_6b_tp1_pp1-reference.yaml",
+            "tests/functional_tests/benchmark/qwen3/gold_values/iluvatar0_6b_tp1_pp1-reference.json",
         ],
         labels=[],
     )
     assert plan["platforms"] == ["iluvatar"]
     assert "iluvatar" in plan["slices"]
+
+
+def test_iluvatar_benchmark_uses_shared_plan_and_measured_thresholds():
+    from flagcicd_plan import build_plan, outputs
+
+    plan = build_plan(
+        ROOT, profile="requested", changed=None, labels=[], requested_platforms=["iluvatar"]
+    )
+    cases = json.loads(outputs(plan, "iluvatar")["benchmark_test_matrix"])
+    assert len(cases) == 1
+    case = cases[0]
+    assert (case["device"], case["task"], case["model"]) == ("iluvatar", "benchmark", "qwen3")
+    root = ROOT / "tests/functional_tests/benchmark/qwen3"
+    config = yaml.safe_load((root / "conf" / (case["case"] + ".yaml")).read_text())
+    assert config["experiment"]["runner"]["nproc_per_node"] == 1
+    train = yaml.safe_load((root / "conf/train" / (case["case"] + ".yaml")).read_text())
+    assert train["system"]["logging"]["log_throughput"] is True
+    assert train["model"]["train_iters"] >= 20
+    assert train["model"]["te_fl_prefer"] == "reference"
+    metrics = json.loads((root / "gold_values" / (case["case"] + ".json")).read_text())["iluvatar"][
+        "iluvatar"
+    ]
+    for key, direction in (
+        ("elapsed time per iteration (ms):", "upper_bound"),
+        ("throughput per GPU (TFLOP/s/GPU):", "lower_bound"),
+    ):
+        assert len(metrics[key]["values"]) >= 20
+        assert all(math.isfinite(value) and value > 0 for value in metrics[key]["values"])
+        assert metrics[key]["threshold"]["type"] == direction
+        assert metrics[key]["threshold"]["tolerance"] == 0.1
+    assert (
+        metrics["throughput per GPU (TFLOP/s/GPU):"]["threshold"]["aggregation"] == "harmonic_mean"
+    )

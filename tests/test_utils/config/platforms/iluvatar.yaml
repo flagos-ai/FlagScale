@@ -7,6 +7,8 @@ iluvatar:
     functional:
       train:
         qwen3: [0_6b_iluvatar]
+      benchmark:
+        qwen3: [iluvatar0_6b_tp1_pp1-reference]
     unit:
       nproc_per_node: 2
       include: "*"
