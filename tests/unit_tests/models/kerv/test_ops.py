@@ -284,12 +284,9 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
         ancestors[row, : nodes.numel()] = nodes
     valid_prefix_tensor = torch.tensor(valid_prefix, device="cuda", dtype=torch.int32)
     kernel = _static_tree_attention_module()
-    if not kernel.is_supported(query, key, value, ancestors, tree_start, valid_prefix_tensor):
-        target = kernel.triton.runtime.driver.active.get_current_target()
-        pytest.skip(
-            "dynamic-prefix kernel unsupported: "
-            f"warp_size={getattr(target, 'warp_size', 'unknown')}"
-        )
+    _require_dynamic_prefix_kernel(
+        kernel, query, key, value, ancestors, tree_start, valid_prefix_tensor
+    )
     result = static_tree_attention(
         query,
         key,
@@ -309,6 +306,20 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
     torch.testing.assert_close(result, expected, rtol=2e-2, atol=2e-2)
 
 
+def _require_dynamic_prefix_kernel(kernel, *args):
+    try:
+        target = kernel.triton.runtime.driver.active.get_current_target()
+    except Exception as error:
+        pytest.skip(f"dynamic-prefix target query failed: {type(error).__name__}: {error}")
+    # Match the runtime's compatibility policy for targets without warp_size.
+    warp_size = getattr(target, "warp_size", 32)
+    if warp_size != 32:
+        pytest.skip(f"dynamic-prefix kernel unsupported: warp_size={warp_size}")
+    # This fixture must exercise the kernel on supported targets. A capability
+    # regression must fail rather than silently turn into a reference-only test.
+    assert kernel.is_supported(*args), "32-lane dynamic-prefix fixture unexpectedly unsupported"
+
+
 def _static_tree_attention_module():
     import importlib
 
@@ -320,6 +331,37 @@ def _static_tree_attention_module():
 
 def _raise_target_error():
     raise RuntimeError("no active driver")
+
+
+@pytest.mark.parametrize(
+    "target,supported,outcome",
+    [
+        (lambda: SimpleNamespace(warp_size=32), True, None),
+        (lambda: SimpleNamespace(), True, None),
+        (lambda: SimpleNamespace(warp_size=64), False, pytest.skip.Exception),
+        (_raise_target_error, False, pytest.skip.Exception),
+        (lambda: SimpleNamespace(warp_size=32), False, AssertionError),
+    ],
+    ids=["warp32", "no-warp-size", "warp64", "target-error", "capability-regression"],
+)
+def test_dynamic_prefix_kernel_test_guard(target, supported, outcome):
+    def is_supported():
+        assert outcome is not pytest.skip.Exception, "Unsupported target reached capability check"
+        return supported
+
+    kernel = SimpleNamespace(
+        triton=SimpleNamespace(
+            runtime=SimpleNamespace(
+                driver=SimpleNamespace(active=SimpleNamespace(get_current_target=target))
+            )
+        ),
+        is_supported=is_supported,
+    )
+    if outcome is None:
+        _require_dynamic_prefix_kernel(kernel)
+    else:
+        with pytest.raises(outcome):
+            _require_dynamic_prefix_kernel(kernel)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")

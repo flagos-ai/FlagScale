@@ -31,6 +31,7 @@ def test_iluvatar_uses_validated_image_through_shared_ci():
     assert "ci_image" not in config  # SDK images cannot be a training fallback.
     assert "iluvatar" in load_platforms(ROOT / ".github/configs")
     labels = config["runner_labels"]
+    assert isinstance(labels, list)
     assert labels and all(isinstance(label, str) and label for label in labels)
     build = config["image_build"]
     assert build["enabled"] is True
@@ -41,6 +42,17 @@ def test_iluvatar_uses_validated_image_through_shared_ci():
     for path in (task["dockerfile"], build["validation_script"]):
         assert (ROOT / path).is_file()
     assert not list((ROOT / ".github/workflows").glob("*iluvatar*"))
+
+
+@pytest.mark.parametrize("labels", ["runner-label", {"runner-label": True}, [], [""]])
+def test_iluvatar_contract_rejects_invalid_runner_labels(tmp_path, monkeypatch, labels):
+    config = yaml.safe_load(CONFIG.read_text())
+    config["runner_labels"] = labels
+    path = tmp_path / "iluvatar.yml"
+    path.write_text(yaml.safe_dump(config))
+    monkeypatch.setattr(sys.modules[__name__], "CONFIG", path)
+    with pytest.raises(AssertionError):
+        test_iluvatar_uses_validated_image_through_shared_ci()
 
 
 def test_corex_runtime_versions_have_a_single_source():
