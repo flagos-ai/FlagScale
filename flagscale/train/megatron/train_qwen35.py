@@ -472,6 +472,25 @@ from flagscale.train.megatron.train_gpt import (
 )
 
 
+def text_batch_needs_pipeline_positions(args):
+    """Use replicated native batches for dense CP1, physical-PP text training.
+
+    SFT, CP, MTP and interleaved/bidirectional schedules keep their existing
+    batch paths; their metadata and iterator contracts need separate handling.
+    """
+    return (
+        not getattr(args, "enable_vision", True)
+        and args.position_embedding_type == "mrope"
+        and args.pipeline_model_parallel_size > 1
+        and args.context_parallel_size == 1
+        and not args.sft
+        and not args.hybrid_context_parallel
+        and not args.mtp_num_layers
+        and getattr(args, "virtual_pipeline_model_parallel_size", None) is None
+        and not getattr(args, "use_dualpipev", False)
+    )
+
+
 def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
     """Generate a batch for text-only training (GPT-style), with mRoPE position_ids."""
     (
@@ -485,7 +504,10 @@ def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
         max_seqlen,
         position_ids,
         tokens,
-    ) = get_batch_gpt(data_iterator, vp_stage)
+    ) = get_batch_gpt(
+        data_iterator, vp_stage,
+        keep_position_ids=text_batch_needs_pipeline_positions(get_args()),
+    )
 
     packed_seq_params = None
     if cu_seqlens is not None:
@@ -734,6 +756,10 @@ if __name__ == "__main__":
         extra_args_provider=add_qwen35_extra_args,
         args_defaults={'tokenizer_type': 'Qwen2VLTokenizer' if _enable_vision else 'HFTokenizerFS'},
     )
+    if not _enable_vision and text_batch_needs_pipeline_positions(args):
+        # The same DP sample stream supplies the native document-reset
+        # positions to each stage; get_batch_text retains them through TP broadcast.
+        args.build_dataset_on_all_pipeline_stages = True
     full_config = pretrain_cfg_container_from_args(args)
 
     if _enable_vision:

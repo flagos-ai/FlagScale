@@ -84,8 +84,18 @@ except ImportError:
 stimer = StragglerDetector()
 
 
-def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Optional[int] = None):
-    """Generate a batch."""
+def get_batch(
+    data_iterator,
+    vp_stage: Optional[int] = None,
+    dualpipev_stage: Optional[int] = None,
+    *,
+    keep_position_ids: bool = False,
+):
+    """Generate a batch, optionally retaining dense CP1 positions on every PP stage.
+
+    Callers enabling keep_position_ids must also build the dataset on every
+    pipeline stage so that each stage consumes the same DP sample stream.
+    """
 
     BATCH_KEYS = ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "max_seqlen", "position_ids", "tokens"]
 
@@ -99,7 +109,15 @@ def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Op
     mtp_on_this_rank = mtp_on_this_rank_func(layout=config.pipeline_model_parallel_layout, mtp_num_layers=config.mtp_num_layers, ignore_virtual=False, vp_stage=vp_stage, ignore_dualpipev=False, dualpipev_stage=dualpipev_stage)
     is_hybrid_cp = args.hybrid_context_parallel
 
-    if not is_first_or_last_pipeline_stage(vp_stage, dualpipev_stage) and not mtp_on_this_rank and not is_sft:
+    if keep_position_ids and (is_sft or is_hybrid_cp or cp_size != 1):
+        raise ValueError("keep_position_ids requires a dense batch with context_parallel_size=1")
+
+    if (
+        not is_first_or_last_pipeline_stage(vp_stage, dualpipev_stage)
+        and not mtp_on_this_rank
+        and not is_sft
+        and not keep_position_ids
+    ):
         return [None for _ in BATCH_KEYS]
 
     batch = {}
@@ -108,9 +126,41 @@ def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Op
         for key in BATCH_KEYS:
             batch[key] = batch[key].to(cur_platform.device(), non_blocking=True) if key in batch and batch[key] is not None else None
 
-    batch = get_batch_on_this_tp_rank(batch, broadcast_src_rank=mpu.get_tensor_model_parallel_src_rank(), broadcast_group=mpu.get_tensor_model_parallel_group(), is_sft=is_sft, is_hybrid_cp=is_hybrid_cp, create_attention_mask_in_dataloader=create_attention_mask_in_dataloader, cp_size=cp_size, tp_rank=tp_rank, micro_batch_size=args.micro_batch_size, seq_length=args.seq_length, mtp_on_this_rank=mtp_on_this_rank, pipeline_model_parallel_size=args.pipeline_model_parallel_size, is_pipeline_first_stage=mpu.is_pipeline_first_stage(), is_pipeline_last_stage=mpu.is_pipeline_last_stage(), is_dualpipev=mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None)
+    # The helper's PP size selects which batch fields to broadcast within this
+    # TP group; it does not change the process groups or the pipeline topology.
+    # Request its complete-batch branch when every stage needs data-dependent
+    # positions, then discard tokens/targets that this physical stage does not use.
+    batch_pp_size = 1 if keep_position_ids else args.pipeline_model_parallel_size
+    batch = get_batch_on_this_tp_rank(
+        batch,
+        broadcast_src_rank=mpu.get_tensor_model_parallel_src_rank(),
+        broadcast_group=mpu.get_tensor_model_parallel_group(),
+        is_sft=is_sft,
+        is_hybrid_cp=is_hybrid_cp,
+        create_attention_mask_in_dataloader=create_attention_mask_in_dataloader,
+        cp_size=cp_size,
+        tp_rank=tp_rank,
+        micro_batch_size=args.micro_batch_size,
+        seq_length=args.seq_length,
+        mtp_on_this_rank=mtp_on_this_rank,
+        pipeline_model_parallel_size=batch_pp_size,
+        is_pipeline_first_stage=mpu.is_pipeline_first_stage(),
+        is_pipeline_last_stage=mpu.is_pipeline_last_stage(),
+        is_dualpipev=mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None,
+    )
+
+    if keep_position_ids:
+        if not mpu.is_pipeline_first_stage() and not mtp_on_this_rank:
+            batch["tokens"] = None
+        if not mpu.is_pipeline_last_stage():
+            batch["labels"] = None
+            batch["loss_mask"] = None
     
-    if not is_first_or_last_pipeline_stage(vp_stage, dualpipev_stage) and not mtp_on_this_rank:
+    if (
+        not is_first_or_last_pipeline_stage(vp_stage, dualpipev_stage)
+        and not mtp_on_this_rank
+        and not keep_position_ids
+    ):
         assert is_sft
         return None, batch['cu_seqlens'], batch['cu_seqlens_padded'], None, None, None, None, batch['max_seqlen'], None, None
     

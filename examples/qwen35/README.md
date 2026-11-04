@@ -4,6 +4,8 @@
 
 所有命令从 FlagScale 仓库根目录执行，后续步骤在同一个 shell 中运行。完整模型短程验证结果见 [验证报告](validation_report.md)。
 
+纯文本训练的流水线位置数据处理及适用范围见 [Text pipeline parallelism](text_pipeline_parallel.md)。
+
 ## 1. 准备训练环境
 
 先进入你自己的 FlagScale 仓库根目录，并激活已安装训练后端的 Python 环境。本文验证环境为 Python 3.12、Torch 2.7.1+cu128，使用 NVIDIA GPU；其他芯片厂商尚未经过本例验证。
