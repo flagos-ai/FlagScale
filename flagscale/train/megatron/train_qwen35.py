@@ -29,9 +29,11 @@ from argparse import Namespace
 from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 
+from megatron.training.training import update_seqlen_stats_from_cu_seqlens
 from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
@@ -470,11 +472,61 @@ from flagscale.train.megatron.train_gpt import (
 )
 
 
+def text_batch_needs_pipeline_positions(args):
+    """Use replicated native batches for dense CP1, physical-PP text training.
+
+    SFT, CP, MTP and interleaved/bidirectional schedules keep their existing
+    batch paths; their metadata and iterator contracts need separate handling.
+    """
+    return (
+        not getattr(args, "enable_vision", True)
+        and args.position_embedding_type == "mrope"
+        and args.pipeline_model_parallel_size > 1
+        and args.context_parallel_size == 1
+        and not args.sft
+        and not args.hybrid_context_parallel
+        and not args.mtp_num_layers
+        and getattr(args, "virtual_pipeline_model_parallel_size", None) is None
+        and not getattr(args, "use_dualpipev", False)
+    )
+
+
 def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
     """Generate a batch for text-only training (GPT-style), with mRoPE position_ids."""
-    tokens, labels, loss_mask, attention_mask, position_ids, packed_seq_params = get_batch_gpt(
-        data_iterator, vp_stage
+    (
+        attention_mask,
+        cu_seqlens,
+        cu_seqlens_padded,
+        hybrid_cp_group,
+        labels,
+        local_cp_size,
+        loss_mask,
+        max_seqlen,
+        position_ids,
+        tokens,
+    ) = get_batch_gpt(
+        data_iterator, vp_stage,
+        keep_position_ids=text_batch_needs_pipeline_positions(get_args()),
     )
+
+    packed_seq_params = None
+    if cu_seqlens is not None:
+        cu_seqlens = cu_seqlens[0]
+        if cu_seqlens_padded is not None:
+            cu_seqlens_padded = cu_seqlens_padded[0]
+        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
+        packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=cu_seqlens_for_params,
+            cu_seqlens_kv=cu_seqlens_for_params,
+            cu_seqlens_q_padded=cu_seqlens_padded,
+            cu_seqlens_kv_padded=cu_seqlens_padded,
+            max_seqlen_q=int(max_seqlen.item()),
+            max_seqlen_kv=int(max_seqlen.item()),
+            local_cp_size=int(local_cp_size.item()) if local_cp_size is not None else None,
+            cp_group=hybrid_cp_group,
+        )
 
     # Expand position_ids from [B, S] to [3, B, S] for mRoPE (text-only: all 3 dims identical)
     if position_ids is not None:
@@ -704,6 +756,10 @@ if __name__ == "__main__":
         extra_args_provider=add_qwen35_extra_args,
         args_defaults={'tokenizer_type': 'Qwen2VLTokenizer' if _enable_vision else 'HFTokenizerFS'},
     )
+    if not _enable_vision and text_batch_needs_pipeline_positions(args):
+        # The same DP sample stream supplies the native document-reset
+        # positions to each stage; get_batch_text retains them through TP broadcast.
+        args.build_dataset_on_all_pipeline_stages = True
     full_config = pretrain_cfg_container_from_args(args)
 
     if _enable_vision:
