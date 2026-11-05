@@ -203,6 +203,8 @@ def run_scenario(scenario: str, timeout_s: float) -> int:
 
     if scenario == "sanity":
         return 0 if return_code == 0 and not findings else 1
+    if scenario == "subprocess":
+        return 0 if return_code == 0 and not findings and len(raw_files) == 2 else 1
     if scenario == "p2p_multi_target":
         expected_p2p_enters = [
             ("ncclRecv", 1, 0, 0, "peer_direction"),
@@ -231,7 +233,7 @@ def main() -> int:
     parser.add_argument(
         "--scenario",
         required=True,
-        choices=("sanity", "p2p_multi_target", *EXPECTED_FINDING),
+        choices=("sanity", "subprocess", "p2p_multi_target", *EXPECTED_FINDING),
     )
     parser.add_argument("--timeout", type=float, default=10.0)
     args = parser.parse_args()

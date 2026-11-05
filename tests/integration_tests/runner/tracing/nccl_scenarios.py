@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import sys
 import time
 from datetime import timedelta
 
@@ -46,6 +48,13 @@ def run(scenario: str) -> None:
         dist.all_reduce(tensor)
         if not torch.equal(tensor, expected):
             raise AssertionError(f"unexpected AllReduce result on rank {rank}: {tensor}")
+        dist.destroy_process_group()
+        return
+
+    if scenario == "subprocess":
+        # Helpers inherit RANK and LD_PRELOAD but must not create rank trace files.
+        subprocess.run([sys.executable, "-c", "import time; time.sleep(0.25)"], check=True)
+        dist.all_reduce(tensor)
         dist.destroy_process_group()
         return
 
@@ -109,6 +118,7 @@ def main() -> int:
         required=True,
         choices=(
             "sanity",
+            "subprocess",
             "not_enter",
             "api_mismatch",
             "parameter_mismatch",
