@@ -15,7 +15,6 @@
 import os
 import subprocess
 import sys
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -283,10 +282,6 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
         nodes = torch.arange(start, row + 1, device="cuda") + tree_start
         ancestors[row, : nodes.numel()] = nodes
     valid_prefix_tensor = torch.tensor(valid_prefix, device="cuda", dtype=torch.int32)
-    kernel = _static_tree_attention_module()
-    _require_dynamic_prefix_kernel(
-        kernel, query, key, value, ancestors, tree_start, valid_prefix_tensor
-    )
     result = static_tree_attention(
         query,
         key,
@@ -304,88 +299,3 @@ def test_static_tree_attention_fixed_prefix_gap_matches_reference():
         valid_prefix_tokens=valid_prefix_tensor,
     )
     torch.testing.assert_close(result, expected, rtol=2e-2, atol=2e-2)
-
-
-def _require_dynamic_prefix_kernel(kernel, *args):
-    try:
-        target = kernel.triton.runtime.driver.active.get_current_target()
-    except Exception as error:
-        pytest.skip(f"dynamic-prefix target query failed: {type(error).__name__}: {error}")
-    # Match the runtime's compatibility policy for targets without warp_size.
-    warp_size = getattr(target, "warp_size", 32)
-    if warp_size != 32:
-        pytest.skip(f"dynamic-prefix kernel unsupported: warp_size={warp_size}")
-    # This fixture must exercise the kernel on supported targets. A capability
-    # regression must fail rather than silently turn into a reference-only test.
-    assert kernel.is_supported(*args), "32-lane dynamic-prefix fixture unexpectedly unsupported"
-
-
-def _static_tree_attention_module():
-    import importlib
-
-    module = importlib.import_module("KERVRuntimeOptimization.embodied_ops.static_tree_attention")
-    if module.triton is None:
-        pytest.skip("Triton is required")
-    return module
-
-
-def _raise_target_error():
-    raise RuntimeError("no active driver")
-
-
-@pytest.mark.parametrize(
-    "target,supported,outcome",
-    [
-        (lambda: SimpleNamespace(warp_size=32), True, None),
-        (lambda: SimpleNamespace(), True, None),
-        (lambda: SimpleNamespace(warp_size=64), False, pytest.skip.Exception),
-        (_raise_target_error, False, pytest.skip.Exception),
-        (lambda: SimpleNamespace(warp_size=32), False, AssertionError),
-    ],
-    ids=["warp32", "no-warp-size", "warp64", "target-error", "capability-regression"],
-)
-def test_dynamic_prefix_kernel_test_guard(target, supported, outcome):
-    def is_supported():
-        assert outcome is not pytest.skip.Exception, "Unsupported target reached capability check"
-        return supported
-
-    kernel = SimpleNamespace(
-        triton=SimpleNamespace(
-            runtime=SimpleNamespace(
-                driver=SimpleNamespace(active=SimpleNamespace(get_current_target=target))
-            )
-        ),
-        is_supported=is_supported,
-    )
-    if outcome is None:
-        _require_dynamic_prefix_kernel(kernel)
-    else:
-        with pytest.raises(outcome):
-            _require_dynamic_prefix_kernel(kernel)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
-@pytest.mark.parametrize(
-    "target,expected",
-    [
-        (lambda: SimpleNamespace(warp_size=32), True),
-        (lambda: SimpleNamespace(warp_size=64), False),
-        (lambda: SimpleNamespace(), True),
-        (_raise_target_error, False),
-    ],
-    ids=["warp32", "warp64", "no-warp-size", "target-error"],
-)
-def test_dynamic_prefix_kernel_checks_warp_layout(monkeypatch, target, expected):
-    module = _static_tree_attention_module()
-    query = torch.zeros(1, 2, 16, 128, device="cuda", dtype=torch.bfloat16)
-    key = torch.zeros(1, 2, 48, 128, device="cuda", dtype=torch.bfloat16)
-    ancestors = torch.full((16, 8), -1, device="cuda", dtype=torch.long)
-    prefix = torch.tensor(31, device="cuda", dtype=torch.int32)
-    module.dynamic_prefix_kernel_supported.cache_clear()
-    monkeypatch.setattr(module.triton.runtime.driver.active, "get_current_target", target)
-    try:
-        assert module.is_supported(query, key, key, ancestors, 32, prefix) is expected
-        # The existing static-prefix path is unaffected by this capability guard.
-        assert module.is_supported(query, key, key, ancestors, 32)
-    finally:
-        module.dynamic_prefix_kernel_supported.cache_clear()

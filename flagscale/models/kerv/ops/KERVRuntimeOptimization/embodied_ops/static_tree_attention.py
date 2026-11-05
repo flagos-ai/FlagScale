@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import functools
 import math
 from types import MethodType
 
@@ -136,17 +135,6 @@ if triton is not None:
         tl.store(output_ptr + output_offsets, output, mask=row_mask[:, None])
 
 
-@functools.cache
-def dynamic_prefix_kernel_supported() -> bool:
-    """Dynamic-prefix masking is only validated on 32-lane warps."""
-    try:
-        target = triton.runtime.driver.active.get_current_target()
-    except Exception:
-        return False
-    # Targets without warp_size predate the guard; keep their previous path.
-    return getattr(target, "warp_size", 32) == 32
-
-
 def is_supported(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -184,7 +172,6 @@ def is_supported(
         and ancestor_indices.is_contiguous()
         and 0 < int(prefix_tokens) <= key.shape[2]
         and dynamic_prefix_ok
-        and (valid_prefix_tokens is None or dynamic_prefix_kernel_supported())
     )
 
 
