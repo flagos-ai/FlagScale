@@ -51,7 +51,7 @@ load_platform_config() {
     CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")
     UNIT_TIMEOUT_MINUTES=$(/usr/local/bin/yq -r '.test_matrix.unit.timeout_minutes // 20' "$CONFIG_FILE")
     validate_unit_timeout_minutes "$UNIT_TIMEOUT_MINUTES" "$CONFIG_FILE" || return 1
-    RUNTIME_RECOVERY_TIMEOUT_MINUTES=$(/usr/local/bin/yq -r '.timeouts.runtime_recovery_minutes // 15' "$CONFIG_FILE")
+    RUNTIME_RECOVERY_TIMEOUT_MINUTES=$(/usr/local/bin/yq -r '.timeouts.runtime_recovery_minutes // 60' "$CONFIG_FILE")
     validate_timeout_minutes "$RUNTIME_RECOVERY_TIMEOUT_MINUTES" "$CONFIG_FILE" "runtime recovery timeout_minutes" || return 1
 
     # Extract package manager configuration

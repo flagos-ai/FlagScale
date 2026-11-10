@@ -52,7 +52,7 @@ def matches(path: str, pattern: str) -> bool:
 
 
 def documentation(path: str) -> bool:
-    return path.startswith(("docs/", "examples/")) or path.endswith(".md")
+    return path.startswith("docs/") or path.endswith((".md", ".rst"))
 
 
 def select_platforms(
@@ -60,7 +60,10 @@ def select_platforms(
     event: str,
     changed: list[str] | None,
     labels: list[str],
+    *,
+    case_owners: dict[str, list[str]] | None = None,
 ) -> tuple[list[str], str]:
+    case_owners = case_owners or {}
     all_platforms = sorted(platforms)
     if event != "pull_request":
         return all_platforms, "non-PR event: full matrix"
@@ -82,7 +85,8 @@ def select_platforms(
     # Anything outside known platform-owned paths is shared or unknown. Never
     # narrow that change with a label: common code must keep cross-platform coverage.
     if any(
-        not any(matches(path, pattern) for watch in platforms.values() for pattern in watch)
+        not case_owners.get(path)
+        and not any(matches(path, pattern) for watch in platforms.values() for pattern in watch)
         for path in files
     ):
         return all_platforms, "shared or unknown files: full matrix"
@@ -93,13 +97,17 @@ def select_platforms(
         for name, watch in platforms.items()
         if any(matches(path, pattern) for path in files for pattern in watch)
     ]
+    selected.extend(p for path in files for p in case_owners.get(path, []))
     return sorted(set(selected) | requested), "platform-owned paths plus labels"
 
 
-def changed_files(base_ref: str, head_ref: str) -> list[str] | None:
+def changed_files(
+    base_ref: str, head_ref: str, *, root: pathlib.Path | None = None
+) -> list[str] | None:
     try:
         result = subprocess.run(
             ["git", "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...{head_ref}", "--"],
+            cwd=root,
             check=True,
             capture_output=True,
             text=True,
@@ -136,7 +144,26 @@ def main() -> None:
                 if args.changed_files is not None
                 else changed_files(args.base_ref, args.head_ref)
             )
-        selected, reason = select_platforms(platforms, args.event_name, changed, labels)
+        case_owners = {}
+        if changed and any(path.startswith("tests/functional_tests/") for path in changed):
+            from flagcicd_cases import affected_cases, configured_cases
+
+            root = pathlib.Path.cwd()
+            cases = []
+            for name in platforms:
+                path = root / f"tests/test_utils/config/platforms/{name}.yaml"
+                if path.is_file():
+                    config = yaml.safe_load(path.read_text())
+                    cases.extend(
+                        configured_cases(root, name, config, ("train", "hetero_train", "benchmark"))
+                    )
+            case_owners = {
+                path: sorted({case["platform"] for case in affected_cases(path, cases)})
+                for path in changed
+            }
+        selected, reason = select_platforms(
+            platforms, args.event_name, changed, labels, case_owners=case_owners
+        )
     except (ValueError, OSError, yaml.YAMLError) as exc:
         parser.exit(1, f"::error::{exc}\n")
     print(f"platforms={json.dumps(selected)}")

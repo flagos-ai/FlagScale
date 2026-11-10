@@ -5,6 +5,7 @@
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / ".github/scripts/ci"
+sys.path.insert(0, str(SCRIPTS))
 
 
 def load(name):
@@ -225,11 +227,10 @@ def test_platform_label_never_removes_path_coverage(changed_platform, label_plat
     assert label_platform in labelled
 
 
-def test_examples_keep_existing_skip_policy():
-    assert (
-        matrix.select_platforms(PLATFORMS, "pull_request", ["examples/model/config.yaml"], [])[0]
-        == []
-    )
+def test_runtime_examples_are_code_inputs():
+    assert matrix.select_platforms(PLATFORMS, "pull_request", ["examples/model/config.yaml"], [])[
+        0
+    ] == sorted(PLATFORMS)
     assert matrix.select_platforms(
         PLATFORMS, "pull_request", ["examples/model/config.yaml", "flagscale/runner.py"], []
     )[0] == sorted(PLATFORMS)
