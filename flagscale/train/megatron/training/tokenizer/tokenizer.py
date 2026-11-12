@@ -20,6 +20,7 @@ from megatron.core.tokenizers.utils.build_tokenizer import (
 
 from .gpt2_tokenization import AquilaTokenizer
 from .rwkv_tokenization import RWKVTokenizer
+from .sft_tokenizer import build_sft_tokenizer
 
 # ---------------------------------------------------------------------------
 # Tokenizer factory registration system
@@ -477,6 +478,7 @@ def _build_rwkv(args, **kwargs):
     return _RWKVTokenizerFS(args.tokenizer_path)
 
 
+register_tokenizer_factory("CustomSFTTokenizer", build_sft_tokenizer)
 register_tokenizer_factory("AquilaTokenizerFS", _build_aquila)
 register_tokenizer_factory("HFTokenizerFS", _build_hf)
 register_tokenizer_factory("Llama3TokenizerFS", _build_llama3)

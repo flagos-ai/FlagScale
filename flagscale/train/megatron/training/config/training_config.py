@@ -656,6 +656,7 @@ class TokenizerConfig:
         "NullTokenizer",
         "NullMultimodalTokenizer",
         "SFTTokenizer",
+        "CustomSFTTokenizer",
         "AquilaTokenizerFS",
         "HFTokenizerFS",
         "HFTokenizersTokenizerFS",
@@ -709,3 +710,6 @@ class TokenizerConfig:
 
     chat_template: Optional[str] = None
     """Custom chat template in jinja format for conversation formatting."""
+
+    custom_chat_template: str | None = None
+    """Jinja template for CustomSFTTokenizer; overrides the HF tokenizer template."""
