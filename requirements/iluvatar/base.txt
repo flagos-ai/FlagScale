@@ -1,0 +1,14 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+# The SDK-only base has no vendor PyTorch; do not inherit CUDA requirements.
+--extra-index-url https://resource.flagos.net/repository/flagos-pypi-iluvatar/simple
+# Vendor runtime versions are pinned only in constraints.txt.
+-c constraints.txt
+torch
+torchaudio
+torchvision
+triton
+numpy
+pyyaml==6.0.2
+hydra-core==1.3.2
+typer>=0.9.0
