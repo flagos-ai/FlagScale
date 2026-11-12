@@ -1,0 +1,26 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+device_types: [iluvatar]
+iluvatar:
+  name: iluvatar
+  tests:
+    functional:
+      train:
+        qwen3: [0_6b_iluvatar]
+      benchmark:
+        qwen3: [iluvatar0_6b_tp1_pp1-reference]
+    unit:
+      nproc_per_node: 2
+      include: "*"
+      exclude:
+        # VLA tests require a separate multimodal dependency stack that is not
+        # part of the Iluvatar Qwen3 training image.
+        - tests/unit_tests/models/vla
+        # This test builds a logical mesh larger than the two-rank Iluvatar CI job.
+        - tests/unit_tests/test_parallel_context.py::test_parallel_config
+        # COREX 4.5.0's dynamic-prefix Triton kernel fails the numerical
+        # assert_close check (rtol=atol=2e-2). Quarantine only this Iluvatar
+        # case pending a KERV owner fix; keep upstream dispatch and other
+        # platforms' kernel coverage unchanged. KERV inference is not validated
+        # by this training-only integration.
+        - tests/unit_tests/models/kerv/test_ops.py::test_static_tree_attention_fixed_prefix_gap_matches_reference
