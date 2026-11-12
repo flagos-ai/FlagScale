@@ -186,6 +186,69 @@ def test_author_cannot_bypass_approval(mode):
     assert not api.mutations
 
 
+def active_run_api(body="/ci run ascend"):
+    api = API("read", body)
+    api.event["comment"]["user"]["id"] = 2
+    api.run.update(status="in_progress", conclusion=None)
+    api.jobs = [
+        {
+            "name": "Platform pipeline (ascend) / test / ascend / checkout_and_config",
+            "status": "completed",
+            "conclusion": "success",
+        },
+        {
+            "name": "Platform pipeline (ascend) / test / ascend / all_tests_complete",
+            "status": "completed",
+            "conclusion": "failure",
+        },
+        {
+            "name": "Platform pipeline (cuda) / test / cuda / unit-a100",
+            "status": "in_progress",
+            "conclusion": None,
+        },
+    ]
+    return api
+
+
+@pytest.mark.parametrize("status", ["in_progress", "queued"])
+def test_author_requests_finished_failed_platform_while_others_run(status):
+    api = active_run_api()
+    api.run["status"] = status
+    comment(api, api.event)
+    assert api.mutations[0] == (
+        "post",
+        ROOT + "/actions/workflows/ci-request.yml/dispatches",
+        {"ref": "main", "inputs": {"pr_number": "42", "head_sha": SHA, "platform": "ascend"}},
+    )
+
+
+@pytest.mark.parametrize(
+    "mode", ["running", "passed", "missing-gate", "all", "unapproved", "other"]
+)
+def test_author_active_run_requires_finished_failed_platform(mode):
+    api = active_run_api("/ci run all" if mode == "all" else "/ci run ascend")
+    if mode == "running":
+        api.jobs[0]["status"] = "in_progress"
+    elif mode == "passed":
+        api.jobs[1]["conclusion"] = "success"
+    elif mode == "missing-gate":
+        api.jobs.pop(1)
+    elif mode == "unapproved":
+        api.jobs[0]["conclusion"] = "failure"
+    elif mode == "other":
+        api.event["comment"]["body"] = "/ci run cuda"
+    with pytest.raises(ValueError, match="PR authors must wait"):
+        comment(api, api.event)
+    assert not api.mutations
+
+
+def test_active_run_job_rerun_points_to_platform_request():
+    api = active_run_api("/ci rerun-job 123")
+    with pytest.raises(ValueError, match="use /ci run <platform>"):
+        comment(api, api.event)
+    assert not api.mutations
+
+
 def test_author_selected_job_rerun():
     api = API("read", "/ci rerun-job 123")
     api.event["comment"]["user"]["id"] = 2

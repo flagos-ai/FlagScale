@@ -1,0 +1,69 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+ARG BASE_IMAGE=harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0
+FROM ${BASE_IMAGE} AS dev
+ARG BASE_IMAGE
+ARG FLAGSCALE_MEGATRON_REF
+ARG FLAGSCALE_TE_REF
+ARG FLAGSCALE_HOME=/opt/flagscale
+# Build-only package index; vendor wheels remain pinned in requirements.
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+USER root
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# Use Ubuntu 24.04's Python 3.12 in an isolated venv (PEP 668).
+# Do not replace COREX's CMake/compiler or install NVIDIA CUDA packages.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3.12 python3.12-dev python3.12-venv ninja-build pkg-config \
+      openssh-client openssh-server rsync procps psmisc hostname \
+      libnuma1 libibverbs1 ibverbs-providers librdmacm1 libopenmpi3t64 ffmpeg \
+    && python3.12 -m venv "${FLAGSCALE_HOME}/venv" \
+    && mkdir -p /run/sshd \
+    && rm -rf /var/lib/apt/lists/*
+ENV FLAGSCALE_HOME=${FLAGSCALE_HOME} \
+    FLAGSCALE_MEGATRON_REF=${FLAGSCALE_MEGATRON_REF} \
+    FLAGSCALE_TE_REF=${FLAGSCALE_TE_REF} \
+    VIRTUAL_ENV=${FLAGSCALE_HOME}/venv \
+    COREX_ROOT=/usr/local/corex \
+    PATH="${FLAGSCALE_HOME}/venv/bin:/usr/local/corex/bin:/opt/cmake-corex/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/corex/lib:${LD_LIBRARY_PATH}" \
+    PIP_CONSTRAINT=${FLAGSCALE_HOME}/constraints-iluvatar.txt \
+    TE_FL_SKIP_CUDA=1 TE_FL_PREFER=reference NVTE_FRAMEWORK=pytorch \
+    NVTE_FLASH_ATTN=0 NVTE_FUSED_ATTN=0 NVTE_UNFUSED_ATTN=1 \
+    NVTE_WITH_NCCL_EP=0 FLAGSCALE_TEST_DIST_BACKEND=nccl \
+    FLAGSCALE_TEST_TORCH_DEVICE_TYPE=cuda
+COPY requirements/iluvatar/constraints.txt ${FLAGSCALE_HOME}/constraints-iluvatar.txt
+COPY tools/install/iluvatar/env.sh /etc/profile.d/flagscale-env.sh
+WORKDIR /workspace
+COPY tools/install /workspace/tools/install
+COPY requirements /workspace/requirements
+RUN chmod +x /workspace/tools/install/*.sh \
+        /workspace/tools/install/utils/*.sh \
+        /workspace/tools/install/iluvatar/*.sh && \
+    source /etc/profile.d/flagscale-env.sh && \
+    python -m pip install --no-cache-dir pip==25.2 && \
+    /workspace/tools/install/install.sh --platform iluvatar --task train \
+        --pkg-mgr pip --no-system --no-dev --only-pip
+# Cache the Python dependency layer before network-dependent source checkouts.
+# Scope Git transport settings to source installation, including submodules.
+# Fail stalled transfers so the existing shared retry helper can recover.
+RUN export GIT_CONFIG_COUNT=3 \
+        GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+        GIT_CONFIG_KEY_1=http.lowSpeedLimit GIT_CONFIG_VALUE_1=1024 \
+        GIT_CONFIG_KEY_2=http.lowSpeedTime GIT_CONFIG_VALUE_2=120 && \
+    source /etc/profile.d/flagscale-env.sh && \
+    /workspace/tools/install/install.sh --platform iluvatar --task train \
+        --pkg-mgr pip --no-system --no-dev --no-base --no-task \
+        --src-deps transformer-engine,megatron-lm --force-build && \
+    rm -rf /workspace/tools /workspace/requirements
+# Megatron dataset helpers invoke the default python3-config command.
+# Keep this small addition after the cached Python/source dependency layers.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+ARG FLAGSCALE_REVISION=unknown
+LABEL org.opencontainers.image.base.name=${BASE_IMAGE} \
+      org.opencontainers.image.revision=${FLAGSCALE_REVISION} \
+      io.flagscale.megatron-lm-fl.revision=${FLAGSCALE_MEGATRON_REF} \
+      io.flagscale.transformer-engine-fl.revision=${FLAGSCALE_TE_REF} \
+      io.flagscale.iluvatar.te-backend=reference
+CMD ["/bin/bash"]
