@@ -293,7 +293,8 @@ def test_generate_run_script_foreground(
             content = f.read()
             assert "nohup" not in content
             assert "set -o pipefail" in content
-            assert 'bash -c "$cmd; sync"' in content
+            assert "training_process.py" in content
+            assert "-- $cmd; rc=" in content
             assert "tee -a" in content
 
 
@@ -313,8 +314,8 @@ def test_generate_stop_script(mock_config, mock_get_args_native, mock_update_con
         with open(script_path, "r") as f:
             content = f.read()
             assert "#!/bin/bash" in content
-            assert "pkill -P $pid" in content
-            assert "pkill -f 'torchrun'" in content
+            assert "training_process.py" in content
+            assert "pkill" not in content
             assert "echo 'Stopping'" in content  # after_stop command
 
 

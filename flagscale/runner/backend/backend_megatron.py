@@ -19,7 +19,6 @@ from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
 from flagscale.runner.diagnostics import (
-    active_run_id_cleanup_lines,
     active_run_id_file,
     active_run_id_setup_lines,
     diagnostic_command_body,
@@ -33,6 +32,7 @@ from flagscale.runner.runner_train import (
     _get_args_megatron,
     _update_config_train,
 )
+from flagscale.runner.training_process import stop_shell_lines, tracked_command_body
 from flagscale.runner.utils import get_pkg_dir, logger, parse_hostfile, resolve_path
 
 PERF_MONITOR_RUNNER_KEYS = (
@@ -205,7 +205,9 @@ class MegatronBackend(BackendBase):
                 self.heartbeat_config,
                 active_run_id_path=(self.active_run_id_file if self.publish_active_run_id else ""),
                 active_run_id=(self.diagnostics_run_id if self.publish_active_run_id else ""),
+                stop_requested_path=host_pid_file + ".training.json.stop_requested",
             )
+            command_body = tracked_command_body(command_body, host_pid_file)
             if background:
                 f.write(
                     f'nohup bash -c "{command_body}" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
@@ -243,19 +245,8 @@ class MegatronBackend(BackendBase):
             f.write("#!/bin/bash\n\n")
             for line in self.heartbeat_config.stop_shell_lines(node_rank):
                 f.write(f"{line}\n")
-            f.write("if [ -f " + host_pid_file + " ]; then\n")
-            f.write("    pid=$(cat " + host_pid_file + ")\n")
-            f.write("    pkill -P $pid\n")
-            f.write("else\n")
-            # TODO: This is a temporary fix. We need to find a better way to stop the job.
-            f.write("    pkill -f 'torchrun'\n")
-            f.write("fi\n")
-            if node_rank == 0 and self.diagnostics_run_id != self.rdzv_id:
-                for line in active_run_id_cleanup_lines(
-                    self.active_run_id_file,
-                    self.diagnostics_run_id,
-                ):
-                    f.write(f"{line}\n")
+            for line in stop_shell_lines(host_pid_file, self.config.experiment.runner):
+                f.write(f"{line}\n")
             f.write(f"{after_stop}\n")
             f.flush()
             os.fsync(f.fileno())

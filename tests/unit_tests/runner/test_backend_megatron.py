@@ -123,8 +123,8 @@ def test_stop_reuses_active_run_id_and_stops_monitor_before_worker(tmp_path):
     assert backend.diagnostics_run_id == active_run_id
     assert backend.heartbeat_config.run_id == active_run_id
     assert backend.heartbeat_config.heartbeat_dir.endswith(f"heartbeat/{active_run_id}")
-    assert script.index("flagscale.runner.heartbeat.monitor") < script.index("pkill -P $pid")
-    assert script.index("pkill -P $pid") < script.rindex("diagnostics.active_run_id")
+    assert script.index("flagscale.runner.heartbeat.monitor") < script.index("training_process.py")
+    assert "diagnostics.active_run_id" not in script
 
 
 def test_nonzero_node_waits_for_monitor_and_does_not_clear_active_run_id(tmp_path):
@@ -137,7 +137,7 @@ def test_nonzero_node_waits_for_monitor_and_does_not_clear_active_run_id(tmp_pat
     script = Path(script_path).read_text(encoding="utf-8")
 
     assert "[ ! -f" in script
-    assert script.index("monitor.pid") < script.index("pkill -P $pid")
+    assert script.index("monitor.pid") < script.index("training_process.py")
     assert "diagnostics.active_run_id" not in script
 
 
@@ -148,5 +148,5 @@ def test_stop_without_active_run_id_still_stops_worker(tmp_path):
 
     assert backend.heartbeat_config.enabled is False
     assert "flagscale.runner.heartbeat.monitor" not in script
-    assert "pkill -P $pid" in script
-    assert "pkill -f 'torchrun'" in script
+    assert "training_process.py" in script
+    assert "pkill" not in script
