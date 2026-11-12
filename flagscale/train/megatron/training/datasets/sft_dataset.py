@@ -98,7 +98,7 @@ class SFTDataset(MegatronDataset):
 
         def extend_with_padding(tokens, targets, positions, pad_len):
             tokens.extend([pad] * pad_len)
-            targets.extend([pad] * pad_len)
+            targets.extend([IGNORE_INDEX] * pad_len)
             positions.extend(range(positions[-1]+1, positions[-1]+1+pad_len))
 
         pack_tokens = []
@@ -143,7 +143,7 @@ class SFTDataset(MegatronDataset):
                 pack_tokens = pack_tokens[:max_body]
                 pack_targets = pack_targets[:max_body]
                 pack_tokens.append(pad)
-                pack_targets.append(pad)
+                pack_targets.append(IGNORE_INDEX)
                 pack_positions = pack_positions[:pack_length+1]
                 # Note len({pack_tokens, pack_targets, pack_positions}) should be pack_length + 1
                 cu_seqlens[-1] = len(pack_tokens) - 1
@@ -167,8 +167,8 @@ class SFTDataset(MegatronDataset):
 
         # Loss mask.
         loss_mask = torch.ones(pack_length, dtype=torch.float32)
-        loss_mask[labels == pad] = 0.0  # Mask paddings
-        loss_mask[labels == IGNORE_INDEX] = 0.0  # mask prompts
+        # Padding targets use IGNORE_INDEX so a shared PAD/EOS ID keeps EOS supervised.
+        loss_mask[labels == IGNORE_INDEX] = 0.0  # Mask prompts and padding
 
         # TODO(duncan): Optionally create an attention mask
         assert not self.config.create_attention_mask and not self.config.reset_attention_mask
