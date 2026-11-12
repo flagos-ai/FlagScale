@@ -1,0 +1,63 @@
+{
+    "iluvatar": {
+        "iluvatar": {
+            "elapsed time per iteration (ms):": {
+                "values": [
+                    2964.3,
+                    1765.3,
+                    561.1,
+                    560.8,
+                    565.1,
+                    561.7,
+                    559.4,
+                    556.5,
+                    559.9,
+                    560.2,
+                    556.5,
+                    563.8,
+                    562.3,
+                    564.0,
+                    561.7,
+                    600.0,
+                    560.7,
+                    557.8,
+                    558.4,
+                    560.1
+                ],
+                "threshold": {
+                    "type": "upper_bound",
+                    "tolerance": 0.1
+                }
+            },
+            "throughput per GPU (TFLOP/s/GPU):": {
+                "values": [
+                    0.3,
+                    0.5,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.6,
+                    1.7,
+                    1.7,
+                    1.7,
+                    1.7
+                ],
+                "threshold": {
+                    "type": "lower_bound",
+                    "tolerance": 0.1,
+                    "aggregation": "harmonic_mean"
+                }
+            }
+        }
+    }
+}

@@ -61,6 +61,42 @@ def nightly_plan():
     return planner.build_plan(ROOT, profile="nightly", changed=None, labels=[])
 
 
+@pytest.mark.parametrize("platform", ["iluvatar", "cuda", "hygon", "metax", "ppu"])
+def test_kerv_dynamic_prefix_exclusion_is_scoped_to_iluvatar(tmp_path, nightly_plan, platform):
+    test_file = "tests/unit_tests/models/kerv/test_ops.py"
+    excluded = test_file + "::test_static_tree_attention_fixed_prefix_gap_matches_reference"
+    device = nightly_plan["slices"][platform]["devices"][0]
+    spec = planner.unit_spec(nightly_plan, platform, device)
+    assert test_file in spec["expected_files"]
+    assert [p for p in spec["deselect"] if p.startswith(test_file)] == (
+        [excluded] if platform == "iluvatar" else []
+    )
+    # Exercise the real plan, pytest launcher and evidence collector without GPUs.
+    # A failing Iluvatar case must be deselected; another KERV case must still run.
+    target = tmp_path / test_file
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "def test_static_tree_attention_fixed_prefix_gap_matches_reference():\n"
+        f"    assert {platform != 'iluvatar'!r}\n"
+        "def test_static_tree_attention_cuda_matches_reference(): pass\n"
+    )
+    spec = {
+        **spec,
+        "command_targets": [test_file],
+        "expected_files": [test_file],
+        "allowed_files": [test_file],
+    }
+    directory, results = run_pytest(tmp_path, spec)
+    for result in results:
+        assert result.returncode == 0, result.stdout + result.stderr
+    evidence.reports(directory, spec)
+    evidence.validate_collection(directory, spec)
+    for rank in range(spec["ranks"]):
+        data = json.loads((directory / f"collection-rank-{rank}.json").read_text())
+        assert data["deselected_nodeids"] == ([excluded] if platform == "iluvatar" else [])
+        assert len(data["passed_nodeids"]) == (1 if platform == "iluvatar" else 2)
+
+
 @pytest.mark.parametrize("platform", ["hygon", "kunlunxin", "metax", "musa", "ppu"])
 def test_real_platform_plan_allows_configured_single_test_file_deselection(
     tmp_path, nightly_plan, platform

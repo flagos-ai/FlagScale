@@ -15,6 +15,8 @@
 import json
 import time
 
+import pytest
+
 from flagscale.train import gpu_heartbeat
 from flagscale.train.gpu_heartbeat import GpuProgressHeartbeat
 
@@ -74,7 +76,11 @@ def test_background_publisher_does_not_manufacture_gpu_progress(tmp_path):
     assert {record["progress_seq"] for record in records} == {0}
 
 
-def test_publisher_reports_progress_marked_by_training_hook(tmp_path):
+@pytest.mark.parametrize("visible_devices,expected_token", [("", "1"), ("0,1", "1"), ("4,5", "5")])
+def test_publisher_reports_progress_marked_by_training_hook(
+    tmp_path, monkeypatch, visible_devices, expected_token
+):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", visible_devices)
     runtime = _runtime(tmp_path)
     runtime.start()
     runtime.mark_progress("train", iteration=3)
@@ -88,7 +94,7 @@ def test_publisher_reports_progress_marked_by_training_hook(tmp_path):
     assert progressed[-1]["phase"] == "train"
     assert progressed[-1]["assigned_gpu"] == {
         "visible_ordinal": 1,
-        "device_token": "1",
+        "device_token": expected_token,
     }
 
 
