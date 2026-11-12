@@ -5,6 +5,7 @@ import argparse
 import time
 
 from megatron.training.config.container import PretrainConfigContainer
+from megatron.training.dsv4_flops import num_floating_point_operations as dsv4_num_flops
 
 # The earliest we can measure the start time.
 _TRAIN_START_TIME = time.time()
@@ -652,6 +653,17 @@ def num_floating_point_operations(
             CP-alignment padding or end-of-sequence padding, so neither kind of
             padding shows up in the reported FLOPs.
     """
+    if (
+        getattr(args, "experimental_attention_variant", None) == "dsv4_hybrid"
+        and not getattr(args, "hybrid_layer_pattern", None)
+    ):
+        return dsv4_num_flops(
+            args,
+            batch_size,
+            seqlen_squared_sum_in_batch=seqlen_squared_sum_in_batch,
+            total_real_tokens_in_batch=total_real_tokens_in_batch,
+        )
+
     # Defaults: BSHD layout assumption (full causal mask, every sample length =
     # seq_length, no padding). For BSHD ``total_real_tokens = batch * s`` and
     # ``seqlen_squared_sum = batch * s^2`` recover the original closed-form.
@@ -1777,7 +1789,11 @@ def pretrain(
 
     ########## FlagScale Begin ##########
     if extra_valid_dataset_provider is not None:
-        from megatron.training.extra_valid import extra_evaluate_and_print_results, build_extra_valid_data_iterators
+        from megatron.training.extra_valid import (
+            build_extra_valid_data_iterators,
+            extra_evaluate_and_print_results,
+        )
+
         # NOTE(zhaoyinglia): Must rebuild the dataloaders for extra validation here,
         # to guarantee extra validation start from extra_iter=0 every time,
         # but we don't need to rebuild the datasets.
@@ -2291,8 +2307,17 @@ def get_optimizer_param_scheduler(optimizer):
 def get_megatron_optimizer_config(args: Any) -> OptimizerConfig:
     """Return a Megatron optimizer config object from Megatron's arguments."""
 
+    optimizer_fields = dataclasses.fields(OptimizerConfig)
+    if getattr(args, "chunked_optimizer_state_offload", False) and not any(
+        field.name == "chunked_optimizer_state_offload" for field in optimizer_fields
+    ):
+        raise RuntimeError(
+            "chunked_optimizer_state_offload was requested, but the loaded Megatron "
+            "OptimizerConfig does not support it. Load a compatible optimizer implementation; "
+            "silently running with GPU-resident optimizer states can cause OOM."
+        )
     kwargs = {}
-    for f in dataclasses.fields(OptimizerConfig):
+    for f in optimizer_fields:
         if hasattr(args, f.name):
             kwargs[f.name] = getattr(args, f.name)
     config = OptimizerConfig(**kwargs)
@@ -2593,6 +2618,53 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     profile_cuda = getattr(args, "straggler_enable_gpu_profile", True)
     ########## FlagScale End ##########
 
+    optimizer_config = getattr(optimizer, 'config', None)
+    chunked_optimizer_state_offload = bool(
+        optimizer_config is not None
+        and getattr(optimizer_config, 'chunked_optimizer_state_offload', False)
+        and getattr(optimizer_config, 'optimizer_state_offload_fraction', 1.0) > 0.0
+    )
+    delay_master_offload_for_param_buffer = (
+        chunked_optimizer_state_offload
+        and args.reuse_grad_buf_for_mxfp8_param_ag
+        and args.overlap_param_gather
+    )
+    if chunked_optimizer_state_offload:
+        # Prefetch masters and the first state chunk as late as possible so H2D overlaps
+        # gradient finalization. Preserve custom hooks and avoid wrapping more than once.
+        finalize_model_grads_func = getattr(config, 'finalize_model_grads_func', None)
+        if (
+            getattr(
+                finalize_model_grads_func,
+                '_chunked_optimizer_state_offload_wrapped_optimizer',
+                None,
+            )
+            is not optimizer
+        ):
+            base_finalize_model_grads_func = getattr(
+                finalize_model_grads_func,
+                '_chunked_optimizer_state_offload_base_finalize_model_grads_func',
+                None,
+            )
+            if base_finalize_model_grads_func is None:
+                base_finalize_model_grads_func = finalize_model_grads_func or finalize_model_grads
+
+            def finalize_model_grads_with_state_reload(*fmg_args, **fmg_kwargs):
+                optimizer.prefetch_optimizer_state_for_gradient_finalization()
+                return base_finalize_model_grads_func(*fmg_args, **fmg_kwargs)
+
+            setattr(
+                finalize_model_grads_with_state_reload,
+                '_chunked_optimizer_state_offload_wrapped_optimizer',
+                optimizer,
+            )
+            setattr(
+                finalize_model_grads_with_state_reload,
+                '_chunked_optimizer_state_offload_base_finalize_model_grads_func',
+                base_finalize_model_grads_func,
+            )
+            config.finalize_model_grads_func = finalize_model_grads_with_state_reload
+
     rerun_state_machine = get_rerun_state_machine()
     save_params_in_this_iteration = (args.save_params_interval is not None and
                                      (iteration + 1) % args.save_params_interval == 0)
@@ -2605,6 +2677,11 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
     save_dgrads_in_this_iteration = (args.save_dgrads_interval is not None and
                                      (iteration + 1) % args.save_dgrads_interval == 0)
     while rerun_state_machine.should_run_forward_backward(data_iterator):
+        if chunked_optimizer_state_offload:
+            optimizer.offload_optimizer_state_for_forward(
+                offload_master=not delay_master_offload_for_param_buffer
+            )
+
         # Set grad to zero.
         for model_chunk in model:
             model_chunk.zero_grad_buffer()
@@ -2645,6 +2722,10 @@ def train_step(forward_step_func, data_iterator, model, optimizer, opt_param_sch
                 for optim_instance in optimizer.chained_optimizers:
                     if isinstance(optim_instance, DistributedOptimizer):
                         optim_instance._copy_main_params_to_param_buffer()
+
+        # MXFP8 parameter staging must finish before masters become CPU canonical.
+        if delay_master_offload_for_param_buffer:
+            optimizer.offload_optimizer_state_for_forward()
 
         # Forward pass.
         if save_activations_in_this_iteration:
@@ -3077,8 +3158,15 @@ def training_log(
             loss_scale=indexer_loss_scale,
             iteration=iteration,
             writer=writer,
+            pg_collection=pg_collection,
             wandb_writer=wandb_writer,
             total_loss_dict=total_loss_dict,
+            num_layers=args.num_layers + (args.mtp_num_layers or 0),
+            num_indexer_layers=(
+                sum(ratio == 4 for ratio in args.csa_compress_ratios)
+                if args.experimental_attention_variant == "dsv4_hybrid" and not args.csa_dense_mode
+                else None
+            ),
         )
 
     # Dump memory snapshot and print metrics to stdout.
@@ -3702,6 +3790,15 @@ def train(
 
     model_pg_collection = get_attr_wrapped_model(model[0], "pg_collection")
 
+    if getattr(args, "chunked_optimizer_state_offload", False):
+        # Status reductions first run after optimizer.step(). At that point the
+        # caching allocator can retain the first forward/backward's high-water
+        # mark, leaving no device memory for NCCL's lazy communicator allocation.
+        # Initialize the same group before those transient allocations exist.
+        # This also covers a cold resume whose first iteration is nonzero.
+        print_rank_0("Initializing model-parallel optimizer-status reductions before training.")
+        logical_and_across_model_parallel_group(True)
+
     # Tracking loss.
     total_loss_dict = {}
 
@@ -4095,6 +4192,11 @@ def train(
             ) = train_step(
                 forward_step_func, train_data_iterator, model, optimizer, opt_param_scheduler, config, forward_backward_func, iteration=iteration
             )
+            if is_first_iteration and getattr(args, "chunked_optimizer_state_offload", False):
+                # NCCL allocates outside PyTorch's caching allocator. First-use
+                # metric collectives can otherwise OOM on the cold step's unused
+                # cache even though the model/optimizer working set fits.
+                torch.cuda.empty_cache()
             ft_integration.on_training_step_end()
             ########## FlagScale Begin ##########
             if perf_callback is not None:
@@ -4322,7 +4424,11 @@ def train(
         ########## FlagScale Begin ##########
         # Extra Evaluation =====================================================================
         if args.extra_eval_interval and iteration % args.extra_eval_interval == 0:
-            from megatron.training.extra_valid import extra_evaluate_and_print_results, build_extra_valid_data_iterators
+            from megatron.training.extra_valid import (
+                build_extra_valid_data_iterators,
+                extra_evaluate_and_print_results,
+            )
+
             # NOTE(zhaoyinglia): Must rebuild the dataloaders for extra validation here,
             # to guarantee extra validation start from extra_iter=0 every time,
             # but we don't need to rebuild the datasets.

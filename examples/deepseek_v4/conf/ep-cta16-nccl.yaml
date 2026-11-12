@@ -1,0 +1,4 @@
+ep:
+  max_ctas: 16
+  min_ctas: 1
+  is_high_priority_stream: false

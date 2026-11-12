@@ -5,19 +5,26 @@
 import argparse
 import dataclasses
 import json
+import math
 import os
-from pathlib import Path
 import re
 import types
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 from packaging.version import Version as PkgVersion
 
+from megatron.core.activations import squared_relu
 from megatron.core.dist_checkpointing.validation import StrictHandling
+from megatron.core.fusions.fused_bias_geglu import quick_gelu
+from megatron.core.msc_utils import MultiStorageClientFeature
+from megatron.core.quantization.utils import (
+    kitchen_quantization_recipe_config,
+    load_quantization_recipe,
+)
 from megatron.core.rerun_state_machine import RerunStateMachine
 from megatron.core.transformer import MLATransformerConfig, TransformerConfig
-from megatron.core.transformer.pipeline_parallel_layer_layout import PipelineParallelLayerLayout
 from megatron.core.transformer.cuda_graph_config import (
     ALLOWED_INFERENCE_SCOPES,
     get_deprecated_cuda_graph_modules_migration,
@@ -30,33 +37,26 @@ from megatron.core.transformer.heterogeneous.heterogeneous_config import (
     HeterogeneousTransformerConfig,
     MLPConfig,
 )
+from megatron.core.transformer.pipeline_parallel_layer_layout import PipelineParallelLayerLayout
 from megatron.core.utils import (
     get_torch_version,
     is_flashinfer_min_version,
     is_te_min_version,
     is_torch_min_version,
 )
-from megatron.core.activations import squared_relu
-from megatron.core.fusions.fused_bias_geglu import quick_gelu
+from megatron.plugin.platform import get_platform
+from megatron.training.argument_utils import ArgumentGroupFactory, core_transformer_config_from_args
+
+######### FlagScale Begin #########
+from megatron.training.arguments_fs import add_flagscale_arguments
 from megatron.training.global_vars import set_global_variables
 from megatron.training.utils import (
     get_device_arch_version,
-    update_use_dist_ckpt,
     print_rank_0,
+    update_use_dist_ckpt,
     warn_rank_0,
 )
-from megatron.core.msc_utils import MultiStorageClientFeature
 
-from megatron.core.quantization.utils import (
-    kitchen_quantization_recipe_config,
-    load_quantization_recipe,
-)
-
-from megatron.training.argument_utils import ArgumentGroupFactory, core_transformer_config_from_args
-######### FlagScale Begin #########
-from megatron.training.arguments_fs import add_flagscale_arguments
-
-from megatron.plugin.platform import get_platform
 cur_platform = get_platform()
 ######### FlagScale End #########
 
@@ -460,8 +460,9 @@ def validate_args(args, defaults={}):
         'Currently only global and local checkpoints are supported'
     if args.non_persistent_ckpt_type == 'local':
         try:
-            from nvidia_resiliency_ext.checkpointing.local.ckpt_managers.local_manager import \
-                LocalCheckpointManager
+            from nvidia_resiliency_ext.checkpointing.local.ckpt_managers.local_manager import (
+                LocalCheckpointManager,
+            )
         except ModuleNotFoundError as e:
             raise RuntimeError('nvidia_resiliency_ext is required for local checkpointing') from e
 
@@ -817,8 +818,10 @@ def validate_args(args, defaults={}):
         )
 
     from megatron.core.models.hybrid.hybrid_layer_allocation import (
-        Symbols, parse_hybrid_pattern, get_hybrid_total_layer_count,
+        Symbols,
+        get_hybrid_total_layer_count,
         get_hybrid_total_pipeline_segment_count,
+        parse_hybrid_pattern,
     )
     sep = Symbols.MTP_SEPARATOR
 
@@ -1289,7 +1292,11 @@ def validate_args(args, defaults={}):
     # across batches/microbatches. Due to additional communication overhead
     # during pipeline parallelism, it should not be set if sequence length
     # is constant during training.
-    args.variable_seq_lengths = False
+    args.variable_seq_lengths = args.experimental_attention_variant == "dsv4_hybrid" and (
+        args.sft or args.dataloader_inter_document_masking
+    )
+    if args.dataloader_inter_document_masking or args.variable_seq_lengths:
+        args.create_attention_mask_in_dataloader = False
 
     # Iteration-based training.
     # Skip these checks when skip_train is set: LR config is irrelevant.
@@ -1763,6 +1770,50 @@ def validate_args(args, defaults={}):
             "When `--fp8-param-gather` is enabled, the optimizer cpu offload "
             "must be used in conjunction with `--fp8-recipe delayed`."
         )
+
+    fractions = args.optimizer_state_offload_fraction_per_pipeline_stage
+    if fractions is not None:
+        if len(fractions) != args.pipeline_model_parallel_size or any(
+            not math.isfinite(value) or not 0.0 <= value <= 1.0 for value in fractions
+        ):
+            raise ValueError("State offload fractions require one finite value in [0, 1] per physical PP stage")
+        if not args.chunked_optimizer_state_offload:
+            raise ValueError("Per-stage fractions require chunked optimizer state offload")
+    offload_fraction = max(fractions) if fractions is not None else args.optimizer_state_offload_fraction
+
+    # Optimizer configuration normalizes the deprecated spelling. Include it here so
+    # cross-config validation still runs before that configuration is constructed.
+    if (
+        args.chunked_optimizer_state_offload or args.offload_optimizer_states
+    ) and offload_fraction > 0.0:
+        if args.optimizer_state_offload_chunk_size_mb == 0:
+            warn_rank_0(
+                "optimizer state offload is enabled with chunk size 0, so all "
+                "selected optimizer tensor state is temporarily restored together. Set "
+                "--optimizer-state-offload-chunk-size-mb to a positive value to bound the "
+                "tensor-state GPU window. Selected master weights always use one full "
+                "restore window regardless of chunk size."
+            )
+        assert args.optimizer == "adam", "chunked optimizer state offload currently supports Adam only"
+        assert args.use_distributed_optimizer, "Adam optimizer state offload requires use_distributed_optimizer"
+        assert (
+            not args.use_megatron_fsdp
+        ), "chunked optimizer state offload does not support Megatron-FSDP"
+        if not args.no_save_optim or not args.no_load_optim:
+            assert args.ckpt_format == 'torch_dist', (
+                "chunked optimizer state offload requires --ckpt-format torch_dist when "
+                "optimizer state is saved or loaded because its sharded load hooks preserve "
+                "CPU canonical storage"
+            )
+        if not args.no_save_optim:
+            assert not args.async_save, (
+                "chunked optimizer state offload does not support --async-save when optimizer "
+                "state is saved because the background writer can retain tensors backed by "
+                "reusable pinned CPU buffers"
+            )
+        assert (
+            args.cuda_graph_impl != 'full_iteration'
+        ), "chunked optimizer state offload does not support full-iteration CUDA graphs"
 
     if args.non_persistent_ckpt_type == "local":
         assert args.non_persistent_local_ckpt_dir is not None, "Tried to use local checkpointing without specifying --local-ckpt-dir!"
@@ -2617,8 +2668,7 @@ def _add_rl_args(parser):
     return parser
 
 def _add_training_args(parser):
-    from megatron.training.config import TrainingConfig
-    from megatron.training.config import ProfilingConfig
+    from megatron.training.config import ProfilingConfig, TrainingConfig
 
     prof_factory = ArgumentGroupFactory(ProfilingConfig)
     prof_group = prof_factory.build_group(parser, "profiling")
@@ -2713,6 +2763,59 @@ def _add_training_args(parser):
                        dest='deprecated_use_mcore_models',
                        help='DEPRECATED. Use the implementation from megatron core.'
                        'Now ignored and mcore models are the default.')
+
+    group.add_argument(
+        '--chunked-optimizer-state-offload',
+        action='store_true',
+        help='Keep selected optimizer tensor states and master weights in CPU memory between '
+        'updates. GPU tensor-state updates run in bounded chunks, while selected master '
+        'weights use one full restore window.',
+    )
+
+    group.add_argument(
+        '--optimizer-state-offload-chunk-size-mb',
+        type=int,
+        default=0,
+        help='Target size of each optimizer tensor-state staging buffer in MiB. Two buffers '
+        'can be live for overlap (roughly 2x this value per active offload manager). Zero '
+        'temporarily restores all selected tensor state for one full GPU update. A single '
+        'atomic parameter state may exceed this soft target and is reported at runtime. This '
+        'value does not bound the selected master-weight window, which is always restored in '
+        'full.',
+    )
+
+    group.add_argument(
+        '--optimizer-state-offload-fraction',
+        type=float,
+        default=1.0,
+        help='Fraction of optimizer parameter bundles to offload. Selected bundles always '
+        'include both tensor state and any separate master weight. This is distinct from '
+        '--optimizer-offload-fraction, which belongs to --optimizer-cpu-offload; the modes are '
+        'mutually exclusive. Zero disables optimizer state offload even when its flag is set.',
+    )
+
+    group.add_argument(
+        '--optimizer-state-offload-fraction-per-pipeline-stage',
+        nargs='+',
+        type=float,
+        default=None,
+        help='Optimizer state offload fractions in physical pipeline rank order. Requires '
+        '--chunked-optimizer-state-offload and one finite value in [0, 1] per PP stage; '
+        'all virtual chunks on a stage use the same fraction.',
+    )
+
+    group.add_argument(
+        '--offload-optimizer-states',
+        action='store_true',
+        dest='offload_optimizer_states',
+        help='Deprecated spelling for --chunked-optimizer-state-offload. It automatically '
+        'enables the replacement; the legacy-equivalent settings are chunk size 0 and offload '
+        'fraction 1.0 unless new tuning arguments are supplied. '
+        'With a nonzero fraction, optimizer-state checkpoint I/O requires --ckpt-format '
+        'torch_dist, optimizer-state saves must be synchronous, and optimizer or full-iteration '
+        'CUDA graphs are unsupported.',
+    )
+
 
     return parser
 
@@ -3093,6 +3196,13 @@ def _add_data_args(parser):
                        help='FIM PAD token')
     group.add_argument('--fim-eod-token', type=str, default='<|endoftext|>',
                        help='FIM EOD token')
+    group.add_argument(
+        '--dataloader-inter-document-masking',
+        action='store_true',
+        help='Emit packed document metadata for GPT pretraining.',
+    )
+
+
     return parser
 
 
@@ -3497,7 +3607,7 @@ def _add_kitchen_quantization_arguments(parser: argparse.ArgumentParser):
     If kitchen isn't available, nothing to do here, return unchanged parser
     """
     try:
-        from megatron.core.extensions.kitchen import KitchenSpecProvider, HAVE_KITCHEN
+        from megatron.core.extensions.kitchen import HAVE_KITCHEN, KitchenSpecProvider
 
     except (ImportError, ModuleNotFoundError):
         HAVE_KITCHEN = False
@@ -3526,6 +3636,12 @@ def _add_sft_args(parser):
     group.add_argument('--sft', action="store_true", help='Megatron SFT training')
     group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned",
                        help='SFT prompt format.')
+    group.add_argument(
+        '--sft-assistant-only-loss', action=argparse.BooleanOptionalAction, default=True,
+        help='Supervise only chat-template generation spans for the default SFT prompt '
+             'format (enabled by default). Other prompt formats are unchanged. Use '
+             '--no-sft-assistant-only-loss to retain all-token targets for default.',
+    )
     return parser
 
 

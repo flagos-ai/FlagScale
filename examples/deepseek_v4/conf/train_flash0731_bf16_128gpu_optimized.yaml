@@ -1,0 +1,67 @@
+# Full Flash-0731 BF16: 16 hosts x 8 GPUs, 43 layers, 256 experts.
+# Preserves the input CodeAlpaca SFT workload, padded to 32768 tokens.
+# No checkpoint load/save; initialized from scratch for this benchmark.
+# PP8/CP4/EP8/VPP2 stage layer counts: 5,6,2,6,6,6,6,6.
+# Standard BF16 entrypoint with fixed PP transport and compiled mHC backward.
+# Historical profiling/remapping configuration is archived under fp8_legacy/.
+# Defaults to 10 iterations with no Nsight capture; score the fixed window steps3-10.
+# The full 12-step validation additionally captured step11 and completed step12.
+# Profiled validation config: outputs/turing-bf16-128-hagg-compiled/hagg_compiled.yaml.
+defaults:
+  - _self_
+  - train: flash0731_bf16_128gpu_optimized
+
+experiment:
+  exp_name: DeepSeek-V4-Flash-0731-BF16-128GPU-Optimized
+  exp_dir: ${experiment.repo_dir}/outputs/dsv4-flash0731-bf16-128gpu-${now:%Y%m%d-%H%M%S}
+  save: ${experiment.exp_dir}/checkpoints
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_deepseek_v4.py
+  runner:
+    ssh_port: 10710
+    master_addr: 10.8.1.106
+    master_port: 11569
+    nproc_per_node: 8
+    hostfile: hostfile
+    nnodes: 16
+    rdzv_backend: static
+    max_restarts: 0
+  shell_cmds: null
+  envs:
+    TORCH_ALLOW_TF32_CUBLAS_OVERRIDE: '1'
+    NVIDIA_TF32_OVERRIDE: '1'
+    CUDA_DEVICE_MAX_CONNECTIONS: '1'
+    TORCH_NCCL_AVOID_RECORD_STREAMS: '1'
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: '1'
+    PYTORCH_ALLOC_CONF: expandable_segments:True
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+    NCCL_NVLS_ENABLE: '0'
+    NCCL_GRAPH_REGISTER: '0'
+    PYTHONWARNINGS: ignore
+    NCCL_DEBUG: WARN
+    NUM_OF_TOKENS_PER_CHUNK_COMBINE_API: '128'
+    NUM_OF_STAGES_DISPATCH_API: '10'
+    NUM_OF_IN_FLIGHT_S2G_DISPATCH_API: '8'
+    NCCL_IB_HCA: mlx5_100,mlx5_101,mlx5_102,mlx5_103,mlx5_104,mlx5_105,mlx5_106,mlx5_107
+    NCCL_SOCKET_IFNAME: bond0
+    NCCL_IB_DISABLE: 0
+    NCCL_IB_GID_INDEX: '-1'
+    MAX_JOBS: '2'
+    OUTPUT_PATH: ${experiment.exp_dir}
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    HYDRA_FULL_ERROR: '1'
+    DSV4_FIXED_P2P_SHAPE: '1'
+    DSV4_COMPILE_HAGG_BWD: '1'
+    DSV4_NUMA_BIND: '0'
+    TRITON_CACHE_AUTOTUNING: '1'
+    TRITON_CACHE_DIR: /tmp/turing-triton-bf16-cp4-pp8-ep8-seq32768-v1
+  cmds:
+    before_start: source /root/miniconda3/bin/activate /workspace/envs/flagscale
+  repo_dir: /workspace/repos/flagscale
+  disable_checkpoint_io: true
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

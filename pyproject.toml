@@ -139,3 +139,6 @@ extend-ignore-identifiers-re = [
 
 [tool.typos.default.extend-words]
 CANN = "CANN"
+
+[tool.typos.default.extend-identifiers]
+ue8m0 = "ue8m0"

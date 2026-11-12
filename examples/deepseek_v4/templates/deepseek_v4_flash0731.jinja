@@ -1,0 +1,199 @@
+{# Port of DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py; see LICENSE.
+   Full conversations only (no incremental context=). Tool arguments must be dicts.
+   HF add_generation_prompt controls the final transition, unlike encode_messages.
+   Generation spans cover assistant bodies, retained reasoning, tool calls and EOS.
+#}
+{%- set reasoning_prompts = {"low": "", "high": "Reasoning Effort: Absolute maximum with no shortcuts permitted.\nYou MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.\nExplicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.\n\n", "max": "Reasoning Effort: Beyond maximum — exhaustive, relentless, and uncompromising.\nYou MUST reason with the utmost depth and rigor, leaving absolutely nothing to chance: exhaustively decompose the problem into its most fundamental components, trace every causal chain to its root, and resolve the underlying cause rather than any surface symptom.\nDo not stop reasoning until you have independently verified the solution from multiple angles and are certain that no assumption remains unchecked and no error remains undiscovered.\n\n"} -%}
+{%- set tools_template = "## Tools\n\nYou have access to a set of tools to help answer the user's question. You can invoke tools by writing a \"<｜DSML｜tool_calls>\" block like the following:\n\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"$TOOL_NAME\">\n<｜DSML｜parameter name=\"$PARAMETER_NAME\" string=\"true|false\">$PARAMETER_VALUE</｜DSML｜parameter>\n...\n</｜DSML｜invoke>\n<｜DSML｜invoke name=\"$TOOL_NAME2\">\n...\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>\n\nString parameters should be specified as is and set `string=\"true\"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string=\"false\"`.\n\nIf thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.\n\nOtherwise, output directly after </think> with tool calls or final response.\n\n### Available Tool Schemas\n\n{tool_schemas}\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n" -%}
+{%- set mode = thinking_mode | default('thinking' if enable_thinking | default(false) else 'chat') -%}
+{%- set effort = reasoning_effort | default('low', true) -%}
+{%- if mode not in ['chat', 'thinking'] or effort not in reasoning_prompts -%}
+    {{- raise_exception('Expected thinking_mode=chat/thinking and reasoning_effort=low/high/max') -}}
+{%- endif -%}
+{%- if context | default([]) -%}
+    {{- raise_exception('Pass the full conversation in messages; incremental context is unsupported') -}}
+{%- endif -%}
+{%- set tasks = {'action': '<｜action｜>', 'query': '<｜query｜>', 'authority': '<｜authority｜>', 'domain': '<｜domain｜>', 'title': '<｜title｜>', 'read_url': '<｜read_url｜>'} -%}
+
+{# HF tools= convenience: attach schemas to the first system message, or prepend one. #}
+{%- set source = namespace(messages=messages) -%}
+{%- if tools | default([]) -%}
+    {%- for m in messages -%}
+        {%- if m.get('tools') -%}
+            {{- raise_exception('Specify tools either on messages or as tools=, not both') -}}
+        {%- endif -%}
+    {%- endfor -%}
+    {%- if messages and messages[0]['role'] == 'system' -%}
+        {%- set source.messages = [dict(messages[0], tools=tools)] + messages[1:] -%}
+    {%- else -%}
+        {%- set source.messages = [{'role': 'system', 'content': '', 'tools': tools}] + messages -%}
+    {%- endif -%}
+{%- endif -%}
+
+{# Official merge_tool_messages semantics, without mutating caller data. #}
+{%- set merged = namespace(items=[]) -%}
+{%- for m in source.messages -%}
+    {%- if m['role'] in ['user', 'tool'] -%}
+        {%- if m['role'] == 'tool' -%}
+            {%- set block = {'type': 'tool_result', 'tool_use_id': m.get('tool_call_id', ''), 'content': m.get('content', '')} -%}
+        {%- else -%}
+            {%- if m.get('content') is not string -%}
+                {{- raise_exception('User content must be a text string') -}}
+            {%- endif -%}
+            {%- set block = {'type': 'text', 'text': m.get('content', '')} -%}
+        {%- endif -%}
+        {%- if merged.items and merged.items[-1]['role'] == 'user' and 'content_blocks' in merged.items[-1] and (m['role'] == 'tool' or merged.items[-1].get('task') is none) -%}
+            {%- set prev = merged.items[-1] -%}
+            {%- set merged.items = merged.items[:-1] + [dict(prev, content_blocks=prev['content_blocks'] + [block])] -%}
+        {%- else -%}
+            {%- set new = namespace(value={'role': 'user', 'content_blocks': [block]}) -%}
+            {%- if m['role'] == 'user' -%}
+                {%- set new.value = dict(new.value, content=m.get('content', '')) -%}
+                {%- for key in ['task', 'wo_eos', 'mask'] if key in m -%}
+                    {%- set new.value = dict(new.value, **{key: m[key]}) -%}
+                {%- endfor -%}
+            {%- endif -%}
+            {%- set merged.items = merged.items + [new.value] -%}
+        {%- endif -%}
+    {%- else -%}
+        {%- set merged.items = merged.items + [m] -%}
+    {%- endif -%}
+{%- endfor -%}
+
+{# Sort only tool-result slots, retaining interleaved text positions. #}
+{%- set ordered = namespace(items=[], calls=[]) -%}
+{%- for m in merged.items -%}
+    {%- if m['role'] == 'assistant' and m.get('tool_calls') -%}
+        {%- set ordered.calls = m['tool_calls'] -%}
+    {%- endif -%}
+    {%- if m['role'] == 'user' and m.get('content_blocks') -%}
+        {%- set results = namespace(items=[], blocks=[], cursor=0) -%}
+        {%- for block in m['content_blocks'] if block['type'] == 'tool_result' -%}
+            {%- set rank = namespace(value=0) -%}
+            {%- for call in ordered.calls -%}
+                {%- set call_id = call.get('id') or call.get('function', {}).get('id', '') -%}
+                {%- if call_id and call_id == block.get('tool_use_id', '') -%}
+                    {%- set rank.value = loop.index0 -%}
+                {%- endif -%}
+            {%- endfor -%}
+            {%- set results.items = results.items + [{'rank': rank.value, 'block': block}] -%}
+        {%- endfor -%}
+        {%- set sorted_results = results.items | sort(attribute='rank') -%}
+        {%- for block in m['content_blocks'] -%}
+            {%- if block['type'] == 'tool_result' -%}
+                {%- set results.blocks = results.blocks + [sorted_results[results.cursor]['block']] -%}
+                {%- set results.cursor = results.cursor + 1 -%}
+            {%- else -%}
+                {%- set results.blocks = results.blocks + [block] -%}
+            {%- endif -%}
+        {%- endfor -%}
+        {%- set m = dict(m, content_blocks=results.blocks) -%}
+    {%- endif -%}
+    {%- set ordered.items = ordered.items + [m] -%}
+{%- endfor -%}
+
+{%- set state = namespace(drop=drop_thinking | default(true), last_user=-1, items=[]) -%}
+{%- for m in ordered.items -%}
+    {%- if m.get('tools') -%}{%- set state.drop = false -%}{%- endif -%}
+    {%- if m['role'] in ['user', 'developer'] -%}{%- set state.last_user = loop.index0 -%}{%- endif -%}
+{%- endfor -%}
+{%- for m in ordered.items -%}
+    {%- if mode != 'thinking' or not state.drop or loop.index0 >= state.last_user or m['role'] in ['user', 'system', 'tool', 'latest_reminder', 'direct_search_results', 'assistant'] -%}
+        {%- set state.items = state.items + [m] -%}
+    {%- endif -%}
+{%- endfor -%}
+{%- set state.last_user = -1 -%}
+{%- for m in state.items -%}
+    {%- if m['role'] in ['user', 'developer'] -%}{%- set state.last_user = loop.index0 -%}{%- endif -%}
+{%- endfor -%}
+
+{%- if add_default_bos_token | default(true) -%}{{- '<｜begin▁of▁sentence｜>' -}}{%- endif -%}
+{%- for m in state.items -%}
+    {%- set idx = loop.index0 -%}
+    {%- set role = m['role'] -%}
+    {%- if loop.first and mode == 'thinking' -%}{{- reasoning_prompts[effort] -}}{%- endif -%}
+    {%- if role in ['system', 'developer'] -%}
+        {%- if role == 'developer' -%}
+            {%- if not m.get('content') -%}{{- raise_exception('Developer content must not be empty') -}}{%- endif -%}
+            {{- '<｜User｜>' -}}
+        {%- endif -%}
+        {{- m.get('content') or '' -}}
+        {%- if m.get('tools') -%}
+            {%- set schemas = namespace(items=[]) -%}
+            {%- for tool in m['tools'] -%}
+                {%- set schemas.items = schemas.items + [tool['function'] | tojson(ensure_ascii=false)] -%}
+            {%- endfor -%}
+            {{- '\n\n' + tools_template.replace('{tool_schemas}', schemas.items | join('\n')) -}}
+        {%- endif -%}
+        {%- if m.get('response_format') -%}
+            {{- '\n\n## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n' + (m['response_format'] | tojson(ensure_ascii=false)) -}}
+        {%- endif -%}
+    {%- elif role == 'user' -%}
+        {{- '<｜User｜>' -}}
+        {%- for block in m['content_blocks'] -%}
+            {%- if not loop.first -%}{{- '\n\n' -}}{%- endif -%}
+            {%- if block['type'] == 'text' -%}
+                {{- block.get('text', '') -}}
+            {%- elif block['type'] == 'tool_result' -%}
+                {{- '<tool_result>' -}}
+                {%- if block.get('content', '') is string -%}
+                    {{- block.get('content', '') -}}
+                {%- elif block.get('content') is sequence and block.get('content') is not mapping -%}
+                    {%- for part in block['content'] -%}
+                        {%- if not loop.first -%}{{- '\n\n' -}}{%- endif -%}
+                        {{- part.get('text', '') if part.get('type') == 'text' else '[Unsupported ' + part.get('type', 'None') + ']' -}}
+                    {%- endfor -%}
+                {%- else -%}
+                    {{- raise_exception('Tool result content must be a string or list of blocks') -}}
+                {%- endif -%}
+                {{- '</tool_result>' -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- elif role == 'latest_reminder' -%}
+        {{- '<｜latest_reminder｜>' + m['content'] -}}
+    {%- elif role == 'assistant' -%}
+        {%- generation -%}
+            {%- if mode == 'thinking' and not (idx > 0 and state.items[idx - 1].get('task') is not none) and (not state.drop or idx > state.last_user) -%}
+                {{- (m.get('reasoning_content') or '') + '</think>' -}}
+            {%- endif -%}
+            {{- m.get('content') or '' -}}
+            {%- if m.get('tool_calls') -%}
+                {{- '\n\n<｜DSML｜tool_calls>\n' -}}
+                {%- for call in m['tool_calls'] -%}
+                    {%- set fn = call['function'] -%}
+                    {%- if fn['arguments'] is not mapping -%}
+                        {{- raise_exception('tool_calls.function.arguments must be a dict; json.loads JSON strings before rendering') -}}
+                    {%- endif -%}
+                    {%- if not loop.first -%}{{- '\n' -}}{%- endif -%}
+                    {{- '<｜DSML｜invoke name="' + fn['name'] + '">\n' -}}
+                    {%- for key, value in fn['arguments'].items() -%}
+                        {%- if not loop.first -%}{{- '\n' -}}{%- endif -%}
+                        {{- '<｜DSML｜parameter name="' + key + '" string="' + ('true' if value is string else 'false') + '">' -}}
+                        {{- value if value is string else value | tojson(ensure_ascii=false) -}}
+                        {{- '</｜DSML｜parameter>' -}}
+                    {%- endfor -%}
+                    {{- '\n</｜DSML｜invoke>' -}}
+                {%- endfor -%}
+                {{- '\n</｜DSML｜tool_calls>' -}}
+            {%- endif -%}
+            {%- if not m.get('wo_eos', false) -%}{{- '<｜end▁of▁sentence｜>' -}}{%- endif -%}
+        {%- endgeneration -%}
+    {%- else -%}
+        {{- raise_exception('Unsupported message role: ' + role) -}}
+    {%- endif -%}
+
+    {# Preserve official transitions within conversations. Only the final one is
+       controlled by HF add_generation_prompt, including task-specific prefixes. #}
+    {%- if (not loop.last and state.items[idx + 1]['role'] in ['assistant', 'latest_reminder']) or (loop.last and add_generation_prompt | default(false)) -%}
+        {%- if m.get('task') is not none -%}
+            {%- if m['task'] not in tasks -%}{{- raise_exception('Unknown task: ' + m['task']) -}}{%- endif -%}
+            {%- if m['task'] == 'action' -%}
+                {{- '<｜Assistant｜>' + ('<think>' if mode == 'thinking' else '</think>') -}}
+            {%- endif -%}
+            {{- tasks[m['task']] -}}
+        {%- elif role in ['user', 'developer'] -%}
+            {{- '<｜Assistant｜>' -}}
+            {{- '<think>' if mode == 'thinking' and (not state.drop or idx >= state.last_user) else '</think>' -}}
+        {%- endif -%}
+    {%- endif -%}
+{%- endfor -%}
