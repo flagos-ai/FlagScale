@@ -37,6 +37,19 @@ def current_run(run, pr, repository, workflow_id):
     )
 
 
+def platform_finished_with_failure(jobs, platform):
+    prefix = f"Platform pipeline ({platform}) / "
+    platform_jobs = [job for job in jobs if job.get("name", "").startswith(prefix)]
+    return (
+        bool(platform_jobs)
+        and all(job.get("status") == "completed" for job in platform_jobs)
+        and any(
+            job["name"].endswith(" / all_tests_complete") and job.get("conclusion") == "failure"
+            for job in platform_jobs
+        )
+    )
+
+
 def source(api, repository, number, sha):
     if not re.fullmatch(r"[1-9][0-9]*", number) or not re.fullmatch(r"[a-f0-9]{40}", sha):
         raise ValueError("Expected a PR number and a full commit SHA")
@@ -88,22 +101,29 @@ def comment(api, event):
         )
         approved = False
         for run in runs:
-            if (
-                current_run(run, pr, repository, workflow["id"])
-                and run["status"] == "completed"
-                and run["conclusion"] in ("success", "failure")
+            if not current_run(run, pr, repository, workflow["id"]):
+                continue
+            completed = run["status"] == "completed" and run["conclusion"] in (
+                "success",
+                "failure",
+            )
+            # Platforms use separate runners, so a finished failed platform can
+            # be requested again while other platforms in the run are active.
+            active = run["status"] in ("queued", "in_progress") and request["platform"] != "all"
+            if not completed and not active:
+                continue
+            jobs = api.paginate(f"{root}/actions/runs/{run['id']}/jobs", "jobs", filter="latest")
+            if not any(
+                " / test / " in job["name"] and job["conclusion"] == "success" for job in jobs
             ):
-                jobs = api.paginate(
-                    f"{root}/actions/runs/{run['id']}/jobs", "jobs", filter="latest"
-                )
-                if any(
-                    " / test / " in job["name"] and job["conclusion"] == "success" for job in jobs
-                ):
-                    approved = True
-                    break
+                continue
+            if completed or platform_finished_with_failure(jobs, request["platform"]):
+                approved = True
+                break
         if not approved:
             raise ValueError(
-                "PR authors must wait for an approved current-head platform CI run to complete"
+                "PR authors must wait for an approved current-head platform CI run to complete, "
+                "or for the requested platform to finish with a failed all_tests_complete job"
             )
 
     def unchanged():
@@ -119,6 +139,14 @@ def comment(api, event):
     if request["kind"] == "rerun-job":
         job = api.get(f"{root}/actions/jobs/{request['job_id']}")
         run = api.get(f"{root}/actions/runs/{job['run_id']}")
+        if current_run(run, pr, repository, workflow["id"]) and run["status"] in (
+            "queued",
+            "in_progress",
+        ):
+            raise ValueError(
+                "GitHub cannot rerun a job while its workflow run is active; "
+                "use /ci run <platform> after that platform finishes"
+            )
         if (
             not current_run(run, pr, repository, workflow["id"])
             or run["status"] != "completed"

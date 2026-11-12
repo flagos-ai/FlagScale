@@ -37,6 +37,13 @@ def load_platforms(configs_dir: pathlib.Path) -> dict[str, list[str]]:
         config = yaml.safe_load(path.read_text())
         if not isinstance(config, dict):
             raise ValueError(f"Invalid platform configuration: {path}")
+        # Platforms can build candidates before they have a validated CI image.
+        # Existing platforms stay enabled unless they explicitly opt out.
+        enabled = config.get("ci_enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"ci_enabled must be a boolean: {path}")
+        if not enabled:
+            continue
         watch = config.get("paths_watch", [])
         if not isinstance(watch, list) or any(not isinstance(p, str) or not p for p in watch):
             raise ValueError(f"paths_watch must be a list of nonempty strings: {path}")

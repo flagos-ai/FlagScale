@@ -16,7 +16,8 @@
 
 # Platform configuration loading script
 # Extracts platform configuration and groups tests by task
-# Usage: source load_platform_config.sh && load_platform_config <platform_name>
+# Usage: source load_platform_config.sh && load_platform_config <platform_name> [train_image]
+# A non-empty train_image overrides ci_train_image from the platform config.
 
 set -euo pipefail
 
@@ -45,7 +46,8 @@ load_platform_config() {
 
     # Extract CI/CD configuration from .github/configs using yq
     echo "Extracting configuration from $CONFIG_FILE"
-    CI_TRAIN_IMAGE=$(/usr/local/bin/yq -r '.ci_train_image // .ci_image // ""' "$CONFIG_FILE")
+    # Candidate builds may supply an image before ci_train_image is promoted.
+    CI_TRAIN_IMAGE=${2:-$(/usr/local/bin/yq -r '.ci_train_image // .ci_image // ""' "$CONFIG_FILE")}
     RUNNER_LABELS=$(/usr/local/bin/yq -o=json -I=0 '.runner_labels' "$CONFIG_FILE")
     VOLUMES=$(/usr/local/bin/yq -o=json -I=0 '.container_volumes' "$CONFIG_FILE")
     CONTAINER_OPTIONS=$(/usr/local/bin/yq -r '.container_options' "$CONFIG_FILE")

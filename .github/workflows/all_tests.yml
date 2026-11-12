@@ -32,12 +32,35 @@ on:
           - musa
           - kunlunxin
           - ppu
+          - iluvatar
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.actor }}
   cancel-in-progress: true
 
 jobs:
+  # Iluvatar Platform
+  iluvatar_prepare:
+    name: Iluvatar / prepare-deps
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'iluvatar'
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: iluvatar
+
+  iluvatar_tests:
+    name: Iluvatar / tests
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'all' || inputs.platform == 'iluvatar'
+    needs: iluvatar_prepare
+    uses: ./.github/workflows/all_tests_common.yml
+    secrets:
+      FLAGCICD_API_TOKEN: ${{ secrets.FLAGCICD_API_TOKEN }}
+    with:
+      platform: iluvatar
+      megatron_cache_key: ${{ needs.iluvatar_prepare.outputs.megatron_cache_key }}
+      megatron_artifact_available: ${{ needs.iluvatar_prepare.outputs.megatron_artifact_available }}
+      te_fl_cache_key: ${{ needs.iluvatar_prepare.outputs.te_fl_cache_key }}
+      te_fl_artifact_available: ${{ needs.iluvatar_prepare.outputs.te_fl_artifact_available }}
+
   # PPU Platform
   ppu_prepare:
     name: PPU / prepare-deps
@@ -225,6 +248,7 @@ jobs:
       - musa_prepare
       - kunlunxin_prepare
       - ppu_prepare
+      - iluvatar_prepare
       - cuda_tests
       - ascend_tests
       - enflame_tests
@@ -233,6 +257,7 @@ jobs:
       - musa_tests
       - kunlunxin_tests
       - ppu_tests
+      - iluvatar_tests
     runs-on: ubuntu-latest
     if: always()
     steps:
