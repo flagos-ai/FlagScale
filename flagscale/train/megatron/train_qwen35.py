@@ -29,9 +29,11 @@ from argparse import Namespace
 from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
 from megatron.core.enums import ModelType
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 
+from megatron.training.training import update_seqlen_stats_from_cu_seqlens
 from megatron.training.utils import unwrap_model
 from megatron.training import get_args, get_timers, get_tokenizer, print_rank_0
 from megatron.training.argument_utils import pretrain_cfg_container_from_args
@@ -472,9 +474,37 @@ from flagscale.train.megatron.train_gpt import (
 
 def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
     """Generate a batch for text-only training (GPT-style), with mRoPE position_ids."""
-    tokens, labels, loss_mask, attention_mask, position_ids, packed_seq_params = get_batch_gpt(
-        data_iterator, vp_stage
-    )
+    (
+        attention_mask,
+        cu_seqlens,
+        cu_seqlens_padded,
+        hybrid_cp_group,
+        labels,
+        local_cp_size,
+        loss_mask,
+        max_seqlen,
+        position_ids,
+        tokens,
+    ) = get_batch_gpt(data_iterator, vp_stage)
+
+    packed_seq_params = None
+    if cu_seqlens is not None:
+        cu_seqlens = cu_seqlens[0]
+        if cu_seqlens_padded is not None:
+            cu_seqlens_padded = cu_seqlens_padded[0]
+        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
+        packed_seq_params = PackedSeqParams(
+            qkv_format="thd",
+            cu_seqlens_q=cu_seqlens_for_params,
+            cu_seqlens_kv=cu_seqlens_for_params,
+            cu_seqlens_q_padded=cu_seqlens_padded,
+            cu_seqlens_kv_padded=cu_seqlens_padded,
+            max_seqlen_q=int(max_seqlen.item()),
+            max_seqlen_kv=int(max_seqlen.item()),
+            local_cp_size=int(local_cp_size.item()) if local_cp_size is not None else None,
+            cp_group=hybrid_cp_group,
+        )
 
     # Expand position_ids from [B, S] to [3, B, S] for mRoPE (text-only: all 3 dims identical)
     if position_ids is not None:
