@@ -1,0 +1,96 @@
+# Copyright 2026 FlagOS Contributors
+# Licensed under the Apache License, Version 2.0.
+hardware_name: iluvatar
+display_name: "Iluvatar BI training (COREX 4.5.0)"
+runner_labels: [flagscale-lluvatar-bi-gpu8]
+# Validated on n32: two-GPU smoke, public unit tests and Qwen3 golden regression.
+ci_train_image: harbor.baai.ac.cn/flagos-dev/flagscale-train:manual-20261030-lluvatar-bi-gpu8-dev
+pkg_mgr: pip
+env_path: ""
+env_names:
+  train: ""
+setup_script: .github/scripts/set_env_iluvatar.sh
+test_matrix:
+  unit:
+    nproc_per_node: 2
+
+dependencies:
+  megatron_lm_fl:
+    enabled: true
+    repository: flagos-ai/Megatron-LM-FL
+    ref: main
+    runtime:
+      install_mode: pythonpath
+      environment: {}
+  te_fl:
+    enabled: true
+    repository: flagos-ai/TransformerEngine-FL
+    ref: main
+    build_mode: python
+    build_environment:
+      TE_FL_SKIP_CUDA: "1"
+      NVTE_WITH_NCCL_EP: "0"
+    runtime:
+      environment:
+        TE_FL_SKIP_CUDA: "1"
+        TE_FL_PREFER: reference
+        NVTE_FLASH_ATTN: "0"
+        NVTE_FUSED_ATTN: "0"
+        NVTE_UNFUSED_ATTN: "1"
+      install_pip_args: []
+      pip_packages: ["megatron-energon[av_decode]~=7.0"]
+
+image_build:
+  enabled: true
+  registry: harbor.baai.ac.cn
+  target: dev
+  network: default
+  max_parallel: 1
+  runtime_device_count: '8'
+  # Two workers exercise two GPUs; device_count still checks all 8 are visible.
+  runtime_smoke_nproc: '2'
+  registry_login: false
+  runner_labels: [flagscale-lluvatar-bi-gpu8]
+  validation_script: tools/install/iluvatar/validate_image_build.sh
+  tasks:
+    train:
+      dockerfile: docker/iluvatar/Dockerfile.train
+      image: flagos-dev/flagscale-train
+      # COREX 4.5.0 / base release 2.3.0; use the tag checked on 2026-10-30.
+      base_image: harbor.baai.ac.cn/flagos-base/flagos-base-iluvatar-corex4.5.0:2.3.0
+      build_args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
+      test_roles: [train]
+      source_refs:
+        FLAGSCALE_MEGATRON_REF: megatron_lm_fl
+        FLAGSCALE_TE_REF: transformer_engine_fl
+
+# Official example assets provisioned on n32; keep shared container paths.
+container_volumes:
+  - /mnt/airs-business/cicd/baai_datasets:/home/gitlab-runner/data:ro
+  - /mnt/airs-business/cicd/baai_tokenizers:/home/gitlab-runner/tokenizers:ro
+# Plain Docker device mapping from build-infra's Iluvatar runtime contract.
+# Verify the actual eight device nodes on n32 before building. No host network
+# here: GitHub container jobs manage their own network.
+container_options: >-
+  --shm-size=100g
+  --ulimit=memlock=-1
+  --ulimit=stack=67108864
+  --device=/dev/itrctl
+  --device=/dev/iluvatar0
+  --device=/dev/iluvatar1
+  --device=/dev/iluvatar2
+  --device=/dev/iluvatar3
+  --device=/dev/iluvatar4
+  --device=/dev/iluvatar5
+  --device=/dev/iluvatar6
+  --device=/dev/iluvatar7
+
+paths_watch:
+  - docker/iluvatar/
+  - tools/install/iluvatar/
+  - requirements/iluvatar/
+  - .github/scripts/set_env_iluvatar.sh
+  - tests/test_utils/config/platforms/iluvatar.yaml
+  - tests/ci/test_iluvatar_bootstrap.py
+  - .github/configs/iluvatar.yml
