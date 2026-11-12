@@ -13,6 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-iluvatar:
+    name: prepare-iluvatar
+    uses: ./.github/workflows/prepare_dependencies.yml
+    with:
+      platform: iluvatar
+
   prepare-ppu:
     name: prepare-ppu
     uses: ./.github/workflows/prepare_dependencies.yml
