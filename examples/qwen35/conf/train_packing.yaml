@@ -1,0 +1,21 @@
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+# Basic Qwen3.5-4B multimodal packing, 8 GPUs: TP4 / PP1 / CP1 / DP2.
+defaults:
+  - train
+  - _self_
+
+experiment:
+  exp_name: qwen35_4b_packing
+
+train:
+  system:
+    packing_buffer_size: 32
+    tensor_model_parallel_size: 4
+    pipeline_model_parallel_size: 1
+    context_parallel_size: 1
+  model:
+    micro_batch_size: 1
+    global_batch_size: 4
+    seq_length: 2048
+    max_padding_length: 2048

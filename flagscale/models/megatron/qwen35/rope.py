@@ -62,7 +62,8 @@ class Qwen35LanguageRotaryEmbedding(Qwen3VLLanguageRotaryEmbedding):
         packed_seq_params: PackedSeqParams | None = None,
         **kwargs,
     ) -> Tensor:
-        assert packed_seq_params is None
+        if packed_seq_params is not None and self.cp_group.size() != 1:
+            raise ValueError("Packed Qwen3.5 mRoPE currently requires context_parallel_size=1")
         if position_ids.ndim == 2:
             position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
 
@@ -88,27 +89,57 @@ def get_rope_index(
     video_grid_thw: torch.LongTensor | None = None,
     attention_mask: torch.Tensor | None = None,
     packed_seq_params: PackedSeqParams | None = None,
+    cu_seqlens: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute mRoPE position indices for Qwen3.5.
 
-    Copied from Qwen3 VL.
+    Copied from Qwen3 VL. For a packed row, delta has shape [1, 1] and describes
+    the whole physical row (including tail padding), not each original sample.
+    The training caller discards it. Packed generation/KV-cache continuation is
+    not supported by this training interface.
     """
+
+    if cu_seqlens is None and packed_seq_params is not None:
+        cu_seqlens = packed_seq_params.cu_seqlens_q
+    if cu_seqlens is not None:
+        if input_ids is None or input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError("Packed mRoPE requires input_ids with shape [1, total_tokens]")
+        boundaries = cu_seqlens.tolist()
+        if (
+            cu_seqlens.ndim != 1 or len(boundaries) < 2 or boundaries[0] != 0
+            or boundaries[-1] != input_ids.shape[1]
+            or any(end <= start for start, end in zip(boundaries, boundaries[1:]))
+        ):
+            raise ValueError("cu_seqlens must strictly partition the packed input tokens")
+        lengths = [end - start for start, end in zip(boundaries, boundaries[1:])]
+        # Reuse the ordinary multimodal position builder on one virtual row per sample.
+        # Image/video grids are already in sample order. Preserve the real-token mask,
+        # and expand video grids only inside the recursive (unpacked) call.
+        virtual_ids = input_ids.new_zeros((len(lengths), max(lengths)))
+        virtual_mask = torch.zeros_like(virtual_ids, dtype=torch.bool)
+        for row, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
+            virtual_ids[row, :end - start] = input_ids[0, start:end]
+            virtual_mask[row, :end - start] = (
+                True if attention_mask is None else attention_mask[0, start:end].bool()
+            )
+        positions, _ = get_rope_index(
+            spatial_merge_size=spatial_merge_size,
+            image_token_id=image_token_id,
+            video_token_id=video_token_id,
+            vision_start_token_id=vision_start_token_id,
+            input_ids=virtual_ids,
+            image_grid_thw=image_grid_thw,
+            video_grid_thw=video_grid_thw,
+            attention_mask=virtual_mask,
+        )
+        positions = torch.cat([positions[:, row, :length] for row, length in enumerate(lengths)], dim=-1)
+        positions = positions.unsqueeze(1)
+        delta = positions.amax(dim=(0, 2)).unsqueeze(-1) + 1 - input_ids.shape[1]
+        return positions, delta
 
     if video_grid_thw is not None:
         video_grid_thw = torch.repeat_interleave(video_grid_thw, video_grid_thw[:, 0], dim=0)
         video_grid_thw[:, 0] = 1
-
-    if packed_seq_params is not None and attention_mask is None and input_ids is not None:
-        cu_seqlens = packed_seq_params.cu_seqlens_q
-        if cu_seqlens is not None and cu_seqlens.numel() >= 2:
-            seq_lens = cu_seqlens[1:] - cu_seqlens[:-1]
-            attention_mask = torch.zeros_like(input_ids, dtype=input_ids.dtype)
-            max_len = attention_mask.shape[1]
-            for i, seq_len in enumerate(seq_lens.tolist()):
-                valid = min(int(seq_len), max_len)
-                attention_mask[i, :valid] = 1
-        else:
-            attention_mask = torch.ones_like(input_ids)
 
     mrope_position_deltas = []
     if input_ids is not None and (image_grid_thw is not None or video_grid_thw is not None):
