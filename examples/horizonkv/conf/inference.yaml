@@ -1,0 +1,26 @@
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+defaults:
+  - _self_
+  - inference: horizonkv
+
+experiment:
+  exp_name: horizonkv
+  exp_dir: outputs/${experiment.exp_name}
+  model: ${oc.env:HORIZONKV_ASSETS,./models/horizonkv}
+  task:
+    type: inference
+    backend: vllm
+    entrypoint: flagscale/inference/core/inference_diffusion.py
+  runner:
+    hostfile: null
+  cmds:
+    before_start: source ${oc.env:HORIZONKV_ENV,./.venvs/horizonkv-worker}/bin/activate
+  envs:
+    CUDA_VISIBLE_DEVICES: ${oc.env:HORIZONKV_GPU,0}
+    PYTHONDONTWRITEBYTECODE: 1
+
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

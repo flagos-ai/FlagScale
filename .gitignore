@@ -28,3 +28,25 @@ template_funcs.py
 # Claude Code configuration (local only, do not commit)
 CLAUDE.md
 .claude/
+
+# HorizonKV requires the modified sparse attention CUDA dependency.
+!third_party/Block-Sparse-Attention/
+/.cache/
+/.venvs/
+/models/
+/benchmarks/
+
+/examples/horizonkv/tests/benchmarks
+/examples/horizonkv/tests/run_service_throughput.sh
+
+
+tests/unit_tests/test_horizonkv_service_benchmark.py
+tests/unit_tests/test_vbenchlong_suite.py
+
+# Local evaluation and unrelated diffusion experiments.
+/examples/horizonkv/**/vbenchlong*
+/examples/horizonkv/**/vbench_long*
+/flagscale/inference/core/diffusion/adaspa/
+
+# Local HorizonKV migration verification (not part of the upstream example).
+/tests/unit_tests/transformations/diffusion/test_horizonkv_integration.py

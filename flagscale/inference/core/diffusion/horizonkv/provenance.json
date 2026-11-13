@@ -1,0 +1,19 @@
+{
+  "upstream": "https://github.com/krea-ai/realtime-video",
+  "revision": "acf4b7b4e1a3049a0e04782e751d12203334038d",
+  "source_sha256": {
+    "release_server.py": "4d0022f13e6cabd4cdcda0e56a4306457b0fff9728b2f176edcf8274ea6ad74b",
+    "pipeline/causal_inference.py": "d5d19c78df76d682fc2cbace2c449cb4d445ec5940790773fa541dc84f528e97",
+    "utils/wan_wrapper.py": "0ef54332e4f3217874eb767a6296713cba62093232680a46d8c4167999cade1c",
+    "utils/scheduler.py": "4194ef1324bb06527621749c7f9a82f431ccf011823aa65099cb7bdf116b642e",
+    "v2v.py": "4856c42fa82fcb23c1a858de622d2b2d127a0a22f8f34fe4118aac9923c074ba",
+    "demo_utils/vae_block3.py": "5a14790275c57b83faa00c4ab7764ceade339f7391d32501a19493b1b646371a",
+    "wan/modules/attention.py": "1b656a8fe9f7bcb30c629996cfc436097f341af28000ffe4b6696af1d9273d73",
+    "wan/modules/sage.py": "420ab95ecefc825a04b67f5ea9d6aa3601b8d88acf812bf6a100d0c4e502bf1c",
+    "wan/modules/model.py": "5235174a4ce14c785fa1bfee1fc426a037e8671142020495b971bb27cd85c0c4",
+    "wan/modules/causal_model.py": "56141137e31d27942beedb2955e811aa48a54baaf14c5e0a93d8bb970d394a8f",
+    "wan/modules/t5.py": "8b0cebf3192c542f92a344255a06c203df3ba24160715899a055cc8de0cd930f",
+    "wan/modules/tokenizers.py": "cf5b189c1ae017326efadab2fc6380ba223fa7a59d0be6464bd264db53c76934",
+    "wan/modules/vae.py": "1b2a25af264be56a73faa9e2c0ebb11fee17ab61bb2a7da0b996811d15cc7570"
+  }
+}

@@ -1,0 +1,3 @@
+[submodule "flagscale/inference/core/diffusion/horizonkv/third_party/Block-Sparse-Attention"]
+	path = flagscale/inference/core/diffusion/horizonkv/third_party/Block-Sparse-Attention
+	url = https://github.com/lemonadenn/Block-Sparse-Attention.git

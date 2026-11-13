@@ -1,0 +1,48 @@
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# HorizonKV case used by the comparison benchmark. RASA selects among the
+# configured top-7/50% endpoint while OAE remains enabled; the native profile
+# supplies the mandatory sink frame and four recent frames.
+engine:
+  model: ${experiment.model}
+  loader: diffusers
+  pipeline:
+    class: flagscale.inference.core.diffusion.horizonkv.pipeline.HorizonKVPipeline
+    from_pretrained:
+      checkpoint: ${oc.env:KREA_CHECKPOINT,./models/horizonkv/checkpoints/krea/krea-realtime-video-14b.safetensors}
+      model_variant: krea-14b
+      torch_dtype: bfloat16
+      horizonkv:
+        method: horizonkv
+        cache: ${oc.decode:${oc.env:HORIZONKV_GPU_CACHE_FRAMES,15}}
+        window: 180
+        sink: 1
+        topk: 7
+        min_frames: 5
+        sparsity: 0.5
+        fixed: false
+        no_overlap: false
+  device: cuda
+  results_path: ${oc.env:FLAGSCALE_BENCHMARK_OUTPUT,./benchmarks/horizonkv/results}
+  output_format: video
+  output_fps: 24
+  transformations:
+    HorizonKVTransformation: {}
+
+generate:
+  prompt: A cinematic shot of a red fox walking slowly through a sunlit green meadow, natural motion, realistic fur, stable camera.
+  latent_frames: 30
+  height: 480
+  width: 832
+  benchmark: false
+  warmup: 0
+  runs: 1
+  save: true
+  duration_seconds: null
+  profile: true
+  output_type: np
+  return_latents: false
+  generator:
+    seed: 42
+    device: cuda
