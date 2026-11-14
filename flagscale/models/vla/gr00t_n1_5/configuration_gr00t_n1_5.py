@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from flagscale.models.configs.types import FeatureType, NormalizationMode, PolicyFeature
 from flagscale.models.utils.constants import ACTION, OBS_STATE
+from flagscale.models.utils.hub_utils import resolve_model_path
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 
 if TYPE_CHECKING:
@@ -104,6 +105,9 @@ class Gr00tN15Config(PreTrainedConfig):
             raise ValueError(
                 f"Action dimension {action_dim} exceeds max_action_dim {self.max_action_dim}."
             )
+
+    def resolve_pretrained_paths(self) -> None:
+        self.base_model_path = resolve_model_path(self.base_model_path)
 
     @classmethod
     def from_train_config(cls, train_config: TrainConfig) -> Gr00tN15Config:
