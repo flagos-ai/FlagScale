@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 import re
 import types
+# BEGIN MEGALENS OBSERVABILITY
+import warnings
+# END MEGALENS OBSERVABILITY
 
 import torch
 import torch.nn.functional as F
@@ -99,7 +102,97 @@ def add_megatron_arguments(parser: argparse.ArgumentParser):
 
     parser = _add_fault_injector_args(parser)
 
+    # BEGIN MEGALENS OBSERVABILITY
+    parser = _add_megalens_args(parser)
+    # END MEGALENS OBSERVABILITY
     return parser
+
+# BEGIN MEGALENS OBSERVABILITY
+def _add_megalens_args(parser):
+    group = parser.add_argument_group(title='megalens')
+    group.add_argument(
+        '--trace',
+        action='store_true',
+        help='Enable rank-local MegaLens training traces.',
+    )
+    group.add_argument(
+        '--trace-mode',
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help='0 records the lightweight sentinel; 1 records framework scopes.',
+    )
+    group.add_argument(
+        '--hardware-monitor',
+        action='store_true',
+        help='Sample hardware counters during active MegaLens iterations.',
+    )
+    group.add_argument('--trace-dir', type=str, default='trace_output')
+    group.add_argument('--trace-interval', type=int, default=1000)
+    group.add_argument('--continuous-trace-iterations', type=int, default=1)
+    group.add_argument(
+        '--trace-granularity',
+        choices=['base', 'full'],
+        default='full',
+    )
+    group.add_argument('--sentinel-hw-sample-ms', type=float, default=100.0)
+    group.add_argument('--sentinel-flush-interval', type=int, default=100)
+    group.add_argument(
+        '--trace-gather-to-rank0',
+        action='store_true',
+        default=False,
+        help='Use the legacy collective single-writer trace path.',
+    )
+    group.add_argument(
+        '--trace-cupti-kernels',
+        choices=['auto', 'on', 'off'],
+        default='off',
+        help=(
+            'Optional CUDA kernel-level tracing via torch.profiler. "auto" enables '
+            'kernel capture for mode-1 full traces, "on" forces it for mode-1 '
+            'traces, and "off" disables it.'
+        ),
+    )
+    return parser
+
+
+def _validate_megalens_args(args):
+    if args.hardware_monitor and not args.trace:
+        raise ValueError('--hardware-monitor requires --trace')
+    if not args.trace:
+        return
+    if args.trace_interval <= 0:
+        raise ValueError('--trace-interval must be greater than zero')
+    if not 0 < args.continuous_trace_iterations <= args.trace_interval:
+        raise ValueError(
+            '--continuous-trace-iterations must be in [1, trace-interval]'
+        )
+    if args.sentinel_hw_sample_ms <= 0:
+        raise ValueError('--sentinel-hw-sample-ms must be greater than zero')
+    if args.sentinel_flush_interval <= 0:
+        raise ValueError('--sentinel-flush-interval must be greater than zero')
+    kernel_capture_requested = (
+        args.trace_mode != 0 and args.trace_cupti_kernels != 'off'
+    )
+    if args.cuda_graph_impl != 'none':
+        warnings.warn(
+            'MegaLens tracing with CUDA Graphs records eager and graph-external '
+            'framework scopes; Python scopes inside managed capture/replay are '
+            'unavailable.',
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if (
+        kernel_capture_requested
+        and args.profile
+        and args.use_pytorch_profiler
+    ):
+        raise ValueError(
+            'MegaLens kernel capture cannot nest the Megatron PyTorch profiler'
+        )
+
+# END MEGALENS OBSERVABILITY
+
 
 def parse_and_validate_args(extra_args_provider=None, ignore_unknown_args=False, args_defaults={}):
     args = parse_args(extra_args_provider, ignore_unknown_args)
@@ -448,6 +541,9 @@ def tuple_type(x):
     return tuple(int(i) for i in x.strip('()').split(','))
 
 def validate_args(args, defaults={}):
+    # BEGIN MEGALENS OBSERVABILITY
+    _validate_megalens_args(args)
+    # END MEGALENS OBSERVABILITY
 
     # Prep for checkpoint conversion.
     if args.ckpt_convert_format is not None:
