@@ -1,0 +1,39 @@
+defaults:
+  - _self_
+  - train: dreamzero_14b
+
+experiment:
+  exp_name: dreamzero_train
+  seed: 42
+  save_steps: 500
+  load: null
+  exp_dir: outputs/${experiment.exp_name}
+  ckpt_format: torch
+  task:
+    type: train
+    backend: native
+    entrypoint: flagscale/train/train_dreamzero.py
+  runner:
+    per_node_task: false
+    no_shared_fs: false
+    rdzv_backend: static
+    hostfile: null
+    nproc_per_node: 8
+  cmds:
+    before_start: echo "Starting DreamZero Training"
+  envs:
+    LOGLEVEL: "INFO"
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1
+    WANDB_MODE: offline
+    OTEL_SDK_DISABLED: true
+    TOKENIZERS_PARALLELISM: false
+    NCCL_TIMEOUT: "1800"
+    TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
+    PYTHONUNBUFFERED: "1"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
