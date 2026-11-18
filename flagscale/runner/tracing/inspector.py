@@ -291,7 +291,7 @@ class InspectorIndex:
 
 
 class InspectorReader:
-    """Build a deduplicated index from Inspector JSON/JSONL output files."""
+    """Incremental input with bounded buffers and a private disk-backed index."""
 
     def __init__(
         self,
@@ -299,47 +299,172 @@ class InspectorReader:
         *,
         enabled: bool,
         correlation_window_s: float = 5.0,
+        poll_bytes: int = 16 * 1024 * 1024,
+        record_bytes: int = 8 * 1024 * 1024,
+        cache_kib: int = 2048,
     ) -> None:
-        self.directory = directory
-        self.enabled = enabled
-        self.correlation_window_s = correlation_window_s
-        self._seen: set[str] = set()
-        self._bridge_records: dict[str, dict] = {}
-        self._revisions: dict[tuple[Any, ...], list[InspectorCompletion]] = {}
+        import sqlite3
 
-    def poll(self) -> InspectorIndex:
+        from .inspector_store import InspectorStore
+
+        if poll_bytes <= 0 or record_bytes <= 0:
+            raise ValueError("Inspector read budgets must be positive")
+        self.directory, self.enabled = directory, enabled
+        self.correlation_window_s = correlation_window_s
+        self.poll_bytes, self.record_bytes = poll_bytes, record_bytes
+        self._store = None
+        self._files = {}
+        self._errors = {}
+        self._fatal = {}
+        self._rotation = 0
+        self.parsed_records = 0
+        self.read_bytes = 0
+        self.caught_up = False
+        if enabled:
+            try:
+                self._store = InspectorStore(cache_kib=cache_kib)
+            except (OSError, sqlite3.Error) as exc:
+                self._fatal["index"] = {
+                    "stage": "index_open",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+
+    @property
+    def diagnostics(self):
+        return {
+            "caught_up": self.caught_up,
+            "parsed_records": self.parsed_records,
+            "read_bytes": self.read_bytes,
+            "files": len(self._files),
+            "errors": [*self._errors.values(), *self._fatal.values()],
+        }
+
+    def poll(self):
+        import sqlite3
+
+        from .inspector_store import StoredInspectorIndex
+
         if not self.enabled:
             return InspectorIndex(False)
-        paths = set(self.directory.rglob("*.json*")) | set(self.directory.rglob("*.log"))
-        for path in sorted(paths):
-            for payload in _read_payloads(path):
-                if payload.get("record_type") in {
-                    "flagscale_profiler_v5_v1",
-                    "flagscale_bridge_error_v1",
-                }:
-                    self._bridge_records[json.dumps(payload, sort_keys=True)] = payload
-                    continue
-                completion = InspectorCompletion.from_payload(payload)
-                if completion is None:
-                    continue
-                fingerprint = json.dumps(completion.summary(), sort_keys=True)
-                if fingerprint in self._seen:
-                    continue
-                self._seen.add(fingerprint)
-                # Retain conflicting revisions as separate candidates. Only
-                # replace evidence when the new record is a compatible refinement.
-                identity = _completion_identity(completion)
-                revisions = self._revisions.setdefault(identity, [])
-                if any(_refines(old, completion) for old in revisions):
-                    continue
-                self._revisions[identity] = [
-                    old for old in revisions if not _refines(completion, old)
-                ] + [completion]
-        return InspectorIndex(
-            True,
-            tuple(record for revisions in self._revisions.values() for record in revisions),
+        if self._store is None:
+            return StoredInspectorIndex(
+                None, self.correlation_window_s, list(self._fatal.values()), False
+            )
+        # Include known paths even if a directory listing temporarily omits them.
+        paths = set(self._files)
+        try:
+            for pattern in ("*.json*", "*.log"):
+                for path in self.directory.rglob(pattern):
+                    paths.add(path)
+                    if len(paths) > 8192:
+                        raise ValueError("inspector_file_budget_exceeded")
+            self._errors.pop("discovery", None)
+        except (OSError, ValueError) as exc:
+            self._errors["discovery"] = {"stage": "discovery", "error": str(exc)}
+            paths = set(self._files)
+        paths = sorted(paths)
+        if paths:
+            rotation = self._rotation % len(paths)
+            paths = paths[rotation:] + paths[:rotation]
+            self._rotation += 1
+        remaining = self.poll_bytes
+        caught_up = True
+        for path in paths:
+            if remaining <= 0:
+                caught_up = False
+                break
+            state = self._files.setdefault(path, {"offset": 0})
+            try:
+                with path.open("rb") as stream:
+                    import os
+
+                    stat = os.fstat(stream.fileno())
+                    identity = (stat.st_dev, stat.st_ino)
+                    signature = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+                    prefix = stream.read(min(128, state.get("size", stat.st_size)))
+                    rewritten = (
+                        state.get("identity", identity) != identity
+                        or stat.st_size < state["offset"]
+                        or (
+                            state.get("signature") != signature
+                            and stat.st_size <= state.get("size", -1)
+                        )
+                        or (
+                            state.get("prefix") is not None
+                            and not prefix.startswith(state["prefix"])
+                        )
+                    )
+                    if rewritten:
+                        state["offset"] = 0
+                    state.update(
+                        identity=identity, signature=signature, size=stat.st_size, prefix=prefix
+                    )
+                    if path.suffix == ".json":
+                        if state.get("loaded_signature") != signature:
+                            if stat.st_size > self.record_bytes:
+                                raise ValueError("inspector_snapshot_budget_exceeded")
+                            stream.seek(0)
+                            data = stream.read(self.record_bytes + 1)
+                            remaining -= len(data)
+                            self.read_bytes += len(data)
+                            payload = json.loads(data)
+                            if isinstance(payload, dict):
+                                self._store.add(payload)
+                                self.parsed_records += 1
+                            state["loaded_signature"] = signature
+                            state["offset"] = len(data)
+                    else:
+                        stream.seek(state["offset"])
+                        while remaining > 0:
+                            data = stream.readline(self.record_bytes + 1)
+                            if not data:
+                                break
+                            remaining -= len(data)
+                            self.read_bytes += len(data)
+                            if len(data) > self.record_bytes:
+                                raise ValueError("inspector_record_budget_exceeded")
+                            if not data.endswith(b"\n"):
+                                # Leave offset at the last complete line; no per-file
+                                # in-memory remainder that can grow across polls.
+                                caught_up = False
+                                break
+                            try:
+                                payload = json.loads(data)
+                            except (ValueError, UnicodeError) as exc:
+                                self._fatal[str(path)] = {
+                                    "path": str(path),
+                                    "stage": "parse",
+                                    "offset": state["offset"],
+                                    "error": str(exc),
+                                }
+                            else:
+                                if isinstance(payload, dict):
+                                    self._store.add(payload)
+                                    self.parsed_records += 1
+                            state["offset"] = stream.tell()
+                    caught_up &= state["offset"] >= stat.st_size
+                self._errors.pop(str(path), None)
+            except (OSError, ValueError, sqlite3.Error, OverflowError) as exc:
+                self._errors[str(path)] = {
+                    "path": str(path),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "errno": getattr(exc, "errno", None),
+                }
+                caught_up = False
+                if isinstance(exc, (sqlite3.Error, OverflowError)):
+                    self._fatal["index"] = self._errors[str(path)]
+        try:
+            self._store.db.commit()
+        except sqlite3.Error as exc:
+            self._fatal["index"] = {"stage": "commit", "error": str(exc)}
+        self.caught_up = caught_up and not self._errors and not self._fatal
+        return StoredInspectorIndex(
+            self._store,
             self.correlation_window_s,
-            tuple(self._bridge_records.values()),
+            [*self._errors.values(), *self._fatal.values()],
+            self.caught_up,
         )
 
 
