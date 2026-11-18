@@ -37,6 +37,9 @@
 
 namespace flagscale::tracing {
 
+uint64_t ProfilerProcessToken();
+bool ProfilerBridgeEnabled();
+
 constexpr std::size_t kQueueCapacity = 16384;
 constexpr std::size_t kMaxBatchSize = 512;
 
@@ -52,6 +55,7 @@ struct Event {
   uint64_t timestamp_unix_ns = 0;
   uint64_t timestamp_mono_ns = 0;
   uint64_t comm_seq = 0;
+  int64_t comm_api_seq = -1;
   uint64_t call_seq = 0;
   uint64_t count = 0;
   uint64_t stream = 0;
@@ -68,6 +72,7 @@ struct Event {
   char api[32] = {};
   char phase[8] = {};
   char comm_uid_hash[17] = {};
+  char comm_inspector_id[17] = {};
   char result_name[32] = {};
 };
 
@@ -157,8 +162,45 @@ uint64_t hash_unique_id(const ncclUniqueId& unique_id) {
   return hash;
 }
 
+// NCCL 2.27/2.28 communicator IDs use this byte-mixing algorithm
+// (src/include/bitops.h getHash). Keep the existing FNV identity unchanged.
+uint64_t inspector_unique_id_hash(const ncclUniqueId& unique_id) {
+  uint64_t first = 1 ^ sizeof(unique_id);
+  uint64_t second = 1;
+  const auto* bytes = reinterpret_cast<const unsigned char*>(&unique_id);
+  for (std::size_t offset = 0; offset < sizeof(unique_id); offset += sizeof(uint64_t)) {
+    first += second;
+    second ^= first;
+    first ^= first >> 31;
+    first *= 0x9de62bbc8cef3ce3ULL;
+    second ^= second >> 32;
+    second *= 0x485cd6311b599e79ULL;
+    uint64_t word = 0;
+    const std::size_t remaining = sizeof(unique_id) - offset;
+    std::memcpy(&word, bytes + offset,
+                remaining < sizeof(word) ? remaining : sizeof(word));
+    first += word;
+  }
+  first ^= first >> 31;
+  first *= 0xbac3bd562846de6bULL;
+  first += second;
+  first ^= first >> 32;
+  return first * 0x995a187a14e7b445ULL;
+}
+
 void format_hash(uint64_t hash, char output[17]) {
   std::snprintf(output, 17, "%016llx", static_cast<unsigned long long>(hash));
+}
+
+// Inspector numbers collectives separately for each API on each communicator.
+// The original mixed-API sequence remains the H1/H2 alignment key.
+int InspectorApiIndex(const char* api) {
+  if (std::strcmp(api, "ncclAllReduce") == 0) return 0;
+  if (std::strcmp(api, "ncclAllGather") == 0) return 1;
+  if (std::strcmp(api, "ncclReduceScatter") == 0) return 2;
+  if (std::strcmp(api, "ncclBroadcast") == 0) return 3;
+  if (std::strcmp(api, "ncclReduce") == 0) return 4;
+  return -1;
 }
 
 struct CommState {
@@ -166,9 +208,12 @@ struct CommState {
   int rank = -1;
   int nranks = 0;
   char uid_hash[17] = {};
+  char inspector_uid_hash[17] = {};
   // P2P calls do not involve every communicator rank, so they must not shift the
   // collective sequence used for cross-rank collective alignment.
   std::atomic<uint64_t> next_collective_sequence{0};
+  std::atomic<uint64_t> next_inspector_sequences[5];
+  std::atomic<bool> inspector_sequence_valid[5];
   std::atomic<uint64_t> next_p2p_sequence{0};
   std::unique_ptr<std::atomic<uint64_t>[]> next_send_sequences;
   std::unique_ptr<std::atomic<uint64_t>[]> next_recv_sequences;
@@ -183,6 +228,10 @@ class CommRegistry {
     state->handle = reinterpret_cast<uintptr_t>(comm);
     state->rank = rank;
     state->nranks = nranks;
+    for (int index = 0; index < 5; ++index) {
+      state->next_inspector_sequences[index].store(0);
+      state->inspector_sequence_valid[index].store(true);
+    }
     if (nranks > 0) {
       state->next_send_sequences = std::make_unique<std::atomic<uint64_t>[]>(nranks);
       state->next_recv_sequences = std::make_unique<std::atomic<uint64_t>[]>(nranks);
@@ -192,6 +241,7 @@ class CommRegistry {
       }
     }
     format_hash(hash_unique_id(unique_id), state->uid_hash);
+    format_hash(inspector_unique_id_hash(unique_id), state->inspector_uid_hash);
     CommState* pointer = state.get();
     std::lock_guard<std::mutex> lock(mutex_);
     const auto existing = active_.find(state->handle);
@@ -417,10 +467,16 @@ class Runtime {
       line += ",\"api\":" + json_string(event.api);
       line += ",\"phase\":" + json_string(event.phase);
       line += ",\"comm_uid_hash\":" + json_string(event.comm_uid_hash);
+      line += ",\"comm_inspector_id\":" + json_string(event.comm_inspector_id);
       line += ",\"comm_rank\":" + std::to_string(event.comm_rank);
       line += ",\"comm_nranks\":" + std::to_string(event.comm_nranks);
       line += ",\"comm_seq\":" + std::to_string(event.comm_seq);
+      line += ",\"comm_api_seq\":" + std::to_string(event.comm_api_seq);
       line += ",\"call_seq\":" + std::to_string(event.call_seq);
+      if (ProfilerBridgeEnabled()) {
+        line += ",\"profiler_bridge\":true";
+        line += ",\"profiler_process_token\":" + std::to_string(ProfilerProcessToken());
+      }
       line += ",\"count\":" + std::to_string(event.count);
       line += ",\"datatype\":" + std::to_string(event.datatype);
       line += ",\"op\":" + std::to_string(event.op);
@@ -465,6 +521,30 @@ class Runtime {
   std::size_t queue_size_ = 0;
 };
 
+// Versioned thread-local identity consumed synchronously by Profiler API callbacks.
+struct ProfilerCall {
+  uint64_t sequence = 0;
+  uint64_t count = 0;
+  const char* api = nullptr;
+};
+thread_local ProfilerCall profiler_call;
+uint64_t ProfilerProcessToken() {
+  static const uint64_t token = clock_ns(CLOCK_MONOTONIC);
+  return token;
+}
+bool ProfilerBridgeEnabled() {
+  const char* value = std::getenv("FLAGSCALE_TRACE_PROFILER_BRIDGE");
+  return value != nullptr && std::strcmp(value, "1") == 0;
+}
+class ScopedProfilerCall {
+ public:
+  ScopedProfilerCall(uint64_t sequence, const char* api, uint64_t count)
+      : previous_(profiler_call) { profiler_call = {sequence, count, api}; }
+  ~ScopedProfilerCall() { profiler_call = previous_; }
+ private:
+  ProfilerCall previous_;
+};
+
 thread_local uint64_t current_group_id = 0;
 thread_local uint64_t current_group_op_index = 0;
 thread_local unsigned int group_depth = 0;
@@ -488,6 +568,7 @@ struct CallContext {
   uint64_t group_id = 0;
   uint64_t group_op_index = 0;
   uint64_t p2p_op_index = 0;
+  int64_t comm_api_seq = -1;
 };
 
 CallContext BeginCall(const char* api, ncclComm_t comm, std::size_t count,
@@ -500,9 +581,26 @@ CallContext BeginCall(const char* api, ncclComm_t comm, std::size_t count,
     if (state != nullptr) {
       event.comm_seq = is_p2p ? state->next_p2p_sequence.fetch_add(1)
                               : state->next_collective_sequence.fetch_add(1);
+      const int api_index = InspectorApiIndex(api);
+      // Group tasks may be reordered before profiler sequence assignment.
+      // Invalidate inference for this API on this communicator, including
+      // subsequent calls: a group failure/capture can also change consumption.
+      // H1/H2's original counters remain independent and unchanged.
+      if (current_group_id != 0 && api_index >= 0) {
+        state->inspector_sequence_valid[api_index].store(false);
+      }
+      // Empty calls return before NCCL's profiler enqueue path. Single-rank
+      // calls do not provide device work and must not borrow another record.
+      if (!is_p2p && count > 0 && state->nranks > 1 && api_index >= 0 &&
+          state->inspector_sequence_valid[api_index].load()) {
+        event.comm_api_seq = static_cast<int64_t>(
+            state->next_inspector_sequences[api_index].fetch_add(1));
+      }
       event.comm_rank = state->rank;
       event.comm_nranks = state->nranks;
       copy_text(event.comm_uid_hash, sizeof(event.comm_uid_hash), state->uid_hash);
+      copy_text(event.comm_inspector_id, sizeof(event.comm_inspector_id),
+                state->inspector_uid_hash);
     }
     if (is_p2p) {
       event.p2p_op_index = event.comm_seq;
@@ -522,7 +620,7 @@ CallContext BeginCall(const char* api, ncclComm_t comm, std::size_t count,
     event.stream = reinterpret_cast<uintptr_t>(stream);
     runtime.Enqueue(event);
     return CallContext{state, event.comm_seq, event.call_seq, event.group_id,
-                       event.group_op_index, event.p2p_op_index};
+                       event.group_op_index, event.p2p_op_index, event.comm_api_seq};
   } catch (...) {
     return {};
   }
@@ -536,13 +634,22 @@ void EndCall(const char* api, const CallContext& context, ncclResult_t result,
     Event event = MakeBaseEvent(EventKind::kNcclCall, api, "exit");
     event.call_seq = context.call_seq;
     event.comm_seq = context.comm_seq;
+    event.comm_api_seq = context.comm_api_seq;
     event.group_id = context.group_id;
     event.group_op_index = context.group_op_index;
     event.p2p_op_index = context.p2p_op_index;
     if (context.comm != nullptr) {
+      const int api_index = InspectorApiIndex(api);
+      if (api_index >= 0 && result != ncclSuccess && static_cast<int>(result) != 7) {
+        // A failed API may not consume a profiler sequence. Subsequent calls
+        // stay unknown instead of guessing an offset after the failure.
+        context.comm->inspector_sequence_valid[api_index].store(false);
+      }
       event.comm_rank = context.comm->rank;
       event.comm_nranks = context.comm->nranks;
       copy_text(event.comm_uid_hash, sizeof(event.comm_uid_hash), context.comm->uid_hash);
+      copy_text(event.comm_inspector_id, sizeof(event.comm_inspector_id),
+                context.comm->inspector_uid_hash);
     }
     event.count = static_cast<uint64_t>(count);
     event.datatype = static_cast<int>(datatype);
@@ -568,6 +675,7 @@ void RecordCommInit(const char* api, ncclComm_t comm, int nranks,
     event.result = static_cast<int>(result);
     copy_text(event.result_name, sizeof(event.result_name), result_name(result));
     format_hash(hash_unique_id(unique_id), event.comm_uid_hash);
+    format_hash(inspector_unique_id_hash(unique_id), event.comm_inspector_id);
     if (result == ncclSuccess && comm != nullptr) {
       runtime.comms().Register(comm, comm_rank, nranks, unique_id);
     }
@@ -607,6 +715,18 @@ __attribute__((constructor)) static void flagscale_nccl_probe_initialize() {
 }
 
 #define FLAGSCALE_EXPORT extern "C" __attribute__((visibility("default")))
+
+// Returns zero when called outside the matching intercepted API.
+FLAGSCALE_EXPORT uint64_t flagscale_trace_profiler_call_v1(
+    const char* api, uint64_t count, uint64_t* process_token) {
+  const auto& current = flagscale::tracing::profiler_call;
+  if (!api || !process_token || !current.api || current.count != count ||
+      std::strncmp(current.api, "nccl", 4) != 0 ||
+      std::strcmp(current.api + 4, api) != 0 ||
+      !flagscale::tracing::ProfilerBridgeEnabled()) return 0;
+  *process_token = flagscale::tracing::ProfilerProcessToken();
+  return current.sequence;
+}
 
 using flagscale::tracing::BeginCall;
 using flagscale::tracing::CallContext;
@@ -659,6 +779,8 @@ FLAGSCALE_EXPORT ncclResult_t ncclCommDestroy(ncclComm_t comm) {
       event.comm_rank = state->rank;
       event.comm_nranks = state->nranks;
       std::snprintf(event.comm_uid_hash, sizeof(event.comm_uid_hash), "%s", state->uid_hash);
+      flagscale::tracing::copy_text(event.comm_inspector_id, sizeof(event.comm_inspector_id),
+                state->inspector_uid_hash);
     }
     Runtime::Instance().Enqueue(event);
     if (result == ncclSuccess) Runtime::Instance().comms().Remove(comm);
@@ -677,6 +799,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclAllReduce(const void* send_buffer, void* recei
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context = BeginCall("ncclAllReduce", comm, count, datatype,
                                         static_cast<int>(op), -1, -1, stream);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclAllReduce", count);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, count, datatype, op, comm, stream);
   EndCall("ncclAllReduce", context, result, count, datatype, static_cast<int>(op),
@@ -693,6 +816,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclAllGather(const void* send_buffer, void* recei
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context =
       BeginCall("ncclAllGather", comm, send_count, datatype, -1, -1, -1, stream);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclAllGather", send_count);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, send_count, datatype, comm, stream);
   EndCall("ncclAllGather", context, result, send_count, datatype, -1, -1, -1,
@@ -710,6 +834,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclReduceScatter(const void* send_buffer,
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context = BeginCall("ncclReduceScatter", comm, receive_count,
                                         datatype, static_cast<int>(op), -1, -1, stream);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclReduceScatter", receive_count);
   const ncclResult_t result = real_function(send_buffer, receive_buffer, receive_count,
                                             datatype, op, comm, stream);
   EndCall("ncclReduceScatter", context, result, receive_count, datatype,
@@ -726,6 +851,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclBroadcast(const void* send_buffer, void* recei
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context =
       BeginCall("ncclBroadcast", comm, count, datatype, -1, root, -1, stream);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclBroadcast", count);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, count, datatype, root, comm, stream);
   EndCall("ncclBroadcast", context, result, count, datatype, -1, root, -1, stream);
@@ -742,6 +868,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclReduce(const void* send_buffer, void* receive_
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context = BeginCall("ncclReduce", comm, count, datatype,
                                         static_cast<int>(op), root, -1, stream);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclReduce", count);
   const ncclResult_t result =
       real_function(send_buffer, receive_buffer, count, datatype, op, root, comm, stream);
   EndCall("ncclReduce", context, result, count, datatype, static_cast<int>(op), root,
@@ -758,6 +885,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclSend(const void* send_buffer, size_t count,
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context =
       BeginCall("ncclSend", comm, count, datatype, -1, -1, peer, stream, true);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclSend", count);
   const ncclResult_t result = real_function(send_buffer, count, datatype, peer, comm, stream);
   EndCall("ncclSend", context, result, count, datatype, -1, -1, peer, stream);
   return result;
@@ -772,6 +900,7 @@ FLAGSCALE_EXPORT ncclResult_t ncclRecv(void* receive_buffer, size_t count,
   if (real_function == nullptr) return ncclInternalError;
   const CallContext context =
       BeginCall("ncclRecv", comm, count, datatype, -1, -1, peer, stream, true);
+  flagscale::tracing::ScopedProfilerCall scope(context.call_seq, "ncclRecv", count);
   const ncclResult_t result = real_function(receive_buffer, count, datatype, peer, comm, stream);
   EndCall("ncclRecv", context, result, count, datatype, -1, -1, peer, stream);
   return result;

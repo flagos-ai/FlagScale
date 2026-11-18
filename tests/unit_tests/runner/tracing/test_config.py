@@ -156,3 +156,53 @@ def test_no_shared_filesystem_is_rejected_for_cross_rank_analysis(tmp_path):
     config.experiment.runner.no_shared_fs = True
     with pytest.raises(ValueError, match="shared filesystem"):
         prepare_trace_launch_config(config, "run")
+
+
+def test_profiler_bridge_is_explicit_and_keeps_delegate(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "inspector": {
+                "enabled": True,
+                "plugin_library": str(tmp_path / "official.so"),
+                "bridge_library": str(tmp_path / "bridge.so"),
+            },
+        },
+    )
+    resolved = prepare_trace_launch_config(config, "run")
+    shell = "\n".join(resolved.shell_setup_lines(0))
+    assert f"export FLAGSCALE_INSPECTOR_DELEGATE={tmp_path / 'official.so'}" in shell
+    assert f"export NCCL_PROFILER_PLUGIN={tmp_path / 'bridge.so'}" in shell
+    assert "export FLAGSCALE_TRACE_PROFILER_BRIDGE=1" in shell
+
+
+def test_bridge_cannot_delegate_to_itself(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "inspector": {
+                "enabled": True,
+                "plugin_library": str(tmp_path / "same.so"),
+                "bridge_library": str(tmp_path / "same.so"),
+            },
+        },
+    )
+    with pytest.raises(ValueError, match="different libraries"):
+        prepare_trace_launch_config(config, "run")
+
+
+def test_legacy_inspector_clears_inherited_bridge_marker(tmp_path):
+    config = _config(
+        tmp_path,
+        {
+            "enabled": True,
+            "inspector": {
+                "enabled": True,
+                "plugin_library": str(tmp_path / "official.so"),
+            },
+        },
+    )
+    shell = "\n".join(prepare_trace_launch_config(config, "run").shell_setup_lines(0))
+    assert "unset FLAGSCALE_TRACE_PROFILER_BRIDGE" in shell

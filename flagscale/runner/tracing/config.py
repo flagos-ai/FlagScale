@@ -82,6 +82,7 @@ class TraceLaunchConfig:
     hardware_health_stale_after_s: float = 180.0
     inspector_enabled: bool = False
     inspector_plugin_library: str = ""
+    inspector_bridge_library: str = ""
     inspector_dump_dir: str = ""
     inspector_dump_interval_us: int = 500_000
     inspector_min_size_bytes: int = 8192
@@ -159,6 +160,19 @@ class TraceLaunchConfig:
                     ),
                 ]
             )
+
+        if self.inspector_enabled and self.inspector_bridge_library:
+            bridge_library = shlex.quote(self.inspector_bridge_library)
+            lines.extend(
+                [
+                    f"test -r {bridge_library} || exit 1",
+                    f"export FLAGSCALE_INSPECTOR_DELEGATE={shlex.quote(self.inspector_plugin_library)}",
+                    f"export NCCL_PROFILER_PLUGIN={bridge_library}",
+                    "export FLAGSCALE_TRACE_PROFILER_BRIDGE=1",
+                ]
+            )
+        else:
+            lines.append("unset FLAGSCALE_TRACE_PROFILER_BRIDGE")
 
         # With a shared trace directory, a single analyzer on node zero sees all ranks.
         if node_rank == 0:
@@ -362,6 +376,13 @@ def prepare_trace_launch_config(
         raise ValueError("tracing.inspector.plugin_library is required when Inspector is enabled")
     if inspector_plugin_library:
         inspector_plugin_library = os.path.abspath(os.path.expanduser(inspector_plugin_library))
+    inspector_bridge_library = str(inspector.get("bridge_library") or "")
+    if inspector_bridge_library:
+        if not inspector_enabled:
+            raise ValueError("tracing.inspector.bridge_library requires Inspector enabled")
+        inspector_bridge_library = os.path.abspath(os.path.expanduser(inspector_bridge_library))
+        if inspector_bridge_library == inspector_plugin_library:
+            raise ValueError("Inspector bridge and delegate must be different libraries")
     inspector_dump_dir = os.path.abspath(
         os.path.expanduser(str(inspector.get("dump_dir") or os.path.join(trace_dir, "inspector")))
     )
@@ -418,6 +439,7 @@ def prepare_trace_launch_config(
         ),
         inspector_enabled=inspector_enabled,
         inspector_plugin_library=inspector_plugin_library,
+        inspector_bridge_library=inspector_bridge_library,
         inspector_dump_dir=inspector_dump_dir,
         inspector_dump_interval_us=inspector_dump_interval_us,
         inspector_min_size_bytes=inspector_min_size_bytes,
