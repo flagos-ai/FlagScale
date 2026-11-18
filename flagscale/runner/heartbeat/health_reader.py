@@ -45,6 +45,7 @@ class HardwareHealthIndex:
     snapshots: tuple[dict[str, Any], ...] = ()
     missing_node_ranks: tuple[int, ...] = ()
     read_errors: tuple[dict[str, Any], ...] = ()
+    read_events: tuple[dict[str, Any], ...] = ()
 
     @property
     def overall_status(self) -> str:
@@ -203,13 +204,18 @@ class HardwareHealthReader:
         self._reported_missing_nodes: set[int] = set()
         self._last_valid: dict[int, dict[str, Any]] = {}
         self._reported_read_failures: set[int] = set()
+        self._read_episodes: dict[int, dict[str, Any]] = {}
 
     def poll(self, now_unix_ns: int) -> tuple[HardwareHealthIndex, list[dict[str, Any]]]:
         if not self.enabled:
             return HardwareHealthIndex(False, now_unix_ns, self.stale_after_s), []
         # Known nodes must not disappear merely because a shared directory listing
         # is stale. Discover additional nodes only when the topology is unknown.
-        nodes = set(range(self.expected_node_count)) | self._last_valid.keys()
+        nodes = (
+            set(range(self.expected_node_count))
+            | self._last_valid.keys()
+            | self._read_episodes.keys()
+        )
         if self.expected_node_count <= 0:
             for path in self.heartbeat_dir.glob("gpu_health_node_*.json"):
                 try:
@@ -219,8 +225,12 @@ class HardwareHealthReader:
         errors: list[dict[str, Any]] = []
         for node in sorted(nodes):
             path = self.heartbeat_dir / f"gpu_health_node_{node}.json"
+            stage = "read"
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
+                text = path.read_text(encoding="utf-8")
+                stage = "parse"
+                payload = json.loads(text)
+                stage = "validate"
                 if (
                     not isinstance(payload, dict)
                     or payload.get("run_id") != self.run_id
@@ -236,6 +246,8 @@ class HardwareHealthReader:
                         "error_type": type(exc).__name__,
                         "error": str(exc),
                         "errno": getattr(exc, "errno", None),
+                        "path": str(path),
+                        "stage": stage,
                     }
                 )
                 continue
@@ -244,6 +256,7 @@ class HardwareHealthReader:
             if old is None or payload["collected_at_unix_ns"] >= old["collected_at_unix_ns"]:
                 self._last_valid[node] = payload
         snapshots = list(self._last_valid.values())
+        read_events = self._update_read_episodes(errors, now_unix_ns)
         missing_node_ranks = self._missing_node_ranks(snapshots, now_unix_ns)
         index = HardwareHealthIndex(
             True,
@@ -252,11 +265,81 @@ class HardwareHealthReader:
             tuple(snapshots),
             missing_node_ranks,
             tuple(errors),
+            tuple(read_events),
         )
         findings = self._new_findings(index, now_unix_ns)
         findings.extend(self._new_missing_findings(index, now_unix_ns))
         findings.extend(self._new_read_failure_findings(index, now_unix_ns))
         return index, findings
+
+    def _update_read_episodes(
+        self, errors: list[dict[str, Any]], now_unix_ns: int
+    ) -> list[dict[str, Any]]:
+        """Retain bounded episode state; the monitor persists transitions separately."""
+        failures = {error["node_rank"]: error for error in errors}
+        events = []
+        for node in sorted(set(failures) | self._read_episodes.keys()):
+            error = failures.get(node)
+            episode = self._read_episodes.get(node)
+            transition = None
+            if error is not None:
+                if episode is None:
+                    episode = {
+                        "first_failure_unix_ns": now_unix_ns,
+                        "failure_count": 0,
+                        "first_error": dict(error),
+                        "last_report_unix_ns": now_unix_ns,
+                    }
+                    self._read_episodes[node] = episode
+                    transition = "first_failure"
+                elif any(
+                    episode["last_error"].get(key) != error.get(key)
+                    for key in ("stage", "error_type", "errno")
+                ):
+                    transition = "error_changed"
+                elif now_unix_ns - episode["last_report_unix_ns"] >= 30_000_000_000:
+                    transition = "ongoing"
+                episode["failure_count"] += 1
+                episode["last_failure_unix_ns"] = now_unix_ns
+                episode["last_error"] = dict(error)
+            elif episode is not None:
+                transition = "read_recovered"
+            if transition is None:
+                continue
+            snapshot = self._last_valid.get(node)
+            sampled_at = snapshot.get("collected_at_unix_ns") if snapshot else None
+            age_s = (
+                max(0.0, (now_unix_ns - sampled_at) / 1_000_000_000)
+                if sampled_at is not None
+                else None
+            )
+            events.append(
+                {
+                    "event": "gpu_health_read_episode",
+                    "run_id": self.run_id,
+                    "node_rank": node,
+                    "observed_at_unix_ns": now_unix_ns,
+                    "transition": transition,
+                    **{
+                        key: value for key, value in episode.items() if key != "last_report_unix_ns"
+                    },
+                    "last_valid_sample_unix_ns": sampled_at,
+                    "sample_age_s": age_s,
+                    "snapshot_status": (
+                        "unavailable"
+                        if snapshot is None
+                        else "stale"
+                        if age_s > self.stale_after_s
+                        else str(snapshot.get("status") or "unavailable")
+                    ),
+                    "recovered_at_unix_ns": now_unix_ns if error is None else None,
+                }
+            )
+            if error is None:
+                del self._read_episodes[node]
+            else:
+                episode["last_report_unix_ns"] = now_unix_ns
+        return events
 
     def _missing_node_ranks(
         self, snapshots: list[dict[str, Any]], now_unix_ns: int

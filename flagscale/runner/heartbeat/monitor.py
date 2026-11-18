@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -374,6 +375,24 @@ def _append_findings(file_obj: TextIO, findings: list[dict[str, Any]]) -> None:
         os.fsync(file_obj.fileno())
 
 
+def _append_health_read_events(path: Path, events: tuple[dict[str, Any], ...]) -> None:
+    if not events:
+        return
+    records = [
+        {**event, "observer_hostname": socket.gethostname(), "observer_pid": os.getpid()}
+        for event in events
+    ]
+    try:
+        with path.open("a", encoding="utf-8") as output:
+            for record in records:
+                output.write(json.dumps(record, sort_keys=True) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+    except OSError:
+        # Preserve the diagnostic in the monitor log if its dedicated journal fails.
+        logger.exception("Could not persist health read events: %s", json.dumps(records))
+
+
 def _write_status(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -430,6 +449,9 @@ def run_monitor(args: argparse.Namespace) -> int:
                 analyzer.ingest(event, now_s)
             now_unix_ns = time.time_ns()
             hardware_health, hardware_findings = hardware_reader.poll(now_unix_ns)
+            _append_health_read_events(
+                report_file.parent / "health_read_events.jsonl", hardware_health.read_events
+            )
             findings = hardware_findings + analyzer.scan(now_s, now_unix_ns, hardware_health)
             _append_findings(output, findings)
             _write_status(status_file, analyzer.snapshot(now_s, now_unix_ns, hardware_health))
