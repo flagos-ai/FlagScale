@@ -79,7 +79,9 @@ def test_unique_completed_record_is_positive_kernel_evidence(tmp_path):
 
 def test_absent_or_ambiguous_inspector_record_stays_unknown(tmp_path):
     reader = InspectorReader(tmp_path, enabled=True)
-    assert reader.poll().for_call(_event())["inspector_kernel_status"] == "unknown"
+    missing = reader.poll().for_call(_event())
+    assert missing["inspector_kernel_status"] == "unknown"
+    assert missing["inspector_correlation_reason"] == "device_record_missing"
 
     output = tmp_path / "inspector.jsonl"
     output.write_text(
@@ -89,6 +91,7 @@ def test_absent_or_ambiguous_inspector_record_stays_unknown(tmp_path):
     evidence = reader.poll().for_call(_event())
 
     assert evidence["inspector_correlation"] == "ambiguous"
+    assert evidence["inspector_correlation_reason"] == "multiple_device_records"
     assert evidence["inspector_candidate_count"] == 2
     assert evidence["inspector_kernel_status"] == "unknown"
     assert evidence["kernel_execution_status"] == "unknown"

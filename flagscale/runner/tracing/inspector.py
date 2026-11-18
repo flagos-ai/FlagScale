@@ -207,6 +207,7 @@ class InspectorIndex:
         if not self.enabled:
             return {
                 "inspector_correlation": "not_collected",
+                "inspector_correlation_reason": "inspector_disabled",
                 "inspector_kernel_status": "not_collected",
                 "kernel_execution_status": "unknown",
             }
@@ -272,6 +273,9 @@ class InspectorIndex:
             return {
                 "inspector_correlation": "none" if not candidates else "ambiguous",
                 "inspector_candidate_count": len(candidates),
+                "inspector_correlation_reason": (
+                    "device_record_missing" if not candidates else "multiple_device_records"
+                ),
                 "inspector_kernel_status": "unknown",
                 "kernel_execution_status": "unknown",
             }
@@ -279,6 +283,10 @@ class InspectorIndex:
         kernel_status = "completed" if completion.kernel_completed else "unknown"
         return {
             "inspector_correlation": "unique",
+            "inspector_correlation_reason": (
+                "device_channels_complete" if completion.kernel_completed
+                else "device_completion_evidence_incomplete"
+            ),
             "inspector_candidate_count": 1,
             "inspector_call_sequence": event_sequence if strict_identity else None,
             "inspector_kernel_status": kernel_status,
