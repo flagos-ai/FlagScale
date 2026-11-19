@@ -465,27 +465,117 @@ def write_online_eval_to_tensorboard(data, iteration, writer):
 # Text-only (GPT-style) data loading — used when enable_vision=False
 ###############################################################################
 
+from megatron.core import mpu
+from megatron.core.utils import get_batch_on_this_tp_rank, get_batch_on_this_cp_rank
+from megatron.training.utils import is_first_or_last_pipeline_stage
+from megatron.core.parallel_state import get_context_parallel_group
+from megatron.core.transformer.multi_token_prediction import (
+    mtp_on_this_rank as mtp_on_this_rank_func,
+)
 from flagscale.train.megatron.train_gpt import (
     get_batch as get_batch_gpt,
     train_valid_test_datasets_provider as train_valid_test_datasets_provider_gpt,
     get_embedding_ranks,
+    is_dataset_built_on_rank as _is_dataset_built_on_rank_gpt,
 )
+
+
+def _broadcast_mrope_inputs_on_this_tp_rank(batch, tp_rank, create_attention_mask_in_dataloader):
+    """Broadcast position_ids (and attention_mask) from TP rank 0 for mrope intermediate PP stages."""
+    src = mpu.get_tensor_model_parallel_src_rank()
+    group = mpu.get_tensor_model_parallel_group()
+    device = cur_platform.device()
+
+    def _broadcast_tensor(tensor, dtype):
+        if tp_rank == 0:
+            assert tensor is not None, "mrope with PP > 1 requires the dataloader to provide this tensor"
+            tensor = tensor.to(device=device, dtype=dtype).contiguous()
+            shape = torch.tensor(tensor.shape, dtype=torch.int64, device=device)
+            ndim = torch.tensor([tensor.dim()], dtype=torch.int64, device=device)
+        else:
+            ndim = torch.empty(1, dtype=torch.int64, device=device)
+        torch.distributed.broadcast(ndim, src, group=group)
+        if tp_rank != 0:
+            shape = torch.empty(int(ndim.item()), dtype=torch.int64, device=device)
+        torch.distributed.broadcast(shape, src, group=group)
+        if tp_rank != 0:
+            tensor = torch.empty(tuple(shape.tolist()), dtype=dtype, device=device)
+        torch.distributed.broadcast(tensor, src, group=group)
+        return tensor
+
+    position_ids = _broadcast_tensor(batch.get("position_ids") if tp_rank == 0 else None, torch.int64)
+    attention_mask = None
+    if create_attention_mask_in_dataloader:
+        attention_mask = _broadcast_tensor(batch.get("attention_mask") if tp_rank == 0 else None, torch.bool)
+    return {"position_ids": position_ids, "attention_mask": attention_mask}
+
+
+def is_dataset_built_on_rank(vp_stage=None, is_packed_sequence=False):
+    """Extends train_gpt's version: also build dataset on mrope intermediate PP stages."""
+    args = get_args()
+    config = core_transformer_config_from_args(args)
+    needs_dataset_for_mrope = (
+        getattr(args, 'position_embedding_type', None) == 'mrope'
+        and not is_first_or_last_pipeline_stage(vp_stage)
+        and not mtp_on_this_rank_func(
+            layout=config.pipeline_model_parallel_layout,
+            mtp_num_layers=config.mtp_num_layers,
+            ignore_virtual=False,
+            vp_stage=vp_stage,
+        )
+    )
+    return _is_dataset_built_on_rank_gpt(vp_stage, is_packed_sequence) or needs_dataset_for_mrope
 
 
 def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
     """Generate a batch for text-only training (GPT-style), with mRoPE position_ids."""
-    (
-        attention_mask,
-        cu_seqlens,
-        cu_seqlens_padded,
-        hybrid_cp_group,
-        labels,
-        local_cp_size,
-        loss_mask,
-        max_seqlen,
-        position_ids,
-        tokens,
-    ) = get_batch_gpt(data_iterator, vp_stage)
+    args = get_args()
+    config = core_transformer_config_from_args(args)
+    tp_rank = mpu.get_tensor_model_parallel_rank()
+    is_intermediate_stage = not is_first_or_last_pipeline_stage(vp_stage) and not mtp_on_this_rank_func(
+        layout=config.pipeline_model_parallel_layout,
+        mtp_num_layers=config.mtp_num_layers,
+        ignore_virtual=False,
+        vp_stage=vp_stage,
+    )
+    is_mrope = getattr(args, 'position_embedding_type', None) == 'mrope'
+
+    if is_intermediate_stage and is_mrope and not args.sft:
+        ######### FlagScale Begin #########
+        # mrope computes rotary embeddings from position_ids on every PP stage.
+        # main's get_batch_gpt returns all-None for intermediate non-SFT stages,
+        # so fetch the batch here and broadcast position_ids across TP, then
+        # apply the same zigzag CP slicing as other stages.
+        assert not args.hybrid_context_parallel, "mrope with PP > 1 does not support hybrid context parallel yet"
+        batch = {}
+        if tp_rank == 0:
+            data = next(data_iterator)
+            BATCH_KEYS = ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "max_seqlen", "position_ids", "tokens"]
+            for key in BATCH_KEYS:
+                batch[key] = data[key].to(cur_platform.device(), non_blocking=True) if key in data and data[key] is not None else None
+        mrope_inputs = _broadcast_mrope_inputs_on_this_tp_rank(
+            batch, tp_rank, args.create_attention_mask_in_dataloader
+        )
+        out = {key: None for key in ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "max_seqlen", "position_ids", "tokens"]}
+        out.update(mrope_inputs)
+        out = get_batch_on_this_cp_rank(out, is_hybrid_cp=False, cp_group=get_context_parallel_group())
+        attention_mask, cu_seqlens, cu_seqlens_padded, hybrid_cp_group, labels, local_cp_size, loss_mask, max_seqlen, position_ids, tokens = (
+            out["attention_mask"], out["cu_seqlens"], out["cu_seqlens_padded"], out["hybrid_cp_group"], out["labels"], out["local_cp_size"], out["loss_mask"], out["max_seqlen"], out["position_ids"], out["tokens"]
+        )
+        ######### FlagScale End #########
+    else:
+        (
+            attention_mask,
+            cu_seqlens,
+            cu_seqlens_padded,
+            hybrid_cp_group,
+            labels,
+            local_cp_size,
+            loss_mask,
+            max_seqlen,
+            position_ids,
+            tokens,
+        ) = get_batch_gpt(data_iterator, vp_stage)
 
     packed_seq_params = None
     if cu_seqlens is not None:

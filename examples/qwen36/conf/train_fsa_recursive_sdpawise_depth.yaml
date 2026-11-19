@@ -1,0 +1,40 @@
+defaults:
+  - _self_
+  - train: 35b_a3b_llm_fsa_recursive_sdpawise_depth
+
+experiment:
+  exp_name: EXP-TRAIN-1-Qwen-36-35B-A3B-LLM-BACKBONE-FSA-RECURSIVE-SDPAWISE-DEPTH
+  exp_dir: /path/to/exps/${experiment.exp_name}
+  task:
+    type: train
+    backend: megatron
+    entrypoint: ./flagscale/train/megatron/train_qwen35.py
+  runner:
+    no_shared_fs: false
+    per_node_task: false
+    rdzv_backend: static
+    nnodes: 8
+    nproc_per_node: 8
+    hostfile: /path/to/hostfile # one host per line
+    ssh_port: 22 # use your ssh port
+  cmds:
+    before_start: ulimit -n 1048576 && source /path/to/conda/bin/activate /path/to/env
+  envs:
+    CUDA_VISIBLE_DEVICES: "0,1,2,3,4,5,6,7"
+    CUDA_DEVICE_MAX_CONNECTIONS: 1 # Using tensor model parallelism or context parallelism require setting the environment variable CUDA_DEVICE_MAX_CONNECTIONS to 1
+    PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+    # NCCL_NVLS_ENABLE: 0
+    NCCL_SOCKET_IFNAME: xxx # your network interface, e.g. eth0
+    GLOO_SOCKET_IFNAME: xxx # your network interface, e.g. eth0
+    NCCL_IB_HCA: "xxx" # your IB HCA list, e.g. mlx5_0,mlx5_1,...
+    NCCL_IB_DISABLE: 0
+    NCCL_IB_GID_INDEX: 3
+    # proxy for wandb online mode
+    # https_proxy: "http://xxx:xxx@xxx.xxx.xxx.xxx:xxxx"
+    # http_proxy: "http://xxx:xxx@xxx.xxx.xxx.xxx:xxxx"
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra

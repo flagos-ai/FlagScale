@@ -219,30 +219,75 @@ def merge_ep_experts(ep_state_dicts, cfg):
 # -----------------------------------------------------------------------------
 # Megatron release checkpoint naming
 # -----------------------------------------------------------------------------
-def megatron_shard_path(save_dir, tp_rank=0, pp_rank=0, ep_rank=None, release=True):
-    """Build path for a single Megatron checkpoint shard."""
+def megatron_shard_path(
+    save_dir,
+    tp_rank=0,
+    pp_rank=0,
+    ep_rank=None,
+    expert_tp_rank=None,
+    release=True,
+    pipeline_parallel=False,
+):
+    """Build path for a single Megatron checkpoint shard.
+
+    Args:
+        save_dir: base checkpoint directory
+        tp_rank: tensor parallel rank
+        pp_rank: pipeline parallel rank
+        ep_rank: expert parallel rank (optional)
+        expert_tp_rank: expert tensor parallel rank (ignored, kept for API compat)
+        release: use release checkpoint layout
+        pipeline_parallel: whether PP>1 (controls directory name format)
+    """
     if release:
-        if ep_rank is not None:
-            rank_dir = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}_ep_{ep_rank:02d}"
-        else:
+        # Follow Megatron-LM-FL get_checkpoint_name() convention:
+        #   PP>1:  mp_rank_{tp:02d}_{pp:03d}[_{ep:03d}]
+        #   PP=1:  mp_rank_{tp:02d}[_{ep:03d}]
+        if pipeline_parallel:
             rank_dir = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}"
+        else:
+            rank_dir = f"mp_rank_{tp_rank:02d}"
+        if ep_rank is not None:
+            rank_dir += f"_{ep_rank:03d}"
         return os.path.join(save_dir, "release", rank_dir, "model_optim_rng.pt")
     else:
         raise NotImplementedError("Non-release checkpoint layout is not supported yet.")
 
 
 def iter_release_shard_dirs(checkpoint_dir):
-    """Yield (tp_rank, pp_rank, ep_rank, dir_path) for release checkpoint shards."""
+    """Yield (tp_rank, pp_rank, ep_rank, expert_tp_rank, dir_path) for release checkpoint shards.
+
+    Supports Megatron-LM-FL naming conventions:
+      - mp_rank_XX                     (TP only)
+      - mp_rank_XX_YYY                 (TP+PP or TP+EP, ambiguous — resolved by caller)
+      - mp_rank_XX_YYY_ZZZ             (TP+PP+EP)
+    """
     release_dir = os.path.join(checkpoint_dir, "release")
     if not os.path.isdir(release_dir):
         return
 
-    pattern = re.compile(r"mp_rank_(\d+)_(\d+)(?:_ep_(\d+))?")
+    # Match 1, 2, or 3 numeric segments after mp_rank_
+    pattern = re.compile(r"mp_rank_(\d+)(?:_(\d+))?(?:_(\d+))?$")
     for name in sorted(os.listdir(release_dir)):
         m = pattern.match(name)
         if not m:
             continue
-        tp_rank = int(m.group(1))
-        pp_rank = int(m.group(2))
-        ep_rank = int(m.group(3)) if m.group(3) is not None else None
-        yield tp_rank, pp_rank, ep_rank, os.path.join(release_dir, name)
+        g1, g2, g3 = m.group(1), m.group(2), m.group(3)
+        if g3 is not None:
+            # 3 segments: tp_pp_ep
+            tp_rank = int(g1)
+            pp_rank = int(g2)
+            ep_rank = int(g3)
+        elif g2 is not None:
+            # 2 segments: could be tp_pp (no EP) or tp_ep (no PP)
+            # Convention: if second segment is 3-digit and small, treat as pp;
+            # but we can't distinguish reliably here. Return both and let caller decide.
+            tp_rank = int(g1)
+            pp_rank = int(g2)
+            ep_rank = None
+        else:
+            # 1 segment: tp only
+            tp_rank = int(g1)
+            pp_rank = 0
+            ep_rank = None
+        yield tp_rank, pp_rank, ep_rank, None, os.path.join(release_dir, name)

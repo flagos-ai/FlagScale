@@ -30,6 +30,8 @@ def _list_megatron_ranks(ref_dir, cfg):
 
     Scans ``ref_dir`` as well as ``release/`` and ``iter_*/`` subdirectories.
     Directory names are parsed according to ``cfg.pp`` and ``cfg.ep``.
+    Expert-TP shards (``_etp_XX``) are collapsed — only the base
+    ``(pp, tp, ep)`` triple is tracked.
     """
     candidates = [ref_dir]
     release_dir = os.path.join(ref_dir, "release")
@@ -44,11 +46,26 @@ def _list_megatron_ranks(ref_dir, cfg):
                 if os.path.isdir(iter_release):
                     candidates.append(iter_release)
 
+    import re
+
+    etp_pattern = re.compile(r"mp_rank_(\d+)_(\d+)(?:_ep_(\d+))?(?:_etp_(\d+))?$")
+
     ranks = set()
     for base in candidates:
         for entry in os.listdir(base):
             if not entry.startswith("mp_rank_"):
                 continue
+
+            m = etp_pattern.match(entry)
+            if m:
+                tp_rank = int(m.group(1))
+                pp_rank = int(m.group(2))
+                ep_rank = int(m.group(3)) if m.group(3) is not None else 0
+                # expert_tp_rank is ignored — we collapse to (pp, tp, ep)
+                ranks.add((pp_rank, tp_rank, ep_rank))
+                continue
+
+            # Fallback: legacy numeric-only naming
             parts = entry.split("_")[2:]  # strip "mp_rank" prefix
             if not parts:
                 continue
@@ -92,12 +109,21 @@ def validate_hf2meg_against_ref(shards_dict, cfg, ref_dir, use_ep=False, skip_va
     all_ok = True
     gen_ranks = set()
     for rank_tuple in sorted(shards_dict.keys()):
-        if len(rank_tuple) == 3:
+        if len(rank_tuple) == 4:
+            pp_rank, tp_rank, ep_rank, expert_tp_rank = rank_tuple
+        elif len(rank_tuple) == 3:
             pp_rank, tp_rank, ep_rank = rank_tuple
+            expert_tp_rank = 0
         else:
             pp_rank, tp_rank = rank_tuple
             ep_rank = 0
+            expert_tp_rank = 0
         gen_ranks.add((pp_rank, tp_rank, ep_rank))
+
+        # Only validate the first expert_tp shard to avoid redundant checks
+        # on non-expert weights (they are identical across expert_tp ranks)
+        if expert_tp_rank != 0:
+            continue
 
         ref_path = find_megatron_shard(ref_dir, tp_rank, pp_rank, ep_rank)
         if ref_path is None:

@@ -118,6 +118,13 @@ def parse_args():
         default=None,
         help="Override expert model parallel size from YAML (MoE only)",
     )
+    p.add_argument(
+        "--expert-tp",
+        type=int,
+        default=None,
+        help="Override expert tensor model parallel size from YAML (MoE only). "
+        "Defaults to same as --tp if not specified.",
+    )
     return p.parse_args(), p
 
 
@@ -153,6 +160,11 @@ def main():
         cfg.pp = args.pp
     if args.ep is not None:
         cfg.ep = args.ep
+    if args.expert_tp is not None:
+        cfg.expert_tp = args.expert_tp
+    elif args.tp is not None:
+        # If --tp is overridden but --expert-tp is not, update expert_tp to match
+        cfg.expert_tp = args.tp
 
     # Auto-detect model type from whichever input is available
     hf_input = args.hf_path if args.direction == "hf2meg" else None
@@ -168,7 +180,22 @@ def main():
     print(f"Direction: {args.direction}")
     print(f"Model type: {model_type}")
     print(f"TP={cfg.tp}, PP={cfg.pp}, EP={cfg.ep}")
+    if model_type == "moe" and cfg.expert_tp != cfg.tp:
+        print(f"Expert-TP={cfg.expert_tp} (different from model TP)")
     print(f"Layers={cfg.num_layers}, hidden={cfg.hidden_size}")
+    if cfg.is_loop:
+        if cfg.loop_type == "sdpa-wise":
+            scope = (
+                f"{cfg.num_looped_sdpa_layers} SDPA layers in "
+                f"[{cfg.loop_start_layer}, {cfg.loop_end_layer})"
+            )
+        else:
+            scope = f"layers [{cfg.loop_start_layer}, {cfg.loop_end_layer})"
+        print(
+            f"Loop Transformer ({cfg.loop_type}): {scope} "
+            f"x {cfg.num_loop_iterations}, scale={cfg.loop_residual_scale}, "
+            f"HF layers={cfg.hf_num_layers}"
+        )
     print(f"LN adjustment: {LN_ADJUSTMENT}")
     print(f"Ref skip value: {args.ref_skip_value}")
 
