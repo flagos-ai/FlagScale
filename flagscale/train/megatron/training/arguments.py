@@ -3526,6 +3526,12 @@ def _add_sft_args(parser):
     group.add_argument('--sft', action="store_true", help='Megatron SFT training')
     group.add_argument('--sft-tokenizer-prompt-format', type=str, default="nemotron-h-aligned",
                        help='SFT prompt format.')
+    group.add_argument(
+        '--sft-assistant-only-loss', action=argparse.BooleanOptionalAction, default=True,
+        help='Supervise only chat-template generation spans for the default SFT prompt '
+             'format (enabled by default). Other prompt formats are unchanged. Use '
+             '--no-sft-assistant-only-loss to retain all-token targets for default.',
+    )
     return parser
 
 

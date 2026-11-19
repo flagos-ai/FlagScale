@@ -67,6 +67,10 @@ def _get_args_megatron(config: DictConfig):
 
     ignore_keys = ["log_dir", "details_dir", "scripts_dir", "pids_dir", "straggler_dir"]
     # Flatten the dictionary to a list of arguments
+    # BooleanOptionalAction defaults to True, so false must be emitted explicitly.
+    if new_config_dict.get("sft_assistant_only_loss") is False:
+        new_config_dict.pop("sft_assistant_only_loss")
+        new_config_dict["no_sft_assistant_only_loss"] = True
     args = flatten_dict_to_args(new_config_dict, ignore_keys)
 
     return args
