@@ -1,0 +1,752 @@
+# Reusable weight structures. Model profiles select structures and bind names/scopes.
+schema_version: 2
+bindings:
+  embedding: embed
+  output: head
+  final_norm: norm
+  attention: attn
+  attention_output: wo_b
+  attention_norm: attn_norm
+  mlp_norm: ffn_norm
+  mlp: ffn
+  gate_proj: w1
+  up_proj: w3
+  down_proj: w2
+structures:
+  embedding:
+    args: [model, vocabulary]
+    rules:
+    - id: embedding
+      hf: ['{embedding}.weight']
+      mcore: [embedding.word_embeddings.weight]
+      shape_config:
+        hf.vocab_size: 0
+        mcore.vocab_size: 0
+        mcore.padded_vocab_size: 0
+        mcore.actual_vocab_size: 0
+  output:
+    args: [untied_embeddings]
+    rules:
+    - id: output
+      hf: ['{output}.weight']
+      mcore: [output_layer.weight]
+      shape_config:
+        hf.vocab_size: 0
+  output_te:
+    args: [untied_embeddings]
+    rules:
+    - id: output
+      hf: ['{output}.weight']
+      mcore: [output_layer.weight]
+      extra_state: [output_layer._extra_state/shard_0_1]
+      shape_config:
+        hf.vocab_size: 0
+  final_norm:
+    args: [rmsnorm]
+    rules:
+    - id: final_norm
+      hf: ['{final_norm}.weight']
+      mcore: [decoder.final_layernorm.weight]
+  final_norm_te:
+    args: [rmsnorm]
+    rules:
+    - id: final_norm
+      hf: ['{final_norm}.weight']
+      mcore: [decoder.final_layernorm.weight]
+      extra_state: [decoder.final_layernorm._extra_state/shard_0_1]
+  gqa:
+    args: [gqa, bias_free]
+    rules:
+    - id: attn_norm
+      hf: ['{attention_norm}.weight']
+      mcore: [self_attention.linear_qkv.layer_norm_weight]
+      scope: layer
+    - id: qkv
+      hf: ['{attention}.q_proj.weight', '{attention}.k_proj.weight', '{attention}.v_proj.weight']
+      mcore: [self_attention.linear_qkv.weight]
+      op: qkv
+      params:
+        heads: $hf.num_attention_heads
+        groups: $hf.num_key_value_heads
+        order: [q, k, v]
+      extra_state: [self_attention.linear_qkv._extra_state/shard_0_1]
+      scope: layer
+    - id: o_proj
+      hf: ['{attention}.{attention_output}.weight']
+      mcore: [self_attention.linear_proj.weight]
+      extra_state: [self_attention.linear_proj._extra_state/shard_0_1]
+      scope: layer
+  qk_norm:
+    args: [qk_norm]
+    rules:
+    - id: q_norm
+      scope: layer
+      hf: ['{attention}.q_norm.weight']
+      mcore: [self_attention.q_layernorm.weight]
+    - id: k_norm
+      scope: layer
+      hf: ['{attention}.k_norm.weight']
+      mcore: [self_attention.k_layernorm.weight]
+  dense_swiglu:
+    args: [dense_mlp, swiglu]
+    rules:
+    - id: ffn_norm
+      hf: ['{mlp_norm}.weight']
+      mcore: [mlp.linear_fc1.layer_norm_weight]
+      scope: layer
+    - id: fc1
+      hf: ['{mlp}.{gate_proj}.weight', '{mlp}.{up_proj}.weight']
+      mcore: [mlp.linear_fc1.weight]
+      op: swiglu
+      extra_state: [mlp.linear_fc1._extra_state/shard_0_1]
+      scope: layer
+    - id: fc2
+      hf: ['{mlp}.{down_proj}.weight']
+      mcore: [mlp.linear_fc2.weight]
+      extra_state: [mlp.linear_fc2._extra_state/shard_0_1]
+      scope: layer
+  separate_norms:
+    args: [rmsnorm]
+    rules:
+    - id: attn_norm
+      scope: layer
+      hf: ['{attention_norm}.weight']
+      mcore: [input_layernorm.weight]
+    - id: ffn_norm
+      scope: layer
+      hf: ['{mlp_norm}.weight']
+      mcore: [pre_mlp_layernorm.weight]
+  mla_query:
+    args: [mla, qk_norm, bias_free]
+    rules:
+    - id: q_down
+      scope: layer
+      hf: ['{attention}.wq_a.weight']
+      mcore: [self_attention.linear_q_down_proj.weight]
+      extra_state: [self_attention.linear_q_down_proj._extra_state/shard_0_1]
+      optional: true
+    - id: q_norm
+      scope: layer
+      hf: ['{attention}.q_norm.weight']
+      mcore: [self_attention.q_layernorm.weight]
+      optional: true
+    - id: q_up
+      scope: layer
+      hf: ['{attention}.wq_b.weight']
+      mcore: [self_attention.linear_q_up_proj.weight]
+      extra_state: [self_attention.linear_q_up_proj._extra_state/shard_0_1]
+      optional: true
+  absorbed_kv:
+    args: [absorbed_mla]
+    rules:
+    - id: kv
+      scope: layer
+      hf: ['{attention}.wkv.weight']
+      mcore: [self_attention.linear_kv_proj.weight]
+      extra_state: [self_attention.linear_kv_proj._extra_state/shard_0_1]
+      optional: true
+    - id: kv_norm
+      scope: layer
+      hf: ['{attention}.kv_norm.weight']
+      mcore: [self_attention.kv_layernorm.weight]
+      optional: true
+  grouped_attention_output:
+    args: [grouped_output]
+    rules:
+    - id: o_group
+      scope: layer
+      hf: ['{attention}.wo_a.weight']
+      mcore: [self_attention.linear_o_group_proj]
+      optional: true
+    - id: o_proj
+      hf: ['{attention}.{attention_output}.weight']
+      mcore: [self_attention.linear_proj.weight]
+      extra_state: [self_attention.linear_proj._extra_state/shard_0_1]
+      scope: layer
+  moe:
+    args: [moe, swiglu]
+    rules:
+    - id: router
+      scope: layer
+      hf: ['{mlp}.gate.weight']
+      mcore: [mlp.router.weight]
+      optional: true
+    - id: router_bias
+      scope: layer
+      optional: true
+      hf: ['{mlp}.gate.bias']
+      mcore: [mlp.router.expert_bias]
+    - id: expert_fc1
+      scope: layer
+      hf: ['{mlp}.experts.{expert}.{gate_proj}.weight', '{mlp}.experts.{expert}.{up_proj}.weight']
+      mcore: [mlp.experts.experts.linear_fc1.weight]
+      op: expert_swiglu
+      collect:
+        expert: $hf.n_routed_experts
+      extra_state: ['mlp.experts.experts.linear_fc1._extra_state/shard_{expert}_{expert_count}']
+      optional: true
+    - id: expert_fc2
+      scope: layer
+      hf: ['{mlp}.experts.{expert}.{down_proj}.weight']
+      mcore: [mlp.experts.experts.linear_fc2.weight]
+      op: stack
+      collect:
+        expert: $hf.n_routed_experts
+      params:
+        axis: 0
+      extra_state: ['mlp.experts.experts.linear_fc2._extra_state/shard_{expert}_{expert_count}']
+      optional: true
+  shared_experts:
+    args: [shared_experts, swiglu]
+    rules:
+    - id: shared_fc1
+      scope: layer
+      hf: ['{mlp}.shared_experts.{gate_proj}.weight', '{mlp}.shared_experts.{up_proj}.weight']
+      mcore: [mlp.shared_experts.linear_fc1.weight]
+      op: swiglu
+      extra_state: [mlp.shared_experts.linear_fc1._extra_state/shard_0_1]
+      optional: true
+    - id: shared_fc2
+      scope: layer
+      hf: ['{mlp}.shared_experts.{down_proj}.weight']
+      mcore: [mlp.shared_experts.linear_fc2.weight]
+      extra_state: [mlp.shared_experts.linear_fc2._extra_state/shard_0_1]
+      optional: true
+  attention_sink:
+    args: []
+    rules:
+    - id: sink
+      scope: layer
+      hf: ['{attention}.attn_sink']
+      mcore: [self_attention.core_attention.attn_sink]
+  compressed_attention:
+    args: [compression]
+    rules:
+    - id: compress_kv
+      scope: layer
+      hf: ['{attention}.compressor.wkv.weight']
+      mcore: [self_attention.core_attention.compressor.linear_wkv.weight]
+      optional: true
+      extra_state: [self_attention.core_attention.compressor.linear_wkv._extra_state/shard_0_1]
+    - id: compress_gate
+      scope: layer
+      hf: ['{attention}.compressor.wgate.weight']
+      mcore: [self_attention.core_attention.compressor.linear_wgate.weight]
+      optional: true
+      extra_state: [self_attention.core_attention.compressor.linear_wgate._extra_state/shard_0_1]
+    - id: compress_ape
+      scope: layer
+      hf: ['{attention}.compressor.ape']
+      mcore: [self_attention.core_attention.compressor.ape]
+      optional: true
+    - id: compress_norm
+      scope: layer
+      hf: ['{attention}.compressor.norm.weight']
+      mcore: [self_attention.core_attention.compressor.norm.weight]
+      optional: true
+  sparse_indexer:
+    args: [indexer]
+    rules:
+    - id: index_q
+      scope: layer
+      hf: ['{attention}.indexer.wq_b.weight']
+      mcore: [self_attention.core_attention.indexer.linear_wq_b.weight]
+      optional: true
+      extra_state: [self_attention.core_attention.indexer.linear_wq_b._extra_state/shard_0_1]
+    - id: index_score
+      scope: layer
+      hf: ['{attention}.indexer.weights_proj.weight']
+      mcore: [self_attention.core_attention.indexer.linear_weights_proj.weight]
+      optional: true
+      extra_state: [self_attention.core_attention.indexer.linear_weights_proj._extra_state/shard_0_1]
+    - id: index_compress_kv
+      scope: layer
+      hf: ['{attention}.indexer.compressor.wkv.weight']
+      mcore: [self_attention.core_attention.indexer.compressor.linear_wkv.weight]
+      optional: true
+      extra_state: [self_attention.core_attention.indexer.compressor.linear_wkv._extra_state/shard_0_1]
+    - id: index_compress_gate
+      scope: layer
+      hf: ['{attention}.indexer.compressor.wgate.weight']
+      mcore: [self_attention.core_attention.indexer.compressor.linear_wgate.weight]
+      optional: true
+      extra_state: [self_attention.core_attention.indexer.compressor.linear_wgate._extra_state/shard_0_1]
+    - id: index_compress_ape
+      scope: layer
+      hf: ['{attention}.indexer.compressor.ape']
+      mcore: [self_attention.core_attention.indexer.compressor.ape]
+      optional: true
+    - id: index_compress_norm
+      scope: layer
+      hf: ['{attention}.indexer.compressor.norm.weight']
+      mcore: [self_attention.core_attention.indexer.compressor.norm.weight]
+      optional: true
+  hash_router:
+    args: [hash_router]
+    rules:
+    - id: hash_router
+      scope: layer
+      hf: ['{mlp}.gate.tid2eid']
+      mcore: [mlp.router.tid2eid]
+      optional: true
+  hyper_connections:
+    args: [hyper_connections]
+    rules:
+    - id: hc_attn_fn
+      scope: layer
+      hf: [hc_attn_fn]
+      mcore: [self_attention_hyper_connection.mapping_proj.weight]
+    - id: hc_attn_base
+      scope: layer
+      hf: [hc_attn_base]
+      mcore: [self_attention_hyper_connection.bias]
+    - id: hc_attn_scale
+      scope: layer
+      hf: [hc_attn_scale]
+      mcore: [self_attention_hyper_connection.alpha_pre, self_attention_hyper_connection.alpha_post, self_attention_hyper_connection.alpha_res]
+      op: split
+      params:
+        axis: 0
+        sizes: [1, 1, 1]
+    - id: hc_ffn_fn
+      scope: layer
+      hf: [hc_ffn_fn]
+      mcore: [mlp_hyper_connection.mapping_proj.weight]
+    - id: hc_ffn_base
+      scope: layer
+      hf: [hc_ffn_base]
+      mcore: [mlp_hyper_connection.bias]
+    - id: hc_ffn_scale
+      scope: layer
+      hf: [hc_ffn_scale]
+      mcore: [mlp_hyper_connection.alpha_pre, mlp_hyper_connection.alpha_post, mlp_hyper_connection.alpha_res]
+      op: split
+      params:
+        axis: 0
+        sizes: [1, 1, 1]
+  hyper_connection_head:
+    args: [hyper_connections]
+    rules:
+    - id: head_fn
+      hf: [hc_head_fn]
+      mcore: [decoder.hc_head_fn]
+    - id: head_base
+      hf: [hc_head_base]
+      mcore: [decoder.hc_head_base]
+    - id: head_scale
+      hf: [hc_head_scale]
+      mcore: [decoder.hc_head_scale]
+  mtp_streams:
+    args: [mtp]
+    rules:
+    - id: mtp_enorm
+      scope: mtp
+      hf: [enorm.weight]
+      mcore: [enorm.weight]
+    - id: mtp_hnorm
+      scope: mtp
+      hf: [hnorm.weight]
+      mcore: [hnorm.weight]
+    - id: mtp_norm
+      scope: mtp
+      hf: [norm.weight]
+      mcore: [final_layernorm.weight]
+    - id: mtp_e_proj
+      scope: mtp
+      hf: [e_proj.weight]
+      mcore: [e_proj.weight]
+      extra_state: [e_proj._extra_state/shard_0_1]
+    - id: mtp_h_proj
+      scope: mtp
+      hf: [h_proj.weight]
+      mcore: [h_proj.weight]
+      extra_state: [h_proj._extra_state/shard_0_1]
+    - id: mtp_head_fn
+      scope: mtp
+      hf: [hc_head_fn]
+      mcore: [hc_head_fn]
+    - id: mtp_head_base
+      scope: mtp
+      hf: [hc_head_base]
+      mcore: [hc_head_base]
+    - id: mtp_head_scale
+      scope: mtp
+      hf: [hc_head_scale]
+      mcore: [hc_head_scale]
+  gdn:
+    args: [gdn, bias_free]
+    rules:
+    - id: gdn_input_norm
+      scope: layer
+      hf: ['{attention_norm}.weight']
+      mcore: [self_attention.in_proj.layer_norm_weight]
+    - id: gdn_qkv
+      scope: layer
+      hf: [linear_attn.in_proj_qkv.weight]
+      mcore: [self_attention.in_proj.weight.query, self_attention.in_proj.weight.key, self_attention.in_proj.weight.value]
+      op: split
+      params:
+        axis: 0
+        sizes:
+        - op: mul
+          args: [$hf.linear_key_head_dim, $hf.linear_num_key_heads]
+        - op: mul
+          args: [$hf.linear_key_head_dim, $hf.linear_num_key_heads]
+        - op: mul
+          args: [$hf.linear_value_head_dim, $hf.linear_num_value_heads]
+      extra_state: [self_attention.in_proj._extra_state/shard_0_1]
+    - id: gdn_z
+      scope: layer
+      hf: [linear_attn.in_proj_z.weight]
+      mcore: [self_attention.in_proj.weight.z]
+    - id: gdn_beta
+      scope: layer
+      hf: [linear_attn.in_proj_b.weight]
+      mcore: [self_attention.in_proj.weight.beta]
+    - id: gdn_alpha
+      scope: layer
+      hf: [linear_attn.in_proj_a.weight]
+      mcore: [self_attention.in_proj.weight.alpha]
+    - id: gdn_conv
+      scope: layer
+      hf: [linear_attn.conv1d.weight]
+      mcore: [self_attention.conv1d.weight.query, self_attention.conv1d.weight.key, self_attention.conv1d.weight.value]
+      op: split
+      params:
+        axis: 0
+        sizes:
+        - op: mul
+          args: [$hf.linear_key_head_dim, $hf.linear_num_key_heads]
+        - op: mul
+          args: [$hf.linear_key_head_dim, $hf.linear_num_key_heads]
+        - op: mul
+          args: [$hf.linear_value_head_dim, $hf.linear_num_value_heads]
+    - id: gdn_A_log
+      scope: layer
+      hf: [linear_attn.A_log]
+      mcore: [self_attention.A_log]
+    - id: gdn_dt_bias
+      scope: layer
+      hf: [linear_attn.dt_bias]
+      mcore: [self_attention.dt_bias]
+    - id: gdn_output_norm
+      scope: layer
+      hf: [linear_attn.norm.weight]
+      mcore: [self_attention.out_norm.weight]
+      extra_state: [self_attention.out_norm._extra_state/shard_0_1]
+    - id: gdn_output
+      scope: layer
+      hf: [linear_attn.out_proj.weight]
+      mcore: [self_attention.out_proj.weight]
+      extra_state: [self_attention.out_proj._extra_state/shard_0_1]
+  gated_gqa:
+    args: [gqa, gated_attention, qk_norm, bias_free]
+    rules:
+    - id: gqa_input_norm
+      scope: layer
+      hf: ['{attention_norm}.weight']
+      mcore: [self_attention.linear_qkv.layer_norm_weight]
+    - id: gated_qkv
+      scope: layer
+      hf: ['{attention}.q_proj.weight', '{attention}.k_proj.weight', '{attention}.v_proj.weight']
+      mcore: [self_attention.linear_qkv.weight]
+      op: qkv
+      params:
+        heads: $hf.num_attention_heads
+        groups: $hf.num_key_value_heads
+        output_gate: true
+      extra_state: [self_attention.linear_qkv._extra_state/shard_0_1]
+    - id: gqa_q_norm
+      scope: layer
+      hf: ['{attention}.q_norm.weight']
+      mcore: [self_attention.q_layernorm.weight]
+      extra_state: [self_attention.q_layernorm._extra_state/shard_0_1]
+    - id: gqa_k_norm
+      scope: layer
+      hf: ['{attention}.k_norm.weight']
+      mcore: [self_attention.k_layernorm.weight]
+      extra_state: [self_attention.k_layernorm._extra_state/shard_0_1]
+    - id: gqa_output
+      scope: layer
+      hf: ['{attention}.{attention_output}.weight']
+      mcore: [self_attention.linear_proj.weight]
+      extra_state: [self_attention.linear_proj._extra_state/shard_0_1]
+  moe_input_norm:
+    args:
+    - rmsnorm
+    rules:
+    - id: moe_input_norm
+      hf:
+      - '{mlp_norm}.weight'
+      mcore:
+      - pre_mlp_layernorm.weight
+      scope: layer
+      extra_state:
+      - pre_mlp_layernorm._extra_state/shard_0_1
+  stacked_experts:
+    args:
+    - moe
+    - swiglu
+    rules:
+    - id: stacked_expert_fc1
+      hf:
+      - '{mlp}.experts.gate_up_proj'
+      mcore:
+      - mlp.experts.experts.linear_fc1.weight
+      scope: layer
+      collect:
+        expert: $hf.n_routed_experts
+      extra_state:
+      - mlp.experts.experts.linear_fc1._extra_state/shard_{expert}_{expert_count}
+    - id: stacked_expert_fc2
+      hf:
+      - '{mlp}.experts.down_proj'
+      mcore:
+      - mlp.experts.experts.linear_fc2.weight
+      scope: layer
+      collect:
+        expert: $hf.n_routed_experts
+      extra_state:
+      - mlp.experts.experts.linear_fc2._extra_state/shard_{expert}_{expert_count}
+  gated_shared_expert:
+    args:
+    - swiglu
+    - gated_shared_expert
+    rules:
+    - id: gated_shared_fc1
+      hf:
+      - '{mlp}.shared_expert.{gate_proj}.weight'
+      - '{mlp}.shared_expert.{up_proj}.weight'
+      mcore:
+      - mlp.shared_experts.linear_fc1.weight
+      scope: layer
+      op: swiglu
+      extra_state:
+      - mlp.shared_experts.linear_fc1._extra_state/shard_0_1
+    - id: gated_shared_fc2
+      hf:
+      - '{mlp}.shared_expert.{down_proj}.weight'
+      mcore:
+      - mlp.shared_experts.linear_fc2.weight
+      scope: layer
+      extra_state:
+      - mlp.shared_experts.linear_fc2._extra_state/shard_0_1
+    - id: shared_expert_gate
+      hf:
+      - '{mlp}.shared_expert_gate.weight'
+      mcore:
+      - mlp.shared_experts.gate_weight
+      scope: layer
+  mtp_projection:
+    args:
+    - mtp
+    - rmsnorm
+    rules:
+    - id: mtp_projection
+      hf:
+      - fc.weight
+      mcore:
+      - eh_proj.weight
+      scope: mtp
+      extra_state:
+      - eh_proj._extra_state/shard_0_1
+    - id: mtp_embedding_norm
+      hf:
+      - pre_fc_norm_embedding.weight
+      mcore:
+      - enorm.weight
+      scope: mtp
+      extra_state:
+      - enorm._extra_state/shard_0_1
+    - id: mtp_hidden_norm
+      hf:
+      - pre_fc_norm_hidden.weight
+      mcore:
+      - hnorm.weight
+      scope: mtp
+      extra_state:
+      - hnorm._extra_state/shard_0_1
+    - id: mtp_final_norm
+      hf:
+      - norm.weight
+      mcore:
+      - final_layernorm.weight
+      scope: mtp
+      extra_state:
+      - final_layernorm._extra_state/shard_0_1
+  vision_patch:
+    args:
+    - vision
+    rules:
+    - id: vision_patch_weight
+      hf:
+      - patch_embed.proj.weight
+      mcore:
+      - patch_embed.proj.weight
+      scope: vision
+      op: reshape
+      params:
+        hf_shape:
+        - $hf.vision_config.hidden_size
+        - $hf.vision_config.in_channels
+        - $hf.vision_config.temporal_patch_size
+        - $hf.vision_config.patch_size
+        - $hf.vision_config.patch_size
+        mcore_shape:
+        - $hf.vision_config.hidden_size
+        - -1
+    - id: vision_patch_bias
+      hf:
+      - patch_embed.proj.bias
+      mcore:
+      - patch_embed.proj.bias
+      scope: vision
+    - id: vision_positions
+      hf:
+      - pos_embed.weight
+      mcore:
+      - pos_embed.weight
+      scope: vision
+  vision_transformer:
+    args:
+    - vision
+    rules:
+    - id: vision_norm1_weight
+      hf:
+      - norm1.weight
+      mcore:
+      - self_attention.linear_qkv.layer_norm_weight
+      scope: vision_layer
+    - id: vision_norm2_weight
+      hf:
+      - norm2.weight
+      mcore:
+      - mlp.linear_fc1.layer_norm_weight
+      scope: vision_layer
+    - id: vision_qkv_weight
+      hf:
+      - attn.qkv.weight
+      mcore:
+      - self_attention.linear_qkv.weight
+      scope: vision_layer
+      op: packed_qkv
+      params:
+        heads: $hf.vision_config.num_heads
+      extra_state:
+      - self_attention.linear_qkv._extra_state/shard_0_1
+    - id: vision_attn_proj_weight
+      hf:
+      - attn.proj.weight
+      mcore:
+      - self_attention.linear_proj.weight
+      scope: vision_layer
+      extra_state:
+      - self_attention.linear_proj._extra_state/shard_0_1
+    - id: vision_mlp_linear_fc1_weight
+      hf:
+      - mlp.linear_fc1.weight
+      mcore:
+      - mlp.linear_fc1.weight
+      scope: vision_layer
+      extra_state:
+      - mlp.linear_fc1._extra_state/shard_0_1
+    - id: vision_mlp_linear_fc2_weight
+      hf:
+      - mlp.linear_fc2.weight
+      mcore:
+      - mlp.linear_fc2.weight
+      scope: vision_layer
+      extra_state:
+      - mlp.linear_fc2._extra_state/shard_0_1
+    - id: vision_norm1_bias
+      hf:
+      - norm1.bias
+      mcore:
+      - self_attention.linear_qkv.layer_norm_bias
+      scope: vision_layer
+    - id: vision_norm2_bias
+      hf:
+      - norm2.bias
+      mcore:
+      - mlp.linear_fc1.layer_norm_bias
+      scope: vision_layer
+    - id: vision_qkv_bias
+      hf:
+      - attn.qkv.bias
+      mcore:
+      - self_attention.linear_qkv.bias
+      scope: vision_layer
+      op: packed_qkv
+      params:
+        heads: $hf.vision_config.num_heads
+      extra_state: []
+    - id: vision_attn_proj_bias
+      hf:
+      - attn.proj.bias
+      mcore:
+      - self_attention.linear_proj.bias
+      scope: vision_layer
+      extra_state: []
+    - id: vision_mlp_linear_fc1_bias
+      hf:
+      - mlp.linear_fc1.bias
+      mcore:
+      - mlp.linear_fc1.bias
+      scope: vision_layer
+      extra_state: []
+    - id: vision_mlp_linear_fc2_bias
+      hf:
+      - mlp.linear_fc2.bias
+      mcore:
+      - mlp.linear_fc2.bias
+      scope: vision_layer
+      extra_state: []
+  vision_merger:
+    args:
+    - vision
+    rules:
+    - id: vision_merger_linear_fc1_weight
+      hf:
+      - merger.linear_fc1.weight
+      mcore:
+      - projection.encoder.linear_fc1.weight
+      scope: vision
+      extra_state:
+      - projection.encoder.linear_fc1._extra_state/shard_0_1
+    - id: vision_merger_linear_fc2_weight
+      hf:
+      - merger.linear_fc2.weight
+      mcore:
+      - projection.encoder.linear_fc2.weight
+      scope: vision
+      extra_state:
+      - projection.encoder.linear_fc2._extra_state/shard_0_1
+    - id: vision_merger_norm_weight
+      hf:
+      - merger.norm.weight
+      mcore:
+      - decoder.final_layernorm.weight
+      scope: vision
+      extra_state:
+      - decoder.final_layernorm._extra_state/shard_0_1
+    - id: vision_merger_linear_fc1_bias
+      hf:
+      - merger.linear_fc1.bias
+      mcore:
+      - projection.encoder.linear_fc1.bias
+      scope: vision
+      extra_state: []
+    - id: vision_merger_linear_fc2_bias
+      hf:
+      - merger.linear_fc2.bias
+      mcore:
+      - projection.encoder.linear_fc2.bias
+      scope: vision
+      extra_state: []
+    - id: vision_merger_norm_bias
+      hf:
+      - merger.norm.bias
+      mcore:
+      - decoder.final_layernorm.bias
+      scope: vision
+      extra_state: []
