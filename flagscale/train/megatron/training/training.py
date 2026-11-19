@@ -2401,6 +2401,13 @@ def setup_model_and_optimizer(
         )
         opt_param_scheduler = get_optimizer_param_scheduler(optimizer)
 
+    # Build param-to-name map for per-module grad norm logging.
+    if optimizer is not None and (
+        getattr(config, 'log_per_module_grad_norm', False)
+        or getattr(config, 'gdn_spike_diag_threshold', None) is not None
+    ):
+        optimizer.build_param_to_name_map(model)
+
     one_logger and one_logger.log_metrics({"app_build_optimzer_finish_time": one_logger_utils.get_timestamp_in_ms()})
 
     if args.moe_use_upcycling:
@@ -2834,6 +2841,7 @@ def training_log(
     max_attention_logit,
     pg_collection=None,
     is_first_iteration=False,
+    per_module_grad_norm=None,
     seqlen_squared_sum_in_batch: float | None = None,
     total_real_tokens_in_batch: float | None = None,
 ):
@@ -2973,6 +2981,16 @@ def training_log(
                 writer.add_scalar('grad-norm vs samples', grad_norm, args.consumed_train_samples)
             if wandb_writer:
                 wandb_writer.log({'grad-norm': grad_norm}, iteration)
+        if per_module_grad_norm is not None:
+            for module_type, module_norm in per_module_grad_norm.items():
+                key = f'grad-norm-{module_type}'
+                if writer:
+                    writer.add_scalar(key, module_norm, iteration)
+                    writer.add_scalar(
+                        f'{key} vs samples', module_norm, args.consumed_train_samples
+                    )
+                if wandb_writer:
+                    wandb_writer.log({key: module_norm}, iteration)
         if num_zeros_in_grad is not None:
             if writer:  # FlagScale Modify
                 writer.add_scalar('num-zeros', num_zeros_in_grad, iteration)
@@ -3158,6 +3176,10 @@ def training_log(
         log_string += f' loss scale: {loss_scale:.1f} |'
         if grad_norm is not None:
             log_string += f' grad norm: {grad_norm:.3f} |'
+        if per_module_grad_norm is not None:
+            log_string += ' grad norm [' + ', '.join(
+                f'{k}={v:.4f}' for k, v in per_module_grad_norm.items()
+            ) + '] |'
         if num_zeros_in_grad is not None:
             log_string += f' num zeros: {num_zeros_in_grad} |'
         if params_norm is not None:
@@ -3922,6 +3944,11 @@ def train(
             optimizers=[optimizer],
         )
 
+    # Enable NVTX range annotations if requested.
+    if getattr(args, 'nvtx_ranges', False):
+        from megatron.core.utils import configure_nvtx_profiling
+        configure_nvtx_profiling(True)
+
     # Run training iterations till done.
     buffered_rollouts = None
     while iteration < args.train_iters:
@@ -4237,9 +4264,117 @@ def train(
             max_attention_logit,
             pg_collection=model_pg_collection,
             is_first_iteration=is_first_iteration,
+            per_module_grad_norm=getattr(optimizer, 'per_module_grad_norm', None) if optimizer is not None else None,
             seqlen_squared_sum_in_batch=seqlen_squared_sum_in_batch,
             total_real_tokens_in_batch=total_real_tokens_in_batch,
         )
+
+        # --- GDN spike diagnostics ---
+        _spike_thresh = getattr(config, 'gdn_spike_diag_threshold', None) if config is not None else None
+        if (
+            _spike_thresh is not None
+            and grad_norm is not None
+            and grad_norm > _spike_thresh
+            and is_last_rank()
+        ):
+            _diag_lines = [
+                f"\n[SPIKE DIAG] iter={iteration}, grad_norm={grad_norm:.4f} "
+                f"(threshold={_spike_thresh})"
+            ]
+            _wandb_diag = {}  # collect metrics for wandb
+
+            # 1) Per-layer grad norm — one line per layer with all module breakdowns
+            per_layer_gn = getattr(optimizer, 'per_layer_grad_norm', None) if optimizer is not None else None
+            if per_layer_gn:
+                import re as _re
+                import math as _math
+                # Group by layer index
+                _layer_modules: dict = {}  # layer_idx -> {module_type: norm}
+                for key, norm_val in per_layer_gn.items():
+                    m = _re.match(r'L(\d+)/(.+)', key)
+                    if m:
+                        lidx, mtype = int(m.group(1)), m.group(2)
+                        _layer_modules.setdefault(lidx, {})[mtype] = norm_val
+                _diag_lines.append("  Per-layer grad norm:")
+                for lidx in sorted(_layer_modules.keys()):
+                    mods = _layer_modules[lidx]
+                    # Total norm for this layer
+                    total = _math.sqrt(sum(v ** 2 for v in mods.values()))
+                    # Build attn part: combine gdn + sdpa
+                    attn_parts = []
+                    attn_sq = 0.0
+                    for sub in ('gdn', 'sdpa'):
+                        if sub in mods:
+                            attn_parts.append(f"{sub}={mods[sub]:.6f}")
+                            attn_sq += mods[sub] ** 2
+                    attn_str = ""
+                    if attn_parts:
+                        attn_total = _math.sqrt(attn_sq)
+                        attn_str = f", attn={attn_total:.6f} [{', '.join(attn_parts)}]"
+                    # mlp
+                    mlp_str = f", mlp={mods['mlp']:.6f}" if 'mlp' in mods else ""
+                    # others
+                    other_sq = sum(v ** 2 for k, v in mods.items() if k not in ('gdn', 'sdpa', 'mlp'))
+                    other_str = f", other={_math.sqrt(other_sq):.6f}" if other_sq > 0 else ""
+                    _diag_lines.append(f"    L{lidx}: {total:.6f}{attn_str}{mlp_str}{other_str}")
+                # wandb: log all per-layer grad norms
+                for key, norm_val in per_layer_gn.items():
+                    _wandb_diag[f'spike-diag/grad-norm/{key}'] = norm_val
+
+            # 2) GDN decay stats from model's transformer block
+            #    model: DDP.module -> Float16Module.module -> Qwen35Model.language_model.decoder
+            for model_chunk in model:
+                _block = None
+                _obj = model_chunk
+                # Unwrap through DDP / Float16Module / nested .module layers
+                for _ in range(5):  # safety limit
+                    if hasattr(_obj, 'decoder'):
+                        _block = _obj.decoder
+                        break
+                    elif hasattr(_obj, 'language_model') and hasattr(_obj.language_model, 'decoder'):
+                        _block = _obj.language_model.decoder
+                        break
+                    elif hasattr(_obj, 'model') and hasattr(_obj.model, 'decoder'):
+                        _block = _obj.model.decoder
+                        break
+                    elif hasattr(_obj, 'module'):
+                        _obj = _obj.module
+                    else:
+                        break
+                decay_diag = getattr(_block, '_gdn_decay_diag', None) if _block else None
+                if decay_diag:
+                    _diag_lines.append("  GDN decay stats per layer:")
+                    for global_layer in sorted(decay_diag.keys()):
+                        g_ref = decay_diag[global_layer]
+                        try:
+                            g_absmax = g_ref.abs().max().item()
+                            g_absmean = g_ref.abs().mean().item()
+                            g_min = g_ref.min().item()
+                            g_max = g_ref.max().item()
+                            stats = (
+                                f"g_min={g_min:.4f}, "
+                                f"g_max={g_max:.4f}, "
+                                f"g_absmax={g_absmax:.4f}, "
+                                f"g_absmean={g_absmean:.4f}"
+                            )
+                            _wandb_diag[f'spike-diag/gdn-decay/L{global_layer}/g_absmax'] = g_absmax
+                            _wandb_diag[f'spike-diag/gdn-decay/L{global_layer}/g_absmean'] = g_absmean
+                            _wandb_diag[f'spike-diag/gdn-decay/L{global_layer}/g_min'] = g_min
+                            _wandb_diag[f'spike-diag/gdn-decay/L{global_layer}/g_max'] = g_max
+                        except Exception:
+                            stats = "(tensor no longer available)"
+                        _diag_lines.append(f"    L{global_layer}: {stats}")
+                    _block._gdn_decay_diag = {}  # clear
+                elif _block is not None:
+                    _diag_lines.append("  GDN decay stats: (no data collected)")
+
+            # Print to stdout log
+            print_rank_last("\n".join(_diag_lines))
+            # Log to wandb
+            if wandb_writer and _wandb_diag:
+                _wandb_diag['spike-diag/grad_norm'] = grad_norm
+                wandb_writer.log(_wandb_diag, iteration)
+
         is_first_iteration = False
 
         ########## FlagScale Begin ##########

@@ -65,6 +65,32 @@ def _restore_ln(weight):
 
 
 # -----------------------------------------------------------------------------
+# Shared-storage dedup (needed after loop expansion)
+# -----------------------------------------------------------------------------
+def _dedup_shared_tensors(hf_sd):
+    """Clone tensors that share underlying storage.
+
+    After loop expansion, multiple HF layer keys may reference the same
+    physical tensor.  ``safetensors`` refuses to serialise shared-storage
+    tensors, so the second (and subsequent) occurrence is cloned in-place.
+    """
+    seen = set()
+    cloned = 0
+    for key in list(hf_sd.keys()):
+        t = hf_sd[key]
+        if not isinstance(t, torch.Tensor):
+            continue
+        ptr = t.untyped_storage().data_ptr()
+        if ptr in seen:
+            hf_sd[key] = t.clone()
+            cloned += 1
+        else:
+            seen.add(ptr)
+    if cloned:
+        print(f"Cloned {cloned} tensors to eliminate shared storage")
+
+
+# -----------------------------------------------------------------------------
 # Base converter
 # -----------------------------------------------------------------------------
 class BaseConverter:
@@ -177,6 +203,170 @@ class BaseConverter:
         return meg_sd
 
     # -------------------------------------------------------------------------
+    # Loop Transformer helpers
+    # -------------------------------------------------------------------------
+    def _build_loop_execution_plan(self):
+        """Build execution plan mapping HF layer indices to physical layers.
+
+        Returns a list of ``(hf_layer_idx, physical_layer_idx, in_loop,
+        iteration)`` tuples.  For non-loop models this is never called.
+
+        Supports three loop types:
+        - module-wise: ABCD → ABCDABCD (entire loop range repeated)
+        - block-wise:  ABCD with block_size=2 → ABABCDCD (each block repeated)
+        - sdpa-wise:   ABC → ABBC for B=SDPA (only SDPA layers repeated, in place)
+        """
+        cfg = self.cfg
+        plan = []
+        hf_idx = 0
+        # Prelude: physical layers [0, loop_start)
+        for phys in range(cfg.loop_start_layer):
+            plan.append((hf_idx, phys, False, -1))
+            hf_idx += 1
+        # Loop region
+        loop_type = cfg.loop_type
+        if loop_type == "module-wise":
+            for iteration in range(cfg.num_loop_iterations):
+                for phys in range(cfg.loop_start_layer, cfg.loop_end_layer):
+                    plan.append((hf_idx, phys, True, iteration))
+                    hf_idx += 1
+        elif loop_type == "block-wise":
+            block_size = cfg.loop_block_size
+            for block_start in range(cfg.loop_start_layer, cfg.loop_end_layer, block_size):
+                block_end = min(block_start + block_size, cfg.loop_end_layer)
+                for iteration in range(cfg.num_loop_iterations):
+                    for phys in range(block_start, block_end):
+                        plan.append((hf_idx, phys, True, iteration))
+                        hf_idx += 1
+        elif loop_type == "sdpa-wise":
+            # GDN layers execute once and are not part of the loop, so they get
+            # in_loop=False and iteration=-1 — that keeps _absorb_loop_scale from
+            # touching them, matching training where they receive no loop_iter.
+            for phys in range(cfg.loop_start_layer, cfg.loop_end_layer):
+                if is_gdn_layer(phys, cfg.linear_attention_freq):
+                    plan.append((hf_idx, phys, False, -1))
+                    hf_idx += 1
+                else:
+                    for iteration in range(cfg.num_loop_iterations):
+                        plan.append((hf_idx, phys, True, iteration))
+                        hf_idx += 1
+        else:
+            raise ValueError(f"Unsupported loop_type='{loop_type}'.")
+        # Coda: physical layers [loop_end, num_layers)
+        for phys in range(cfg.loop_end_layer, cfg.num_layers):
+            plan.append((hf_idx, phys, False, -1))
+            hf_idx += 1
+        assert hf_idx == cfg.hf_num_layers, (
+            f"Execution plan length {hf_idx} != expected {cfg.hf_num_layers}"
+        )
+        return plan
+
+    def _absorb_key_lora(self, full_sd, mg_pfx, in_proj_weight, iteration):
+        """Fold the per-iteration key LoRA delta into a copy of ``in_proj.weight``.
+
+        Training computes the key as ``linear(norm(x))[k] + (norm(x) @ down) @ up``.
+        Because the delta is a side branch on the *post-norm* activation, it is
+        equivalent to adding ``(down @ up)^T`` to the key rows of the weight --
+        which is what lets each loop iteration be exported as an ordinary layer.
+
+        ``iteration < 0`` means the layer is not looped, so there is no delta.
+        The sum is done in fp32 and cast back, so the merge does not add a second
+        rounding step on top of the bf16 product.
+        """
+        cfg = self.cfg
+        if not getattr(cfg, "loop_gdn_key_lora_rank", None) or iteration < 0:
+            return in_proj_weight
+
+        down_key = f"{mg_pfx}.self_attention.key_lora_down"
+        up_key = f"{mg_pfx}.self_attention.key_lora_up"
+        if down_key not in full_sd or up_key not in full_sd:
+            raise KeyError(
+                f"loop_gdn_key_lora_rank is set but {down_key} / {up_key} are missing "
+                f"from the checkpoint; the training run may not have used key LoRA."
+            )
+        down = full_sd[down_key][iteration].float()  # [hidden, rank], not TP-sharded
+        up = full_sd[up_key][iteration].float()  # [rank, qk_dim] (TP-concatenated)
+        delta = (down @ up).T  # [qk_dim, hidden]
+
+        qk_dim = cfg.linear_key_head_dim * cfg.linear_num_key_heads
+        if delta.shape[0] != qk_dim:
+            raise ValueError(f"key LoRA delta has {delta.shape[0]} rows, expected qk_dim={qk_dim}.")
+
+        # The merged in_proj is TP-rank-grouped, not a flat [q|k|v|z|beta|alpha]:
+        # split_gdn_in_proj reshapes it to [tp, per_rank_dim, hidden]. So the key
+        # rows live at a per-rank offset and a flat slice would hit the wrong rows
+        # for tp > 1. Walk the ranks and apply each one's share of the delta.
+        tp_size = cfg.tp
+        v_dim = cfg.linear_value_head_dim * cfg.linear_num_value_heads
+        per_rank_dim = in_proj_weight.shape[0] // tp_size
+        expected = (qk_dim * 2 + v_dim * 2 + cfg.linear_num_value_heads * 2) // tp_size
+        if per_rank_dim != expected:
+            raise ValueError(
+                f"unexpected in_proj layout: per_rank_dim={per_rank_dim}, "
+                f"expected {expected} (tp={tp_size})."
+            )
+        qk_local = qk_dim // tp_size
+        w = in_proj_weight.float().clone()
+        for rank in range(tp_size):
+            base = rank * per_rank_dim
+            k_start = base + qk_local  # q occupies the first qk_local rows
+            w[k_start : k_start + qk_local] += delta[rank * qk_local : (rank + 1) * qk_local]
+        return w.to(in_proj_weight.dtype)
+
+    def _absorb_loop_scale(self, hf_sd, hf_pfx, phys_idx, iteration=0):
+        """Multiply ``loop_residual_scale`` into output-projection weights.
+
+        Scale is absorbed into the last linear projection of both the
+        attention block (GDN ``out_proj`` or SDPA ``o_proj``) and the MLP
+        block (dense ``down_proj`` or every MoE expert ``down_proj`` plus
+        the shared-expert ``down_proj``).
+
+        Because ``scale * (W @ x) == (scale * W) @ x``, the scaled model
+        produces identical outputs without any runtime modification.
+        """
+        cfg = self.cfg
+        raw_scale = cfg.loop_residual_scale
+        if raw_scale is None:
+            return
+        # Per-iteration (hybrid) scale: each loop iteration has its own HF
+        # layer copy, so absorb the corresponding scale into that copy.
+        if isinstance(raw_scale, list):
+            scale = raw_scale[iteration] if iteration < len(raw_scale) else raw_scale[-1]
+        else:
+            scale = raw_scale
+        if scale == 1.0:
+            return
+        freq = cfg.linear_attention_freq
+
+        # --- Attention output projection ---
+        if is_gdn_layer(phys_idx, freq):
+            attn_key = f"{hf_pfx}.linear_attn.out_proj.weight"
+        else:
+            attn_key = f"{hf_pfx}.self_attn.o_proj.weight"
+        if attn_key in hf_sd:
+            hf_sd[attn_key] = hf_sd[attn_key] * scale
+
+        # --- MLP output projection(s) ---
+        if cfg.is_moe:
+            # Stacked experts: shape [num_experts, hidden, moe_ffn]
+            key = f"{hf_pfx}.mlp.experts.down_proj"
+            if key in hf_sd:
+                hf_sd[key] = hf_sd[key] * scale
+            # Per-expert (non-stacked format)
+            for e in range(cfg.num_experts):
+                key = f"{hf_pfx}.mlp.experts.{e}.down_proj.weight"
+                if key in hf_sd:
+                    hf_sd[key] = hf_sd[key] * scale
+            # Shared expert
+            key = f"{hf_pfx}.mlp.shared_expert.down_proj.weight"
+            if key in hf_sd:
+                hf_sd[key] = hf_sd[key] * scale
+        else:
+            key = f"{hf_pfx}.mlp.down_proj.weight"
+            if key in hf_sd:
+                hf_sd[key] = hf_sd[key] * scale
+
+    # -------------------------------------------------------------------------
     # Megatron -> HF naming conversion
     # -------------------------------------------------------------------------
     def _convert_llm_meg2hf(self, full_sd, hf_sd):
@@ -186,18 +376,61 @@ class BaseConverter:
         if emb_key in full_sd:
             hf_sd["model.language_model.embed_tokens.weight"] = full_sd[emb_key]
 
-        for layer_idx in range(cfg.num_layers):
-            mg_pfx = f"language_model.decoder.layers.{layer_idx}"
-            hf_pfx = f"model.language_model.layers.{layer_idx}"
+        # Build layer mapping.  For loop models the loop region is expanded;
+        # for non-loop models this is a plain 1:1 identity mapping.
+        if cfg.is_loop:
+            layer_plan = self._build_loop_execution_plan()
+            print(
+                f"Loop expansion: {cfg.num_layers} physical layers -> "
+                f"{cfg.hf_num_layers} HF layers "
+                f"(loop [{cfg.loop_start_layer}, {cfg.loop_end_layer}) "
+                f"x {cfg.num_loop_iterations}, "
+                f"scale={cfg.loop_residual_scale})"
+            )
+        else:
+            layer_plan = [(i, i, False, -1) for i in range(cfg.num_layers)]
 
-            if is_gdn_layer(layer_idx, freq):
+        for hf_idx, phys_idx, in_loop, iteration in layer_plan:
+            mg_pfx = f"language_model.decoder.layers.{phys_idx}"
+            hf_pfx = f"model.language_model.layers.{hf_idx}"
+            layer_type = "GDN" if is_gdn_layer(phys_idx, freq) else "SDPA"
+
+            if in_loop:
+                scale = cfg.loop_residual_scale
+                if isinstance(scale, list):
+                    iter_scale = scale[iteration] if iteration < len(scale) else scale[-1]
+                else:
+                    iter_scale = scale
+                print(
+                    f"  HF layer {hf_idx:>3d} <- physical {phys_idx:>3d} "
+                    f"[{layer_type}] loop iter={iteration}, scale={iter_scale}"
+                )
+            elif cfg.is_loop:
+                if phys_idx < cfg.loop_start_layer:
+                    region = "prelude"
+                elif phys_idx >= cfg.loop_end_layer:
+                    region = "coda"
+                else:
+                    # sdpa-wise: a GDN layer inside the loop range, executed once
+                    region = "in range, not looped"
+                print(
+                    f"  HF layer {hf_idx:>3d} <- physical {phys_idx:>3d} [{layer_type}] ({region})"
+                )
+            else:
+                print(f"  HF layer {hf_idx:>3d} <- physical {phys_idx:>3d} [{layer_type}]")
+
+            if is_gdn_layer(phys_idx, freq):
                 mk = f"{mg_pfx}.self_attention.in_proj.layer_norm_weight"
                 if mk in full_sd:
                     hf_sd[f"{hf_pfx}.input_layernorm.weight"] = _restore_ln(full_sd[mk])
 
                 mk = f"{mg_pfx}.self_attention.in_proj.weight"
                 if mk in full_sd:
-                    qkv, z, b, a = split_gdn_in_proj(full_sd[mk], cfg)
+                    # Fold this iteration's key delta in before splitting, so each
+                    # HF copy of the layer carries its own key projection and the
+                    # exported model needs no per-iteration machinery at inference.
+                    w = self._absorb_key_lora(full_sd, mg_pfx, full_sd[mk], iteration)
+                    qkv, z, b, a = split_gdn_in_proj(w, cfg)
                     hf_sd[f"{hf_pfx}.linear_attn.in_proj_qkv.weight"] = qkv
                     hf_sd[f"{hf_pfx}.linear_attn.in_proj_z.weight"] = z
                     hf_sd[f"{hf_pfx}.linear_attn.in_proj_b.weight"] = b
@@ -242,7 +475,11 @@ class BaseConverter:
                 if mk in full_sd:
                     hf_sd[f"{hf_pfx}.self_attn.k_norm.weight"] = _restore_ln(full_sd[mk])
 
-            convert_layer_mlp_meg2hf(full_sd, hf_sd, layer_idx, hf_pfx, mg_pfx, cfg)
+            convert_layer_mlp_meg2hf(full_sd, hf_sd, phys_idx, hf_pfx, mg_pfx, cfg)
+
+            # Absorb loop_residual_scale into output projection weights
+            if in_loop:
+                self._absorb_loop_scale(hf_sd, hf_pfx, phys_idx, iteration=iteration)
 
         mk = "language_model.decoder.final_layernorm.weight"
         if mk in full_sd:
@@ -261,16 +498,57 @@ class BaseConverter:
             convert_vision_meg2hf(full_sd, hf_sd, self.cfg)
         if self.cfg.mtp_num_layers > 0:
             convert_mtp_meg2hf(full_sd, hf_sd, self.cfg)
+
+        # Loop expansion causes multiple HF layers to reference the same
+        # physical tensor (shared storage).  safetensors refuses to save
+        # tensors that share memory, so we need to clone any duplicates.
+        if self.cfg.is_loop:
+            _dedup_shared_tensors(hf_sd)
+
         return hf_sd
 
     # -------------------------------------------------------------------------
     # TP / PP / EP sharding
     # -------------------------------------------------------------------------
     def _split_tp(self, meg_sd):
-        """Split a full Megatron state dict into TP shards."""
+        """Split a full Megatron state dict into TP shards.
+
+        When expert_tp != tp, each TP shard gets the expert weights corresponding
+        to etp_rank = tp_rank // (tp / expert_tp), matching Megatron's implicit
+        mapping where ETP is a subset of TP.
+        """
         cfg = self.cfg
         tp = cfg.tp
+        expert_tp = cfg.expert_tp if cfg.is_moe else tp
+
+        # Always use 1D sharding indexed by tp_rank
         shards = [{} for _ in range(tp)]
+
+        def assign_to_all(key, value):
+            """Helper to assign a value to all shards."""
+            for r in range(tp):
+                shards[r][key] = value
+
+        def assign_tp_chunks(key, chunks, dim_is_expert=False):
+            """Helper to assign TP-chunked values.
+
+            Args:
+                key: parameter key
+                chunks: list of tensor chunks (length tp or expert_tp)
+                dim_is_expert: if True, chunks are by expert_tp; else by tp
+            """
+            if dim_is_expert and expert_tp != tp:
+                # Expert dimension: map tp_rank -> expert_tp_rank
+                # etp_rank = tp_rank // (tp / expert_tp)
+                assert tp % expert_tp == 0, f"TP={tp} must be divisible by expert_TP={expert_tp}"
+                ratio = tp // expert_tp
+                for t in range(tp):
+                    etp_rank = t // ratio
+                    shards[t][key] = chunks[etp_rank]
+            else:
+                # Non-expert dimension: one chunk per tp_rank
+                for r in range(tp):
+                    shards[r][key] = chunks[r]
 
         if cfg.enable_vision:
             vis_h = cfg.vision_hidden_size
@@ -282,8 +560,11 @@ class BaseConverter:
 
         for k, v in meg_sd.items():
             if not isinstance(v, torch.Tensor):
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
+                continue
+
+            # Skip MTP weights when MTP is disabled
+            if "mtp" in k and cfg.mtp_num_layers == 0:
                 continue
 
             # Skip MTP weights when MTP is disabled
@@ -295,9 +576,7 @@ class BaseConverter:
                 "language_model.embedding.word_embeddings.weight",
                 "language_model.output_layer.weight",
             ):
-                chunks = v.chunk(tp, dim=0)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
                 continue
 
             # Vision model
@@ -306,135 +585,115 @@ class BaseConverter:
                     # Vision weights exist but vision is disabled in config, skip
                     continue
                 if "patch_embed" in k or "pos_embed" in k or "final_layernorm" in k:
-                    for r in range(tp):
-                        shards[r][k] = v
+                    assign_to_all(k, v)
                 elif "linear_qkv.weight" in k:
                     viewed = v.view(vis_qg, 3, vis_head_dim, vis_h)
-                    chunks = viewed.chunk(tp, dim=0)
-                    for r in range(tp):
-                        shards[r][k] = chunks[r].reshape(-1, vis_h)
+                    chunks = [c.reshape(-1, vis_h) for c in viewed.chunk(tp, dim=0)]
+                    assign_tp_chunks(k, chunks, dim_is_expert=False)
                 elif "linear_qkv.bias" in k:
                     viewed = v.view(vis_qg, 3, vis_head_dim)
-                    chunks = viewed.chunk(tp, dim=0)
-                    for r in range(tp):
-                        shards[r][k] = chunks[r].reshape(-1)
-                elif "linear_proj.weight" in k or "linear_fc2.weight" in k:
-                    chunks = v.chunk(tp, dim=1)
-                    for r in range(tp):
-                        shards[r][k] = chunks[r]
+                    chunks = [c.reshape(-1) for c in viewed.chunk(tp, dim=0)]
+                    assign_tp_chunks(k, chunks, dim_is_expert=False)
+                elif "linear_proj.weight" in k or (
+                    "linear_fc2.weight" in k and "vision_model" in k
+                ):
+                    assign_tp_chunks(k, v.chunk(tp, dim=1), dim_is_expert=False)
                 elif "linear_fc1.weight" in k and "projection" not in k:
-                    chunks = v.chunk(tp, dim=0)
-                    for r in range(tp):
-                        shards[r][k] = chunks[r]
+                    assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
                 elif "linear_fc1.bias" in k and "projection" not in k:
-                    chunks = v.chunk(tp, dim=0)
-                    for r in range(tp):
-                        shards[r][k] = chunks[r]
+                    assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
                 elif "linear_proj.bias" in k or "linear_fc2.bias" in k:
-                    for r in range(tp):
-                        shards[r][k] = v
+                    assign_to_all(k, v)
                 elif "layer_norm" in k:
-                    for r in range(tp):
-                        shards[r][k] = v
+                    assign_to_all(k, v)
                 elif "projection.encoder" in k:
                     if "linear_fc1" in k:
-                        chunks = v.chunk(tp, dim=0)
-                        for r in range(tp):
-                            shards[r][k] = chunks[r]
+                        assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
                     elif "linear_fc2.weight" in k:
-                        chunks = v.chunk(tp, dim=1)
-                        for r in range(tp):
-                            shards[r][k] = chunks[r]
+                        assign_tp_chunks(k, v.chunk(tp, dim=1), dim_is_expert=False)
                     else:
-                        for r in range(tp):
-                            shards[r][k] = v
+                        assign_to_all(k, v)
                 else:
-                    for r in range(tp):
-                        shards[r][k] = v
+                    assign_to_all(k, v)
                 continue
 
             # LLM
             if "layer_norm_weight" in k or "layer_norm_bias" in k:
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
             elif "final_layernorm" in k:
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
             elif "pre_mlp_layernorm" in k:
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
             elif "in_proj.weight" in k:
-                chunks = v.chunk(tp, dim=0)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
             elif "conv1d.weight" in k:
                 conv_shards = _shard_gdn_conv1d(v, cfg)
-                for r in range(tp):
-                    shards[r][k] = conv_shards[r]
+                assign_tp_chunks(k, conv_shards, dim_is_expert=False)
             elif "conv1d.bias" in k:
                 conv_shards = _shard_gdn_conv1d(v, cfg)
-                for r in range(tp):
-                    shards[r][k] = conv_shards[r]
+                assign_tp_chunks(k, conv_shards, dim_is_expert=False)
             elif "A_log" in k or "dt_bias" in k:
-                chunks = v.chunk(tp, dim=0)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
             elif "out_norm" in k:
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
             elif "out_proj.weight" in k:
-                chunks = v.chunk(tp, dim=1)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=1), dim_is_expert=False)
             elif "linear_qkv.weight" in k:
                 # Simple dim-0 chunk / cat for TP sharding of the fused QKV weight.
                 # This is valid for any TP size, including cases where num_query_groups < tp.
-                chunks = v.chunk(tp, dim=0)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
             elif "linear_proj.weight" in k:
-                chunks = v.chunk(tp, dim=1)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=1), dim_is_expert=False)
             elif "q_layernorm" in k or "k_layernorm" in k:
-                for r in range(tp):
-                    shards[r][k] = v
-            elif "mlp.experts.linear_fc1.weight" in k:
-                viewed = v.view(2, cfg.moe_ffn_hidden_size, cfg.hidden_size)
-                chunks = viewed.chunk(tp, dim=1)
-                for r in range(tp):
-                    shards[r][k] = chunks[r].reshape(-1, cfg.hidden_size)
+                assign_to_all(k, v)
             elif "shared_experts.linear_fc1.weight" in k:
+                # Shared experts use regular tp (must match before mlp.experts)
                 viewed = v.view(2, cfg.moe_shared_expert_intermediate_size, cfg.hidden_size)
-                chunks = viewed.chunk(tp, dim=1)
-                for r in range(tp):
-                    shards[r][k] = chunks[r].reshape(-1, cfg.hidden_size)
+                chunks = [c.reshape(-1, cfg.hidden_size) for c in viewed.chunk(tp, dim=1)]
+                assign_tp_chunks(k, chunks, dim_is_expert=False)
+            elif "mlp.experts.linear_fc1.weight" in k:
+                # Expert weights use expert_tp
+                viewed = v.view(2, cfg.moe_ffn_hidden_size, cfg.hidden_size)
+                chunks = [c.reshape(-1, cfg.hidden_size) for c in viewed.chunk(expert_tp, dim=1)]
+                assign_tp_chunks(k, chunks, dim_is_expert=True)
+            elif "mlp.experts.linear_fc2.weight" in k:
+                # Expert fc2 also uses expert_tp (row-parallel)
+                assign_tp_chunks(k, v.chunk(expert_tp, dim=1), dim_is_expert=True)
             elif "linear_fc1.weight" in k:
                 viewed = v.view(2, cfg.ffn_hidden_size, cfg.hidden_size)
-                chunks = viewed.chunk(tp, dim=1)
-                for r in range(tp):
-                    shards[r][k] = chunks[r].reshape(-1, cfg.hidden_size)
+                chunks = [c.reshape(-1, cfg.hidden_size) for c in viewed.chunk(tp, dim=1)]
+                assign_tp_chunks(k, chunks, dim_is_expert=False)
             elif "linear_fc2.weight" in k:
-                chunks = v.chunk(tp, dim=1)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                # Non-expert fc2 uses regular tp
+                assign_tp_chunks(k, v.chunk(tp, dim=1), dim_is_expert=False)
             elif "router.weight" in k:
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
             elif "eh_proj.weight" in k:
-                chunks = v.chunk(tp, dim=0)
-                for r in range(tp):
-                    shards[r][k] = chunks[r]
+                assign_tp_chunks(k, v.chunk(tp, dim=0), dim_is_expert=False)
             else:
-                for r in range(tp):
-                    shards[r][k] = v
+                assign_to_all(k, v)
 
         return shards
 
     def _merge_tp(self, shards):
-        """Merge TP shards into a single state dict for one PP/EP rank."""
+        """Merge TP shards into a single state dict for one PP/EP rank.
+
+        Args:
+            shards: list of state_dicts indexed by tp_rank
+        """
         cfg = self.cfg
         tp = cfg.tp
+        expert_tp = cfg.expert_tp if cfg.is_moe else tp
+        # When expert_tp != tp, expert weights are replicated across TP shards
+        # via the implicit mapping etp_rank = tp_rank // (tp / expert_tp).
+        # To merge, pick one representative shard per ETP group (the first in
+        # each group) and concatenate those unique chunks.
+        expert_replicated = cfg.is_moe and expert_tp != tp
+        if expert_replicated:
+            etp_ratio = tp // expert_tp
+            # Indices of representative shards: [0, ratio, 2*ratio, ...]
+            expert_repr_indices = list(range(0, tp, etp_ratio))
+
         merged = {}
         all_keys = set()
         for s in shards:
@@ -509,6 +768,16 @@ class BaseConverter:
                 merged[k] = _merge_gdn_conv1d(vals, cfg)
             elif "A_log" in k or "dt_bias" in k:
                 merged[k] = torch.cat(vals, dim=0)
+            elif "key_lora_up" in k:
+                # [num_loop_iterations, rank, qk_dim_local_tp]: the key dimension is
+                # TP-sharded, and it is the LAST axis here, not dim 0.
+                merged[k] = torch.cat(vals, dim=2)
+            elif "key_lora_down" in k:
+                # [num_loop_iterations, hidden, rank]: replicated across TP ranks.
+                merged[k] = vals[0]
+            elif "loop_dt_offset" in k:
+                # [num_loop_iterations, num_v_heads_local_tp], TP along dim 1.
+                merged[k] = torch.cat(vals, dim=1)
             elif "out_norm" in k:
                 merged[k] = vals[0]
             elif "out_proj.weight" in k:
@@ -521,12 +790,25 @@ class BaseConverter:
                 merged[k] = torch.cat(vals, dim=1)
             elif "q_layernorm" in k or "k_layernorm" in k:
                 merged[k] = vals[0]
-            elif "mlp.experts.linear_fc1.weight" in k:
-                viewed = [x.view(2, -1, cfg.hidden_size) for x in vals]
-                merged[k] = torch.cat(viewed, dim=1).view(-1, cfg.hidden_size)
             elif "shared_experts.linear_fc1.weight" in k:
+                # Shared experts use regular tp (must match before mlp.experts)
                 viewed = [x.view(2, -1, cfg.hidden_size) for x in vals]
                 merged[k] = torch.cat(viewed, dim=1).view(-1, cfg.hidden_size)
+            elif "mlp.experts.linear_fc1.weight" in k:
+                if expert_replicated:
+                    # Pick one shard per ETP group and merge the unique chunks
+                    unique_vals = [vals[i] for i in expert_repr_indices]
+                    viewed = [x.view(2, -1, cfg.hidden_size) for x in unique_vals]
+                    merged[k] = torch.cat(viewed, dim=1).view(-1, cfg.hidden_size)
+                else:
+                    viewed = [x.view(2, -1, cfg.hidden_size) for x in vals]
+                    merged[k] = torch.cat(viewed, dim=1).view(-1, cfg.hidden_size)
+            elif "mlp.experts.linear_fc2.weight" in k:
+                if expert_replicated:
+                    unique_vals = [vals[i] for i in expert_repr_indices]
+                    merged[k] = torch.cat(unique_vals, dim=1)
+                else:
+                    merged[k] = torch.cat(vals, dim=1)
             elif "linear_fc1.weight" in k:
                 viewed = [x.view(2, -1, cfg.hidden_size) for x in vals]
                 merged[k] = torch.cat(viewed, dim=1).view(-1, cfg.hidden_size)
@@ -537,6 +819,39 @@ class BaseConverter:
             elif "eh_proj.weight" in k:
                 merged[k] = torch.cat(vals, dim=0)
             else:
+                merged[k] = vals[0]
+
+        return merged
+
+    def _merge_expert_tp(self, expert_tp_shards):
+        """Merge expert_tp shards for a single (pp, tp, ep) position.
+
+        Only expert weights vary across expert_tp ranks; non-expert weights are
+        replicated and taken from the first shard.
+
+        Args:
+            expert_tp_shards: list of state_dicts indexed by expert_tp_rank
+        """
+        cfg = self.cfg
+        merged = {}
+        all_keys = set()
+        for s in expert_tp_shards:
+            all_keys.update(s.keys())
+
+        for k in sorted(all_keys):
+            if "extra_state" in k:
+                continue
+            vals = [s[k] for s in expert_tp_shards if k in s]
+            if not vals or not isinstance(vals[0], torch.Tensor):
+                continue
+
+            if "mlp.experts.linear_fc1.weight" in k and "shared_experts" not in k:
+                viewed = [x.view(2, -1, cfg.hidden_size) for x in vals]
+                merged[k] = torch.cat(viewed, dim=1).view(-1, cfg.hidden_size)
+            elif "mlp.experts.linear_fc2.weight" in k and "shared_experts" not in k:
+                merged[k] = torch.cat(vals, dim=1)
+            else:
+                # Non-expert weights are replicated, take first
                 merged[k] = vals[0]
 
         return merged
@@ -707,12 +1022,24 @@ class MoEConverter(BaseConverter):
         pp_stages = split_pp_layers(meg_sd, cfg)
         del meg_sd
 
-        print(f"Splitting by EP (ranks={cfg.ep}) and TP (ranks={cfg.tp})...")
+        expert_tp = cfg.expert_tp
+        use_expert_tp = expert_tp != cfg.tp
+
+        if use_expert_tp:
+            print(f"Using Expert-TP={expert_tp} (TP={cfg.tp}, EP={cfg.ep})")
+            print(
+                f"  Each TP shard contains expert weights from etp_rank = tp_rank // {cfg.tp // expert_tp}"
+            )
+        else:
+            print(f"Splitting by EP (ranks={cfg.ep}) and TP (ranks={cfg.tp})...")
+
         shards_dict = {}
         for pp_rank in range(cfg.pp):
             ep_shards = split_ep_experts(pp_stages[pp_rank], cfg)
             for ep_rank in range(cfg.ep):
                 tp_shards = self._split_tp(ep_shards[ep_rank])
+
+                # tp_shards is always a list indexed by tp_rank (no 2D dict anymore)
                 for tp_rank in range(cfg.tp):
                     shard = self._add_extra_states(tp_shards[tp_rank])
                     shards_dict[(pp_rank, tp_rank, ep_rank)] = shard
@@ -729,6 +1056,7 @@ class MoEConverter(BaseConverter):
 
     def run_meg2hf(self, meg_dir, save_dir, ref_dir=None, skip_value=False):
         cfg = self.cfg
+
         pp_merged = {}
         for pp_rank in range(cfg.pp):
             print(f"Loading PP stage {pp_rank}...")
@@ -742,8 +1070,12 @@ class MoEConverter(BaseConverter):
                             f"Cannot find checkpoint for TP={tp_rank}, PP={pp_rank}, EP={ep_rank} in {meg_dir}"
                         )
                     ep_shards.append(load_megatron_shard(path))
+
                 tp_merged[tp_rank] = merge_ep_experts(ep_shards, cfg)
                 del ep_shards
+
+            # _merge_tp handles expert_tp != tp: replicated expert weights are
+            # taken from the first TP shard, matching the implicit ETP mapping.
             pp_merged[pp_rank] = self._merge_tp([tp_merged[r] for r in range(cfg.tp)])
             del tp_merged
 

@@ -76,7 +76,7 @@ def load_megatron_shard(path):
     return sd.get("model", sd)
 
 
-def find_megatron_shard(meg_dir, tp_rank=0, pp_rank=0, ep_rank=None):
+def find_megatron_shard(meg_dir, tp_rank=0, pp_rank=0, ep_rank=None, expert_tp_rank=None):
     """Find a single Megatron shard file under release/ or iter_*/ subdirs."""
     candidates = [meg_dir]
     release_dir = os.path.join(meg_dir, "release")
@@ -94,18 +94,27 @@ def find_megatron_shard(meg_dir, tp_rank=0, pp_rank=0, ep_rank=None):
         if os.path.isdir(iter_release):
             candidates.append(iter_release)
 
-    ep_rank = ep_rank if ep_rank is not None else 0
-    suffixes = [
-        # Standard PP>1 and EP>1 naming: tp_pp_ep
-        f"{tp_rank:02d}_{pp_rank:03d}_{ep_rank:03d}",
-    ]
+    _ep = ep_rank if ep_rank is not None else 0
+    _etp = expert_tp_rank if expert_tp_rank is not None else 0
+    # Whether the caller explicitly asked for expert_tp dimension
+    has_expert_tp = expert_tp_rank is not None
+
+    suffixes = []
+
+    # Expert-TP naming (always try first when caller specifies expert_tp_rank)
+    if has_expert_tp:
+        suffixes.append(f"{tp_rank:02d}_{pp_rank:03d}_ep_{_ep:02d}_etp_{_etp:02d}")
+
+    # Standard PP>1 and EP>1 naming: tp_pp_ep
+    suffixes.append(f"{tp_rank:02d}_{pp_rank:03d}_{_ep:03d}")
+
     # PP>1 EP=1 naming (only valid when ep_rank==0, otherwise ambiguous)
-    if ep_rank == 0:
+    if _ep == 0:
         suffixes.append(f"{tp_rank:02d}_{pp_rank:03d}")
     # PP=1 EP>1 naming: tp_ep
-    suffixes.append(f"{tp_rank:02d}_{ep_rank:03d}")
+    suffixes.append(f"{tp_rank:02d}_{_ep:03d}")
     # PP=1 EP=1 naming (only valid when both are 0)
-    if pp_rank == 0 and ep_rank == 0:
+    if pp_rank == 0 and _ep == 0:
         suffixes.append(f"{tp_rank:02d}")
 
     for base in candidates:
@@ -117,24 +126,33 @@ def find_megatron_shard(meg_dir, tp_rank=0, pp_rank=0, ep_rank=None):
 
 
 def save_megatron_release_checkpoint(shards_dict, save_dir, cfg):
-    """Save a {(pp, tp, ep?): state_dict} mapping as a Megatron release checkpoint."""
+    """Save a {(pp, tp, ep?, expert_tp?): state_dict} mapping as a Megatron release checkpoint."""
     release_dir = os.path.join(save_dir, "release")
     os.makedirs(release_dir, exist_ok=True)
 
     for rank_tuple, shard in shards_dict.items():
-        # Support both (pp, tp) and (pp, tp, ep) tuple layouts regardless of cfg.ep.
-        if len(rank_tuple) == 3:
+        # Support (pp, tp), (pp, tp, ep), and (pp, tp, ep, expert_tp) tuple layouts
+        if len(rank_tuple) == 4:
+            pp_rank, tp_rank, ep_rank, expert_tp_rank = rank_tuple
+        elif len(rank_tuple) == 3:
             pp_rank, tp_rank, ep_rank = rank_tuple
         else:
             pp_rank, tp_rank = rank_tuple
             ep_rank = None
+
+        use_pp = cfg.pp > 1
         use_ep = ep_rank is not None and ep_rank >= 0 and cfg.ep > 1
 
-        name = f"mp_rank_{tp_rank:02d}"
-        if cfg.pp > 1:
-            name = f"{name}_{pp_rank:03d}"
+        # Build directory name following Megatron-LM-FL get_checkpoint_name():
+        #   PP>1:  mp_rank_{tp:02d}_{pp:03d}[_{ep:03d}]
+        #   PP=1:  mp_rank_{tp:02d}[_{ep:03d}]
+        if use_pp:
+            name = f"mp_rank_{tp_rank:02d}_{pp_rank:03d}"
+        else:
+            name = f"mp_rank_{tp_rank:02d}"
+
         if use_ep:
-            name = f"{name}_{ep_rank:03d}"
+            name += f"_{ep_rank:03d}"
 
         ckpt_dir = os.path.join(release_dir, name)
         os.makedirs(ckpt_dir, exist_ok=True)

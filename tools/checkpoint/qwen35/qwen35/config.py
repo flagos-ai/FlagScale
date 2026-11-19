@@ -50,6 +50,8 @@ class Config:
         self.tp = cfg.get("tensor_model_parallel_size", 1)
         self.pp = cfg.get("pipeline_model_parallel_size", 1)
         self.ep = cfg.get("expert_model_parallel_size", 1)
+        # Expert TP: defaults to same as model TP if not specified
+        self.expert_tp = cfg.get("expert_tensor_parallel_size", self.tp)
 
         # Uneven PP: optional per-stage layer counts
         self.decoder_first_pipeline_num_layers = cfg.get("decoder_first_pipeline_num_layers", None)
@@ -107,12 +109,135 @@ class Config:
             self.temporal_patch_size = 0
             self.use_linear_proj = False
 
+        # Loop Transformer params: optional
+        # When set, meg2hf expands the loop region into separate HF layers
+        # and absorbs loop_residual_scale into output projection weights.
+        self.loop_start_layer = cfg.get("loop_start_layer", None)
+        self.loop_end_layer = cfg.get("loop_end_layer", None)
+        self.num_loop_iterations = cfg.get("num_loop_iterations", 2)
+        self.loop_residual_scale = cfg.get("loop_residual_scale", None)
+        # Normalize list format: [0.7, 0.3] -> keep as list; single float -> keep as float
+        if isinstance(self.loop_residual_scale, list) and len(self.loop_residual_scale) == 1:
+            self.loop_residual_scale = self.loop_residual_scale[0]
+        self.loop_type = cfg.get("loop_type", "module-wise")
+        self.loop_block_size = cfg.get("loop_block_size", None)
+        # Per-loop-iteration key LoRA. Training keeps the fused checkpoint keys, so
+        # the only thing conversion has to do is fold each iteration's delta into
+        # that iteration's copy of in_proj -- after which the exported model is an
+        # ordinary one and needs no inference-side support.
+        self.loop_gdn_key_lora_rank = cfg.get("loop_gdn_key_lora_rank", None)
+        self._validate_loop_config()
+
         # MTP params: optional
         self.mtp_num_layers = cfg.get("mtp_num_layers", 0) or 0
 
     @property
     def is_moe(self):
         return self.num_experts is not None and self.num_experts > 0
+
+    @property
+    def is_loop(self):
+        """Whether Loop Transformer expansion is enabled."""
+        return self.loop_start_layer is not None and self.loop_end_layer is not None
+
+    @property
+    def hf_num_layers(self):
+        """Number of layers in the expanded HF checkpoint.
+
+        For non-loop models this equals num_layers.  For loop models the loop
+        region is repeated ``num_loop_iterations`` times so the total is::
+
+            prelude + loop_span * num_loop_iterations + coda
+
+        For ``loop_type='sdpa-wise'`` only the SDPA layers inside the range are
+        repeated, so the count grows by the number of those layers instead of by
+        the whole span.
+        """
+        if not self.is_loop:
+            return self.num_layers
+        if self.loop_type == "sdpa-wise":
+            return self.num_layers + self.num_looped_sdpa_layers * (self.num_loop_iterations - 1)
+        loop_span = self.loop_end_layer - self.loop_start_layer
+        return self.num_layers + loop_span * (self.num_loop_iterations - 1)
+
+    @property
+    def num_looped_sdpa_layers(self):
+        """Number of SDPA layers inside the loop range (``sdpa-wise`` only)."""
+        from .gdn import is_gdn_layer
+
+        return sum(
+            1
+            for i in range(self.loop_start_layer, self.loop_end_layer)
+            if not is_gdn_layer(i, self.linear_attention_freq)
+        )
+
+    def _validate_loop_config(self):
+        """Sanity-check loop parameters when present."""
+        if (self.loop_start_layer is None) != (self.loop_end_layer is None):
+            raise ValueError(
+                "loop_start_layer and loop_end_layer must both be None or both be set. "
+                f"Got loop_start_layer={self.loop_start_layer}, "
+                f"loop_end_layer={self.loop_end_layer}."
+            )
+        if not self.is_loop:
+            return
+        if not (0 <= self.loop_start_layer < self.loop_end_layer <= self.num_layers):
+            raise ValueError(
+                f"Loop range must satisfy 0 <= loop_start_layer < loop_end_layer <= num_layers. "
+                f"Got loop_start_layer={self.loop_start_layer}, "
+                f"loop_end_layer={self.loop_end_layer}, num_layers={self.num_layers}."
+            )
+        if self.num_loop_iterations < 2:
+            raise ValueError(f"num_loop_iterations must be >= 2, got {self.num_loop_iterations}.")
+        if self.loop_residual_scale is not None:
+            if isinstance(self.loop_residual_scale, list):
+                if any(s <= 0 for s in self.loop_residual_scale):
+                    raise ValueError(
+                        f"All loop_residual_scale values must be positive, got {self.loop_residual_scale}."
+                    )
+            elif self.loop_residual_scale <= 0:
+                raise ValueError(
+                    f"loop_residual_scale must be positive, got {self.loop_residual_scale}."
+                )
+        _valid_loop_types = {"module-wise", "block-wise", "sdpa-wise", "layer-wise"}
+        if self.loop_type not in _valid_loop_types:
+            raise ValueError(
+                f"loop_type must be one of {_valid_loop_types}, got '{self.loop_type}'."
+            )
+        if self.loop_type == "layer-wise":
+            # Alias for block-wise with block_size=1 (ABC -> AABBCC). Normalised to
+            # match the training side, which does the same in its __post_init__, so
+            # the conversion plan stays in lockstep with the execution plan.
+            if self.loop_block_size not in (None, 1):
+                raise ValueError(
+                    f"loop_type='layer-wise' implies loop_block_size=1, but "
+                    f"loop_block_size={self.loop_block_size} was given."
+                )
+            self.loop_type = "block-wise"
+            self.loop_block_size = 1
+        if self.loop_type == "sdpa-wise":
+            # Repeats only SDPA layers in place, so no block alignment is needed,
+            # but the range must actually contain an SDPA layer or the loop is a no-op.
+            if self.num_looped_sdpa_layers == 0:
+                raise ValueError(
+                    f"loop_type='sdpa-wise' found no SDPA layers in loop range "
+                    f"[{self.loop_start_layer}, {self.loop_end_layer}) with "
+                    f"linear_attention_freq={self.linear_attention_freq}; "
+                    f"the loop would be a no-op."
+                )
+        if self.loop_type == "block-wise":
+            if self.loop_block_size is None:
+                raise ValueError("loop_block_size must be set when loop_type='block-wise'.")
+            loop_span = self.loop_end_layer - self.loop_start_layer
+            if self.loop_block_size <= 0 or self.loop_block_size > loop_span:
+                raise ValueError(
+                    f"loop_block_size must be in [1, {loop_span}], got {self.loop_block_size}."
+                )
+            if loop_span % self.loop_block_size != 0:
+                raise ValueError(
+                    f"loop_block_size ({self.loop_block_size}) must evenly divide "
+                    f"loop span ({loop_span})."
+                )
 
     @property
     def pp_layer_counts(self):

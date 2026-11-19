@@ -714,6 +714,13 @@ def get_batch_on_this_tp_rank(data_iterator, mtp_on_this_rank: bool = False):
             _broadcast(batch['loss_mask'])
             _broadcast(batch['attention_mask'])
 
+        else:
+            # Intermediate pipeline stages
+            # For mrope (multimodal RoPE), intermediate stages need position_ids to compute rotary embeddings
+            if hasattr(args, 'position_embedding_type') and args.position_embedding_type == 'mrope':
+                _broadcast(batch['position_ids'])
+                _broadcast(batch['attention_mask'])
+
 
     else:
         if args.hybrid_context_parallel:
@@ -821,6 +828,22 @@ def get_batch_on_this_tp_rank(data_iterator, mtp_on_this_rank: bool = False):
             _broadcast(loss_mask)
             _broadcast(attention_mask)
 
+        else:
+            # Intermediate pipeline stages
+            # For mrope (multimodal RoPE), intermediate stages need position_ids to compute rotary embeddings
+            tokens = None
+            labels = None
+            loss_mask = None
+            cu_seqlens = None
+            max_seqlen = None
+
+            if hasattr(args, 'position_embedding_type') and args.position_embedding_type == 'mrope':
+                _broadcast(position_ids)
+                _broadcast(attention_mask)
+            else:
+                # For rope/yarn, position_ids not needed (derived from decoder_input shape)
+                position_ids = None
+                attention_mask = None
 
         batch = {
             'tokens': tokens,

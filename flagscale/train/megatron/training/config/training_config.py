@@ -319,6 +319,12 @@ class LoggerConfig:
     log_num_zeros_in_grad: bool = False
     """If set, calculate and log the number of zeros in gradient."""
 
+    log_per_module_grad_norm: bool = False
+    """If set, compute and log per-module (attn/mlp/other) grad norm breakdown at each step."""
+
+    log_per_module_grad_norm_detailed: bool = False
+    """If set, additionally log fine-grained sub-category grad norms (e.g. attn/gdn, mlp/experts)."""
+
     log_max_attention_logit: bool = False
     """Enable max attention logit logging to tensorboard."""
 
