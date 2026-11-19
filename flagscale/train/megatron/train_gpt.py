@@ -230,7 +230,14 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             cu_seqlens_padded = cu_seqlens_padded[0]
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
-        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        # DSv4 consumes the same batch on every virtual pipeline chunk. Count
+        # it once per physical rank; consume_seqlen_stats_in_iteration already
+        # removes TP/CP/PP replication, but not virtual chunks.
+        if (
+            getattr(args, "experimental_attention_variant", None) != "dsv4_hybrid"
+            or vp_stage in (None, 0)
+        ):
+            update_seqlen_stats_from_cu_seqlens(cu_seqlens)
         cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens # TODO(asolergi-nv): Currently there is a bug forcing cu_seqlens to be cu_seqlens_padded
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
@@ -251,7 +258,8 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             assert args.overlap_moe_expert_parallel_comm, \
                 "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
             schedule_plan = model.build_schedule_plan(
-                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask,
+                packed_seq_params=packed_seq_params,
             )
             return schedule_plan, partial(loss_func, loss_mask, model=model)
         else:

@@ -174,6 +174,15 @@ class DeepSeekModel(GPTModel):
         """
         Adaptation of overlap_moe_expert_parallel_comm.
         """
+        if (
+            self.config.enable_hyper_connections
+            and not self.decoder.has_final_layernorm_in_this_stage()
+        ):
+            # The overlap schedule reads these handles on every pipeline chunk.
+            # Only the final chunk owns the mHC head and contracts its streams.
+            self.decoder.hc_head_fn = None
+            self.decoder.hc_head_base = None
+            self.decoder.hc_head_scale = None
         # Precompute the engram_hash_iput_ids, it will be used to create a TransformerChunkSchedulePlan.
         if self.config.use_engram:
             engram_hash_input_ids = LazyHashInputIds(
@@ -192,6 +201,7 @@ class DeepSeekModel(GPTModel):
             labels=labels,
             loss_mask=loss_mask,
             extra_block_kwargs=extra_block_kwargs,
+            packed_seq_params=packed_seq_params,
         )
     
     def sharded_state_dict(

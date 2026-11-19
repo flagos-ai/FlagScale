@@ -1,0 +1,72 @@
+# MODIFICATION 5 (task config): dedicated YAML for the DeepSeek-V4-Flash BF16 64K
+# 128-GPU SFT run described in .codex/deepseek_v41_flash_sft_8h_plan.md.
+# Derived from examples/deepseek_v4/conf/train_flash0731_bf16_64k_128gpu.yaml
+# (whose untouched copy is at /workspace/backup_sft8h/), keeping model, parallel
+# and precision settings identical. Changes are listed in
+# outputs/dsv4-flash-sft-8h/MODIFICATIONS.md -- nothing here touches model
+# semantics, precision, routing, attention, recompute or the optimizer math.
+defaults:
+  - _self_
+  - train: flash0731_bf16_64k_128gpu_sft
+
+experiment:
+  exp_name: DeepSeek-V4-Flash-0731-BF16-64K-128GPU-SFT
+  # Fixed output directory (not timestamped) so the single final checkpoint and
+  # all logs live at one predictable path for acceptance.
+  exp_dir: /workspace/repos/flagscale/outputs/dsv4-flash-sft-8h/exp
+  save: ${experiment.exp_dir}/checkpoints
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_deepseek_v4.py
+  runner:
+    ssh_port: 10710
+    master_addr: 10.8.1.106
+    master_port: 11649
+    nproc_per_node: 8
+    # MODIFICATION: base yaml pointed at ./hostfile (only 4 hosts).
+    # free_hostfile is the 16-host x slots=8 file -> 128 GPUs.
+    hostfile: /workspace/repos/flagscale/free_hostfile
+    nnodes: 16
+    rdzv_backend: static
+    max_restarts: 0
+  shell_cmds: null
+  envs:
+    TORCH_ALLOW_TF32_CUBLAS_OVERRIDE: '1'
+    NVIDIA_TF32_OVERRIDE: '1'
+    CUDA_DEVICE_MAX_CONNECTIONS: '1'
+    TORCH_NCCL_AVOID_RECORD_STREAMS: '1'
+    NVTE_ALLOW_NONDETERMINISTIC_ALGO: '1'
+    PYTORCH_ALLOC_CONF: expandable_segments:True
+    PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+    NCCL_NVLS_ENABLE: '0'
+    NCCL_GRAPH_REGISTER: '0'
+    PYTHONWARNINGS: ignore
+    NCCL_DEBUG: WARN
+    NUM_OF_TOKENS_PER_CHUNK_COMBINE_API: '128'
+    NUM_OF_STAGES_DISPATCH_API: '10'
+    NUM_OF_IN_FLIGHT_S2G_DISPATCH_API: '8'
+    NCCL_IB_HCA: mlx5_100,mlx5_101,mlx5_102,mlx5_103,mlx5_104,mlx5_105,mlx5_106,mlx5_107
+    NCCL_SOCKET_IFNAME: bond0
+    NCCL_IB_DISABLE: 0
+    NCCL_IB_GID_INDEX: '-1'
+    MAX_JOBS: '2'
+    OUTPUT_PATH: ${experiment.exp_dir}
+    CUDA_VISIBLE_DEVICES: 0,1,2,3,4,5,6,7
+    HYDRA_FULL_ERROR: '1'
+    # Plan section 3: keep ONLY these three DSV4_* switches.
+    DSV4_FIXED_P2P_SHAPE: '1'
+    DSV4_COMPILE_HAGG_BWD: '1'
+    DSV4_NUMA_BIND: '0'
+    TRITON_CACHE_AUTOTUNING: '1'
+    TRITON_CACHE_DIR: /tmp/turing-triton-bf16-cp8-pp8-ep8-seq65536-v1
+  cmds:
+    before_start: source /root/miniconda3/bin/activate /workspace/envs/flagscale
+  repo_dir: /workspace/repos/flagscale
+  # MODIFICATION: must be false; true strips the whole checkpoint block and
+  # disables both loading and saving.
+  disable_checkpoint_io: false
+action: run
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
