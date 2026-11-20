@@ -23,6 +23,7 @@ from datetime import datetime
 
 from omegaconf import DictConfig, OmegaConf
 
+from flagscale.runner.diagnostics import active_run_id_cleanup_lines
 from flagscale.runner.elastic.monitor_service import MonitorService
 from flagscale.runner.launcher.launcher_base import LauncherBase
 from flagscale.runner.utils import (
@@ -151,6 +152,8 @@ def _get_runner_cmd_train(
     # Heartbeat is consumed by FlagScale and is not a torchrun option.
     if "heartbeat" in runner_args:
         del runner_args["heartbeat"]
+    for key in ("stop_timeout_s", "stop_kill_timeout_s"):
+        runner_args.pop(key, None)
     runner_args["rdzv_id"] = rdzv_id
     # runner_args["master_addr"] = master_addr
     # runner_args["master_port"] = master_port
@@ -584,13 +587,25 @@ class SshLauncher(LauncherBase):
                         host, host_stop_script_file, logging_config.scripts_dir, ssh_port
                     )
                 # Step 3: run the host_run_script_file on the remote host
-                run_ssh_command(host, f"bash {host_stop_script_file}", ssh_port)
+                # Wait for each node's final stop result before reporting success.
+                result = run_ssh_command(
+                    host,
+                    f"bash {shlex.quote(host_stop_script_file)}",
+                    ssh_port,
+                    background=False,
+                    query=True,
+                )
+                if result.returncode:
+                    raise RuntimeError(
+                        f"Training stop failed on {host}: {result.stderr}\n{result.stdout}"
+                    )
             else:
                 run_local_command(f"bash {host_stop_script_file}")
 
     def stop(self):
         if self.resources is None or self.task_type == "serve":
             self._stop_each("localhost", 0)
+            self._clear_stopped_run()
             return
 
         nnodes = get_nnodes(len(self.resources), self.config.experiment.runner.get("nnodes", None))
@@ -619,6 +634,19 @@ class SshLauncher(LauncherBase):
                 if node_rank >= nnodes:
                     break
                 self._stop_each(host, node_rank)
+
+        self._clear_stopped_run()
+
+    def _clear_stopped_run(self):
+        # Every target must confirm exit before the controller clears active state.
+        if self.task_type == "train" and hasattr(self.backend, "active_run_id_file"):
+            run_local_command(
+                "\n".join(
+                    active_run_id_cleanup_lines(
+                        self.backend.active_run_id_file, self.backend.diagnostics_run_id
+                    )
+                )
+            )
 
     def _generate_query_script(self, host, node_rank):
         """Genetrate the query script for each host."""
