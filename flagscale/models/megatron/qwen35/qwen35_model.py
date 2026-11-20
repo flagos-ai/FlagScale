@@ -297,6 +297,7 @@ class Qwen35Model(MegatronModule):
         image_grid_thw: torch.LongTensor | None = None,
         video_grid_thw: torch.LongTensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        cu_seqlens: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute mRoPE position indices for Qwen3.5."""
         return get_rope_index(
@@ -308,4 +309,5 @@ class Qwen35Model(MegatronModule):
             image_grid_thw=image_grid_thw,
             video_grid_thw=video_grid_thw,
             attention_mask=attention_mask,
+            cu_seqlens=cu_seqlens,
         )

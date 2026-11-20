@@ -1,0 +1,26 @@
+# Copyright 2026 FlagOS Contributors
+# SPDX-License-Identifier: Apache-2.0
+# Full 4B model, vision and MTP; configure data/tokenizer and platform environment.
+defaults:
+  - train_packing
+  - _self_
+
+experiment:
+  exp_name: qwen35_4b_packing_smoke
+  exp_dir: ${oc.env:QWEN35_OUTPUT_DIR,./outputs/qwen35_4b_packing_smoke}
+  task:
+    entrypoint: ./tests/functional_tests/train/qwen35/packing_smoke.py
+
+train:
+  system:
+    tensor_model_parallel_size: 2
+    packing_buffer_size: 32
+    logging:
+      log_interval: 1
+  model:
+    seq_length: 4096
+    max_padding_length: 4096
+    # Default 1x8 / TP2 / DP4; set a multiple of DP size for other layouts.
+    global_batch_size: ${oc.env:QWEN35_GLOBAL_BATCH_SIZE,4}
+    train_iters: 5
+    eval_iters: 0

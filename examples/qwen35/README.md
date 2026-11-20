@@ -418,3 +418,125 @@ PY
 ```
 
 稳定窗口内不保存 checkpoint（`save_interval: 1000`），第 15 步结束后仍会保存最终训练状态。比较结果见 [8 卡吞吐报告](throughput_report.md)。日志吞吐仍是框架语言模型计算量估算除以实际耗时，并非硬件计数器读数；固定长度消除了动态长度造成的口径不一致，但该指标不包含视觉编码器完整 FLOPs，也不等同于有效非 padding token 吞吐。
+
+## 13. 基础多模态 packing
+
+Qwen3.5 的 Energon 数据路径支持把多条完整样本拼接为一个训练序列。配置
+`train.system.packing_buffer_size` 为正整数即可开启，默认 `0` 关闭。例如：
+
+```bash
+export QWEN35_DATA_PATH=/path/to/energon/wds
+export QWEN35_VISION_ROOT=/path/to/images
+export QWEN35_HF_PATH=/path/to/tokenizer
+python run.py --config-path examples/qwen35/conf --config-name train_packing
+```
+
+`conf/train_packing.yaml` 继承完整 4B 模型配置（包括视觉编码器和 MTP），示例使用
+8 卡、TP4、PP1、CP1。模型权重、训练步数、输出目录按前文设置；默认配置不指定预训练权重。
+
+- `packing_buffer_size` 的单位是**已编码样本数**，表示每个 Energon worker 一次用于打包的
+  缓冲样本数量，不是 token 数、batch size 或全局 DP 缓冲大小。调大它会增加主机内存需求。
+- 数据先按 DP rank 和 worker 划分，再在各自的数据流中独立 packing，不跨 DP 收集或重分配。
+- 默认采用顺序 **Next Fit**：保持输入顺序；下一条样本放不下时结束当前包、另起一包；
+  缓冲区末尾的不足一包也会输出。没有长度排序、BFD、代价模型、solver 或负载均衡。
+- 每包上限为 `max_padding_length`，须与 `seq_length` 相等。超过上限或空样本会记录警告并跳过；
+  不切断视觉 token 区间。请按数据长度分布设置上限，检查日志中的跳过情况。
+  这是与原非 packing 路径有意保留的差异：原路径在 batch 阶段截断超长样本，packing 路径
+  选择整条跳过，以避免截断视觉 span 后 token、patch 和 grid 不再对齐。
+- 当前支持 `micro_batch_size=1`、`context_parallel_size=1`、`pipeline_model_parallel_size=1`；
+  TP、DP 可以大于 1。一个 microbatch 包含一个打包后的序列，`global_batch_size` 统计包数，
+  原始样本数随长度变化，不能直接沿用未 packing 的样本数口径。
+
+拼接时保留图像/视频 patch、grid、视觉 mask 的对应顺序，通过 `cu_seqlens` 将原始样本边界
+传给语言模型的 attention、GDN 和 MTP；mRoPE 在各样本内部独立计算。已有标签已完成 next-token
+shift，因此只屏蔽每条样本末尾的标签，不再次 shift，也不屏蔽下一条样本的首个有效标签。
+
+保留原有首批容量 padding 和 TP 对齐 padding；尾部 padding 属于最后一段、loss 为零。
+`cu_seqlens` 描述整个物理 THD 缓冲区，最后一个边界等于包含尾部 padding 的序列长度，
+中间没有另行插入的对齐空洞。因此当前 CP1 路径不设置 `cu_seqlens_q_padded` /
+`cu_seqlens_kv_padded`：attention 和 GDN 在这些字段为 `None` 时使用 `cu_seqlens_q/kv`，
+MTP 也在同一组边界内执行位移。最后一段的真实 token 位于 padding 之前，因果计算不读取
+其后的 padding；对应 padding 标签和 MTP loss mask 均被忽略。CP>1 仍被参数检查拒绝。
+
+打包分支的 mRoPE delta 形状为 `[1, 1]`，含义是整个打包行的最大位置加一，减去该行的
+物理长度（包括尾部 padding），并非每条原始样本各有一个 delta。当前训练入口只使用
+显式 `position_ids`，丢弃 delta；此接口未支持打包样本的独立生成或 KV-cache 续接。
+
+`packing_buffer_size=0` 使用原来的非 packing 路径。验证集继续逐样本评估，并根据实际 batch
+元数据选择普通路径。不同 attention 后端可能内部补齐后计算，启用该功能不等于启用了原生
+varlen kernel，也不保证具体吞吐收益。
+
+在已安装训练依赖的环境中，从 FlagScale 根目录运行回归测试：
+
+```bash
+PYTHONPATH="$PWD:$PWD/flagscale/train:$PWD/flagscale/train/megatron:${PYTHONPATH:-}" \
+  python -m pytest -q tests/unit_tests/train/megatron/test_qwen35_packing.py
+```
+
+测试覆盖顺序打包、尾包/超长样本、图文与视频对齐、标签边界、padding、分段 mRoPE、MTP 位移、
+非法配置，以及启用训练 packing 时未打包验证 batch 的回退路径。接收端用例明确使用非 TP0
+rank 和 `data=None`；另有整包 delta 的数值断言，以及带尾部 padding 的 MTP 标签验证。
+在 TE-FL 环境中，还会直接比较参考 attention 的打包结果与逐样本计算的输出和梯度，确认
+尾部 padding 不影响真实 token、且其梯度为零；没有此可选后端的环境会明确跳过该项。
+
+提供可复现的设备端冒烟入口：
+`tests/functional_tests/train/qwen35/packing_smoke.py`，配置为 `conf/train_packing_smoke.yaml`。
+它复用完整 4B 模型的正式训练流程，保留视觉编码器和一层 MTP，使用随机初始化，不读取或
+写入 checkpoint。入口增加断言检查真实 TP 广播、packed 参数、有限 loss、有限梯度范数及
+每步优化器成功更新，不修改模型计算或打包策略。
+
+先按当前平台配置训练运行时，并设置上面的数据、图片根目录和 tokenizer 路径。数据中应包含
+能够共同装入一个包的较短样本，否则冒烟会因未观察到多样本打包而失败。从 FlagScale 根目录
+运行单节点 8 卡冒烟：
+
+```bash
+export QWEN35_OUTPUT_DIR=/path/to/new/packing-smoke-output
+python run.py --config-path examples/qwen35/conf --config-name train_packing_smoke
+```
+
+四节点、每节点 8 卡时，准备各节点可访问的 hostfile 和一致的训练环境，然后执行：
+
+```bash
+export PACKING_HOSTFILE=/path/to/hostfile
+export PACKING_MASTER_ADDR=192.0.2.1  # replace with the actual master address
+python run.py --config-path examples/qwen35/conf --config-name train_packing_smoke \
+  experiment.runner.nnodes=4 \
+  +experiment.runner.hostfile="$PACKING_HOSTFILE" \
+  +experiment.runner.master_addr="$PACKING_MASTER_ADDR" \
+  +experiment.runner.master_port=29644 \
+  train.model.global_batch_size=32
+```
+
+如使用多节点容器，应通过已有的容器启动方式执行 `action=dryrun` 生成的各节点命令。
+设备和网络相关变量按平台设置，示例配置不硬编码某一厂商环境。
+
+每个 rank 应输出 `PACKING_TP_BROADCAST_OK`，表示真实通信已覆盖 packed 和 unpacked 两种
+batch，后者用于验证“训练 packing 已开启、验证 batch 未打包”的接收端路径。训练完成时
+应输出 `PACKING_SMOKE_COMPLETE`，其中 `optimizer_steps` 等于 `train_iters`，
+`multi_sample_forwards` 大于零；同时检查所有节点退出码为 0。断言失败会使进程失败，
+仅启动训练进程不算通过。
+
+2026-10-15 使用上述功能测试入口完成四节点 MetaX C550（32 卡）图文冒烟：
+TP2 / PP1 / CP1 / DP16、MBS1、GBS32、序列长度 4096、packing buffer size 32，
+连续完成 5 步训练。32 个 rank 均通过 packed/unpacked TP 广播检查，且每个 rank 完成
+10 次模型前向和 5 次优化器更新，梯度范数均有限。四节点退出码均为 0，无 NaN 或跳过
+更新；LM loss 从 12.8767 降至 10.9768。32 项回归测试全部通过，无跳过项。
+该结果使用 FineVision 图文数据；视频仅有单元测试覆盖，尚未验证真实视频的分布式训练。
+
+该次 MetaX 环境的版本如下，不能将它等同于其他依赖版本或平台的验证结果：
+
+| Component | Tested version / source revision |
+| --- | --- |
+| PyTorch | `2.10.0+metax3.8.1.0` |
+| Megatron-LM-FL | package `0.18.2`, source `c8fa61f2e403f490baf4cf43fbad24a122f7225a` |
+| Energon | `6.0.1` |
+| TransformerEngine-FL | package `2.17.0`, source `247bdb33d8047630aae9afc249522ef31886393e` |
+| FlagGems | `4af1e434eff5adbf448890089cc3e75ba15a9ff5` |
+| FLA | `0.5.0+metax3.8.1.0torch2.10` |
+| FlashAttention package | `2.6.3+metax3.8.1.0torch2.10` |
+
+MetaX 运行时沿用 packing 之前已有的本地 JIT 策略、chunked cross entropy 和 TE vendor
+加载路径调整，并设置 `CE_TOKEN_CHUNK_SIZE=256`；因此上述 revision 是基础版本而非干净
+checkout 的声明。这些调整不是本 PR 新增的 packing 依赖改动。测试实际使用 TE 的
+`reference.torch` attention 回退路径，不代表原生 varlen 内核性能或其他后端也已验证。
+packing 接口继续复用依赖已有能力，本 PR 不修改 Megatron-LM-FL、TransformerEngine-FL 或 FlagGems。
