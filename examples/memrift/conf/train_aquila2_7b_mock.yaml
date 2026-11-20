@@ -1,0 +1,29 @@
+# Aquila2-7B MemRift metric training entry.
+# The metric scripts override data_path to Alpaca and can switch between pure LoRA
+# and MemRift+LoRA with Hydra overrides.
+
+defaults:
+  - train/aquila2_7b_lora_memrift_mock
+  - _self_
+
+experiment:
+  envs:
+    TORCH_DEVICE_BACKEND_AUTOLOAD: "0"
+  cmds:
+    before_start: export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+  exp_name: memrift_metric_aquila2_7b
+  exp_dir: ./outputs/${experiment.exp_name}
+  task:
+    type: train
+    backend: megatron
+    entrypoint: flagscale/train/megatron/train_memrift.py
+  runner:
+    type: torchrun
+    nnodes: 1
+    nproc_per_node: 1
+
+action: run
+
+hydra:
+  run:
+    dir: ${experiment.exp_dir}/hydra
