@@ -33,6 +33,10 @@ from flagscale.runner.runner_train import (
     _get_args_megatron,
     _update_config_train,
 )
+from flagscale.runner.tracing.config import (
+    TraceLaunchConfig,
+    prepare_trace_launch_config,
+)
 from flagscale.runner.utils import get_pkg_dir, logger, parse_hostfile, resolve_path
 
 PERF_MONITOR_RUNNER_KEYS = (
@@ -64,22 +68,32 @@ class MegatronBackend(BackendBase):
         logging_config = self.config.train.system.logging
         self.active_run_id_file = active_run_id_file(logging_config.pids_dir)
         self.heartbeat_config = prepare_heartbeat_launch_config(self.config, self.rdzv_id)
+        self.trace_config = prepare_trace_launch_config(
+            self.config, self.rdzv_id, self.heartbeat_config
+        )
         action = str(self.config.get("action", "run")).lower()
-        if action == "stop" and self.heartbeat_config.enabled:
+        diagnostics_enabled = self.heartbeat_config.enabled or self.trace_config.enabled
+        if action == "stop" and diagnostics_enabled:
             active_run_id = read_active_run_id(self.active_run_id_file)
             if active_run_id is not None:
                 self.diagnostics_run_id = active_run_id
                 self.heartbeat_config = prepare_heartbeat_launch_config(
                     self.config, self.diagnostics_run_id
                 )
+                self.trace_config = prepare_trace_launch_config(
+                    self.config,
+                    self.diagnostics_run_id,
+                    self.heartbeat_config,
+                )
             else:
                 logger.warning(
-                    "Heartbeat stop cannot locate a valid active diagnostics run id at %s; "
+                    "Diagnostics stop cannot locate a valid active run id at %s; "
                     "training workers will still be stopped",
                     self.active_run_id_file,
                 )
                 self.heartbeat_config = HeartbeatLaunchConfig(enabled=False)
-        self.publish_active_run_id = self.heartbeat_config.enabled and action in {
+                self.trace_config = TraceLaunchConfig(enabled=False)
+        self.publish_active_run_id = diagnostics_enabled and action in {
             "run",
             "test",
         }
@@ -176,6 +190,10 @@ class MegatronBackend(BackendBase):
                 f.write(f"{line}\n")
             if self.heartbeat_config.enabled:
                 f.write("\n")
+            for line in self.trace_config.shell_setup_lines(node_rank):
+                f.write(f"{line}\n")
+            if self.trace_config.enabled:
+                f.write("\n")
             f.write(f'cmd="{cmd}"\n')
             f.write("\n")
             if enable_monitoring:
@@ -203,6 +221,7 @@ class MegatronBackend(BackendBase):
             command_body = diagnostic_command_body(
                 node_rank,
                 self.heartbeat_config,
+                self.trace_config,
                 active_run_id_path=(self.active_run_id_file if self.publish_active_run_id else ""),
                 active_run_id=(self.diagnostics_run_id if self.publish_active_run_id else ""),
             )
@@ -242,6 +261,8 @@ class MegatronBackend(BackendBase):
         with open(host_stop_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
             for line in self.heartbeat_config.stop_shell_lines(node_rank):
+                f.write(f"{line}\n")
+            for line in self.trace_config.stop_shell_lines(node_rank):
                 f.write(f"{line}\n")
             f.write("if [ -f " + host_pid_file + " ]; then\n")
             f.write("    pid=$(cat " + host_pid_file + ")\n")
