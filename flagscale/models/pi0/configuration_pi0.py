@@ -24,6 +24,7 @@ import draccus
 
 from flagscale.models.configs.types import FeatureType, NormalizationMode, PolicyFeature
 from flagscale.models.utils.constants import OBS_IMAGES
+from flagscale.models.utils.hub_utils import resolve_model_path
 from flagscale.models.vla.pretrained_config import PreTrainedConfig
 
 DEFAULT_IMAGE_SIZE = 224
@@ -185,6 +186,7 @@ class PI0Config(PreTrainedConfig):
 
     @classmethod
     def from_pretrained(cls, config_dir: str, **kwargs: Any) -> "PI0Config":
+        config_dir = resolve_model_path(config_dir)
         config_path = os.path.join(config_dir, "config.json")
         if not os.path.exists(config_path):
             raise ValueError(f"config.json not found in {config_dir}")

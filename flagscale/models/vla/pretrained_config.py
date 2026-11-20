@@ -159,6 +159,14 @@ class PreTrainedConfig(ABC):
     def action_delta_indices(self) -> list | None:
         raise NotImplementedError
 
+    def resolve_pretrained_paths(self) -> None:
+        """Resolve any HF/ModelScope repo IDs in this config to local paths.
+
+        Subclasses override to call ``resolve_model_path()`` on their
+        model-path fields.  Called by ``TrainablePolicy.from_config()``
+        before model construction.
+        """
+
     @classmethod
     def from_train_config(cls, train_config: TrainConfig):
         """Build a config from the OmegaConf-based TrainConfig.
