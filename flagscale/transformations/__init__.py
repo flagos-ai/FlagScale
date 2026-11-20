@@ -44,6 +44,13 @@ def _get_transformation_registry() -> dict[str, type[Transformation]]:
 
         _TRANSFORMATION_REGISTRY["TaylorSeerTransformation"] = TaylorSeerTransformation
 
+    if "HorizonKVTransformation" not in _TRANSFORMATION_REGISTRY:
+        from flagscale.inference.core.diffusion.horizonkv_transformation import (
+            HorizonKVTransformation,
+        )
+
+        _TRANSFORMATION_REGISTRY["HorizonKVTransformation"] = HorizonKVTransformation
+
     return _TRANSFORMATION_REGISTRY
 
 

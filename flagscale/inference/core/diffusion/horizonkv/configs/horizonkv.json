@@ -1,0 +1,7 @@
+{
+  "max_stage1_kv_frames": 7,
+  "gpu_cache_frames": 15,
+  "block_target_density": 0.5,
+  "overlap_block_sparsity": 0.5,
+  "mandatory_recent_kv_frames": 4
+}

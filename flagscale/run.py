@@ -21,7 +21,6 @@ from omegaconf import DictConfig, OmegaConf
 from omegaconf.errors import OmegaConfBaseException
 
 from flagscale.logger import logger
-from flagscale.runner.autotuner_factory import AutotunerFactory
 from flagscale.runner.runner_base import Runner
 from flagscale.runner.runner_inference import SSHInferenceRunner
 from flagscale.runner.runner_serve import CloudServeRunner, SSHServeRunner
@@ -106,6 +105,10 @@ def get_runner(config: DictConfig, task_type: str):
 def handle_auto_tune(config: DictConfig, task_type: str) -> None:
     if task_type not in {"serve", "train"}:
         raise NotImplementedError(f"Auto tune is not implemented for task type '{task_type}'")
+
+    # Auto-tuning has optional data-analysis dependencies (for example pandas).
+    # Ordinary inference startup should not import that subsystem.
+    from flagscale.runner.autotuner_factory import AutotunerFactory
 
     # Only one autotuner process for MPI-based runs
     if task_type == "train" and not is_master(config):

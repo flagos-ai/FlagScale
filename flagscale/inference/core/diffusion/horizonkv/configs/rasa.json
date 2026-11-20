@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "policy": "bounded_two_config",
+  "best_config": {
+    "frames": 7,
+    "block_sparsity": 0.5
+  },
+  "min_config": {
+    "frames": 5,
+    "block_sparsity": 0.3
+  },
+  "switch_miss_items": 80,
+  "overlap_min_miss_items": 32
+}
