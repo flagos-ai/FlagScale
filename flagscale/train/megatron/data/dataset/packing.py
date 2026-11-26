@@ -2,17 +2,22 @@
 # Copyright (c) 2026 FlagOS Contributors. All rights reserved.
 #
 # Vendored from ms-swift (Apache-2.0): swift/dataset/packing.py.
-# Only imports are rewritten; the logic is unchanged.
+# FlagScale additionally supports shared index caches and physical-length
+# accounting for padding applied to each row before rows are packed.
 import math
 import multiprocessing as mp
-import torch.distributed as dist
+import os
+import pickle
+import tempfile
 from itertools import chain
-from torch.utils.data import Dataset, IterableDataset
-from tqdm import tqdm
 from typing import Optional
 
-from ..template import MaxLengthError
+import torch.distributed as dist
+from torch.utils.data import Dataset, IterableDataset
+from tqdm import tqdm
+
 from .._utils import get_logger, is_dist, is_master, split_list
+from ..template import MaxLengthError
 
 logger = get_logger()
 
@@ -88,6 +93,13 @@ def calculate_matched_group(sequences, packing_length: int, is_finished: bool = 
     return sequences, ret_sequences
 
 
+def _round_up_length(length: int, alignment: int) -> int:
+    """Return the physical row length after pre-pack alignment."""
+    if alignment <= 0:
+        raise ValueError(f'packing_alignment must be positive, got {alignment}')
+    return ((length + alignment - 1) // alignment) * alignment
+
+
 class PackingDataset(Dataset):
     PACKING_BATCH_SIZE = 1000
 
@@ -102,6 +114,9 @@ class PackingDataset(Dataset):
         packing_length: Optional[int] = None,
         packing_num_proc: int = 1,
         packing_strategy: str = 'binpack',
+        packing_alignment: int = 1,
+        packing_cache_file: Optional[str] = None,
+        packing_cache_key: Optional[str] = None,
         multiprocessing_context: Optional[str] = None,
         **kwargs,
     ):
@@ -113,46 +128,128 @@ class PackingDataset(Dataset):
         self.strict = strict
         self.load_from_cache_file = load_from_cache_file
         self.packing_strategy = packing_strategy
+        self.packing_alignment = packing_alignment
+        self.packing_cache_file = packing_cache_file
+        self.packing_cache_key = packing_cache_key
         self.multiprocessing_context = multiprocessing_context
         self.packing_length = packing_length or self.template.max_length
         self.packing_num_proc = min(packing_num_proc, math.ceil(len(dataset) / self.PACKING_BATCH_SIZE))
-        if is_master():
-            lengths = self.dataset['lengths']
-            chunked_lengths = split_list(lengths, self.packing_num_proc)
-            offsets = []
-            offset = 0
-            for chunk in chunked_lengths:
-                offsets.append(offset)
-                offset += len(chunk)
-            jobs = [(i, offsets[i], chunked_lengths[i], self.packing_length, self.packing_strategy)
-                    for i in range(self.packing_num_proc)]
+        distributed = dist.is_available() and dist.is_initialized() and is_dist()
+        rank = dist.get_rank() if distributed else 0
+        use_disk_cache = bool(self.load_from_cache_file and self.packing_cache_file)
 
-            ctx = _resolve_mp_context(self.multiprocessing_context)
-            self._out_queue = ctx.Queue()
-            # Pass the out-queue/params as explicit args (not via `self`) so a non-fork context does not
-            # need to pickle the whole dataset held by `self`.
-            _spawn_workers(ctx, target=self.create_packed_idx, jobs=self._worker_jobs(jobs))
-            self.packed_idx = [[] for _ in range(self.packing_num_proc)]
-            self.packed_length = [[] for _ in range(self.packing_num_proc)]
-            desc = 'Packing: ' if self.packing_num_proc == 1 else f'Packing (num_proc={self.packing_num_proc}): '
-            with tqdm(total=len(lengths), dynamic_ncols=True, desc=desc) as prog_bar:
-                finished_workers = 0
-                while finished_workers < self.packing_num_proc:
-                    rank, sequences, data_len = self._out_queue.get()
-                    if data_len == -1:
-                        finished_workers += 1
-                        continue
-                    prog_bar.update(data_len)
-                    self.packed_idx[rank] += [[x[0] for x in seq] for seq in sequences]
-                    self.packed_length[rank] += [sum(x[1] for x in seq) for seq in sequences]
-            self.packed_idx = list(chain.from_iterable(self.packed_idx))
-            self.packed_length = list(chain.from_iterable(self.packed_length))
+        if use_disk_cache:
+            error = None
+            if rank == 0:
+                try:
+                    from filelock import FileLock
+
+                    lock_path = self.packing_cache_file + '.lock'
+                    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+                    with FileLock(lock_path):
+                        if not self._load_packing_cache():
+                            self._build_packed_indices()
+                            self._save_packing_cache()
+                except Exception as exc:
+                    error = f'Failed to build packing cache {self.packing_cache_file}: {exc!r}'
+            if distributed:
+                status = [error]
+                dist.broadcast_object_list(status, src=0)
+                error = status[0]
+            if error is not None:
+                raise RuntimeError(error)
+            if rank != 0 and not self._load_packing_cache():
+                raise RuntimeError(
+                    f'Packing cache is not visible on rank {rank}: {self.packing_cache_file}. '
+                    'Use a cache directory shared by every training node.')
+            return
+
+        if is_master():
+            self._build_packed_indices()
         else:
             self.packed_idx, self.packed_length = None, None
-        if dist.is_initialized() and is_dist():
+        if distributed:
             obj_list = [(self.packed_idx, self.packed_length)]
             dist.broadcast_object_list(obj_list)
             self.packed_idx, self.packed_length = obj_list[0]
+
+    def _build_packed_indices(self):
+        raw_lengths = self.dataset['lengths']
+        lengths = []
+        for length in raw_lengths:
+            length = sum(length) if isinstance(length, (list, tuple)) else length
+            physical_length = _round_up_length(int(length), self.packing_alignment)
+            if physical_length > self.packing_length:
+                raise ValueError(
+                    f'Sample physical length {physical_length} exceeds packing_length '
+                    f'{self.packing_length} after alignment to {self.packing_alignment} '
+                    f'(raw length: {length}).'
+                )
+            lengths.append(physical_length)
+        chunked_lengths = split_list(lengths, self.packing_num_proc)
+        offsets = []
+        offset = 0
+        for chunk in chunked_lengths:
+            offsets.append(offset)
+            offset += len(chunk)
+        jobs = [(i, offsets[i], chunked_lengths[i], self.packing_length, self.packing_strategy)
+                for i in range(self.packing_num_proc)]
+
+        ctx = _resolve_mp_context(self.multiprocessing_context)
+        self._out_queue = ctx.Queue()
+        # Pass the out-queue/params as explicit args (not via `self`) so a non-fork context does not
+        # need to pickle the whole dataset held by `self`.
+        _spawn_workers(ctx, target=self.create_packed_idx, jobs=self._worker_jobs(jobs))
+        self.packed_idx = [[] for _ in range(self.packing_num_proc)]
+        self.packed_length = [[] for _ in range(self.packing_num_proc)]
+        desc = 'Packing: ' if self.packing_num_proc == 1 else f'Packing (num_proc={self.packing_num_proc}): '
+        with tqdm(total=len(lengths), dynamic_ncols=True, desc=desc) as prog_bar:
+            finished_workers = 0
+            while finished_workers < self.packing_num_proc:
+                rank, sequences, data_len = self._out_queue.get()
+                if data_len == -1:
+                    finished_workers += 1
+                    continue
+                prog_bar.update(data_len)
+                self.packed_idx[rank] += [[x[0] for x in seq] for seq in sequences]
+                self.packed_length[rank] += [sum(x[1] for x in seq) for seq in sequences]
+        self.packed_idx = list(chain.from_iterable(self.packed_idx))
+        self.packed_length = list(chain.from_iterable(self.packed_length))
+
+    def _load_packing_cache(self) -> bool:
+        if not self.packing_cache_file or not os.path.isfile(self.packing_cache_file):
+            return False
+        try:
+            with open(self.packing_cache_file, 'rb') as f:
+                cached = pickle.load(f)
+            if (cached.get('cache_key') != self.packing_cache_key
+                    or cached.get('dataset_len') != len(self.dataset)):
+                return False
+            self.packed_idx = cached['packed_idx']
+            self.packed_length = cached['packed_length']
+            logger.info(f'Loaded packing cache: {self.packing_cache_file}')
+            return True
+        except (OSError, EOFError, pickle.UnpicklingError, AttributeError, KeyError, TypeError):
+            return False
+
+    def _save_packing_cache(self):
+        parent = os.path.dirname(self.packing_cache_file)
+        os.makedirs(parent, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(prefix='.packing.', suffix='.tmp', dir=parent)
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                pickle.dump({
+                    'cache_key': self.packing_cache_key,
+                    'dataset_len': len(self.dataset),
+                    'packed_idx': self.packed_idx,
+                    'packed_length': self.packed_length,
+                }, f, protocol=pickle.HIGHEST_PROTOCOL)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.packing_cache_file)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     def _worker_jobs(self, jobs):
         # Bind the shared out-queue into each per-worker arg tuple at spawn time (queue may be rebuilt on

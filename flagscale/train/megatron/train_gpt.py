@@ -120,27 +120,25 @@ def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Op
         # broadcast path allocates fixed (mbs, seq_length) receive buffers, so pad
         # the pack up to seq_length here to keep sender/receiver shapes equal.
         cu = batch.get("cu_seqlens")
-        total = None if cu is None else int(cu.reshape(-1)[-1])
+        cu_padded = batch.get("cu_seqlens_padded")
+        physical_cu = cu_padded if cu_padded is not None else cu
+        total = None if physical_cu is None else int(physical_cu.reshape(-1)[-1])
         for key in ("tokens", "labels", "loss_mask", "loss_scale", "position_ids"):
             item = batch.get(key)
             if item is None or item.shape[-1] >= args.seq_length:
                 continue
             batch[key] = torch.nn.functional.pad(item, (0, args.seq_length - item.shape[-1]))
-        # Keep cu_seqlens consistent with the padded tensor: append one trailing
-        # pseudo-sequence covering the pad region. Consumers split the
-        # (seq_length,) THD tensor by cu_seqlens, so cu_seqlens[-1] must equal
-        # seq_length; loss over the pad region is already zero (loss_mask padded 0).
+        # Append a zero-real-token physical segment for TP-shape padding. Real
+        # and physical prefix arrays must retain matching shapes.
         if cu is not None and total is not None and total < args.seq_length:
             cu_flat = cu.reshape(-1)
-            last = cu_flat[-1:]
-            extra = (last + args.seq_length - total).reshape(1).to(cu.dtype)
-            padded_cu = torch.cat([cu_flat, extra], dim=0).unsqueeze(0)
-            batch["cu_seqlens"] = padded_cu
-            # forward_step feeds PackedSeqParams from cu_seqlens_padded (when
-            # present) -- it must split the same padded THD tensor, so patch it too.
-            cu_padded = batch.get("cu_seqlens_padded")
-            if cu_padded is not None:
-                batch["cu_seqlens_padded"] = padded_cu.clone()
+            physical_flat = physical_cu.reshape(-1)
+            batch["cu_seqlens"] = torch.cat([cu_flat, cu_flat[-1:]], dim=0).unsqueeze(0)
+            batch["cu_seqlens_padded"] = torch.cat(
+                [physical_flat, physical_flat.new_tensor([args.seq_length])], dim=0
+            ).unsqueeze(0)
+            physical_lengths = batch["cu_seqlens_padded"][0].diff()
+            batch["max_seqlen"] = physical_lengths.max().reshape_as(batch["max_seqlen"])
 
     batch = get_batch_on_this_tp_rank(batch, broadcast_src_rank=mpu.get_tensor_model_parallel_src_rank(), broadcast_group=mpu.get_tensor_model_parallel_group(), is_sft=is_sft, is_hybrid_cp=is_hybrid_cp, create_attention_mask_in_dataloader=create_attention_mask_in_dataloader, cp_size=cp_size, tp_rank=tp_rank, micro_batch_size=args.micro_batch_size, seq_length=args.seq_length, mtp_on_this_rank=mtp_on_this_rank, pipeline_model_parallel_size=args.pipeline_model_parallel_size, is_pipeline_first_stage=mpu.is_pipeline_first_stage(), is_pipeline_last_stage=mpu.is_pipeline_last_stage(), is_dualpipev=mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None)
     
@@ -442,6 +440,8 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
             packing_num_proc=args.sft_packing_num_proc,
             context_parallel_size=args.context_parallel_size,
             dataset_num_proc=args.sft_dataset_num_proc,
+            load_from_cache_file=args.sft_load_from_cache_file,
+            cache_dir=args.sft_cache_dir,
             data_seed=args.seed,
         )
         print_rank_0("> building ms-swift online SFT datasets ...")

@@ -3573,6 +3573,18 @@ def _add_sft_args(parser):
                        help='[swift backend] Number of packing worker processes.')
     group.add_argument('--sft-dataset-num-proc', type=int, default=1,
                        help='[swift backend] Number of dataset preprocessing processes.')
+    group.add_argument('--sft-pad-to-packing-length', action='store_true',
+                       help='[swift backend] Pad every pack to the full '
+                            '--sft-packing-length instead of rounding up to the '
+                            'TP/CP/FP8 alignment granularity. This trades some '
+                            'padding compute for constant microbatch shapes.')
+    group.add_argument('--sft-cache-dir', type=str, default=None,
+                       help='[swift backend] Shared directory for fully encoded samples and '
+                            'packing indices. Every training node must see the same path. '
+                            'Defaults to $MODELSCOPE_CACHE/datasets/flagscale_sft.')
+    group.add_argument('--sft-no-cache', action='store_false', dest='sft_load_from_cache_file',
+                       help='[swift backend] Disable reading and writing the shared encoded/packing cache.')
+    group.set_defaults(sft_load_from_cache_file=True)
     return parser
 
 

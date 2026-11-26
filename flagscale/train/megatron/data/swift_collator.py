@@ -27,10 +27,9 @@ This collator bridges the two:
 - ``loss_scale``        <- per-token weights when the strategy is non-binary, else
                            ``None``. Must multiply the loss *numerator* only -- see
                            the note in :func:`swift_sft_collate`.
-- ``cu_seqlens``        <- restart points of ``position_ids`` (== 0), matching
-                           ms-swift's ``get_packed_seq_params``.
-- ``cu_seqlens_padded`` <- same as ``cu_seqlens`` (padding_free packs to a single
-                           contiguous run; the trailing pad is one extra segment).
+- ``cu_seqlens``        <- cumulative real-token lengths for each packed segment.
+- ``cu_seqlens_padded`` <- cumulative physical lengths after per-segment CP
+                           alignment; a trailing pack pad is a zero-real-token segment.
 - ``max_seqlen``        <- max segment length from cu_seqlens.
 - ``attention_mask``    <- None (varlen / THD attention via packed_seq_params).
 """
@@ -43,20 +42,38 @@ import torch
 IGNORE_INDEX = -100
 
 
-def _cu_seqlens_from_position_ids(position_ids: torch.Tensor, total_len: int) -> torch.Tensor:
-    """Reproduce ms-swift ``get_packed_seq_params`` cu_seqlens from position_ids.
+def _cu_seqlens_from_position_ids(
+    position_ids: torch.Tensor, total_len: int, real_len: Optional[int] = None
+) -> torch.Tensor:
+    """Derive cu_seqlens for a packed sequence.
 
     ``position_ids`` restarts at 0 at the start of every packed sub-sequence, so
-    the indices where it equals 0 are the segment boundaries.
+    the zero indices are document boundaries -- but only inside the *real* token
+    region. The template pads with a repeating ramp
+    (``torch.arange(cp_size*2).repeat(...)`` in ``template/base.py``), so the pad
+    tail holds a zero every ``2*cp_size`` tokens. Scanning the whole sequence
+    therefore invents one bogus document per 16 pad tokens: with
+    ``--sft-pad-to-packing-length`` the pad tail is ~13k tokens and a 60-row
+    sample reported packs with 771 and 1356 "documents", corrupting the varlen
+    attention boundaries and ``max_seqlen``.
+
+    So restrict the scan to ``real_len`` and append the pad tail as one trailing
+    segment, mirroring the megatron SFT dataset (which sets ``cu_seqlens[-1]`` to
+    the real end explicitly). ``real_len`` comes from the collator's
+    ``seq_lens``; when unavailable this falls back to the whole-sequence scan,
+    which is correct whenever there is no pad tail (e.g. padding_to=None).
     """
     pos = position_ids.flatten()
-    idx = torch.arange(pos.shape[0], device=pos.device, dtype=torch.int32)
-    starts = idx[pos == 0]
-    cu_seqlens = torch.cat([
-        starts,
-        torch.tensor([total_len], device=pos.device, dtype=torch.int32),
-    ])
-    return cu_seqlens
+    scan_len = total_len if real_len is None else max(0, min(int(real_len), total_len))
+    idx = torch.arange(scan_len, device=pos.device, dtype=torch.int32)
+    starts = idx[pos[:scan_len] == 0]
+    bounds = [starts]
+    if 0 < scan_len < total_len:
+        # Close the real region; the pad tail becomes its own segment so the
+        # final boundary still equals total_len (consumers split the full tensor).
+        bounds.append(torch.tensor([scan_len], device=pos.device, dtype=torch.int32))
+    bounds.append(torch.tensor([total_len], device=pos.device, dtype=torch.int32))
+    return torch.cat(bounds)
 
 
 def swift_sft_collate(
@@ -118,11 +135,56 @@ def swift_sft_collate(
     safe_labels = labels.clone()
     safe_labels[safe_labels == IGNORE_INDEX] = 0
 
-    cu_seqlens = _cu_seqlens_from_position_ids(position_ids, total_len)
-    max_seqlen = int(cu_seqlens.diff().max().item())
+    # Real (pre-batch-pad) packed length, so the pad tail is not scanned for
+    # bogus document boundaries. ms-swift reports per-row raw lengths in
+    # ``seq_lens``, but before the batch-level pad the template also CP-pads each
+    # row to a multiple of ``2*cp`` (``_handle_megatron_cp``). So the real region
+    # is ``sum(ceil(len_i / 2cp) * 2cp)``, not ``sum(len_i)`` -- missing that CP
+    # rounding left the last document's final tokens glued to the pad tail.
+    seq_lens = res.get("seq_lens")
+    cp = int(getattr(template, "sequence_parallel_size", 1) or 1)
+    if seq_lens is not None:
+        try:
+            raw_lens = [int(x) for x in seq_lens]
+        except TypeError:
+            raw_lens = [int(seq_lens)]
+        physical_lens = raw_lens
+        if cp > 1:
+            unit = 2 * cp
+            physical_lens = [((length + unit - 1) // unit) * unit for length in raw_lens]
+        physical_len = sum(physical_lens)
+
+        if physical_len > total_len:
+            raise ValueError(
+                "the CP-padded Swift sequence lengths exceed the collated tensor: "
+                f"{physical_len} > {total_len}"
+            )
+
+        real_lens = raw_lens
+        tail_len = total_len - physical_len
+        if tail_len:
+            # The pack tail occupies physical rows but contains no real tokens.
+            physical_lens = [*physical_lens, tail_len]
+            real_lens = [*real_lens, 0]
+        cu_seqlens = torch.tensor(
+            [0, *torch.tensor(real_lens, dtype=torch.int32).cumsum(0).tolist()],
+            dtype=torch.int32,
+        )
+        cu_seqlens_padded = torch.tensor(
+            [0, *torch.tensor(physical_lens, dtype=torch.int32).cumsum(0).tolist()],
+            dtype=torch.int32,
+        )
+    else:
+        # Custom templates without seq_lens cannot distinguish alignment padding
+        # from real rows. Preserve the legacy position-id-derived metadata.
+        cu_seqlens = _cu_seqlens_from_position_ids(position_ids, total_len)
+        cu_seqlens_padded = cu_seqlens.clone()
+
+    max_seqlen = int(cu_seqlens_padded.diff().max().item())
 
     # Carry the dataloader batch dim (1, n): forward_step squeezes it back out.
     cu_seqlens = cu_seqlens.unsqueeze(0)
+    cu_seqlens_padded = cu_seqlens_padded.unsqueeze(0)
 
     out = {
         "tokens": input_ids.to(torch.int64),
@@ -133,7 +195,7 @@ def swift_sft_collate(
         "loss_scale": None if loss_scale is None else loss_scale.to(torch.float32),
         "position_ids": position_ids.to(torch.int64),
         "cu_seqlens": cu_seqlens,
-        "cu_seqlens_padded": cu_seqlens,
+        "cu_seqlens_padded": cu_seqlens_padded,
         # Shape (1,) int32, matching the receive buffer non-zero TP ranks
         # allocate in megatron.core.utils.get_batch_on_this_tp_rank:
         #     max_seqlen = torch.empty(1, dtype=torch.int32, ...)
@@ -152,7 +214,25 @@ def swift_padding_to_from_args(args) -> Optional[int]:
     The packed sequence length must be padded so it stays divisible by the TP
     (sequence-parallel), CP and FP8/FP4 block constraints. Keeping this identical
     to ms-swift is what makes the two runs bit-comparable.
+
+    With ``--sft-pad-to-packing-length`` the granularity is instead the whole
+    packing length, so every pack comes out exactly that long. The template does
+    ``ceil(max(seq_lens) / padding_to) * padding_to`` and a pack never exceeds the
+    packing length, so that ceil collapses to 1x and the batch length is constant.
+    The packed DSv4 CSA path needs this: its ``torch.compile(fullgraph=True)``
+    helpers receive the derived sizes as Python ints (``l_local``, ``c_cap`` in
+    ``csa_utils/cp_utils.py``), and ``capacity`` even sizes a ``torch.arange``, so
+    Dynamo specializes per pack length rather than going symbolic. Variable-length
+    packs then blow past ``recompile_limit`` (observed: hit 256 and abort with
+    FailOnRecompileLimitHit). Trade-off: padding compute, and no longer
+    bit-comparable with ms-swift.
     """
+    if getattr(args, "sft_pad_to_packing_length", False):
+        packing_length = getattr(args, "sft_packing_length", None) or getattr(
+            args, "sft_max_length", None
+        ) or args.seq_length
+        return int(packing_length)
+
     padding_to = None
     if args.tensor_model_parallel_size > 1 and getattr(args, "sequence_parallel", False):
         padding_to = args.tensor_model_parallel_size

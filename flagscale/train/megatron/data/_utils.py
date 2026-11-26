@@ -16,13 +16,17 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import wraps
 from typing import Any, Mapping, Optional, Union
 
 import torch
 import torch.distributed as dist
-from transformers import FeatureExtractionMixin, PreTrainedTokenizerBase
-from transformers import ProcessorMixin as HfProcessorMixin
+from transformers import (
+    FeatureExtractionMixin,
+    PreTrainedTokenizerBase,
+    ProcessorMixin as HfProcessorMixin,
+)
 
 try:
     from transformers import BaseImageProcessor
@@ -86,6 +90,8 @@ def get_logger(log_file: Optional[str] = None, log_level: Optional[int] = None, 
 
 
 logger = get_logger()
+
+_safe_ddp_synchronization_enabled = ContextVar('safe_ddp_synchronization_enabled', default=True)
 
 
 def _strtobool(value: str) -> bool:
@@ -189,7 +195,9 @@ def safe_ddp_context(hash_id: Optional[str], use_barrier: bool = True):
     storage. Falls back to a file lock when torch.distributed is not initialized,
     which is the case while the dataset is being built.
     """
-    if use_barrier and dist.is_available() and dist.is_initialized():
+    if not _safe_ddp_synchronization_enabled.get():
+        yield
+    elif use_barrier and dist.is_available() and dist.is_initialized():
         if is_dist():
             if not is_master():
                 dist.barrier()
@@ -211,6 +219,16 @@ def safe_ddp_context(hash_id: Optional[str], use_barrier: bool = True):
             yield
     else:
         yield
+
+
+@contextmanager
+def disable_safe_ddp_synchronization():
+    """Disable nested dataset barriers when an outer rank-0 cache build owns synchronization."""
+    token = _safe_ddp_synchronization_enabled.set(False)
+    try:
+        yield
+    finally:
+        _safe_ddp_synchronization_enabled.reset(token)
 
 
 def get_seed(random_state=None) -> int:
