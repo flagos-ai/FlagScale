@@ -11,7 +11,7 @@ leaves behind:
     needs to inspect model internals. Text-only DeepSeek-V4 encoding never does.
 ``ModelInfo`` / ``ModelMeta``
     TYPE_CHECKING-only annotations in ``register.py``; replaced by the shim
-    records from :mod:`..swift_processor_shim` at runtime.
+    records from :mod:`.processor` at runtime.
 ``BaseArguments``
     A TYPE_CHECKING-only annotation on an ms-swift CLI helper.
 

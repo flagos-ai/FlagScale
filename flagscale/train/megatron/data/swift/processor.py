@@ -114,7 +114,8 @@ def build_processor(model_dir: str, model_type: str, template: str):
     if declared:
         raise ValueError(
             f"{model_dir} looks multimodal (config declares {declared}), which "
-            "swift_processor_shim does not support. Use swift.model.get_processor, "
+            "the vendored Swift SFT processor does not support. Use "
+            "swift.model.get_processor, "
             "which resolves AutoProcessor and the image/video pipeline."
         )
 

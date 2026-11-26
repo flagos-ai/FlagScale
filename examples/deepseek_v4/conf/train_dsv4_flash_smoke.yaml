@@ -45,8 +45,8 @@ experiment:
     hostfile: null
     nproc_per_node: 8
   cmds:
-    # Use the dsv4-train-back conda env: it has the full FlagScale/Megatron/TE
-    # stack PLUS the swift library the Phase-1 SFT data backend imports.
+    # Use the dsv4-train-back conda env for the FlagScale/Megatron/TE stack.
+    # The SFT implementation itself is vendored under data/swift.
     before_start: >-
       ulimit -n 1048576 &&
       export PATH=/public/lizhiyu/envs/dsv4-train-back/bin:$PATH &&

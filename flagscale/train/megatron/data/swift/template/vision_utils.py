@@ -15,7 +15,7 @@ condition that is falsy for text-only input::
                                     ``inputs.audios`` is non-empty
 
 DeepSeek-V4 is text-only (no vision/audio sub-config, no multimodal tower), and
-:func:`..swift_processor_shim.build_processor` refuses a multimodal config
+:func:`..processor.build_processor` refuses a multimodal config
 outright, so none of these can fire.
 
 They raise rather than return a placeholder: a silent no-op here would mean

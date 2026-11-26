@@ -492,7 +492,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
     # builder and return SwiftSFTDataset instances directly. The custom collator
     # is attached later in build_pretraining_data_loader.
     if args.sft and getattr(args, "sft_data_backend", "megatron") == "swift":
-        from data import SwiftSFTConfig, build_swift_sft_datasets
+        from data.swift import SwiftSFTConfig, build_swift_sft_datasets
 
         assert args.sft_dataset, "--sft-dataset is required when --sft-data-backend swift"
         swift_config = SwiftSFTConfig(

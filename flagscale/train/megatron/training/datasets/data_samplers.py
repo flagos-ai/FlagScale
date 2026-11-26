@@ -98,8 +98,8 @@ def build_pretraining_data_loader(dataset, consumed_samples):
     if hasattr(dataset, "template") and getattr(dataset, "template", None) is not None \
             and getattr(args, "sft_data_backend", "megatron") == "swift":
         # ms-swift online SFT: convert packed/encoded rows into FlagScale batch keys.
-        from data import build_swift_sft_collator
-        from data.swift_collator import swift_padding_to_from_args
+        from data.swift import build_swift_sft_collator
+        from data.swift.collator import swift_padding_to_from_args
 
         padding_to = swift_padding_to_from_args(args)
         extra_kwargs = {"collate_fn": build_swift_sft_collator(dataset.template, padding_to)}

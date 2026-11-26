@@ -1,9 +1,8 @@
 # Copyright (c) 2026 FlagOS Contributors. All rights reserved.
 
-"""Online SFT dataset built on top of ms-swift components.
+"""Online SFT dataset compatible with ms-swift's SFT data format.
 
-This is the Phase-1 port of the ms-swift ``megatron sft`` data pipeline. It reuses
-``swift`` as a library so behavior matches the validated training run exactly:
+This vendors the required pieces of the ms-swift ``megatron sft`` data pipeline:
 
     load_dataset (jsonl + ``#N`` sampling)
       -> template.encode (tokenize + loss_scale, global rank 0 only)
@@ -12,7 +11,7 @@ This is the Phase-1 port of the ms-swift ``megatron sft`` data pipeline. It reus
 
 ``PackingDataset.__getitem__`` returns a *list* of encoded rows (one packed
 sequence). The list is flattened and collated by the ms-swift template's
-``data_collator`` inside :mod:`swift_collator`, then converted to FlagScale's
+``data_collator`` inside :mod:`.collator`, then converted to FlagScale's
 Megatron batch keys.
 """
 
@@ -67,7 +66,7 @@ class SwiftSFTConfig:
     split_dataset_ratio: float = 0.0
 
     # packing / padding_free. ms-swift's megatron default is padding_free=True; the
-    # collator in :mod:`swift_collator` only supports that (packed) layout.
+    # collator in :mod:`.collator` only supports that (packed) layout.
     padding_free: bool = True
     packing: bool = True
     packing_length: Optional[int] = None  # defaults to max_length
@@ -129,8 +128,8 @@ def _pipeline_code_digest() -> str:
         os.path.join(data_dir, "template"),
     ]
     files = [
-        os.path.join(data_dir, "swift_processor_shim.py"),
-        os.path.join(data_dir, "swift_sft_dataset.py"),
+        os.path.join(data_dir, "processor.py"),
+        os.path.join(data_dir, "sft_dataset.py"),
     ]
     for root in roots:
         for current_root, _, names in os.walk(root):
@@ -231,11 +230,11 @@ def _broadcast_cache_build_error(error: Optional[str]) -> None:
 
 def _build_template(config: SwiftSFTConfig):
     """Build a stand-alone template (tokenizer only, no model weights)."""
-    from .swift_processor_shim import build_processor
+    from .processor import build_processor
     from .template import get_template
 
     # Only the tokenizer plus a handful of config-derived fields are needed to
-    # encode; see swift_processor_shim for why swift.model is not used here.
+    # encode; see processor.py for why swift.model is not used here.
     processor = build_processor(config.model_dir, config.model_type, config.template)
     # ms-swift arg-level ``delete`` means "drop over-long samples". The template
     # itself only accepts raise/left/right/split, so (matching ms-swift
@@ -273,7 +272,7 @@ class SwiftSFTDataset:
     When ``packing`` is enabled, ``__getitem__`` returns a ``list`` of encoded
     rows (a single packed sequence). Otherwise it returns a single encoded row.
     The associated ``template`` (exposed as an attribute) must be used to build
-    the collator; see :func:`~.swift_collator.build_swift_sft_collator`.
+    the collator; see :func:`~.collator.build_swift_sft_collator`.
     """
 
     def __init__(self, config: SwiftSFTConfig, dataset_paths: List[str], *, is_train: bool):

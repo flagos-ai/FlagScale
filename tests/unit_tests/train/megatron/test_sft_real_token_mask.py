@@ -43,7 +43,7 @@ def test_dual_cu_seqlens_reconstruct_physical_padding_mask():
 
 def test_swift_collator_emits_real_and_physical_cu_seqlens():
     """Real lengths exclude CP/tail padding while physical lengths retain it."""
-    from data.swift_collator import swift_sft_collate
+    from data.swift.collator import swift_sft_collate
 
     class FakeTemplate:
         # Per-row physical lengths are rounded to 2 * CP = 4.

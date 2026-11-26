@@ -30,7 +30,7 @@ def sft_loss_scale_is_non_binary(args):
         return False
     # The Swift SFT implementation is vendored into this repository; do not
     # reintroduce an external ms-swift runtime dependency from the batch path.
-    from data.loss_scale import get_loss_scale
+    from data.swift.loss_scale import get_loss_scale
 
     return not get_loss_scale(spec).is_binary_loss_scale
 

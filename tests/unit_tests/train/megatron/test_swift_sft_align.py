@@ -117,7 +117,7 @@ def _swift_batch(template, batch):
 
 
 def test_swift_sft_collator_matches_ms_swift():
-    from data.swift_collator import swift_sft_collate
+    from data.swift.collator import swift_sft_collate
 
     template = _build_template()
     batch = _encode(template)
@@ -148,7 +148,7 @@ def test_swift_sft_collator_matches_ms_swift():
 
 def test_swift_sft_loss_matches_ms_swift():
     """Given identical per-token losses, both sides must reduce to the same scalar."""
-    from data.swift_collator import swift_sft_collate
+    from data.swift.collator import swift_sft_collate
 
     template = _build_template()
     batch = _encode(template)
@@ -187,7 +187,7 @@ def test_non_binary_loss_scale_stays_out_of_the_denominator():
     """
     import json
 
-    from data.swift_collator import swift_sft_collate
+    from data.swift.collator import swift_sft_collate
 
     template = _build_template(loss_scale="default", is_binary_loss_scale=False)
 
@@ -254,7 +254,7 @@ def test_collator_metadata_matches_the_tp_broadcast_buffers():
         max_seqlen = torch.empty(1, dtype=torch.int32, ...)
         cu_seqlens = torch.empty((1, n), dtype=torch.int32, ...)
     """
-    from data.swift_collator import swift_sft_collate
+    from data.swift.collator import swift_sft_collate
 
     template = _build_vendored_template()
     batch = _encode(template)
@@ -332,7 +332,7 @@ def test_vendored_loader_matches_ms_swift(suffixes, ratio):
 
     from swift.dataset import load_dataset as reference
 
-    from data.dataset import load_dataset as vendored
+    from data.swift.dataset import load_dataset as vendored
 
     specs = [DATA + suffix for suffix in suffixes]
     kwargs = dict(
@@ -357,7 +357,7 @@ def test_vendored_loader_matches_ms_swift(suffixes, ratio):
 
 def test_vendored_loader_rejects_unsupported_sources():
     """Remote ids and hub prefixes must fail loudly, not resolve unexpectedly."""
-    from data.dataset import load_dataset
+    from data.swift.dataset import load_dataset
 
     with pytest.raises(ValueError, match="hub-prefixed"):
         load_dataset(["hf::AI-ModelScope/alpaca-gpt4-data-zh"])
@@ -376,7 +376,7 @@ def test_vendored_pipeline_matches_ms_swift_end_to_end():
     every per-sample length, so identical packs mean the lengths, the encode and
     the packer all agree.
     """
-    import data.dataset as vendored_ds
+    import data.swift.dataset as vendored_ds
     import swift.dataset as reference_ds
 
     results = {}
@@ -433,10 +433,10 @@ def test_whole_data_path_stands_alone_without_swift():
 
         builtins.__import__ = blocked
 
-        from data.swift_processor_shim import build_processor
-        from data.template import get_template
-        from data.dataset import AddLengthPreprocessor, LazyLLMDataset, PackingDataset, load_dataset
-        from data.swift_collator import swift_sft_collate
+        from data.swift.processor import build_processor
+        from data.swift.template import get_template
+        from data.swift.dataset import AddLengthPreprocessor, LazyLLMDataset, PackingDataset, load_dataset
+        from data.swift.collator import swift_sft_collate
 
         template = get_template(
             build_processor({MODEL!r}, "deepseek_v4", {TEMPLATE!r}),
@@ -475,8 +475,8 @@ def test_whole_data_path_stands_alone_without_swift():
 
 def _build_vendored_template(loss_scale=LOSS_SCALE, **kwargs):
     """The same template, built from the vendored package instead of ``swift``."""
-    from data.swift_processor_shim import build_processor
-    from data.template import get_template
+    from data.swift.processor import build_processor
+    from data.swift.template import get_template
 
     template = get_template(
         build_processor(MODEL, "deepseek_v4", TEMPLATE),
@@ -583,7 +583,7 @@ def test_vendored_template_tool_calling_matches():
     assert "<tool_result>" in decoded
 
     # And the response parses back into the same call.
-    from data.agent_template import agent_template_map
+    from data.swift.agent_template import agent_template_map
 
     functions = agent_template_map["deepseek_v4"]().get_toolcall(
         '<think>r</think>\n\n<｜DSML｜tool_calls>\n'
@@ -610,8 +610,8 @@ def test_vendored_max_length_error_is_honoured_by_the_dataset_layer():
 
     import datasets
 
-    from data.dataset import LazyLLMDataset
-    from data.template import MaxLengthError as VendoredMaxLengthError
+    from data.swift.dataset import LazyLLMDataset
+    from data.swift.template import MaxLengthError as VendoredMaxLengthError
 
     assert issubclass(VendoredMaxLengthError, ValueError)
 
@@ -662,8 +662,8 @@ def test_vendored_template_stands_alone_without_swift():
             return real_import(name, *args, **kwargs)
 
         builtins.__import__ = blocked
-        from data.swift_processor_shim import build_processor
-        from data.template import get_template
+        from data.swift.processor import build_processor
+        from data.swift.template import get_template
 
         template = get_template(
             build_processor({MODEL!r}, "deepseek_v4", {TEMPLATE!r}),
@@ -696,7 +696,7 @@ def test_processor_shim_matches_ms_swift():
     """
     import json
 
-    from data.swift_processor_shim import build_processor
+    from data.swift.processor import build_processor
 
     reference = _build_template()
     shimmed = _build_template(processor=build_processor(MODEL, "deepseek_v4", TEMPLATE))
@@ -728,7 +728,7 @@ def test_processor_shim_matches_ms_swift():
 
 def test_processor_shim_rejects_multimodal():
     """The shim is text-only, so it must refuse rather than mis-encode."""
-    from data import swift_processor_shim
+    from data.swift import processor as swift_processor_shim
 
     class _Cfg:
         vision_config = {"hidden_size": 1}
@@ -759,7 +759,7 @@ def test_data_path_does_not_import_swift_model():
         f"""
         import sys
         sys.path.insert(0, {os.path.abspath(_MEGATRON_ROOT)!r})
-        from data.swift_processor_shim import build_processor
+        from data.swift.processor import build_processor
         from swift.template import get_template
 
         processor = build_processor({MODEL!r}, "deepseek_v4", {TEMPLATE!r})
@@ -813,7 +813,7 @@ def test_vendored_loss_scale_matches_ms_swift(spec):
     """The vendored loss_scale package must reproduce swift.loss_scale exactly."""
     from swift.loss_scale import get_loss_scale as reference
 
-    from data.loss_scale import ContextType, get_loss_scale as vendored
+    from data.swift.loss_scale import ContextType, get_loss_scale as vendored
 
     mine, ref = vendored(spec), reference(spec)
     assert type(mine).__name__ == type(ref).__name__
@@ -852,7 +852,7 @@ def test_vendored_types_match_ms_swift():
     """
     from swift.template import ContextType as RefContextType, get_last_user_round as reference
 
-    from data.loss_scale import ContextType, get_last_user_round as vendored
+    from data.swift.loss_scale import ContextType, get_last_user_round as vendored
 
     assert ContextType.RESPONSE == RefContextType.RESPONSE
     assert ContextType.SUFFIX == RefContextType.SUFFIX
@@ -886,7 +886,7 @@ def test_vendored_split_str_parts_by_matches_ms_swift():
     """``split_str_parts_by`` drives every ConfigLossScale split."""
     from swift.template import split_str_parts_by as reference
 
-    from data.loss_scale import split_str_parts_by as vendored
+    from data.swift.loss_scale import split_str_parts_by as vendored
 
     plain = ["Thought:", "Action:", "Action Input:", "Observation:"]
     regex = [r"^<think>\s*</think>\s*", r"^</think>\s*"]
@@ -910,7 +910,7 @@ def test_vendored_split_str_parts_by_matches_ms_swift():
 def test_vendored_loss_scale_registers_the_same_strategies():
     from swift.loss_scale import loss_scale_map as reference
 
-    from data.loss_scale import loss_scale_map as vendored
+    from data.swift.loss_scale import loss_scale_map as vendored
 
     assert sorted(vendored) == sorted(reference)
 
@@ -924,7 +924,7 @@ def test_vendored_loss_scale_has_no_swift_dependency():
         f"""
         import sys
         sys.path.insert(0, {os.path.abspath(_MEGATRON_ROOT)!r})
-        from data.loss_scale import get_loss_scale
+        from data.swift.loss_scale import get_loss_scale
         ls = get_loss_scale("default+ignore_empty_think")
         assert ls.is_binary_loss_scale is True
         print("SWIFT:" + ",".join(sorted(m for m in sys.modules if m.split(".")[0] == "swift")))
@@ -935,7 +935,7 @@ def test_vendored_loss_scale_has_no_swift_dependency():
     line = [l for l in out.stdout.splitlines() if l.startswith("SWIFT:")]
     assert line, out.stdout[-2000:]
     leaked = [m for m in line[0][len("SWIFT:"):].split(",") if m]
-    assert not leaked, f"data.loss_scale pulled in swift modules: {leaked}"
+    assert not leaked, f"data.swift.loss_scale pulled in swift modules: {leaked}"
 
 
 def test_batch_keys_order_matches_the_unpack_sites():

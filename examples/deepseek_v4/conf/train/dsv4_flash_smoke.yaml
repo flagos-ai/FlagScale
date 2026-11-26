@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Single-node (8 GPU) SFT smoke test for DeepSeek-V4-Flash using the ms-swift
-# online data backend (Phase 1). The model is randomly initialised: this run
+# Single-node (8 GPU) SFT smoke test for DeepSeek-V4-Flash using the vendored
+# ms-swift-compatible online data backend. The model is randomly initialised: this run
 # exercises the SFT data path (load -> template tokenize with loss_scale ->
 # packing -> collate -> forward/backward), NOT convergence.
 #
@@ -154,7 +154,7 @@ model:
       lr_wsd_decay_iters: 5
 
 data:
-  # ms-swift online SFT data backend (Phase 1). No offline data_path / .bin is
+  # Vendored ms-swift-compatible SFT backend. No offline data_path / .bin is
   # used; jsonl is loaded, tokenized and packed at runtime by the swift pipeline.
   sft: true
   sft_data_backend: swift

@@ -42,7 +42,7 @@ class _FakeTemplate:
 
 def test_packing_budgets_per_row_cp_padding():
     """Rows that fit by raw length must split if CP padding crosses the cap."""
-    from data.dataset import PackingDataset
+    from data.swift.dataset import PackingDataset
 
     class LengthDataset:
         lengths = [[33], [80]]
@@ -79,7 +79,7 @@ def test_packing_budgets_per_row_cp_padding():
 
 def test_second_build_reuses_encoded_and_packing_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path / "modelscope-cache"))
-    from data import swift_sft_dataset as module
+    from data.swift import sft_dataset as module
 
     model_dir = tmp_path / "model"
     model_dir.mkdir()
@@ -120,7 +120,7 @@ def test_second_build_reuses_encoded_and_packing_cache(tmp_path, monkeypatch):
 
 
 def test_cache_key_changes_when_encoding_inputs_change(tmp_path):
-    from data.swift_sft_dataset import SwiftSFTConfig, _cache_manifest, _manifest_key
+    from data.swift.sft_dataset import SwiftSFTConfig, _cache_manifest, _manifest_key
 
     model_dir = tmp_path / "model"
     model_dir.mkdir()

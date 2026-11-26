@@ -179,8 +179,8 @@ def get_template(
         KeyError: If the specified or detected template_type is not found in TEMPLATE_MAPPING.
 
     Examples:
-        >>> from data.swift_processor_shim import build_processor
-        >>> from data.template import get_template
+        >>> from data.swift.processor import build_processor
+        >>> from data.swift.template import get_template
         >>>
         >>> processor = build_processor(model_dir, 'deepseek_v4', 'deepseek_v4_flash')
         >>> template = get_template(processor, template_type='deepseek_v4_flash')
