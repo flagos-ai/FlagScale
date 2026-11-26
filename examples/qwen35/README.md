@@ -418,3 +418,29 @@ PY
 ```
 
 稳定窗口内不保存 checkpoint（`save_interval: 1000`），第 15 步结束后仍会保存最终训练状态。比较结果见 [8 卡吞吐报告](throughput_report.md)。日志吞吐仍是框架语言模型计算量估算除以实际耗时，并非硬件计数器读数；固定长度消除了动态长度造成的口径不一致，但该指标不包含视觉编码器完整 FLOPs，也不等同于有效非 padding token 吞吐。
+
+## 纯文本 SFT 的消息级监督
+
+已有的纯文本 SFT 配置可以在 `train.data` 下设置 `sft_message_loss_mask: true`，对应命令行参数 `--sft-message-loss-mask`。该开关默认关闭，需要与 `sft: true` 一起使用。选择 `HFTokenizerFS` 时将 `tokenizer_path` 指向原始 HF checkpoint，选择 `SFTTokenizer` 时使用 `tokenizer_model`。开启后使用该 checkpoint 的 Qwen ChatML 模板。
+
+输入保留整段对话。仅 assistant 回复及其结束符参与 loss，显式标记 `"loss": false` 的回复、system/user/tool 回合、角色前缀和模板生成的空 `<think>` 前缀均屏蔽。packing、截断和 next-token 错位沿用 SFTDataset 的处理。
+
+### 在线跨行 packing
+
+纯文本 SFT 可以直接从本地或共享文件系统上的 JSONL 读取对话。在训练配置中启用：
+
+```yaml
+train:
+  data:
+    sft: true
+    sft_online_packing: true
+    sft_packing_window_size: 8
+```
+
+`sft_online_packing` 默认关闭。窗口单位是序列长度，8 表示每个数据 worker 最多积累 8 倍序列长度的候选 token，编码下一条对话时还需容纳这一条输入。窗口内按长度降序选取剩余空间最合适的包，最空的一个包留到下一窗口。窗口为 1 时按输入顺序装包。超出序列长度的单条对话跳过。组包直接使用已编码的 tokens 和 targets，不创建或读取 Arrow、长度文件或 packing 索引。
+
+此路径使用 micro batch 1、CP1 和按步数训练的 dataloader。每个 DP rank 和 worker 顺序读取各文件中互不重叠的字节区间，按行起点分配完整记录。同一条 PP 流水线在各阶段使用相同的数据顺序。多个来源按配置权重交错读取，单个分片每遍读取全部来源一次；权重控制读取顺序。各分片读完后独立开始下一遍。每条对话的 position IDs 单独从 0 开始，注意力分段，跨对话及尾部 padding 的标签屏蔽。消息级监督仍由单独的开关控制。
+
+固定输入、tokenizer、seed、窗口、DP 大小和 worker 数时，恢复训练会根据已消费包数重放输入到对应位置。重放开销随已消费包数增长。显式的训练、验证、测试文件可分开配置；在同一文件上指定 split 比例时按字节区间划分，保留完整行。此路径支持按步数验证。
+
+在线 packing 下设置 `train.model.enable_variable_seq_lengths: true`，可把实际输入裁到当前包长。启用 sequence parallel 时，包尾仅补齐至 TP 大小的倍数。窗口容量和对话分组保持一致，TP 和 PP 按每个 microbatch 的实际长度传递张量。
