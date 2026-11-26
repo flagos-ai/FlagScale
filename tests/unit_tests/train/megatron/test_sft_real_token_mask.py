@@ -33,9 +33,22 @@ def test_dual_cu_seqlens_reconstruct_physical_padding_mask():
         mask,
         torch.tensor(
             [
-                False, False, False, True,
-                False, False, False, False, False, True, True, True,
-                True, True, True, True,
+                False,
+                False,
+                False,
+                True,
+                False,
+                False,
+                False,
+                False,
+                False,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
             ]
         ),
     )
@@ -56,23 +69,35 @@ def test_swift_collator_emits_real_and_physical_cu_seqlens():
                 # The first two real tokens are prompts and therefore ignored
                 # by CE, but they must remain valid for router/indexer losses.
                 "labels": torch.tensor(
-                    [[-100, -100, 2, -100, -100, 5, 6, 7, 8, -100, -100, -100,
-                      -100, -100, -100, -100]]
+                    [
+                        [
+                            -100,
+                            -100,
+                            2,
+                            -100,
+                            -100,
+                            5,
+                            6,
+                            7,
+                            8,
+                            -100,
+                            -100,
+                            -100,
+                            -100,
+                            -100,
+                            -100,
+                            -100,
+                        ]
+                    ]
                 ),
-                "position_ids": torch.tensor(
-                    [[0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3]]
-                ),
+                "position_ids": torch.tensor([[0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3]]),
                 "seq_lens": [3, 5],
             }
 
     out = swift_sft_collate([{}], template=FakeTemplate(), padding_to=16)
     assert "real_token_mask" not in out
-    assert torch.equal(
-        out["cu_seqlens"], torch.tensor([[0, 3, 8, 8]], dtype=torch.int32)
-    )
-    assert torch.equal(
-        out["cu_seqlens_padded"], torch.tensor([[0, 4, 12, 16]], dtype=torch.int32)
-    )
+    assert torch.equal(out["cu_seqlens"], torch.tensor([[0, 3, 8, 8]], dtype=torch.int32))
+    assert torch.equal(out["cu_seqlens_padded"], torch.tensor([[0, 4, 12, 16]], dtype=torch.int32))
     # Prompt rows remain absent from CE supervision; their validity for MoE/DSA
     # is represented by the real segment length, not by loss_mask.
     assert not bool(out["loss_mask"][0, 0])
@@ -93,11 +118,13 @@ def test_megatron_sft_dataset_emits_real_and_physical_cu_seqlens():
 
     # Bypass MegatronDataset.__init__; __getitem__ only needs these fields.
     dataset = SFTDataset.__new__(SFTDataset)
-    dataset.dataset = [[
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "prompt"},
-        {"role": "assistant", "content": "answer"},
-    ]]
+    dataset.dataset = [
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "prompt"},
+            {"role": "assistant", "content": "answer"},
+        ]
+    ]
     dataset.indices = np.array([0], dtype=np.int64)
     dataset.num_samples = 1
     dataset.config = SimpleNamespace(

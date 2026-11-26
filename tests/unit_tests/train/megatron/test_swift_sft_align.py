@@ -24,7 +24,14 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("swift")
 
 _MEGATRON_ROOT = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "flagscale", "train", "megatron"
+    os.path.dirname(os.path.abspath(__file__)),
+    "..",
+    "..",
+    "..",
+    "..",
+    "flagscale",
+    "train",
+    "megatron",
 )
 sys.path.insert(0, os.path.abspath(_MEGATRON_ROOT))
 
@@ -220,7 +227,9 @@ def test_non_binary_loss_scale_stays_out_of_the_denominator():
     # The 2.0 weight makes the weight sum strictly larger; the denominator must
     # track tokens, so the two must not coincide.
     assert sum_weights > n_tokens
-    assert torch.equal(fs["loss_mask"], (fs["loss_mask"] > 0).to(torch.float32)), "loss_mask must stay binary"
+    assert torch.equal(fs["loss_mask"], (fs["loss_mask"] > 0).to(torch.float32)), (
+        "loss_mask must stay binary"
+    )
 
     # The weights must cover exactly the supervised positions, which is what lets
     # the CP/TP plumbing gate 'loss_scale' on 'loss_mask'.
@@ -260,7 +269,7 @@ def test_collator_metadata_matches_the_tp_broadcast_buffers():
     batch = _encode(template)
     out = swift_sft_collate(list(batch), template=template, padding_to=None)
 
-    assert out["max_seqlen"].shape == (1, ), out["max_seqlen"].shape
+    assert out["max_seqlen"].shape == (1,), out["max_seqlen"].shape
     assert out["max_seqlen"].dtype == torch.int32, out["max_seqlen"].dtype
     # forward_step does int(max_seqlen.item()), which requires exactly one element.
     assert int(out["max_seqlen"].item()) > 0
@@ -305,12 +314,12 @@ def test_loss_func_applies_loss_scale_to_the_numerator_only():
 
 
 LOADER_CASES = [
-    ([""], 0.0),            # plain path
-    (["#3"], 0.0),          # #N below the row count
-    (["#10"], 0.0),         # #N above it -> repeat sampling
-    ([""], 0.34),           # train/val split
+    ([""], 0.0),  # plain path
+    (["#3"], 0.0),  # #N below the row count
+    (["#10"], 0.0),  # #N above it -> repeat sampling
+    ([""], 0.34),  # train/val split
     (["#4"], 0.5),
-    (["", "#2"], 0.0),      # two sources, concatenated
+    (["", "#2"], 0.0),  # two sources, concatenated
     # A ratio small enough that int(train_len * ratio) rounds to 0: upstream
     # clamps the val split to at least one row, and the larger cases above do not
     # distinguish that from plain truncation.
@@ -330,9 +339,8 @@ def test_vendored_loader_matches_ms_swift(suffixes, ratio):
     """
     import json
 
-    from swift.dataset import load_dataset as reference
-
     from data.swift.dataset import load_dataset as vendored
+    from swift.dataset import load_dataset as reference
 
     specs = [DATA + suffix for suffix in suffixes]
     kwargs = dict(
@@ -385,16 +393,27 @@ def test_vendored_pipeline_matches_ms_swift_end_to_end():
         ("reference", reference_ds, _build_template()),
     ):
         train, _ = module.load_dataset(
-            [DATA], split_dataset_ratio=0.0, seed=42, num_proc=1,
-            load_from_cache_file=False, strict=False, streaming=False,
+            [DATA],
+            split_dataset_ratio=0.0,
+            seed=42,
+            num_proc=1,
+            load_from_cache_file=False,
+            strict=False,
+            streaming=False,
         )
         train = module.AddLengthPreprocessor(template=template)(
             train, num_proc=1, load_from_cache_file=False, strict=False, batch_size=1000
         )
         lazy = module.LazyLLMDataset(train, template.encode, strict=False, random_state=42)
         packed = module.PackingDataset(
-            template, lazy, num_proc=1, packing_length=MAX_LENGTH, packing_num_proc=1,
-            packing_strategy="binpack", strict=False, load_from_cache_file=False,
+            template,
+            lazy,
+            num_proc=1,
+            packing_length=MAX_LENGTH,
+            packing_num_proc=1,
+            packing_strategy="binpack",
+            strict=False,
+            load_from_cache_file=False,
         )
         results[name] = {
             "lengths": list(train["lengths"]),
@@ -465,11 +484,13 @@ def test_whole_data_path_stands_alone_without_swift():
         print("SWIFT:" + ",".join(sorted(m for m in sys.modules if m.split(".")[0] == "swift")))
         """
     )
-    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=1800)
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=1800
+    )
     assert out.returncode == 0, out.stderr[-4000:]
     line = [l for l in out.stdout.splitlines() if l.startswith("SWIFT:")]
     assert line, out.stdout[-2000:]
-    leaked = [m for m in line[0][len("SWIFT:"):].split(",") if m]
+    leaked = [m for m in line[0][len("SWIFT:") :].split(",") if m]
     assert not leaked, f"the data path still pulls in swift: {leaked}"
 
 
@@ -546,18 +567,20 @@ def test_vendored_template_tool_calling_matches():
     """The DSML tool-call path runs through the vendored agent_template."""
     import json
 
-    tools = [{
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Get the weather",
-            "parameters": {
-                "type": "object",
-                "properties": {"location": {"type": "string"}, "n": {"type": "integer"}},
-                "required": ["location"],
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get the weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}, "n": {"type": "integer"}},
+                    "required": ["location"],
+                },
             },
-        },
-    }]
+        }
+    ]
     row = {
         "tools": tools,
         "messages": [
@@ -586,11 +609,11 @@ def test_vendored_template_tool_calling_matches():
     from data.swift.agent_template import agent_template_map
 
     functions = agent_template_map["deepseek_v4"]().get_toolcall(
-        '<think>r</think>\n\n<｜DSML｜tool_calls>\n'
+        "<think>r</think>\n\n<｜DSML｜tool_calls>\n"
         '<｜DSML｜invoke name="get_weather">\n'
         '<｜DSML｜parameter name="location" string="true">Beijing</｜DSML｜parameter>\n'
         '<｜DSML｜parameter name="n" string="false">3</｜DSML｜parameter>\n'
-        '</｜DSML｜invoke>\n</｜DSML｜tool_calls>'
+        "</｜DSML｜invoke>\n</｜DSML｜tool_calls>"
     )
     assert len(functions) == 1
     assert functions[0].name == "get_weather"
@@ -609,7 +632,6 @@ def test_vendored_max_length_error_is_honoured_by_the_dataset_layer():
     import json
 
     import datasets
-
     from data.swift.dataset import LazyLLMDataset
     from data.swift.template import MaxLengthError as VendoredMaxLengthError
 
@@ -680,11 +702,13 @@ def test_vendored_template_stands_alone_without_swift():
         print("SWIFT:" + ",".join(sorted(m for m in sys.modules if m.split(".")[0] == "swift")))
         """
     )
-    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=900)
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=900
+    )
     assert out.returncode == 0, out.stderr[-3000:]
     line = [l for l in out.stdout.splitlines() if l.startswith("SWIFT:")]
     assert line, out.stdout[-2000:]
-    leaked = [m for m in line[0][len("SWIFT:"):].split(",") if m]
+    leaked = [m for m in line[0][len("SWIFT:") :].split(",") if m]
     assert not leaked, f"the vendored template pulled in swift: {leaked}"
 
 
@@ -727,7 +751,7 @@ def test_processor_shim_matches_ms_swift():
 
 
 def test_processor_shim_rejects_multimodal():
-    """The shim is text-only, so it must refuse rather than mis-encode."""
+    """The shim is text-only, so it must refuse rather than encode incorrectly."""
     from data.swift import processor as swift_processor_shim
 
     class _Cfg:
@@ -788,7 +812,7 @@ def test_data_path_does_not_import_swift_model():
     assert out.returncode == 0, out.stderr[-3000:]
     line = [l for l in out.stdout.splitlines() if l.startswith("LEAKED:")]
     assert line, out.stdout[-2000:]
-    leaked = [m for m in line[0][len("LEAKED:"):].split(",") if m]
+    leaked = [m for m in line[0][len("LEAKED:") :].split(",") if m]
     assert not leaked, f"swift.model / swift.sequence_parallel got reimported: {leaked}"
 
 
@@ -811,9 +835,8 @@ LOSS_SCALE_SPECS = (
 @pytest.mark.parametrize("spec", LOSS_SCALE_SPECS)
 def test_vendored_loss_scale_matches_ms_swift(spec):
     """The vendored loss_scale package must reproduce swift.loss_scale exactly."""
-    from swift.loss_scale import get_loss_scale as reference
-
     from data.swift.loss_scale import ContextType, get_loss_scale as vendored
+    from swift.loss_scale import get_loss_scale as reference
 
     mine, ref = vendored(spec), reference(spec)
     assert type(mine).__name__ == type(ref).__name__
@@ -832,12 +855,22 @@ def test_vendored_loss_scale_matches_ms_swift(spec):
         {"role": "assistant", "content": "Thought: t\nAction: x\nAction Input: y\n", "loss": False},
     ]
     contexts = [
-        "sys", "q1", "<think></think>a1", "q2", "<think>r</think>a2", "q3",
+        "sys",
+        "q1",
+        "<think></think>a1",
+        "q2",
+        "<think>r</think>a2",
+        "q3",
         "Thought: t\nAction: x\nAction Input: y\n",
     ]
     types = [
-        ContextType.OTHER, ContextType.OTHER, ContextType.RESPONSE, ContextType.OTHER,
-        ContextType.RESPONSE, ContextType.OTHER, ContextType.RESPONSE,
+        ContextType.OTHER,
+        ContextType.OTHER,
+        ContextType.RESPONSE,
+        ContextType.OTHER,
+        ContextType.RESPONSE,
+        ContextType.OTHER,
+        ContextType.RESPONSE,
     ]
     assert mine(list(contexts), list(types), messages) == ref(list(contexts), list(types), messages)
 
@@ -850,9 +883,8 @@ def test_vendored_types_match_ms_swift():
     'tool' as well as 'user'. The parametrized test above cannot catch a slip
     here because its fixture holds no tool-role message, so cover it directly.
     """
-    from swift.template import ContextType as RefContextType, get_last_user_round as reference
-
     from data.swift.loss_scale import ContextType, get_last_user_round as vendored
+    from swift.template import ContextType as RefContextType, get_last_user_round as reference
 
     assert ContextType.RESPONSE == RefContextType.RESPONSE
     assert ContextType.SUFFIX == RefContextType.SUFFIX
@@ -884,9 +916,8 @@ def test_vendored_types_match_ms_swift():
 
 def test_vendored_split_str_parts_by_matches_ms_swift():
     """``split_str_parts_by`` drives every ConfigLossScale split."""
-    from swift.template import split_str_parts_by as reference
-
     from data.swift.loss_scale import split_str_parts_by as vendored
+    from swift.template import split_str_parts_by as reference
 
     plain = ["Thought:", "Action:", "Action Input:", "Observation:"]
     regex = [r"^<think>\s*</think>\s*", r"^</think>\s*"]
@@ -908,9 +939,8 @@ def test_vendored_split_str_parts_by_matches_ms_swift():
 
 
 def test_vendored_loss_scale_registers_the_same_strategies():
-    from swift.loss_scale import loss_scale_map as reference
-
     from data.swift.loss_scale import loss_scale_map as vendored
+    from swift.loss_scale import loss_scale_map as reference
 
     assert sorted(vendored) == sorted(reference)
 
@@ -930,11 +960,13 @@ def test_vendored_loss_scale_has_no_swift_dependency():
         print("SWIFT:" + ",".join(sorted(m for m in sys.modules if m.split(".")[0] == "swift")))
         """
     )
-    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=300)
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300
+    )
     assert out.returncode == 0, out.stderr[-3000:]
     line = [l for l in out.stdout.splitlines() if l.startswith("SWIFT:")]
     assert line, out.stdout[-2000:]
-    leaked = [m for m in line[0][len("SWIFT:"):].split(",") if m]
+    leaked = [m for m in line[0][len("SWIFT:") :].split(",") if m]
     assert not leaked, f"data.swift.loss_scale pulled in swift modules: {leaked}"
 
 
@@ -942,16 +974,21 @@ def test_batch_keys_order_matches_the_unpack_sites():
     """BATCH_KEYS is unpacked positionally, so its order is part of the contract."""
     import re
 
-    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".."))
+    root = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..")
+    )
     pattern = re.compile(r"^BATCH_KEYS = (\[[^\]]*\])", re.M)
     inline = re.compile(r"    BATCH_KEYS = (\[[^\]]*\])", re.M)
 
     found = {}
-    for rel in ("flagscale/train/megatron/model_specific_batch.py", "flagscale/train/megatron/train_gpt.py"):
+    for rel in (
+        "flagscale/train/megatron/model_specific_batch.py",
+        "flagscale/train/megatron/train_gpt.py",
+    ):
         text = open(os.path.join(root, rel)).read()
         match = pattern.search(text) or inline.search(text)
         assert match, f"no BATCH_KEYS in {rel}"
-        found[rel] = eval(match.group(1))  # noqa: S307 - a literal list in our own source
+        found[rel] = eval(match.group(1))
 
     keys = list(found.values())
     assert keys[0] == keys[1], f"BATCH_KEYS diverged between the two get_batch paths: {found}"
@@ -968,9 +1005,7 @@ def test_data_level_loss_false_masks_tokens():
     with open(DATA) as f:
         for line in f:
             row = json.loads(line)
-            if not any(
-                m.get("loss") is False for m in row["messages"] if m["role"] == "assistant"
-            ):
+            if not any(m.get("loss") is False for m in row["messages"] if m["role"] == "assistant"):
                 continue
             try:
                 masked = template.encode(json.loads(json.dumps(row)))

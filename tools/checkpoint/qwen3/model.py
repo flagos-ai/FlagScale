@@ -40,7 +40,7 @@ def get_hf_model(dtype, model_path=None, config=None):
         from accelerate.utils import set_module_tensor_to_device
 
         with init_empty_weights():
-            model = Qwen3ForCausalLM._from_config(config, torch_dtype=dtype)
+            model = _Qwen3ForCausalLM._from_config(config, torch_dtype=dtype)
         for name, param in model.named_parameters():
             set_module_tensor_to_device(model, name, "cpu", torch.empty(*param.size(), dtype=dtype))
     else:
