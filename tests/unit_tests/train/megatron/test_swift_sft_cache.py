@@ -133,4 +133,3 @@ def test_cache_key_changes_when_encoding_inputs_change(tmp_path):
     config.max_length = 256
     changed_key = _manifest_key(_cache_manifest(config, config.dataset, is_train=True))
     assert changed_key != key
-

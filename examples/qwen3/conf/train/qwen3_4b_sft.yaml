@@ -60,7 +60,7 @@ system:
     save_interval: 100000
     load: ${experiment.load}
     ckpt_format: ${experiment.ckpt_format}
-  
+
   profile: true
   use_pytorch_profiler: true
   # profile_ranks: [0] # 全局 rank；空列表表示所有 rank
