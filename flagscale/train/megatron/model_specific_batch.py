@@ -28,7 +28,9 @@ def sft_loss_scale_is_non_binary(args):
     spec = getattr(args, "sft_loss_scale", None)
     if not spec:
         return False
-    from swift.loss_scale import get_loss_scale
+    # The Swift SFT implementation is vendored into this repository; do not
+    # reintroduce an external ms-swift runtime dependency from the batch path.
+    from data.loss_scale import get_loss_scale
 
     return not get_loss_scale(spec).is_binary_loss_scale
 
@@ -73,7 +75,9 @@ def broadcast_loss_scale_on_tp_rank(batch, args, tp_rank, src_rank, group, seq_l
     return batch
 
 
-def slice_loss_scale_on_cp_rank(batch, cp_group, is_hybrid_cp=False):
+def slice_loss_scale_on_cp_rank(
+    batch, cp_group, is_hybrid_cp=False, use_contiguous_cp=False
+):
     """Partition 'loss_scale' across CP ranks, in lockstep with 'loss_mask'.
 
     ``get_sft_batch_on_this_cp_rank`` only index-selects a hardcoded
@@ -86,6 +90,18 @@ def slice_loss_scale_on_cp_rank(batch, cp_group, is_hybrid_cp=False):
         return batch
     cp_size = torch.distributed.get_world_size(cp_group)
     if cp_size <= 1:
+        return batch
+    if use_contiguous_cp:
+        if loss_scale.size(1) % (2 * cp_size) != 0:
+            raise ValueError(
+                "loss_scale sequence length must be divisible by 2 * CP size for "
+                f"contiguous DSv4 CP, got {loss_scale.size(1)} and CP size {cp_size}"
+            )
+        local_seq_len = loss_scale.size(1) // cp_size
+        cp_rank = torch.distributed.get_rank(cp_group)
+        batch["loss_scale"] = loss_scale.narrow(
+            1, cp_rank * local_seq_len, local_seq_len
+        ).contiguous()
         return batch
     if is_hybrid_cp:
         # Hybrid CP routes through the zigzag pretrain partitioner, whose key
@@ -125,8 +141,23 @@ def get_batch_for_model_with_all_stage_tokens(data_iterator, vp_stage=None, dual
         batch = next(data_iterator)
         for key in BATCH_KEYS:
             batch[key] = batch[key].to(cur_platform.device(), non_blocking=True) if key in batch and batch[key] is not None else None
+
+    # Unlike the generic MCore broadcaster, this model-specific path keeps token
+    # ids on every PP stage for DSv4 Engram/hash routing. It must still negotiate
+    # the actual packed length before non-zero TP ranks allocate receive buffers.
+    if args.sft:
+        actual_seq_length = torch.tensor(
+            batch["tokens"].shape[1] if tp_rank == 0 else 0,
+            dtype=torch.int32,
+            device=cur_platform.device(),
+        )
+        _broadcast(actual_seq_length)
+        sequence_length = int(actual_seq_length.item())
     else:
-        shape = (args.micro_batch_size, args.seq_length)
+        sequence_length = args.seq_length
+
+    if tp_rank != 0:
+        shape = (args.micro_batch_size, sequence_length)
         batch = {key: None for key in BATCH_KEYS}
         batch["tokens"] = torch.empty(shape, dtype=torch.int64, device=cur_platform.device())
         batch["labels"] = torch.empty(shape, dtype=torch.int64, device=cur_platform.device())
@@ -138,7 +169,38 @@ def get_batch_for_model_with_all_stage_tokens(data_iterator, vp_stage=None, dual
         if sft_loss_scale_is_non_binary(args):
             batch["loss_scale"] = torch.empty(shape, dtype=torch.float32, device=cur_platform.device())
         if args.create_attention_mask_in_dataloader:
-            batch["attention_mask"] = torch.empty((args.micro_batch_size, 1, args.seq_length, args.seq_length), dtype=torch.bool, device=cur_platform.device())
+            batch["attention_mask"] = torch.empty(
+                (args.micro_batch_size, 1, sequence_length, sequence_length),
+                dtype=torch.bool,
+                device=cur_platform.device(),
+            )
+
+    def _broadcast_cu_seqlens(value):
+        numel = torch.tensor(
+            value.numel() if tp_rank == 0 and value is not None else 0,
+            dtype=torch.int64,
+            device=cur_platform.device(),
+        )
+        _broadcast(numel)
+        if int(numel.item()) == 0:
+            return None
+        if tp_rank != 0:
+            value = torch.empty(
+                (1, int(numel.item())), dtype=torch.int32, device=cur_platform.device()
+            )
+        _broadcast(value)
+        return value
+
+    if args.sft:
+        batch["cu_seqlens"] = _broadcast_cu_seqlens(batch.get("cu_seqlens"))
+        if tp_rank != 0:
+            batch["max_seqlen"] = torch.empty(
+                1, dtype=torch.int32, device=cur_platform.device()
+            )
+        _broadcast(batch["max_seqlen"])
+        batch["cu_seqlens_padded"] = _broadcast_cu_seqlens(
+            batch.get("cu_seqlens_padded")
+        )
 
     _broadcast(batch["tokens"])
     # 'loss_scale' is only consumed where the loss is computed, so it travels with
@@ -175,6 +237,17 @@ def get_batch_for_model_with_all_stage_tokens(data_iterator, vp_stage=None, dual
 
     is_hybrid_cp = args.hybrid_context_parallel
     cp_group = get_context_parallel_group()
-    batch = get_batch_on_this_cp_rank(batch, is_hybrid_cp=is_hybrid_cp, cp_group=cp_group, hybrid_cp_group_func=get_hybrid_data_context_parallel_groups)
-    batch = slice_loss_scale_on_cp_rank(batch, cp_group, is_hybrid_cp=is_hybrid_cp)
+    batch = get_batch_on_this_cp_rank(
+        batch,
+        is_hybrid_cp=is_hybrid_cp,
+        cp_group=cp_group,
+        hybrid_cp_group_func=get_hybrid_data_context_parallel_groups,
+        use_contiguous_cp=args.experimental_attention_variant == "dsv4_hybrid",
+    )
+    batch = slice_loss_scale_on_cp_rank(
+        batch,
+        cp_group,
+        is_hybrid_cp=is_hybrid_cp,
+        use_contiguous_cp=args.experimental_attention_variant == "dsv4_hybrid",
+    )
     return [batch[key] for key in BATCH_KEYS]

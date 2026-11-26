@@ -65,6 +65,7 @@ from model_provider import model_provider
 ######### FlagScale Begin #########
 # Use FlagScale's tokenizer shim which handles FlagScale-specific tokenizer
 # types (QwenTokenizerFS, etc.) and delegates standard types to upstream.
+from data.packed_seq_utils import padding_mask_from_cu_seqlens
 from megatron.training.tokenizer import build_tokenizer
 from megatron.training.extra_valid import extra_valid_datasets_provider
 from megatron.plugin.hetero.parallel_context import get_parallel_context
@@ -153,8 +154,19 @@ def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Op
         return None, batch['cu_seqlens'], batch['cu_seqlens_padded'], None, None, None, None, None, batch['max_seqlen'], None, None
 
     cp_group = get_context_parallel_group()
-    batch = get_batch_on_this_cp_rank(batch, is_hybrid_cp=is_hybrid_cp, cp_group=cp_group, hybrid_cp_group_func=get_hybrid_data_context_parallel_groups)
-    batch = slice_loss_scale_on_cp_rank(batch, cp_group, is_hybrid_cp=is_hybrid_cp)
+    batch = get_batch_on_this_cp_rank(
+        batch,
+        is_hybrid_cp=is_hybrid_cp,
+        cp_group=cp_group,
+        hybrid_cp_group_func=get_hybrid_data_context_parallel_groups,
+        use_contiguous_cp=args.experimental_attention_variant == "dsv4_hybrid",
+    )
+    batch = slice_loss_scale_on_cp_rank(
+        batch,
+        cp_group,
+        is_hybrid_cp=is_hybrid_cp,
+        use_contiguous_cp=args.experimental_attention_variant == "dsv4_hybrid",
+    )
 
     # Return values in BATCH_KEYS order so callers can unpack into the fixed
     # names regardless of any provenance fields wrappers like BlendedDataset
@@ -245,6 +257,37 @@ def loss_func(
     return loss, num_tokens, report
 
 
+def _padding_mask_from_cu_seqlens(
+    cu_seqlens: torch.Tensor,
+    cu_seqlens_padded: Optional[torch.Tensor],
+    local_seq_length: int,
+    micro_batch_size: int,
+    use_contiguous_cp: bool,
+) -> Optional[torch.Tensor]:
+    """Recover the local MoE padding mask from real and physical THD boundaries."""
+    padding_mask = padding_mask_from_cu_seqlens(cu_seqlens, cu_seqlens_padded)
+    if padding_mask is None:
+        return None
+    total_length = padding_mask.numel()
+
+    if local_seq_length != total_length:
+        cp_group = get_context_parallel_group()
+        cp_size = torch.distributed.get_world_size(cp_group)
+        if total_length != local_seq_length * cp_size:
+            raise ValueError(
+                "physical packed length must equal local length times CP size: "
+                f"{total_length} != {local_seq_length} * {cp_size}"
+            )
+        if not use_contiguous_cp:
+            raise NotImplementedError(
+                "dual-cu-seqlens MoE masking with CP requires contiguous layout"
+            )
+        cp_rank = torch.distributed.get_rank(cp_group)
+        padding_mask = padding_mask.narrow(0, cp_rank * local_seq_length, local_seq_length)
+
+    return padding_mask.unsqueeze(0).expand(micro_batch_size, -1)
+
+
 def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = False, get_batch_func=get_batch):
     """Forward training step.
 
@@ -277,16 +320,43 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
         ) = get_batch_func(data_iterator, vp_stage, dualpipev_stage)
 
     packed_seq_params = None
+    padding_mask = None
     if cu_seqlens is not None:
         # cu_seqlens / cu_seqlens_padded carry the dataloader's batch dim (1, n).
         # PackedSeqParams (and TE attention) expect 1-D, so squeeze before use.
         cu_seqlens = cu_seqlens[0]
         if cu_seqlens_padded is not None:
             cu_seqlens_padded = cu_seqlens_padded[0]
+        physical_length = int(
+            (cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens)[-1].item()
+        )
+        local_seq_length = (
+            tokens.shape[-1]
+            if tokens is not None
+            else physical_length // max(1, args.context_parallel_size)
+        )
+        padding_mask = _padding_mask_from_cu_seqlens(
+            cu_seqlens,
+            cu_seqlens_padded,
+            local_seq_length,
+            args.micro_batch_size,
+            use_contiguous_cp=(args.experimental_attention_variant == "dsv4_hybrid"),
+        )
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
-        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
-        cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens # TODO(asolergi-nv): Currently there is a bug forcing cu_seqlens to be cu_seqlens_padded
+        # DSv4 consumes the same batch on every virtual pipeline chunk. Count
+        # it once per physical rank; consume_seqlen_stats_in_iteration already
+        # removes TP/CP/PP replication, but not virtual chunks.
+        if (
+            getattr(args, "experimental_attention_variant", None) != "dsv4_hybrid"
+            or vp_stage in (None, 0)
+        ):
+            update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        cu_seqlens_for_params = (
+            cu_seqlens
+            if getattr(args, "experimental_attention_variant", None) == "dsv4_hybrid"
+            else cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
+        )
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
             cu_seqlens_q=cu_seqlens_for_params,
@@ -306,12 +376,14 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             assert args.overlap_moe_expert_parallel_comm, \
                 "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
             schedule_plan = model.build_schedule_plan(
-                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask,
+                packed_seq_params=packed_seq_params, padding_mask=padding_mask,
             )
             return schedule_plan, partial(loss_func, loss_mask, loss_scale=loss_scale, model=model)
         else:
             output_tensor = model(
-                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask, packed_seq_params=packed_seq_params
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask,
+                packed_seq_params=packed_seq_params, padding_mask=padding_mask,
             )
 
     # [ModelOpt]: model is needed to access ModelOpt distillation losses
