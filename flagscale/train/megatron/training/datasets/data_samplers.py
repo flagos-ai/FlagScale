@@ -30,7 +30,10 @@ def build_pretraining_data_loader(dataset, consumed_samples):
     else:
         split = None
 
-    if split == Split.valid and args.full_validation:
+    if getattr(args, 'sft_online_packing', False) and isinstance(dataset, torch.utils.data.IterableDataset):
+        dataset.consumed_samples = consumed_samples
+        batch_sampler = None
+    elif split == Split.valid and args.full_validation:
         batch_sampler = MegatronPretrainingSampler(
             total_samples=len(dataset),
             consumed_samples=0,

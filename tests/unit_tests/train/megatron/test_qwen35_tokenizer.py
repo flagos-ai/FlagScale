@@ -121,3 +121,18 @@ def test_hetero_mesh_validation_precedes_common_validation(monkeypatch, enable_h
     assert training_arguments.parse_and_validate_args() is args
     expected = ["backend", "pre", "validate", "post", "globals"]
     assert events == (expected if enable_hetero else ["validate", "globals"])
+
+
+def test_text_sft_later_pipeline_stage_recovers_packed_positions(monkeypatch):
+    import torch
+
+    from flagscale.train.megatron import train_qwen35 as entry
+
+    boundaries = torch.tensor([[0, 3, 7]], dtype=torch.int32)
+    batch = (None, boundaries, None, None, None, None, None, torch.tensor(4), None, None)
+    monkeypatch.setattr(entry, "get_batch_gpt", lambda *args: batch)
+    monkeypatch.setattr(entry, "get_args", lambda: SimpleNamespace(context_parallel_size=1))
+    monkeypatch.setattr(entry, "update_seqlen_stats_from_cu_seqlens", lambda _: None)
+    _, _, _, _, positions, _ = entry.get_batch_text(None)
+    expected = torch.tensor([0, 1, 2, 0, 1, 2, 3]).expand(3, 1, 7)
+    torch.testing.assert_close(positions, expected)

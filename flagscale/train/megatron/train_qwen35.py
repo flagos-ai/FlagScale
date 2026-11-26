@@ -28,6 +28,7 @@ from argparse import Namespace
 
 from megatron.core import parallel_state
 from megatron.training.checkpointing import get_checkpoint_name
+from megatron.training.datasets.sft_dataset import packed_position_ids
 from megatron.core.enums import ModelType
 from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.rerun_state_machine import get_rerun_state_machine
@@ -494,6 +495,10 @@ def get_batch_text(data_iterator, vp_stage: Optional[int] = None):
             cu_seqlens_padded = cu_seqlens_padded[0]
         update_seqlen_stats_from_cu_seqlens(cu_seqlens)
         cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
+        # GPT omits position IDs on later pipeline stages. Qwen applies mRoPE on
+        # every stage. For an unpartitioned packed sequence, each example starts at 0.
+        if position_ids is None and get_args().context_parallel_size == 1:
+            position_ids = packed_position_ids(cu_seqlens_for_params).unsqueeze(0)
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
             cu_seqlens_q=cu_seqlens_for_params,

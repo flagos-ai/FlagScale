@@ -45,7 +45,16 @@ def build_tokenizer(args, **kwargs):
     """
     from megatron.training.utils import print_rank_0
 
-    if args.tokenizer_type in _TOKENIZER_FACTORY_REGISTRY:
+    if getattr(args, "sft_message_loss_mask", False):
+        if not args.sft or args.tokenizer_type not in ("HFTokenizerFS", "SFTTokenizer"):
+            raise ValueError("--sft-message-loss-mask requires --sft and HFTokenizerFS or SFTTokenizer")
+        from .qwen_message_tokenizer import QwenMessageLossTokenizer
+
+        path = args.tokenizer_path if args.tokenizer_type == "HFTokenizerFS" else args.tokenizer_model
+        if not path:
+            raise ValueError("Set the checkpoint tokenizer path for message-level SFT masking")
+        tokenizer = QwenMessageLossTokenizer(path)
+    elif args.tokenizer_type in _TOKENIZER_FACTORY_REGISTRY:
         print_rank_0(f"> building {args.tokenizer_type} tokenizer ...")
         tokenizer = _TOKENIZER_FACTORY_REGISTRY[args.tokenizer_type](args, **kwargs)
     else:
