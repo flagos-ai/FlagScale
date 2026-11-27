@@ -44,6 +44,8 @@ class HardwareHealthIndex:
     stale_after_s: float
     snapshots: tuple[dict[str, Any], ...] = ()
     missing_node_ranks: tuple[int, ...] = ()
+    read_errors: tuple[dict[str, Any], ...] = ()
+    read_events: tuple[dict[str, Any], ...] = ()
 
     @property
     def overall_status(self) -> str:
@@ -66,6 +68,9 @@ class HardwareHealthIndex:
             return "stale"
         return str(snapshot.get("status") or "unavailable")
 
+    def _read_error(self, node_rank: int | None) -> dict[str, Any] | None:
+        return next((e for e in self.read_errors if e["node_rank"] == node_rank), None)
+
     def summary(self) -> dict[str, Any]:
         if not self.enabled:
             return {"enabled": False, "status": "not_collected", "nodes": []}
@@ -80,6 +85,14 @@ class HardwareHealthIndex:
                     "source": snapshot.get("source"),
                     "error": snapshot.get("error"),
                     "gpus": snapshot.get("gpus", []),
+                    **(
+                        {
+                            "using_cached_snapshot": True,
+                            "read_error": self._read_error(snapshot.get("node_rank")),
+                        }
+                        if self._read_error(snapshot.get("node_rank"))
+                        else {}
+                    ),
                 }
             )
         for node_rank in self.missing_node_ranks:
@@ -90,7 +103,12 @@ class HardwareHealthIndex:
                     "status": "unavailable",
                     "sample_age_s": None,
                     "source": None,
-                    "error": "gpu_health_snapshot_not_generated",
+                    "error": "gpu_health_snapshot_not_observed",
+                    **(
+                        {"read_error": self._read_error(node_rank)}
+                        if self._read_error(node_rank)
+                        else {}
+                    ),
                     "gpus": [],
                 }
             )
@@ -103,12 +121,19 @@ class HardwareHealthIndex:
         snapshot = next((item for item in self.snapshots if item.get("hostname") == hostname), None)
         if snapshot is None:
             return {"gpu_device_health": "unavailable"}
+        read_error = self._read_error(snapshot.get("node_rank"))
+        read_details = (
+            {"gpu_health_using_cached_snapshot": True, "gpu_health_read_error": read_error}
+            if read_error
+            else {}
+        )
         snapshot_status = self._snapshot_status(snapshot)
         if snapshot_status in {"stale", "unavailable"}:
             return {
                 "gpu_device_health": snapshot_status,
                 "gpu_health_sample_age_s": self._snapshot_age_s(snapshot),
                 "gpu_health_source": snapshot.get("source"),
+                **read_details,
             }
 
         gpu = _match_rank_gpu(rank_event, snapshot.get("gpus", []))
@@ -118,6 +143,7 @@ class HardwareHealthIndex:
                 "gpu_health_sample_age_s": self._snapshot_age_s(snapshot),
                 "gpu_health_source": snapshot.get("source"),
                 "gpu_health_error": "could_not_map_rank_to_gpu",
+                **read_details,
             }
         return {
             "gpu_device_health": str(gpu.get("status") or "unavailable"),
@@ -129,6 +155,7 @@ class HardwareHealthIndex:
                 "uuid": gpu.get("uuid"),
             },
             "gpu_hardware": gpu,
+            **read_details,
         }
 
 
@@ -175,18 +202,61 @@ class HardwareHealthReader:
         self.monitor_started_unix_ns = monitor_started_unix_ns
         self._reported: set[tuple[str, str, tuple[str, ...]]] = set()
         self._reported_missing_nodes: set[int] = set()
+        self._last_valid: dict[int, dict[str, Any]] = {}
+        self._reported_read_failures: set[int] = set()
+        self._read_episodes: dict[int, dict[str, Any]] = {}
 
     def poll(self, now_unix_ns: int) -> tuple[HardwareHealthIndex, list[dict[str, Any]]]:
         if not self.enabled:
             return HardwareHealthIndex(False, now_unix_ns, self.stale_after_s), []
-        snapshots: list[dict[str, Any]] = []
-        for path in sorted(self.heartbeat_dir.glob("gpu_health_node_*.json")):
+        # Known nodes must not disappear merely because a shared directory listing
+        # is stale. Discover additional nodes only when the topology is unknown.
+        nodes = (
+            set(range(self.expected_node_count))
+            | self._last_valid.keys()
+            | self._read_episodes.keys()
+        )
+        if self.expected_node_count <= 0:
+            for path in self.heartbeat_dir.glob("gpu_health_node_*.json"):
+                try:
+                    nodes.add(int(path.stem.removeprefix("gpu_health_node_")))
+                except ValueError:
+                    continue
+        errors: list[dict[str, Any]] = []
+        for node in sorted(nodes):
+            path = self.heartbeat_dir / f"gpu_health_node_{node}.json"
+            stage = "read"
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+                text = path.read_text(encoding="utf-8")
+                stage = "parse"
+                payload = json.loads(text)
+                stage = "validate"
+                if (
+                    not isinstance(payload, dict)
+                    or payload.get("run_id") != self.run_id
+                    or payload.get("node_rank") != node
+                    or type(payload.get("collected_at_unix_ns")) is not int
+                    or payload["collected_at_unix_ns"] <= 0
+                ):
+                    raise ValueError("invalid snapshot identity or timestamp")
+            except (OSError, ValueError) as exc:
+                errors.append(
+                    {
+                        "node_rank": node,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "errno": getattr(exc, "errno", None),
+                        "path": str(path),
+                        "stage": stage,
+                    }
+                )
                 continue
-            if isinstance(payload, dict) and payload.get("run_id") == self.run_id:
-                snapshots.append(payload)
+            # Never replace a newer sample with a stale shared-filesystem view.
+            old = self._last_valid.get(node)
+            if old is None or payload["collected_at_unix_ns"] >= old["collected_at_unix_ns"]:
+                self._last_valid[node] = payload
+        snapshots = list(self._last_valid.values())
+        read_events = self._update_read_episodes(errors, now_unix_ns)
         missing_node_ranks = self._missing_node_ranks(snapshots, now_unix_ns)
         index = HardwareHealthIndex(
             True,
@@ -194,10 +264,82 @@ class HardwareHealthReader:
             self.stale_after_s,
             tuple(snapshots),
             missing_node_ranks,
+            tuple(errors),
+            tuple(read_events),
         )
         findings = self._new_findings(index, now_unix_ns)
         findings.extend(self._new_missing_findings(index, now_unix_ns))
+        findings.extend(self._new_read_failure_findings(index, now_unix_ns))
         return index, findings
+
+    def _update_read_episodes(
+        self, errors: list[dict[str, Any]], now_unix_ns: int
+    ) -> list[dict[str, Any]]:
+        """Retain bounded episode state; the monitor persists transitions separately."""
+        failures = {error["node_rank"]: error for error in errors}
+        events = []
+        for node in sorted(set(failures) | self._read_episodes.keys()):
+            error = failures.get(node)
+            episode = self._read_episodes.get(node)
+            transition = None
+            if error is not None:
+                if episode is None:
+                    episode = {
+                        "first_failure_unix_ns": now_unix_ns,
+                        "failure_count": 0,
+                        "first_error": dict(error),
+                        "last_report_unix_ns": now_unix_ns,
+                    }
+                    self._read_episodes[node] = episode
+                    transition = "first_failure"
+                elif any(
+                    episode["last_error"].get(key) != error.get(key)
+                    for key in ("stage", "error_type", "errno")
+                ):
+                    transition = "error_changed"
+                elif now_unix_ns - episode["last_report_unix_ns"] >= 30_000_000_000:
+                    transition = "ongoing"
+                episode["failure_count"] += 1
+                episode["last_failure_unix_ns"] = now_unix_ns
+                episode["last_error"] = dict(error)
+            elif episode is not None:
+                transition = "read_recovered"
+            if transition is None:
+                continue
+            snapshot = self._last_valid.get(node)
+            sampled_at = snapshot.get("collected_at_unix_ns") if snapshot else None
+            age_s = (
+                max(0.0, (now_unix_ns - sampled_at) / 1_000_000_000)
+                if sampled_at is not None
+                else None
+            )
+            events.append(
+                {
+                    "event": "gpu_health_read_episode",
+                    "run_id": self.run_id,
+                    "node_rank": node,
+                    "observed_at_unix_ns": now_unix_ns,
+                    "transition": transition,
+                    **{
+                        key: value for key, value in episode.items() if key != "last_report_unix_ns"
+                    },
+                    "last_valid_sample_unix_ns": sampled_at,
+                    "sample_age_s": age_s,
+                    "snapshot_status": (
+                        "unavailable"
+                        if snapshot is None
+                        else "stale"
+                        if age_s > self.stale_after_s
+                        else str(snapshot.get("status") or "unavailable")
+                    ),
+                    "recovered_at_unix_ns": now_unix_ns if error is None else None,
+                }
+            )
+            if error is None:
+                del self._read_episodes[node]
+            else:
+                episode["last_report_unix_ns"] = now_unix_ns
+        return events
 
     def _missing_node_ranks(
         self, snapshots: list[dict[str, Any]], now_unix_ns: int
@@ -243,7 +385,37 @@ class HardwareHealthReader:
                     "hostname": None,
                     "gpu_device_health": "unavailable",
                     "expected_file": f"gpu_health_node_{node_rank}.json",
-                    "reason": "gpu_health_snapshot_not_generated",
+                    "reason": "gpu_health_snapshot_not_observed",
+                    "read_error": index._read_error(node_rank),
+                    "confidence": "observed",
+                }
+            )
+        return findings
+
+    def _new_read_failure_findings(
+        self, index: HardwareHealthIndex, now_unix_ns: int
+    ) -> list[dict[str, Any]]:
+        failures = {e["node_rank"]: e for e in index.read_errors}
+        self._reported_read_failures.intersection_update(failures)
+        findings = []
+        for snapshot in index.snapshots:
+            node = snapshot["node_rank"]
+            if node not in failures or index._snapshot_status(snapshot) != "stale":
+                continue
+            if node in self._reported_read_failures:
+                continue
+            self._reported_read_failures.add(node)
+            findings.append(
+                {
+                    "finding_type": "gpu_health_snapshot_read_failed",
+                    "run_id": self.run_id,
+                    "detected_at_unix_ns": now_unix_ns,
+                    "node_rank": node,
+                    "hostname": snapshot.get("hostname"),
+                    "gpu_device_health": "stale",
+                    "sample_age_s": index._snapshot_age_s(snapshot),
+                    "reason": "last_valid_health_snapshot_expired",
+                    "read_error": failures[node],
                     "confidence": "observed",
                 }
             )
