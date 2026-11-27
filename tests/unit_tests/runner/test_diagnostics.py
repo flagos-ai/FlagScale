@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 from flagscale.runner.diagnostics import (
     active_run_id_cleanup_action,
     active_run_id_cleanup_lines,
@@ -22,6 +24,8 @@ from flagscale.runner.diagnostics import (
     stop_process_shell_lines,
     wait_for_file_removal_shell_lines,
 )
+from flagscale.runner.heartbeat.config import HeartbeatLaunchConfig
+from flagscale.runner.tracing.config import TraceLaunchConfig
 
 
 class _DiagnosticConfig:
@@ -29,6 +33,34 @@ class _DiagnosticConfig:
 
     def command_exit_actions(self, node_rank: int) -> list[str]:
         return [f"record-node-{node_rank}"]
+
+
+def test_joint_diagnostics_preserve_completion_markers_and_hardware_cleanup():
+    heartbeat = HeartbeatLaunchConfig(
+        enabled=True,
+        heartbeat_dir="/tmp/heartbeat",
+        hardware_health_enabled=True,
+    )
+    tracing = TraceLaunchConfig(enabled=True, trace_dir="/tmp/tracing")
+
+    node_zero = diagnostic_command_body(0, heartbeat, tracing)
+    node_one = diagnostic_command_body(1, heartbeat, tracing)
+
+    assert os.path.join("/tmp/heartbeat", "training.exit_code") in node_zero
+    assert os.path.join("/tmp/tracing", "training.exit_code") in node_zero
+    assert os.path.join("/tmp/heartbeat", "gpu_health_node_0.pid") in node_zero
+    assert os.path.join("/tmp/heartbeat", "gpu_health_node_1.pid") in node_one
+    assert os.path.join("/tmp/tracing", "training.exit_code") not in node_one
+
+
+def test_joint_diagnostics_are_noop_when_disabled():
+    command = diagnostic_command_body(
+        0,
+        HeartbeatLaunchConfig(enabled=False),
+        TraceLaunchConfig(enabled=False),
+    )
+
+    assert command == "$cmd; sync"
 
 
 def test_active_run_id_path_and_reading(tmp_path):
