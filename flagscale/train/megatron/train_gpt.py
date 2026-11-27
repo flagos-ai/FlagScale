@@ -65,10 +65,16 @@ from model_provider import model_provider
 ######### FlagScale Begin #########
 # Use FlagScale's tokenizer shim which handles FlagScale-specific tokenizer
 # types (QwenTokenizerFS, etc.) and delegates standard types to upstream.
+from data.packed_seq_utils import padding_mask_from_cu_seqlens
 from megatron.training.tokenizer import build_tokenizer
 from megatron.training.extra_valid import extra_valid_datasets_provider
 from megatron.plugin.hetero.parallel_context import get_parallel_context
 from megatron.plugin.platform import get_platform
+
+from model_specific_batch import (
+    broadcast_loss_scale_on_tp_rank,
+    slice_loss_scale_on_cp_rank,
+)
 ######### FlagScale End #########
 
 cur_platform = get_platform()
@@ -87,7 +93,9 @@ stimer = StragglerDetector()
 def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Optional[int] = None):
     """Generate a batch."""
 
-    BATCH_KEYS = ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "max_seqlen", "position_ids", "tokens"]
+    # See model_specific_batch.BATCH_KEYS for why 'loss_scale' is carried
+    # separately from 'loss_mask'.
+    BATCH_KEYS = ["attention_mask", "cu_seqlens", "cu_seqlens_padded", "hybrid_cp_group", "labels", "local_cp_size", "loss_mask", "loss_scale", "max_seqlen", "position_ids", "tokens"]
 
     args = get_args()
     config = core_transformer_config_from_args(args)
@@ -108,13 +116,57 @@ def get_batch(data_iterator, vp_stage: Optional[int] = None, dualpipev_stage: Op
         for key in BATCH_KEYS:
             batch[key] = batch[key].to(cur_platform.device(), non_blocking=True) if key in batch and batch[key] is not None else None
 
+    if tp_rank == 0 and is_sft:
+        # SFT packed sequences are variable-length (total <= seq_length); the TP
+        # broadcast path allocates fixed (mbs, seq_length) receive buffers, so pad
+        # the pack up to seq_length here to keep sender/receiver shapes equal.
+        cu = batch.get("cu_seqlens")
+        cu_padded = batch.get("cu_seqlens_padded")
+        physical_cu = cu_padded if cu_padded is not None else cu
+        total = None if physical_cu is None else int(physical_cu.reshape(-1)[-1])
+        for key in ("tokens", "labels", "loss_mask", "loss_scale", "position_ids"):
+            item = batch.get(key)
+            if item is None or item.shape[-1] >= args.seq_length:
+                continue
+            batch[key] = torch.nn.functional.pad(item, (0, args.seq_length - item.shape[-1]))
+        # Append a zero-real-token physical segment for TP-shape padding. Real
+        # and physical prefix arrays must retain matching shapes.
+        if cu is not None and total is not None and total < args.seq_length:
+            cu_flat = cu.reshape(-1)
+            physical_flat = physical_cu.reshape(-1)
+            batch["cu_seqlens"] = torch.cat([cu_flat, cu_flat[-1:]], dim=0).unsqueeze(0)
+            batch["cu_seqlens_padded"] = torch.cat(
+                [physical_flat, physical_flat.new_tensor([args.seq_length])], dim=0
+            ).unsqueeze(0)
+            physical_lengths = batch["cu_seqlens_padded"][0].diff()
+            batch["max_seqlen"] = physical_lengths.max().reshape_as(batch["max_seqlen"])
+
     batch = get_batch_on_this_tp_rank(batch, broadcast_src_rank=mpu.get_tensor_model_parallel_src_rank(), broadcast_group=mpu.get_tensor_model_parallel_group(), is_sft=is_sft, is_hybrid_cp=is_hybrid_cp, create_attention_mask_in_dataloader=create_attention_mask_in_dataloader, cp_size=cp_size, tp_rank=tp_rank, micro_batch_size=args.micro_batch_size, seq_length=args.seq_length, mtp_on_this_rank=mtp_on_this_rank, pipeline_model_parallel_size=args.pipeline_model_parallel_size, is_pipeline_first_stage=mpu.is_pipeline_first_stage(), is_pipeline_last_stage=mpu.is_pipeline_last_stage(), is_dualpipev=mpu.get_dualpipev_pipeline_model_parallel_world_size() is not None)
     
+    # Upstream's broadcast covers a fixed key set; 'loss_scale' is carried here.
+    batch = broadcast_loss_scale_on_tp_rank(
+        batch, args, tp_rank, mpu.get_tensor_model_parallel_src_rank(),
+        mpu.get_tensor_model_parallel_group(), args.seq_length,
+    )
+
     if not is_first_or_last_pipeline_stage(vp_stage, dualpipev_stage) and not mtp_on_this_rank:
         assert is_sft
-        return None, batch['cu_seqlens'], batch['cu_seqlens_padded'], None, None, None, None, batch['max_seqlen'], None, None
-    
-    batch = get_batch_on_this_cp_rank(batch, is_hybrid_cp=is_hybrid_cp, cp_group=get_context_parallel_group(), hybrid_cp_group_func=get_hybrid_data_context_parallel_groups)
+        return None, batch['cu_seqlens'], batch['cu_seqlens_padded'], None, None, None, None, None, batch['max_seqlen'], None, None
+
+    cp_group = get_context_parallel_group()
+    batch = get_batch_on_this_cp_rank(
+        batch,
+        is_hybrid_cp=is_hybrid_cp,
+        cp_group=cp_group,
+        hybrid_cp_group_func=get_hybrid_data_context_parallel_groups,
+        use_contiguous_cp=args.experimental_attention_variant == "dsv4_hybrid",
+    )
+    batch = slice_loss_scale_on_cp_rank(
+        batch,
+        cp_group,
+        is_hybrid_cp=is_hybrid_cp,
+        use_contiguous_cp=args.experimental_attention_variant == "dsv4_hybrid",
+    )
 
     # Return values in BATCH_KEYS order so callers can unpack into the fixed
     # names regardless of any provenance fields wrappers like BlendedDataset
@@ -130,13 +182,20 @@ SPIKY_LOSS_FACTOR = 10
 
 
 def loss_func(
-    loss_mask: torch.Tensor, output_tensor: torch.Tensor, model: Optional[GPTModel] = None
+    loss_mask: torch.Tensor,
+    output_tensor: torch.Tensor,
+    loss_scale: Optional[torch.Tensor] = None,
+    model: Optional[GPTModel] = None,
 ):
     """Loss function.
 
     Args:
         loss_mask (torch.Tensor): Used to mask out some portions of the loss
         output_tensor (torch.Tensor): The tensor with the losses
+        loss_scale (torch.Tensor, optional): Per-token loss weights from the
+            ms-swift SFT backend. Weights the numerator only; the denominator
+            stays the token count from ``loss_mask``. ``None`` for every binary
+            loss_scale strategy, which is the common case.
         model (GPTModel, optional): The model (can be wrapped)
 
     Returns:
@@ -148,10 +207,17 @@ def loss_func(
     args = get_args()
 
     if has_nvidia_modelopt and getattr(args, 'modelopt_enabled', False):  # [ModelOpt]
+        assert loss_scale is None, "a non-binary loss_scale is not supported with ModelOpt"
         loss, num_tokens, report = loss_func_modelopt(loss_mask, output_tensor, model=model)
     else:
         losses = output_tensor.view(-1).float()
         loss_mask = loss_mask.view(-1).float()
+        if loss_scale is not None:
+            # Matches ms-swift (swift/megatron/trainers/trainer.py): the weights
+            # scale the summed loss, while num_tokens below keeps counting
+            # tokens. Folding them into loss_mask instead would divide by the
+            # sum of the weights and silently diverge.
+            losses = losses * loss_scale.view(-1).float()
         loss = torch.sum(losses * loss_mask)
 
         num_tokens = loss_mask.sum().clone().detach().to(torch.int)
@@ -191,6 +257,37 @@ def loss_func(
     return loss, num_tokens, report
 
 
+def _padding_mask_from_cu_seqlens(
+    cu_seqlens: torch.Tensor,
+    cu_seqlens_padded: Optional[torch.Tensor],
+    local_seq_length: int,
+    micro_batch_size: int,
+    use_contiguous_cp: bool,
+) -> Optional[torch.Tensor]:
+    """Recover the local MoE padding mask from real and physical THD boundaries."""
+    padding_mask = padding_mask_from_cu_seqlens(cu_seqlens, cu_seqlens_padded)
+    if padding_mask is None:
+        return None
+    total_length = padding_mask.numel()
+
+    if local_seq_length != total_length:
+        cp_group = get_context_parallel_group()
+        cp_size = torch.distributed.get_world_size(cp_group)
+        if total_length != local_seq_length * cp_size:
+            raise ValueError(
+                "physical packed length must equal local length times CP size: "
+                f"{total_length} != {local_seq_length} * {cp_size}"
+            )
+        if not use_contiguous_cp:
+            raise NotImplementedError(
+                "dual-cu-seqlens MoE masking with CP requires contiguous layout"
+            )
+        cp_rank = torch.distributed.get_rank(cp_group)
+        padding_mask = padding_mask.narrow(0, cp_rank * local_seq_length, local_seq_length)
+
+    return padding_mask.unsqueeze(0).expand(micro_batch_size, -1)
+
+
 def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = False, get_batch_func=get_batch):
     """Forward training step.
 
@@ -216,22 +313,50 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             labels,
             local_cp_size,
             loss_mask,
+            loss_scale,
             max_seqlen,
             position_ids,
             tokens,
         ) = get_batch_func(data_iterator, vp_stage, dualpipev_stage)
 
     packed_seq_params = None
+    padding_mask = None
     if cu_seqlens is not None:
         # cu_seqlens / cu_seqlens_padded carry the dataloader's batch dim (1, n).
         # PackedSeqParams (and TE attention) expect 1-D, so squeeze before use.
         cu_seqlens = cu_seqlens[0]
         if cu_seqlens_padded is not None:
             cu_seqlens_padded = cu_seqlens_padded[0]
+        physical_length = int(
+            (cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens)[-1].item()
+        )
+        local_seq_length = (
+            tokens.shape[-1]
+            if tokens is not None
+            else physical_length // max(1, args.context_parallel_size)
+        )
+        padding_mask = _padding_mask_from_cu_seqlens(
+            cu_seqlens,
+            cu_seqlens_padded,
+            local_seq_length,
+            args.micro_batch_size,
+            use_contiguous_cp=(args.experimental_attention_variant == "dsv4_hybrid"),
+        )
         # Use real (unpadded) cu_seqlens to feed the FLOPs accounting: varlen
         # attention only computes work for real tokens within each chunk.
-        update_seqlen_stats_from_cu_seqlens(cu_seqlens)
-        cu_seqlens_for_params = cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens # TODO(asolergi-nv): Currently there is a bug forcing cu_seqlens to be cu_seqlens_padded
+        # DSv4 consumes the same batch on every virtual pipeline chunk. Count
+        # it once per physical rank; consume_seqlen_stats_in_iteration already
+        # removes TP/CP/PP replication, but not virtual chunks.
+        if (
+            getattr(args, "experimental_attention_variant", None) != "dsv4_hybrid"
+            or vp_stage in (None, 0)
+        ):
+            update_seqlen_stats_from_cu_seqlens(cu_seqlens)
+        cu_seqlens_for_params = (
+            cu_seqlens
+            if getattr(args, "experimental_attention_variant", None) == "dsv4_hybrid"
+            else cu_seqlens_padded if cu_seqlens_padded is not None else cu_seqlens
+        )
         packed_seq_params = PackedSeqParams(
             qkv_format="thd",
             cu_seqlens_q=cu_seqlens_for_params,
@@ -251,16 +376,18 @@ def forward_step(data_iterator, model: GPTModel, return_schedule_plan: bool = Fa
             assert args.overlap_moe_expert_parallel_comm, \
                 "overlap_moe_expert_parallel_comm must be enabled to return the schedule plan"
             schedule_plan = model.build_schedule_plan(
-                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask,
+                packed_seq_params=packed_seq_params, padding_mask=padding_mask,
             )
-            return schedule_plan, partial(loss_func, loss_mask, model=model)
+            return schedule_plan, partial(loss_func, loss_mask, loss_scale=loss_scale, model=model)
         else:
             output_tensor = model(
-                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask, packed_seq_params=packed_seq_params
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask,
+                packed_seq_params=packed_seq_params, padding_mask=padding_mask,
             )
 
     # [ModelOpt]: model is needed to access ModelOpt distillation losses
-    return output_tensor, partial(loss_func, loss_mask, model=model)
+    return output_tensor, partial(loss_func, loss_mask, loss_scale=loss_scale, model=model)
 
 
 def is_dataset_built_on_rank(vp_stage=None, is_packed_sequence=False):
@@ -360,6 +487,39 @@ def train_valid_test_datasets_provider(train_val_test_num_samples, vp_stage=None
     if config is None:
         config = core_gpt_dataset_config_from_args(args)
 
+
+    # ms-swift online SFT data backend (Phase 1): bypass the BlendedMegatron
+    # builder and return SwiftSFTDataset instances directly. The custom collator
+    # is attached later in build_pretraining_data_loader.
+    if args.sft and getattr(args, "sft_data_backend", "megatron") == "swift":
+        from data.swift import SwiftSFTConfig, build_swift_sft_datasets
+
+        assert args.sft_dataset, "--sft-dataset is required when --sft-data-backend swift"
+        swift_config = SwiftSFTConfig(
+            model_dir=args.sft_model_dir or args.load or args.pretrained_checkpoint,
+            model_type=args.sft_model_type,
+            template=args.sft_template,
+            max_length=args.sft_max_length or args.seq_length,
+            truncation_strategy=args.sft_truncation_strategy,
+            loss_scale=args.sft_loss_scale,
+            add_non_thinking_prefix=args.sft_add_non_thinking_prefix,
+            dataset=list(args.sft_dataset),
+            val_dataset=list(args.sft_val_dataset) if args.sft_val_dataset else [],
+            split_dataset_ratio=args.sft_split_dataset_ratio,
+            packing=args.sft_packing,
+            packing_length=args.sft_packing_length,
+            packing_strategy=args.sft_packing_strategy,
+            packing_num_proc=args.sft_packing_num_proc,
+            context_parallel_size=args.context_parallel_size,
+            dataset_num_proc=args.sft_dataset_num_proc,
+            load_from_cache_file=args.sft_load_from_cache_file,
+            cache_dir=args.sft_cache_dir,
+            data_seed=args.seed,
+        )
+        print_rank_0("> building ms-swift online SFT datasets ...")
+        train_ds, valid_ds = build_swift_sft_datasets(swift_config)
+        print_rank_0("> finished creating ms-swift SFT datasets ...")
+        return train_ds, valid_ds, None
 
     is_packed_sequence = False
     if args.sft:

@@ -125,6 +125,7 @@ class DeepSeekModel(GPTModel):
             rotary_pos_cos_sin=rotary_pos_cos_sin,
             packed_seq_params=packed_seq_params,
             sequence_len_offset=sequence_len_offset,
+            padding_mask=padding_mask,
             **decoder_extra_block_kwargs,
         )
         # torch.cuda.nvtx.range_pop()
@@ -148,6 +149,7 @@ class DeepSeekModel(GPTModel):
             loss_mask=loss_mask,
             decoder_input=decoder_input,
             attention_mask=attention_mask,
+            padding_mask=padding_mask,
             inference_params=inference_params,
             packed_seq_params=packed_seq_params,
             sequence_len_offset=sequence_len_offset,
@@ -170,10 +172,20 @@ class DeepSeekModel(GPTModel):
         runtime_gather_output: Optional[bool] = None,
         inference_params: Optional[BaseInferenceContext] = None,
         loss_mask: Optional[torch.Tensor] = None,
+        padding_mask: Optional[torch.Tensor] = None,
     ):
         """
         Adaptation of overlap_moe_expert_parallel_comm.
         """
+        if (
+            self.config.enable_hyper_connections
+            and not self.decoder.has_final_layernorm_in_this_stage()
+        ):
+            # The overlap schedule reads these handles on every pipeline chunk.
+            # Only the final chunk owns the mHC head and contracts its streams.
+            self.decoder.hc_head_fn = None
+            self.decoder.hc_head_base = None
+            self.decoder.hc_head_scale = None
         # Precompute the engram_hash_iput_ids, it will be used to create a TransformerChunkSchedulePlan.
         if self.config.use_engram:
             engram_hash_input_ids = LazyHashInputIds(
@@ -191,7 +203,9 @@ class DeepSeekModel(GPTModel):
             decoder_input,
             labels=labels,
             loss_mask=loss_mask,
+            padding_mask=padding_mask,
             extra_block_kwargs=extra_block_kwargs,
+            packed_seq_params=packed_seq_params,
         )
     
     def sharded_state_dict(

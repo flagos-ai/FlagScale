@@ -186,6 +186,17 @@ class _HFTokenizerFS(_FlagScaleTokenizerBase):
         return self.pad_id
 
 
+class _DeepSeekV4TokenizerFS(_HFTokenizerFS):
+    """DeepSeek-V4 tokenizer whose model vocabulary includes added tokens."""
+
+    @property
+    def vocab_size(self):
+        # DeepSeek-V4's released tokenizer exposes part of its model vocabulary
+        # as added tokens. The embedding/output size must cover every emitted id,
+        # while PreTrainedTokenizer.vocab_size reports only the base vocabulary.
+        return len(self.tokenizer)
+
+
 class _Llama3TokenizerFS(_HFTokenizerFS):
     """Llama3 tokenizer with added vocab."""
 
@@ -439,6 +450,11 @@ def _build_hf(args, **kwargs):
     return _HFTokenizerFS(args.tokenizer_path)
 
 
+def _build_deepseek_v4(args, **kwargs):
+    assert args.tokenizer_path
+    return _DeepSeekV4TokenizerFS(args.tokenizer_path)
+
+
 def _build_llama3(args, **kwargs):
     assert args.tokenizer_path
     return _Llama3TokenizerFS(args.tokenizer_path)
@@ -479,6 +495,7 @@ def _build_rwkv(args, **kwargs):
 
 register_tokenizer_factory("AquilaTokenizerFS", _build_aquila)
 register_tokenizer_factory("HFTokenizerFS", _build_hf)
+register_tokenizer_factory("DeepSeekV4TokenizerFS", _build_deepseek_v4)
 register_tokenizer_factory("Llama3TokenizerFS", _build_llama3)
 register_tokenizer_factory("QwenTokenizerFS", _build_qwen)
 register_tokenizer_factory("HFTokenizersTokenizerFS", _build_hftokenizers)
