@@ -4,15 +4,22 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <cerrno>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include "profiler.h"
 
 namespace {
@@ -35,11 +42,29 @@ struct Event {
   std::shared_ptr<Event> task;
   unsigned channel = 0;
 };
-std::mutex mutex;
-std::unordered_map<uintptr_t, std::shared_ptr<Event>> events;
+using Clock = std::chrono::steady_clock;
+constexpr auto kSnapshotInterval = std::chrono::milliseconds(50);
+constexpr auto kFinishTimeout = std::chrono::milliseconds(250);
+constexpr size_t kMaxPendingBytes = 8 * 1024 * 1024;
+constexpr size_t kMaxPendingRows = 4096;
+constexpr size_t kSnapshotsPerInterval = 128;
+struct BridgeState {
+  std::mutex mutex;
+  std::unordered_map<uintptr_t, std::shared_ptr<Event>> events;
+  std::unordered_set<uintptr_t> dirty;
+  std::condition_variable changed;
+  std::deque<std::string> pending;
+  size_t pending_bytes = 0, pending_rows = 0, contexts = 0;
+  uint64_t submitted = 0, published = 0;
+  int fd = -1;
+  const char* failure = nullptr;
+};
+// A publisher blocked in write() can outlive normal NCCL finalization.
+BridgeState& bridge = *new BridgeState;
+auto& mutex = bridge.mutex;
+auto& events = bridge.events;
 ncclProfiler_v5_t* delegate = nullptr;
 Getter getter = nullptr;
-FILE* output = nullptr;
 uintptr_t serial = 0;
 uint64_t process_token = 0;
 size_t peak_events = 0;
@@ -62,16 +87,26 @@ std::string quoted(const std::string& text) {
   }
   return out + '"';
 }
-void write_line(const std::string& line) {
-  if (!output) return;
-  if (std::fputs((line + "\n").c_str(), output) < 0 || std::fflush(output) != 0)
-    broken = true;
-}
-void invalidate() {
+void invalidate(const char* reason = "bridge_invalid") {
   if (broken) return;
   broken = true;
-  write_line("{\"record_type\":\"flagscale_bridge_error_v1\",\"hostname\":" +
-             quoted(hostname) + ",\"pid\":" + std::to_string(getpid()) + "}");
+  bridge.failure = reason;
+  bridge.changed.notify_all();
+}
+void write_line(std::string line) {
+  if (bridge.fd < 0 || broken) return;
+  line += '\n';
+  if (line.size() > kMaxPendingBytes - bridge.pending_bytes ||
+      bridge.pending_rows == kMaxPendingRows) {
+    invalidate("publisher_queue_full");
+    return;
+  }
+  const size_t size = line.size();
+  bridge.pending.push_back(std::move(line));
+  bridge.pending_bytes += size;
+  ++bridge.pending_rows;
+  ++bridge.submitted;
+  bridge.changed.notify_all();
 }
 std::shared_ptr<Event> lookup(void* handle) {
   if (reinterpret_cast<uintptr_t>(handle) & kApiTag) return nullptr;
@@ -82,7 +117,7 @@ void* original(void* handle) {
   auto item = lookup(handle);
   return item ? item->delegate : nullptr;
 }
-void emit(const std::shared_ptr<Event>& e) {
+void emit(const std::shared_ptr<Event>& e, const char* observation = nullptr) {
   if (!e || !e->call || broken) return;
   std::ostringstream out;
   out << "{\"record_type\":\"flagscale_profiler_v5_v1\",\"hostname\":" << quoted(hostname)
@@ -102,7 +137,9 @@ void emit(const std::shared_ptr<Event>& e) {
     out << "{\"channel_id\":" << pair.first << ",\"begin\":" << pair.second.begin
         << ",\"end\":" << pair.second.end << '}';
   }
-  out << "]}";
+  out << "]";
+  if (observation) out << ",\"observation\":" << quoted(observation);
+  out << "}";
   write_line(out.str());
 }
 bool finished(const std::shared_ptr<Event>& e) {
@@ -111,6 +148,74 @@ bool finished(const std::shared_ptr<Event>& e) {
     if (!p.second.begin || p.second.end < p.second.begin) return false;
   return true;
 }
+
+bool write_all(int fd, const std::string& line) {
+  const char* cursor = line.data();
+  size_t remaining = line.size();
+  while (remaining) {
+    const ssize_t written = ::write(fd, cursor, remaining);
+    if (written < 0 && errno == EINTR) continue;
+    if (written <= 0) return false;
+    cursor += written;
+    remaining -= static_cast<size_t>(written);
+  }
+  return true;
+}
+
+void publish() noexcept {
+  try {
+    std::deque<std::string> batch;
+    std::unique_lock<std::mutex> lock(mutex);
+    auto next_snapshot = Clock::now() + kSnapshotInterval;
+    while (!broken) {
+      if (Clock::now() >= next_snapshot) {
+        for (size_t n = 0; n < kSnapshotsPerInterval && !bridge.dirty.empty() && !broken; ++n) {
+          auto item = bridge.dirty.begin();
+          auto task = events.find(*item);
+          bridge.dirty.erase(item);
+          if (task != events.end()) emit(task->second, "periodic_partial_snapshot");
+        }
+        next_snapshot = Clock::now() + kSnapshotInterval;
+      }
+      if (broken) break;
+      if (bridge.pending.empty()) {
+        if (bridge.dirty.empty()) bridge.changed.wait(lock);
+        else bridge.changed.wait_until(lock, next_snapshot);
+        continue;
+      }
+      batch.swap(bridge.pending);
+      const int fd = bridge.fd;
+      lock.unlock();
+      size_t published_bytes = 0, published_rows = 0;
+      for (const auto& line : batch) {
+        if (!write_all(fd, line)) break;
+        published_bytes += line.size();
+        ++published_rows;
+      }
+      lock.lock();
+      bridge.pending_bytes -= published_bytes;
+      bridge.pending_rows -= published_rows;
+      bridge.published += published_rows;
+      if (published_rows != batch.size()) invalidate("publisher_write_failed");
+      batch.clear();
+      bridge.changed.notify_all();
+    }
+    const char* failure = bridge.failure;
+    bridge.pending.clear();
+    lock.unlock();
+    if (failure) {
+      std::fprintf(stderr, "FlagScale bridge publication stopped: %s\n", failure);
+      write_all(bridge.fd, "{\"record_type\":\"flagscale_bridge_error_v1\",\"hostname\":" +
+                quoted(hostname) + ",\"pid\":" + std::to_string(getpid()) +
+                ",\"reason\":" + quoted(failure) + "}\n");
+    }
+  } catch (...) {
+    std::lock_guard<std::mutex> lock(mutex);
+    invalidate("publisher_exception");
+    std::fputs("FlagScale bridge publisher failed\n", stderr);
+  }
+}
+
 ncclResult_t init(void** context, uint64_t comm, int* mask, const char* name,
                   int nodes, int ranks, int rank, ncclDebugLogger_t logger) {
   std::lock_guard<std::mutex> guard(mutex);
@@ -128,8 +233,24 @@ ncclResult_t init(void** context, uint64_t comm, int* mask, const char* name,
       const char* dir = std::getenv("NCCL_INSPECTOR_DUMP_DIR");
       if (!dir) { *mask = 0; *context = nullptr; return ncclSuccess; }
       std::string file = std::string(dir) + "/bridge-" + hostname + "-" + std::to_string(getpid()) + ".jsonl";
-      output = std::fopen(file.c_str(), "wx");
-      if (!output) { *mask = 0; *context = nullptr; return ncclSuccess; }
+      bridge.fd = ::open(file.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+      if (bridge.fd < 0) { delegate = nullptr; *mask = 0; *context = nullptr; return ncclSuccess; }
+      Dl_info library{};
+      if (!dladdr(reinterpret_cast<void*>(publish), &library) ||
+          !dlopen(library.dli_fname, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE)) {
+        ::close(bridge.fd);
+        bridge.fd = -1;
+        delegate = nullptr;
+        *mask = 0; *context = nullptr; return ncclSuccess;
+      }
+      try {
+        std::thread(publish).detach();
+      } catch (...) {
+        ::close(bridge.fd);
+        bridge.fd = -1;
+        delegate = nullptr;
+        throw;
+      }
     }
     auto c = std::make_unique<Context>();
     c->comm = comm; c->rank = rank; c->ranks = ranks;
@@ -138,6 +259,7 @@ ncclResult_t init(void** context, uint64_t comm, int* mask, const char* name,
     *mask |= ncclProfileCollApi | ncclProfileP2pApi | ncclProfileColl |
              ncclProfileP2p | ncclProfileKernelCh;
     *context = c.release();
+    ++bridge.contexts;
     return ncclSuccess;
   } catch (...) { invalidate(); *mask = 0; *context = nullptr; return ncclSuccess; }
 }
@@ -193,6 +315,7 @@ ncclResult_t start(void* context, void** handle, ncclProfilerEventDescr_v5_t* de
           auto& channels = e->task->channels;
           if (channels.count(e->channel)) e->task->invalid = true;
           channels[e->channel].begin = descr->kernelCh.pTimer;
+          if (e->task->call && bridge.dirty.insert(e->task->id).second) bridge.changed.notify_all();
         }
       }
       auto forwarded = *descr;
@@ -232,10 +355,14 @@ ncclResult_t state(void* handle, ncclProfilerEventState_v5_t state,
   try {
     if (e->task && args && state == ncclProfilerKernelChStop) {
       e->task->channels[e->channel].end = args->kernelCh.pTimer;
-      // Initial task + final coverage records suffice for H3. Avoid writing
-      // an O(channels^2) sequence of snapshots for every ordinary operation.
-      if (finished(e->task) || e->task->invalid) emit(e->task);
-      if (e->task->stopped && finished(e->task)) events.erase(e->task->id);
+      const bool complete = finished(e->task);
+      if (complete || e->task->invalid) {
+        bridge.dirty.erase(e->task->id);
+        emit(e->task);
+      } else if (e->task->call && !broken && bridge.dirty.insert(e->task->id).second) {
+        bridge.changed.notify_all();
+      }
+      if (e->task->stopped && complete) events.erase(e->task->id);
     }
   } catch (...) { invalidate(); }
   return result;
@@ -245,11 +372,44 @@ ncclResult_t finalize(void* context) {
   auto c = static_cast<Context*>(context);
   // Delegate finalization may wait for callbacks; do not hold our mutex here.
   auto result = delegate->finalize(c->delegate);
-  std::lock_guard<std::mutex> guard(mutex);
+  std::unique_lock<std::mutex> guard(mutex);
+  try {
+    size_t incomplete = 0;
+    for (const auto& item : events) {
+      const auto& e = item.second;
+      if (e->context == c && (e->type == ncclProfileColl || e->type == ncclProfileP2p) &&
+          !finished(e)) {
+        emit(e, "context_finalize");
+        ++incomplete;
+      }
+    }
+    write_line("{\"record_type\":\"flagscale_bridge_lifecycle_v1\",\"event\":\"context_finalize\","
+               "\"hostname\":" + quoted(hostname) + ",\"pid\":" + std::to_string(getpid()) +
+               ",\"incomplete_tasks\":" + std::to_string(incomplete) + "}");
+  } catch (...) {
+    invalidate("context_finalize_failed");
+  }
   for (auto i = events.begin(); i != events.end();) {
-    if (i->second->context == c) i = events.erase(i); else ++i;
+    if (i->second->context == c) {
+      bridge.dirty.erase(i->first);
+      i = events.erase(i);
+    } else {
+      ++i;
+    }
   }
   delete c;
+  if (--bridge.contexts == 0 && !broken) {
+    const auto target = bridge.submitted;
+    if (!bridge.changed.wait_for(guard, kFinishTimeout, [target] {
+          return broken || bridge.published >= target;
+        })) {
+      const auto pending = target - bridge.published;
+      invalidate("publisher_flush_timeout");
+      guard.unlock();
+      std::fprintf(stderr, "FlagScale bridge final publication timed out: %llu rows unconfirmed\n",
+                   static_cast<unsigned long long>(pending));
+    }
+  }
   return result;
 }
 }  // namespace
