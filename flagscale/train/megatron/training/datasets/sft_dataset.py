@@ -105,7 +105,6 @@ class SFTDataset(MegatronDataset):
         pack_targets = []
         pack_positions = []
         cu_seqlens = [0]
-        real_cu_seqlens = [0]
         eod = tokenizer.eod
         pad = tokenizer.pad
         # TODO(duncan): Track number of convs dropped and/or truncated and amount of end-padding
@@ -121,7 +120,6 @@ class SFTDataset(MegatronDataset):
 
             pack_tokens.extend(tokens_list)
             pack_targets.extend(targets_list)
-            real_cu_seqlens.append(real_cu_seqlens[-1] + len(tokens_list))
 
             assert not self.config.reset_position_ids
             pack_positions.extend(range(len(tokens_list)))
@@ -149,14 +147,6 @@ class SFTDataset(MegatronDataset):
                 pack_positions = pack_positions[:pack_length+1]
                 # Note len({pack_tokens, pack_targets, pack_positions}) should be pack_length + 1
                 cu_seqlens[-1] = len(pack_tokens) - 1
-                # Truncation can cut into the final real document. Keep the real
-                # cumulative length consistent with the retained physical rows.
-                final_physical_capacity = max(0, cu_seqlens[-1] - cu_seqlens[-2])
-                final_real_length = min(
-                    real_cu_seqlens[-1] - real_cu_seqlens[-2],
-                    final_physical_capacity,
-                )
-                real_cu_seqlens[-1] = real_cu_seqlens[-2] + final_real_length
                 break
 
         # Handle any necessary padding
@@ -185,16 +175,10 @@ class SFTDataset(MegatronDataset):
         # attention_mask = None
 
         assert len(cu_seqlens) >= 2
-        # ``cu_seqlens`` describes real rows while ``cu_seqlens_padded``
-        # describes their physical CP-aligned storage. They intentionally have
-        # the same number of entries so packed CSA can recover each segment's
-        # real length from the former and its physical start from the latter.
-        cu_seqlens_padded = torch.tensor(cu_seqlens, dtype=torch.int32)
-        cu_seqlens = torch.tensor(real_cu_seqlens, dtype=torch.int32)
-        assert cu_seqlens.shape == cu_seqlens_padded.shape
+        cu_seqlens = torch.tensor(cu_seqlens, dtype=torch.int32)
         # Calculating max_seqlen here, rather than incrementally above, because of possible
         # effects of truncation and padding
-        adjacent_diffs = cu_seqlens_padded[1:] - cu_seqlens_padded[:-1]
+        adjacent_diffs = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = adjacent_diffs.max()  # max_seqlen is a 0-D tensor
 
         return {
@@ -204,6 +188,5 @@ class SFTDataset(MegatronDataset):
             'loss_mask': loss_mask,
             'position_ids': position_ids,
             'cu_seqlens': cu_seqlens,
-            'cu_seqlens_padded': cu_seqlens_padded,
             'max_seqlen': max_seqlen,
         }

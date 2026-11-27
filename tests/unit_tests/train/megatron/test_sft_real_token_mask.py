@@ -4,9 +4,7 @@
 
 import os
 import sys
-from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -101,46 +99,6 @@ def test_swift_collator_emits_real_and_physical_cu_seqlens():
     # Prompt rows remain absent from CE supervision; their validity for MoE/DSA
     # is represented by the real segment length, not by loss_mask.
     assert not bool(out["loss_mask"][0, 0])
-
-
-def test_megatron_sft_dataset_emits_real_and_physical_cu_seqlens():
-    """The offline backend must expose the same dual-boundary semantics."""
-    from megatron.training.datasets.sft_dataset import SFTDataset
-
-    class FakeTokenizer:
-        pad = 99
-        eod = 0
-
-        def tokenize_conversation(self, conversation, return_target, add_generation_prompt):
-            del conversation, return_target, add_generation_prompt
-            # One prompt token followed by two supervised tokens.
-            return torch.tensor([10, 11, 12]), torch.tensor([-100, 11, 12])
-
-    # Bypass MegatronDataset.__init__; __getitem__ only needs these fields.
-    dataset = SFTDataset.__new__(SFTDataset)
-    dataset.dataset = [
-        [
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "prompt"},
-            {"role": "assistant", "content": "answer"},
-        ]
-    ]
-    dataset.indices = np.array([0], dtype=np.int64)
-    dataset.num_samples = 1
-    dataset.config = SimpleNamespace(
-        tokenizer=FakeTokenizer(),
-        sequence_length=8,
-        context_parallel_size=2,
-        reset_position_ids=False,
-        create_attention_mask=False,
-        reset_attention_mask=False,
-    )
-
-    out = dataset[0]
-
-    assert "real_token_mask" not in out
-    assert torch.equal(out["cu_seqlens"], torch.tensor([0, 3], dtype=torch.int32))
-    assert torch.equal(out["cu_seqlens_padded"], torch.tensor([0, 8], dtype=torch.int32))
 
 
 def test_non_binary_loss_scale_uses_contiguous_dsv4_cp_shard(monkeypatch):
