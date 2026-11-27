@@ -284,7 +284,8 @@ class InspectorIndex:
         return {
             "inspector_correlation": "unique",
             "inspector_correlation_reason": (
-                "device_channels_complete" if completion.kernel_completed
+                "device_channels_complete"
+                if completion.kernel_completed
                 else "device_completion_evidence_incomplete"
             ),
             "inspector_candidate_count": 1,

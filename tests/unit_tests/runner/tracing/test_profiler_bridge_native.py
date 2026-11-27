@@ -158,7 +158,9 @@ def test_native_bridge_reclaims_state_and_keeps_delayed_identity(tmp_path, nativ
     assert rows[-1]["incomplete_tasks"] == 1
 
 
-def test_native_bridge_publishes_partial_callbacks_before_abrupt_stop(tmp_path, native_bridge_harness):
+def test_native_bridge_publishes_partial_callbacks_before_abrupt_stop(
+    tmp_path, native_bridge_harness
+):
     result = subprocess.run(
         native_bridge_harness,
         env=dict(os.environ, BRIDGE_TEST_TERMINATE_PARTIAL="1"),
@@ -170,7 +172,8 @@ def test_native_bridge_publishes_partial_callbacks_before_abrupt_stop(tmp_path, 
     (partial,) = (
         row
         for row in tasks
-        if row.get("observation") == "periodic_partial_snapshot" and row["channels"][0]["begin"] == 300
+        if row.get("observation") == "periodic_partial_snapshot"
+        and row["channels"][0]["begin"] == 300
     )
     assert partial["channels"] == [{"channel_id": 0, "begin": 300, "end": 0}]
     assert any(len(row["channels"]) == 2 for row in tasks)
