@@ -260,6 +260,19 @@ class TaskEncoder(
         # flattened_imgs, image_thw_grids = self._flatten_visual_inputs(imgs, is_image=True)
         # flattened_videos, video_thw_grids = self._flatten_visual_inputs(videos, is_image=False)
 
+        # Only the opt-in LlamaFactory converter emits this marker. Existing
+        # ChatML/VQA image loading keeps its original PIL behavior.
+        source_metadata = (
+            json.loads(sample.conversation)
+            if isinstance(sample.conversation, (str, bytes))
+            else sample.conversation
+        )
+        lf_source = (
+            source_metadata.get("source_dataset")
+            if isinstance(source_metadata, dict)
+            and source_metadata.get("input_format") == "llamafactory"
+            else None
+        )
         #######################################################################################
         # NOTE(lizhiyu): use the transformers processor
         if sample.imgs is not None and len(sample.imgs) > 0:
@@ -267,7 +280,14 @@ class TaskEncoder(
             for img in sample.imgs:
                 img_path = os.path.join(self.vision_root, img)
                 try:
-                    image = PIL.Image.open(img_path)
+                    if lf_source is not None:
+                        from tools.datasets.qwenvl.remote_sensing_images import (
+                            open_remote_sensing_image,
+                        )
+
+                        image = open_remote_sensing_image(img_path, lf_source)
+                    else:
+                        image = PIL.Image.open(img_path)
                     image = self._preprocess_image(
                         image=image,
                         image_max_pixels=getattr(
