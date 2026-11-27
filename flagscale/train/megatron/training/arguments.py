@@ -1289,13 +1289,7 @@ def validate_args(args, defaults={}):
     # across batches/microbatches. Due to additional communication overhead
     # during pipeline parallelism, it should not be set if sequence length
     # is constant during training.
-    args.variable_seq_lengths = (
-        args.experimental_attention_variant == "dsv4_hybrid"
-        and args.sft
-        and not args.sft_pad_to_packing_length
-    )
-    if args.variable_seq_lengths:
-        args.create_attention_mask_in_dataloader = False
+    args.variable_seq_lengths = False
 
     # Iteration-based training.
     # Skip these checks when skip_train is set: LR config is irrelevant.
