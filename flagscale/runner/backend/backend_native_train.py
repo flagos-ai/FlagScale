@@ -19,6 +19,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from flagscale.runner.backend.backend_base import BackendBase
 from flagscale.runner.runner_train import _get_args_native, _update_config_train
+from flagscale.runner.training_process import stop_shell_lines, tracked_command_body
 from flagscale.runner.utils import get_pkg_dir, logger, parse_hostfile, resolve_path
 
 
@@ -118,13 +119,14 @@ class NativeTrainBackend(BackendBase):
                 )
             f.write("\n")
 
+            command_body = tracked_command_body("$cmd; sync", host_pid_file)
             if background:
                 f.write(
-                    f'nohup bash -c "$cmd; sync" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
+                    f'nohup bash -c "{command_body}" >> {host_output_file} 2>&1 & echo $! > {host_pid_file}\n'
                 )
             else:
                 f.write("set -o pipefail\n")
-                f.write(f'bash -c "$cmd; sync" 2>&1 | tee -a {host_output_file}\n')
+                f.write(f'bash -c "{command_body}" 2>&1 | tee -a {host_output_file}\n')
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
@@ -153,13 +155,8 @@ class NativeTrainBackend(BackendBase):
             after_stop = ""
         with open(host_stop_script_file, "w") as f:
             f.write("#!/bin/bash\n\n")
-            f.write("if [ -f " + host_pid_file + " ]; then\n")
-            f.write("    pid=$(cat " + host_pid_file + ")\n")
-            f.write("    pkill -P $pid\n")
-            f.write("else\n")
-            # TODO: This is a temporary fix. We need to find a better way to stop the job.
-            f.write("    pkill -f 'torchrun'\n")
-            f.write("fi\n")
+            for line in stop_shell_lines(host_pid_file, self.config.experiment.runner):
+                f.write(f"{line}\n")
             f.write(f"{after_stop}\n")
             f.flush()
             os.fsync(f.fileno())
