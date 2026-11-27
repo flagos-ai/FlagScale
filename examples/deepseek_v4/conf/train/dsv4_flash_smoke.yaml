@@ -170,7 +170,7 @@ data:
   sft_packing_num_proc: 2
   sft_dataset_num_proc: 4
   tokenizer:
-    tokenizer_type: HFTokenizerFS
+    tokenizer_type: DeepSeekV4TokenizerFS
     tokenizer_path: ${experiment.sft_model_dir}
     vocab_size: 129280
     make_vocab_size_divisible_by: 64

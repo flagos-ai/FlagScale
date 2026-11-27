@@ -658,6 +658,7 @@ class TokenizerConfig:
         "SFTTokenizer",
         "AquilaTokenizerFS",
         "HFTokenizerFS",
+        "DeepSeekV4TokenizerFS",
         "HFTokenizersTokenizerFS",
         "Llama3TokenizerFS",
         "QwenTokenizerFS",
